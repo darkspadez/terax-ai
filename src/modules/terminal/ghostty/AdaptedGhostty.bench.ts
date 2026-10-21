@@ -4,7 +4,7 @@ import {
   type TeraxGhosttyRenderState,
   type TeraxGhosttyTerminal,
 } from "@terax/ghostty-core/adapted";
-import { afterAll, beforeAll, bench, describe } from "vitest";
+import { afterAll, beforeAll, test } from "vitest";
 
 const artifacts = ["ghostty-vt.wasm", "ghostty-vt-scalar.wasm"];
 const terminals: TeraxGhosttyTerminal[] = [];
@@ -160,70 +160,85 @@ afterAll(() => {
   }
 });
 
+// Each test is one comparison group: its benchmarks run together and are
+// reported side by side.
 for (const [index, artifact] of artifacts.entries()) {
-  describe(artifact, () => {
+  test(artifact, async ({ bench }) => {
     let incrementalIndex = 0;
-    bench("parse a bounded streaming update", () => {
-      terminals[index].write(streamingUpdate);
-    });
-    bench("synchronize one changed agent row", () => {
-      incrementalIndex ^= 1;
-      terminals[index].write(incrementalUpdates[incrementalIndex]);
-      terminals[index].updateRenderState();
-    });
-    bench("synchronize an unchanged visible state", () => {
-      terminals[index].updateRenderState();
-    });
+    await bench.compare(
+      bench("parse a bounded streaming update", () => {
+        terminals[index].write(streamingUpdate);
+      }),
+      bench("synchronize one changed agent row", () => {
+        incrementalIndex ^= 1;
+        terminals[index].write(incrementalUpdates[incrementalIndex]);
+        terminals[index].updateRenderState();
+      }),
+      bench("synchronize an unchanged visible state", () => {
+        terminals[index].updateRenderState();
+      }),
+    );
   });
 
   // One bench iteration is one Ink tick: erase + rewrite 12 lines, one spinner
   // glyph differs. "consumer" adds what the v1 renderer does with the result.
-  describe(`${artifact} Ink-like 12-line region, one spinner character changing per tick`, () => {
-    bench("parse only (shared baseline)", () => {
-      inkTick = (inkTick + 1) % inkTicks.length;
-      inkTerminals[index].parseOnly.write(inkTicks[inkTick]);
-    });
-    bench("SoA format: write + update", () => {
-      inkTick = (inkTick + 1) % inkTicks.length;
-      inkTerminals[index].soa.write(inkTicks[inkTick]);
-      inkTerminals[index].soa.updateRenderState();
-    });
-    bench("SoA format: write + update + JS cell packing (v1 consumer)", () => {
-      inkTick = (inkTick + 1) % inkTicks.length;
-      inkTerminals[index].soa.write(inkTicks[inkTick]);
-      packLikeBuildRows(inkTerminals[index].soa.updateRenderState());
-    });
-    bench(
-      "GPU format: write + update (exact dirty rows, no JS cell work)",
-      () => {
+  test(`${artifact} Ink-like 12-line region, one spinner character changing per tick`, async ({
+    bench,
+  }) => {
+    await bench.compare(
+      bench("parse only (shared baseline)", () => {
         inkTick = (inkTick + 1) % inkTicks.length;
+        inkTerminals[index].parseOnly.write(inkTicks[inkTick]);
+      }),
+      bench("SoA format: write + update", () => {
+        inkTick = (inkTick + 1) % inkTicks.length;
+        inkTerminals[index].soa.write(inkTicks[inkTick]);
+        inkTerminals[index].soa.updateRenderState();
+      }),
+      bench(
+        "SoA format: write + update + JS cell packing (v1 consumer)",
+        () => {
+          inkTick = (inkTick + 1) % inkTicks.length;
+          inkTerminals[index].soa.write(inkTicks[inkTick]);
+          packLikeBuildRows(inkTerminals[index].soa.updateRenderState());
+        },
+      ),
+      bench(
+        "GPU format: write + update (exact dirty rows, no JS cell work)",
+        () => {
+          inkTick = (inkTick + 1) % inkTicks.length;
+          const terminal = inkTerminals[index].gpu;
+          terminal.write(inkTicks[inkTick]);
+          const state = terminal.updateGpuRenderState();
+          for (const _glyph of state.newGlyphs) void _glyph;
+          terminal.acknowledgeGpuGlyphs();
+        },
+      ),
+      bench("GPU format: identical redraw (no row changes)", () => {
         const terminal = inkTerminals[index].gpu;
-        terminal.write(inkTicks[inkTick]);
-        const state = terminal.updateGpuRenderState();
-        for (const _glyph of state.newGlyphs) void _glyph;
-        terminal.acknowledgeGpuGlyphs();
-      },
+        terminal.write(inkTicks[0]);
+        terminal.updateGpuRenderState();
+      }),
     );
-    bench("GPU format: identical redraw (no row changes)", () => {
-      const terminal = inkTerminals[index].gpu;
-      terminal.write(inkTicks[0]);
-      terminal.updateGpuRenderState();
-    });
   });
 
   // Every tick appends a line, so every visible row changes.
-  describe(`${artifact} streaming log, full viewport scroll per tick`, () => {
-    bench("SoA format: write + update", () => {
-      scrollTick = (scrollTick + 1) % scrollLines.length;
-      inkTerminals[index].scrollSoa.write(scrollLines[scrollTick]);
-      inkTerminals[index].scrollSoa.updateRenderState();
-    });
-    bench("GPU format: write + update", () => {
-      scrollTick = (scrollTick + 1) % scrollLines.length;
-      const terminal = inkTerminals[index].scrollGpu;
-      terminal.write(scrollLines[scrollTick]);
-      terminal.updateGpuRenderState();
-      terminal.acknowledgeGpuGlyphs();
-    });
+  test(`${artifact} streaming log, full viewport scroll per tick`, async ({
+    bench,
+  }) => {
+    await bench.compare(
+      bench("SoA format: write + update", () => {
+        scrollTick = (scrollTick + 1) % scrollLines.length;
+        inkTerminals[index].scrollSoa.write(scrollLines[scrollTick]);
+        inkTerminals[index].scrollSoa.updateRenderState();
+      }),
+      bench("GPU format: write + update", () => {
+        scrollTick = (scrollTick + 1) % scrollLines.length;
+        const terminal = inkTerminals[index].scrollGpu;
+        terminal.write(scrollLines[scrollTick]);
+        terminal.updateGpuRenderState();
+        terminal.acknowledgeGpuGlyphs();
+      }),
+    );
   });
 }

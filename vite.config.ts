@@ -195,8 +195,8 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => ({
         // (src/app/dist-budget.test.ts) locks this.
         codeSplitting: {
           groups: [
-            { name: eagerChunk, priority: 100 },
-            { name: lazyChunk, priority: 0 },
+            { name: eagerChunk, debugName: "eager", priority: 100 },
+            { name: lazyChunk, debugName: "lazy", priority: 0 },
           ],
         },
       },

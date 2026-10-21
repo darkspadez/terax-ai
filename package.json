@@ -18,7 +18,7 @@
     "tauri": "tauri",
     "test": "vitest run",
     "test:watch": "vitest",
-    "bench:ghostty": "vitest bench src/modules/terminal/ghostty/AdaptedGhostty.bench.ts --run",
+    "bench:ghostty": "vitest bench src/modules/terminal/ghostty/AdaptedGhostty.bench.ts --run --reporter=verbose",
     "profile:ghostty": "node scripts/ghostty-profile.mjs",
     "soak:ghostty": "vitest run --config scripts/ghostty-soak.config.ts",
     "check-types": "tsc --noEmit",
@@ -119,10 +119,10 @@
     "@babel/core": "^7.29.7",
     "@biomejs/biome": "^2.5.15",
     "@rolldown/plugin-babel": "^0.2.4",
-    "@size-limit/file": "^12.1.0",
+    "@size-limit/file": "^14.2.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "^2.12.3",
-    "@types/node": "^25.9.9",
+    "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
@@ -133,12 +133,12 @@
     "react-scan": "^0.5.7",
     "rollup-plugin-visualizer": "^7.1.1",
     "shadcn": "^4.22.1",
-    "size-limit": "^12.1.0",
+    "size-limit": "^14.2.0",
     "tailwindcss": "^4.3.3",
     "tw-animate-css": "^1.4.0",
-    "typescript": "~6.0.3",
+    "typescript": "~7.0.2",
     "vite": "^8.3.4",
     "vite-plugin-inspect": "^12.1.0",
-    "vitest": "^4.1.12"
+    "vitest": "^5.0.5"
   }
 }
