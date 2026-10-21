@@ -1,7 +1,7 @@
 import {
   convertToModelMessages,
+  isStepCount,
   pruneMessages,
-  stepCountIs,
   streamText,
   type LanguageModel,
   type UIMessage,
@@ -22,7 +22,7 @@ import {
   type CustomEndpoint,
   type ProviderId,
 } from "../config";
-import { buildTools, type ToolContext } from "../tools/tools";
+import { buildTools, TOOL_APPROVAL, type ToolContext } from "../tools/tools";
 import { compactModelMessagesDetailed } from "./compact";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { prepareAgentPrompt } from "./prompt";
@@ -108,8 +108,8 @@ export async function buildLanguageModel(
       break;
     }
     case "google": {
-      const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
-      built = createGoogleGenerativeAI({ apiKey: key })(resolvedModelId);
+      const { createGoogle } = await import("@ai-sdk/google");
+      built = createGoogle({ apiKey: key })(resolvedModelId);
       break;
     }
     case "xai": {
@@ -414,15 +414,17 @@ export async function runAgentStream(opts: RunAgentOptions) {
   );
 
   let stepsSeen = 0;
-  return streamText({
+  const tools = buildTools(opts.toolContext);
+  const result = streamText({
     model,
-    system: prompt.system,
+    instructions: prompt.system,
     messages: prompt.messages,
     allowSystemInMessages: false,
-    tools: buildTools(opts.toolContext),
-    stopWhen: stepCountIs(MAX_AGENT_STEPS),
+    tools,
+    toolApproval: TOOL_APPROVAL,
+    stopWhen: isStepCount(MAX_AGENT_STEPS),
     abortSignal: opts.abortSignal,
-    onStepFinish: (step) => {
+    onStepEnd: (step) => {
       stepsSeen++;
       if (opts.onStep) {
         const last = step.toolCalls?.[step.toolCalls.length - 1];
@@ -450,14 +452,15 @@ export async function runAgentStream(opts: RunAgentOptions) {
         });
       }
     },
-    onFinish: (result) => {
+    onEnd: (event) => {
       opts.onStep?.(null);
-      const finishReason =
-        (result as { finishReason?: string } | undefined)?.finishReason ?? "";
       opts.onFinishMeta?.({
         hitStepCap: stepsSeen >= MAX_AGENT_STEPS,
-        finishReason,
+        finishReason: event.finishReason ?? "",
       });
     },
   });
+  // The UI stream conversion needs the tool set (the deprecated
+  // `result.toUIMessageStream()` used to pass it implicitly).
+  return { stream: result.stream, tools };
 }

@@ -1,10 +1,11 @@
-import { generateText, stepCountIs } from "ai";
+import { generateText, isStepCount } from "ai";
 import { getModel, type ModelId } from "../config";
 import { buildLanguageModel } from "../lib/agent";
 import type { ProviderKeys } from "../lib/keyring";
 import type { ToolContext } from "../tools/context";
 import { buildFsTools } from "../tools/fs";
 import { buildSearchTools } from "../tools/search";
+import { TOOL_APPROVAL } from "../tools/tools";
 import { SUBAGENTS, type SubagentType } from "./registry";
 
 const SUBAGENT_MAX_STEPS = 12;
@@ -56,11 +57,15 @@ export async function runSubagent({
   const start = Date.now();
   const result = await generateText({
     model,
-    system: def.systemPrompt,
+    instructions: def.systemPrompt,
     prompt,
     tools: tools as Parameters<typeof generateText>[0]["tools"],
-    stopWhen: stepCountIs(SUBAGENT_MAX_STEPS),
-    onStepFinish: (step) => {
+    // Subagents only get read-only tools, but the shared policy still
+    // applies: a mutating tool whitelisted by mistake stops for approval
+    // (which a subagent cannot get) instead of running.
+    toolApproval: TOOL_APPROVAL,
+    stopWhen: isStepCount(SUBAGENT_MAX_STEPS),
+    onStepEnd: (step) => {
       if (!onStep) return;
       const last = step.toolCalls?.[step.toolCalls.length - 1];
       if (last) onStep(`${type}: ${last.toolName}`);

@@ -19,7 +19,7 @@ async function fetchWithTimeout(
 }
 
 async function transcribeOpenAI(blob: Blob, apiKey: string): Promise<string> {
-  const [{ createOpenAI }, { experimental_transcribe: transcribe }] =
+  const [{ createOpenAI }, { transcribe }] =
     await Promise.all([import("@ai-sdk/openai"), import("ai")]);
   const openai = createOpenAI({ apiKey });
   const buf = new Uint8Array(await blob.arrayBuffer());

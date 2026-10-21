@@ -1,4 +1,5 @@
 import type { UIMessage } from "@ai-sdk/react";
+import { toUIMessageStream } from "ai";
 import type { CustomEndpoint } from "../config";
 import { runAgentStream, type AgentUsageDelta } from "./agent";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
@@ -80,7 +81,7 @@ export function createContextAwareTransport(deps: Deps) {
     const messagesForRun = envBlock
       ? injectEnvIntoLastUser(options.messages, envBlock)
       : options.messages;
-    const result = await runAgentStream({
+    const run = await runAgentStream({
       keys: deps.getKeys(),
       modelId: deps.getModelId(),
       customInstructions: deps.getCustomInstructions(),
@@ -107,7 +108,9 @@ export function createContextAwareTransport(deps: Deps) {
       uiMessages: messagesForRun,
       abortSignal: options.abortSignal,
     });
-    return result.toUIMessageStream({
+    return toUIMessageStream({
+      stream: run.stream,
+      tools: run.tools,
       originalMessages: options.messages,
       onError: formatAiError,
     });
