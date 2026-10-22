@@ -116,7 +116,7 @@ Terax 是一个轻量、开源、终端优先的 AI 原生开发环境（ADE）�
 
 ## 安装
 
-最新安装程序位于 [Releases](https://github.com/crynta/terax-ai/releases/latest) 页面。Terax 会从该页面自动更新。
+最新安装程序位于 [Releases](https://github.com/crynta/terax-ai/releases/latest) 页面。在本仓库发布自己的版本之前，其构建不会自动更新。
 
 ### Windows 说明
 

@@ -90,7 +90,7 @@ Terax एक हल्का, ओपन-सोर्स, टर्मिनल-�
 
 ## इंस्टॉल करें
 
-नवीनतम इंस्टॉलर [Releases](https://github.com/crynta/terax-ai/releases/latest) पेज पर हैं। Terax वहीं से अपने आप अपडेट होता है।
+नवीनतम इंस्टॉलर [Releases](https://github.com/crynta/terax-ai/releases/latest) पेज पर हैं। इस रिपॉज़िटरी के बिल्ड तब तक अपने आप अपडेट नहीं होते जब तक यह अपनी रिलीज़ प्रकाशित नहीं करती।
 
 ### Windows नोट्स
 

@@ -90,7 +90,7 @@ Terax to lekkie, otwartoźródłowe, terminalowe środowisko programistyczne (AD
 
 ## Instalacja
 
-Najnowsze instalatory znajdują się na stronie [Releases](https://github.com/crynta/terax-ai/releases/latest). Terax aktualizuje się stamtąd automatycznie.
+Najnowsze instalatory znajdują się na stronie [Releases](https://github.com/crynta/terax-ai/releases/latest). Kompilacje z tego repozytorium nie aktualizują się same, dopóki nie opublikuje ono własnych wydań.
 
 ### Uwagi dla Windows
 

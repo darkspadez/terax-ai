@@ -90,7 +90,7 @@ Terax は、Tauri 2 + Rust と React 19 で構築された、軽量かつオー�
 
 ## インストール
 
-最新のインストーラーは [Releases](https://github.com/crynta/terax-ai/releases/latest) ページにあります。Terax はそこから自動更新されます。
+最新のインストーラーは [Releases](https://github.com/crynta/terax-ai/releases/latest) ページにあります。このリポジトリのビルドは、独自のリリースを公開するまで自動更新されません。
 
 ### Windows の注意事項
 

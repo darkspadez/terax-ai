@@ -90,7 +90,7 @@ Terax adalah lingkungan pengembangan (ADE) ringan, sumber terbuka, berfokus pada
 
 ## Instalasi
 
-Penginstal terbaru tersedia di halaman [Releases](https://github.com/crynta/terax-ai/releases/latest). Terax melakukan pembaruan otomatis dari sana.
+Penginstal terbaru tersedia di halaman [Releases](https://github.com/crynta/terax-ai/releases/latest). Build dari repositori ini tidak memperbarui dirinya sendiri sampai repositori ini menerbitkan rilisnya sendiri.
 
 ### Catatan Windows
 

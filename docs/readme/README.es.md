@@ -114,7 +114,7 @@ Terax es un entorno de desarrollo (ADE) ligero, de código abierto, centrado en 
 
 ## Instalación
 
-Los instaladores más recientes están en la página de [Releases](https://github.com/crynta/terax-ai/releases/latest). Terax se actualiza automáticamente desde allí.
+Los instaladores más recientes están en la página de [Releases](https://github.com/crynta/terax-ai/releases/latest). Las compilaciones de este repositorio no se actualizan solas hasta que publique sus propias versiones.
 
 ### Notas para Windows
 

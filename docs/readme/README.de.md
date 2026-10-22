@@ -114,7 +114,7 @@ Terax ist eine leichtgewichtige, quelloffene, terminalorientierte und KI-native 
 
 ## Installation
 
-Die neuesten Installationspakete stehen auf der Seite [Releases](https://github.com/crynta/terax-ai/releases/latest). Terax aktualisiert sich von dort automatisch.
+Die neuesten Installationspakete stehen auf der Seite [Releases](https://github.com/crynta/terax-ai/releases/latest). Builds dieses Repositorys aktualisieren sich nicht selbst, bis es eigene Releases veröffentlicht.
 
 ### Hinweise für Windows
 

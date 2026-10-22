@@ -90,7 +90,7 @@ Terax는 Tauri 2 + Rust와 React 19로 만든 가볍고 오픈 소스이며 터�
 
 ## 설치
 
-최신 설치 프로그램은 [Releases](https://github.com/crynta/terax-ai/releases/latest) 페이지에 있습니다. Terax는 이 페이지에서 자동 업데이트됩니다.
+최신 설치 프로그램은 [Releases](https://github.com/crynta/terax-ai/releases/latest) 페이지에 있습니다. 이 저장소의 빌드는 자체 릴리스를 게시하기 전까지 자동으로 업데이트되지 않습니다.
 
 ### Windows 참고 사항
 
