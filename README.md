@@ -122,7 +122,7 @@ Terax is a lightweight open-source terminal-first AI-native development environm
 
 ## Install
 
-Latest installers are on the [Releases](https://github.com/crynta/terax-ai/releases/latest) page. Terax auto-updates from there.
+Latest installers are on the [Releases](https://github.com/crynta/terax-ai/releases/latest) page. Builds of this repository do not update themselves until it publishes its own releases.
 
 ### Windows notes
 
