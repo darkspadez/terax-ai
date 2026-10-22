@@ -1,3 +1,4 @@
+import { textFieldKey } from "@/lib/ime";
 import { useLayoutEffect, useRef, useState } from "react";
 
 type Props = {
@@ -74,10 +75,11 @@ export function InlineInput({
       placeholder={placeholder}
       onChange={(e) => setValue(e.target.value)}
       onKeyDown={(e) => {
-        if (e.key === "Enter") {
+        const action = textFieldKey(e.nativeEvent);
+        if (action === "commit") {
           e.preventDefault();
           commit();
-        } else if (e.key === "Escape") {
+        } else if (action === "cancel") {
           e.preventDefault();
           cancel();
         }

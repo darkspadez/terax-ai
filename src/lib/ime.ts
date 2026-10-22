@@ -13,3 +13,20 @@ export function isImeKeyEvent(e: {
 }): boolean {
   return e.isComposing || e.keyCode === 229 || e.key === "Process";
 }
+
+/**
+ * What Enter and Escape do in a one-line text field (renaming a tab or a
+ * space, naming a new file, the explorer search): commit or cancel, or
+ * nothing while an input method owns the key, so confirming a candidate
+ * never commits the half-typed name.
+ */
+export function textFieldKey(e: {
+  isComposing: boolean;
+  keyCode: number;
+  key: string;
+}): "commit" | "cancel" | null {
+  if (isImeKeyEvent(e)) return null;
+  if (e.key === "Enter") return "commit";
+  if (e.key === "Escape") return "cancel";
+  return null;
+}

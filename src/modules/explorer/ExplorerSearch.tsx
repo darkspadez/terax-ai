@@ -1,4 +1,5 @@
 import { Input } from "@/components/ui/input";
+import { isImeKeyEvent } from "@/lib/ime";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   ContextMenu,
@@ -192,6 +193,8 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
+              // Keys that confirm or cancel an input method's candidate are the IME's.
+              if (isImeKeyEvent(e.nativeEvent)) return;
               if (e.key === "Escape") {
                 e.preventDefault();
                 e.stopPropagation();

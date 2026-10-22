@@ -55,6 +55,7 @@ import { useShallow } from "zustand/react/shallow";
 import { selectTabAgentStatus } from "./lib/tabAgentStatus";
 import { labelFor } from "./lib/tabLabel";
 import type { EditorTab, Tab, TerminalTab } from "./lib/useTabs";
+import { textFieldKey } from "@/lib/ime";
 import { NewTabMenu } from "./NewTabMenu";
 import { MovePaneToNewTabMenu, MoveToSplitMenu } from "./TabMoveMenus";
 import { TerminalTabLabel } from "./TerminalTabLabel";
@@ -806,8 +807,9 @@ function TabRenameInput({
       )}
       onKeyDown={(e) => {
         e.stopPropagation();
-        if (e.key === "Enter") commit(e.currentTarget.value, true);
-        else if (e.key === "Escape") finish(onCancel);
+        const action = textFieldKey(e.nativeEvent);
+        if (action === "commit") commit(e.currentTarget.value, true);
+        else if (action === "cancel") finish(onCancel);
       }}
       onBlur={(e) => {
         // Switching windows/apps blurs the input; keep the edit open instead
