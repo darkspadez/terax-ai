@@ -75,9 +75,10 @@ The composer derives `isBusy` from `agentMeta.status` so it can mount safely bef
 
 Tool definitions live under `src/modules/ai/tools/`:
 
-- `TOOL_APPROVAL` in `tools.ts` classifies every tool as `user-approval` or `not-applicable` and is passed as `toolApproval` to every generation given these tools (the main agent and sub-agents). The record is exhaustive, so a new tool does not compile until it is classified.
+- `TOOL_GATES` in `tools.ts` classifies every tool as `none`, `approvable` (file changes), `approvable-outside-plan` (shell commands) or `always` (the coding-agent tools). The record is exhaustive, so a new tool does not compile until it is classified. `runAgentStream` turns it into each run's `toolApproval` with `buildToolApproval`, whose gated entries read the conversation's approval mode and plan mode on every call; sub-agents get Ask mode's fixed `TOOL_APPROVAL`.
+- Each conversation is in **Ask** (the default) or **Auto-approve** (`SessionMeta.approvalMode`, chosen in the composer; new conversations start in the Settings default `aiApprovalMode`). Auto-approve runs `approvable` tools, and `approvable-outside-plan` ones outside plan mode, without a card; their `execute` still applies the deny-lists. `always` tools ask in every mode. While it is on, the composer shows a chip that turns it off in one click, and the mini window and the running status pill show it too.
 - Read-only tools (`read_file`, `list_directory`, `grep`, `glob`) auto-execute after passing the security deny-list.
-- Mutating tools (`write_file`, `edit`, `multi_edit`, `create_directory`, `bash_run`, `bash_background`) and the coding-agent tools (`spawn_coding_agent`, `send_to_agent`) are `user-approval`. The AI SDK pauses and the UI renders an approval card.
+- In Ask mode, mutating tools (`write_file`, `edit`, `multi_edit`, `create_directory`, `bash_run`, `bash_background`) and the coding-agent tools (`spawn_coding_agent`, `send_to_agent`) are `user-approval`. The AI SDK pauses and the UI renders an approval card.
 - Other tools run without an approval card: `bash_logs`, `bash_list`, `bash_kill` (background processes the agent started), `get_terminal_output` (refused for private terminals), `suggest_command` (renders an Insert card, never writes to a terminal), `open_preview`, `todo_write`, `read_agent_output` and `run_subagent`.
 - `edit` / `multi_edit` enforce a read-before-edit invariant: the model must have read the file earlier in the session.
 - In plan mode, mutating tools queue edits for batch review instead of applying them immediately. Apply (`planStore.applyAll`) writes the edits queued when it was pressed, re-checks each path against the deny-list (canonicalized) at write time, skips edits rejected meanwhile, and leaves edits queued during the writes for the next review.
@@ -101,7 +102,7 @@ AI-proposed file edits open in an `ai-diff` tab. The user accepts or rejects per
 - Keep the Vercel AI SDK v7 chat shape (`streamText`, tools, `toolApproval`, step limits); the rest of the UI depends on it.
 - Keys only via `secrets_*` commands; never disk, settings store, or `localStorage`.
 - New providers must justify their bundle cost and unique value.
-- Mutating tools require approval; read-only tools still pass the deny-list.
+- Mutating tools require approval unless the conversation is in Auto-approve; the coding-agent tools always do, and no mode skips a deny-list. Read-only tools still pass the deny-list.
 
 ## See also
 

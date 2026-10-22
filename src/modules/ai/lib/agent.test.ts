@@ -119,15 +119,41 @@ beforeEach(() => {
   streamTextMock.mockClear();
 });
 
+/** Each tool's status under the policy as it stands now. */
+function resolvePolicy(toolApproval: unknown): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(toolApproval as Record<string, unknown>).map(
+      ([name, entry]) => [name, typeof entry === "function" ? entry() : entry],
+    ),
+  );
+}
+
 describe("runAgentStream", () => {
   it("gates the agent's tools with the shared approval policy", async () => {
     const { run, options } = await startRun();
-    expect(options.toolApproval).toBe(TOOL_APPROVAL);
+    const policy = resolvePolicy(options.toolApproval);
+    // Without an approval state every gated tool asks, as in Ask mode.
+    expect(policy).toEqual(TOOL_APPROVAL);
     expect(Object.keys(options.tools).sort()).toEqual(
       Object.keys(TOOL_APPROVAL).sort(),
     );
     // The UI stream conversion receives the same tool set.
     expect(run.tools).toBe(options.tools);
+  });
+
+  it("builds the run's policy from the conversation's approval mode", async () => {
+    let mode: "ask" | "auto" = "auto";
+    const { options } = await startRun({
+      approvalState: () => ({ mode, planMode: false }),
+    });
+    expect(resolvePolicy(options.toolApproval)).toMatchObject({
+      bash_run: "not-applicable",
+      write_file: "not-applicable",
+      spawn_coding_agent: "user-approval",
+      send_to_agent: "user-approval",
+    });
+    mode = "ask";
+    expect(resolvePolicy(options.toolApproval)).toEqual(TOOL_APPROVAL);
   });
 
   it("passes the system prompt as instructions, never as a message", async () => {

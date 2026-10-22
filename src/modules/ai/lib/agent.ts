@@ -22,7 +22,12 @@ import {
   type CustomEndpoint,
   type ProviderId,
 } from "../config";
-import { buildTools, TOOL_APPROVAL, type ToolContext } from "../tools/tools";
+import {
+  type ApprovalState,
+  buildTools,
+  buildToolApproval,
+  type ToolContext,
+} from "../tools/tools";
 import { compactModelMessagesDetailed } from "./compact";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import {
@@ -316,10 +321,15 @@ export type RunAgentOptions = {
   customEndpoints?: readonly CustomEndpoint[];
   customEndpointKeys?: CustomEndpointKeys;
   planMode?: boolean;
+  /** The conversation's approval mode and plan mode, read on every gated
+   *  tool call. Without it every gated tool asks. */
+  approvalState?: () => ApprovalState;
   projectMemory?: string | null;
   uiMessages: UIMessage[];
   abortSignal?: AbortSignal;
 };
+
+const ASK_STATE: ApprovalState = { mode: "ask", planMode: false };
 
 export async function runAgentStream(opts: RunAgentOptions) {
   const modelId = opts.modelId ?? DEFAULT_MODEL_ID;
@@ -378,7 +388,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     messages: prompt.messages,
     allowSystemInMessages: false,
     tools,
-    toolApproval: TOOL_APPROVAL,
+    toolApproval: buildToolApproval(opts.approvalState ?? (() => ASK_STATE)),
     stopWhen: isStepCount(MAX_AGENT_STEPS),
     abortSignal: opts.abortSignal,
     onStepEnd: (step) => {

@@ -19,6 +19,8 @@ import {
 } from "../lib/sessions";
 import { pushRecentModel } from "../lib/modelPrefs";
 import { persistDelay } from "../lib/persistSchedule";
+import { type ApprovalMode, normalizeApprovalMode } from "../lib/approvalMode";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 
 export type Live = {
   getCwd: () => string | null;
@@ -144,6 +146,8 @@ type StoreState = {
   switchSession: (id: string) => void;
   deleteSession: (id: string) => void;
   renameSession: (id: string, title: string) => void;
+  /** Chooses whether this conversation's gated tools ask or run unasked. */
+  setSessionApprovalMode: (id: string, mode: ApprovalMode) => void;
   /** Persist messages of a session and bump its updatedAt + auto-title. */
   persistMessages: (id: string, messages: UIMessage[]) => void;
 };
@@ -159,6 +163,31 @@ const NOOP_LIVE: Live = {
   spawnManagedAgent: () => null,
   readLeafBuffer: () => null,
 };
+
+/** New conversations start in the Settings default (Ask unless changed). */
+function defaultApprovalMode(): ApprovalMode {
+  return normalizeApprovalMode(usePreferencesStore.getState().aiApprovalMode);
+}
+
+function newSessionMeta(id: string): SessionMeta {
+  const now = Date.now();
+  return {
+    id,
+    title: "New chat",
+    createdAt: now,
+    updatedAt: now,
+    approvalMode: defaultApprovalMode(),
+  };
+}
+
+/** A conversation's approval mode; Ask for an unknown conversation. */
+export function sessionApprovalMode(
+  sessions: readonly SessionMeta[],
+  id: string | null,
+): ApprovalMode {
+  if (id === null) return "ask";
+  return normalizeApprovalMode(sessions.find((s) => s.id === id)?.approvalMode);
+}
 
 const CHATS_LRU_CAP = 8;
 export const chats = new Map<string, Chat<UIMessage>>();
@@ -307,7 +336,15 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   hydrateSessions: async () => {
     if (get().sessionsHydrated) return;
-    const { sessions, activeElsewhere } = await loadAll();
+    // The new conversation below starts in the Settings default, so wait for
+    // the preferences (loading in parallel at startup) rather than race them.
+    const [{ sessions, activeElsewhere }] = await Promise.all([
+      loadAll(),
+      usePreferencesStore
+        .getState()
+        .init()
+        .catch(() => {}),
+    ]);
     if (get().sessionsHydrated) return;
 
     // Reuse the most recent untitled "New chat" session if one exists from
@@ -320,17 +357,19 @@ export const useChatStore = create<StoreState>((set, get) => ({
     let nextSessions: SessionMeta[];
     let freshId: string;
     if (reusable) {
-      nextSessions = sessions;
+      // It is this launch's new conversation, so it takes today's default.
+      const mode = defaultApprovalMode();
+      nextSessions =
+        normalizeApprovalMode(reusable.approvalMode) === mode
+          ? sessions
+          : sessions.map((s) =>
+              s.id === reusable.id ? { ...s, approvalMode: mode } : s,
+            );
       freshId = reusable.id;
+      if (nextSessions !== sessions) void saveSessionsList(nextSessions);
     } else {
       freshId = newSessionId();
-      const fresh: SessionMeta = {
-        id: freshId,
-        title: "New chat",
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      nextSessions = [fresh, ...sessions];
+      nextSessions = [newSessionMeta(freshId), ...sessions];
       void saveSessionsList(nextSessions);
     }
     void saveActiveId(freshId);
@@ -362,13 +401,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   newSession: () => {
     const id = newSessionId();
-    const meta: SessionMeta = {
-      id,
-      title: "New chat",
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    const next = [meta, ...get().sessions];
+    const next = [newSessionMeta(id), ...get().sessions];
     set({ sessions: next, activeSessionId: id, agentMeta: IDLE_META });
     void saveSessionsList(next);
     void saveActiveId(id);
@@ -419,12 +452,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     void useTodosStore.getState().clearSession(id);
 
     if (remaining.length === 0) {
-      const fresh: SessionMeta = {
-        id: newSessionId(),
-        title: "New chat",
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
+      const fresh = newSessionMeta(newSessionId());
       set({ sessions: [fresh], activeSessionId: fresh.id });
       void saveSessionsList([fresh]);
       void saveActiveId(fresh.id);
@@ -441,6 +469,18 @@ export const useChatStore = create<StoreState>((set, get) => ({
   renameSession: (id, title) => {
     const next = get().sessions.map((s) =>
       s.id === id ? { ...s, title, updatedAt: Date.now() } : s,
+    );
+    set({ sessions: next });
+    void saveSessionsList(next);
+  },
+
+  setSessionApprovalMode: (id, mode) => {
+    const sessions = get().sessions;
+    const meta = sessions.find((s) => s.id === id);
+    if (!meta || normalizeApprovalMode(meta.approvalMode) === mode) return;
+    // Not a change to the conversation itself: its place in history stays.
+    const next = sessions.map((s) =>
+      s.id === id ? { ...s, approvalMode: mode } : s,
     );
     set({ sessions: next });
     void saveSessionsList(next);
@@ -467,6 +507,13 @@ export const useChatStore = create<StoreState>((set, get) => ({
     void saveSessionsList(next);
   },
 }));
+
+/** The open conversation's approval mode. */
+export function useActiveApprovalMode(): ApprovalMode {
+  return useChatStore((s) =>
+    sessionApprovalMode(s.sessions, s.activeSessionId),
+  );
+}
 
 export function getChat(sessionId?: string): Chat<UIMessage> | undefined {
   if (sessionId) return chats.get(sessionId);

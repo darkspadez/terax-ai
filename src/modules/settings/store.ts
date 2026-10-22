@@ -18,6 +18,10 @@ import {
   type SttProvider,
   WHISPERCPP_DEFAULT_BASE_URL,
 } from "@/modules/ai/config";
+import {
+  type ApprovalMode,
+  normalizeApprovalMode,
+} from "@/modules/ai/lib/approvalMode";
 import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
 import { parseFontFeatures } from "@/modules/terminal/lib/fontFeatures";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -137,6 +141,8 @@ export type Preferences = {
   editorTheme: EditorThemePref;
   editorFontSize: number;
   customInstructions: string;
+  /** How new AI conversations start: gated tools ask, or run unasked. */
+  aiApprovalMode: ApprovalMode;
   autostart: boolean;
   restoreWindowState: boolean;
   autocompleteEnabled: boolean;
@@ -249,6 +255,7 @@ const KEY_DEFAULT_MODEL = "defaultModelId";
 const KEY_EDITOR_THEME = "editorTheme";
 const KEY_EDITOR_FONT_SIZE = "editorFontSize";
 const KEY_CUSTOM_INSTRUCTIONS = "customInstructions";
+const KEY_AI_APPROVAL_MODE = "aiApprovalMode";
 const KEY_AUTOSTART = "autostart";
 const KEY_RESTORE_WINDOW = "restoreWindowState";
 export type AutocompleteTrigger = "auto" | "manual";
@@ -408,6 +415,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   editorTheme: EDITOR_THEME_AUTO,
   editorFontSize: EDITOR_FONT_SIZE_DEFAULT,
   customInstructions: "",
+  aiApprovalMode: "ask",
   autostart: false,
   // Off by default: a translucent window keeps the compositor blending the
   // whole frame every present. An explicitly stored choice (either value)
@@ -540,6 +548,7 @@ export async function loadPreferences(): Promise<Preferences> {
     customInstructions:
       get<string>(KEY_CUSTOM_INSTRUCTIONS) ??
       DEFAULT_PREFERENCES.customInstructions,
+    aiApprovalMode: normalizeApprovalMode(get<unknown>(KEY_AI_APPROVAL_MODE)),
     autostart: get<boolean>(KEY_AUTOSTART) ?? DEFAULT_PREFERENCES.autostart,
     restoreWindowState:
       get<boolean>(KEY_RESTORE_WINDOW) ??
@@ -792,6 +801,10 @@ export async function setEditorFontSize(value: number): Promise<void> {
 
 export async function setCustomInstructions(value: string): Promise<void> {
   await writePref(KEY_CUSTOM_INSTRUCTIONS, value);
+}
+
+export async function setAiApprovalMode(value: ApprovalMode): Promise<void> {
+  await writePref(KEY_AI_APPROVAL_MODE, normalizeApprovalMode(value));
 }
 
 export async function setAutostart(value: boolean): Promise<void> {
@@ -1172,6 +1185,7 @@ export async function onPreferencesChange(
     [KEY_EDITOR_THEME]: "editorTheme",
     [KEY_EDITOR_FONT_SIZE]: "editorFontSize",
     [KEY_CUSTOM_INSTRUCTIONS]: "customInstructions",
+    [KEY_AI_APPROVAL_MODE]: "aiApprovalMode",
     [KEY_AUTOSTART]: "autostart",
     [KEY_RESTORE_WINDOW]: "restoreWindowState",
     [KEY_AUTOCOMPLETE_ENABLED]: "autocompleteEnabled",

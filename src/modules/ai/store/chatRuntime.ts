@@ -13,6 +13,7 @@ import type { ToolContext } from "../tools/tools";
 import {
   chats,
   seedMessages,
+  sessionApprovalMode,
   touchChat,
   useChatStore,
 } from "./chatStore";
@@ -58,6 +59,8 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       };
     },
     getPlanMode: () => usePlanStore.getState().active,
+    getApprovalMode: () =>
+      sessionApprovalMode(useChatStore.getState().sessions, sessionId),
     getLmstudioBaseURL: () => usePreferencesStore.getState().lmstudioBaseURL,
     getLmstudioModelId: () => usePreferencesStore.getState().lmstudioModelId,
     getMlxBaseURL: () => usePreferencesStore.getState().mlxBaseURL,

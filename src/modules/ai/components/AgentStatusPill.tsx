@@ -2,7 +2,11 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { AlertCircleIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useChatStore, type AgentMeta } from "../store/chatStore";
+import {
+  useActiveApprovalMode,
+  useChatStore,
+  type AgentMeta,
+} from "../store/chatStore";
 
 type Props = {
   onClick: () => void;
@@ -10,6 +14,7 @@ type Props = {
 
 export function AgentStatusPill({ onClick }: Props) {
   const meta = useChatStore((s) => s.agentMeta);
+  const autoApprove = useActiveApprovalMode() === "auto";
 
   // awaiting-approval is surfaced by the notification + auto-opened mini window.
   if (meta.status === "awaiting-approval") return null;
@@ -27,10 +32,15 @@ export function AgentStatusPill({ onClick }: Props) {
         "animate-in fade-in-0 slide-in-from-top-1 duration-150 ease-out",
         tone,
       )}
-      title="Open AI log"
+      title={autoApprove ? "Open AI log (auto-approve is on)" : "Open AI log"}
     >
       {icon}
       <span className="max-w-[180px] truncate">{label}</span>
+      {autoApprove ? (
+        <span className="shrink-0 rounded bg-amber-500/15 px-1 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+          Auto-approve
+        </span>
+      ) : null}
     </button>
   );
 }

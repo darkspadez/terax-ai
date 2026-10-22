@@ -6,6 +6,7 @@ import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { formatAiError } from "./errors";
 import { native } from "./native";
 import type { ToolContext } from "../tools/tools";
+import type { ApprovalMode } from "./approvalMode";
 
 const TERAX_MD_MAX_BYTES = 32 * 1024;
 type MemoryCacheEntry = { content: string | null; mtime: number };
@@ -65,6 +66,8 @@ type Deps = {
   onCompact?: (info: { droppedCount: number }) => void;
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
   getPlanMode?: () => boolean;
+  /** The conversation's approval mode, read on every gated tool call. */
+  getApprovalMode?: () => ApprovalMode;
 };
 
 type SendOptions = {
@@ -104,6 +107,10 @@ export function createContextAwareTransport(deps: Deps) {
       customEndpoints: deps.getCustomEndpoints?.(),
       customEndpointKeys: deps.getCustomEndpointKeys?.(),
       planMode: deps.getPlanMode?.(),
+      approvalState: () => ({
+        mode: deps.getApprovalMode?.() ?? "ask",
+        planMode: deps.getPlanMode?.() ?? false,
+      }),
       projectMemory,
       uiMessages: messagesForRun,
       abortSignal: options.abortSignal,

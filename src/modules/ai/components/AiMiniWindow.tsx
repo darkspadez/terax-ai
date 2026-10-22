@@ -24,6 +24,7 @@ import {
   Cancel01Icon,
   Delete02Icon,
   FilterIcon,
+  FlashIcon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -34,7 +35,7 @@ import type { ResizeDir } from "../lib/miniWindowGeometry";
 import type { SessionMeta } from "../lib/sessions";
 import { useMiniWindowGeometry } from "../lib/useMiniWindowGeometry";
 import { useAgentsStore } from "../store/agentsStore";
-import { useChatStore } from "../store/chatStore";
+import { useActiveApprovalMode, useChatStore } from "../store/chatStore";
 import { getOrCreateChat } from "../store/chatRuntime";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { usePlanStore } from "../store/planStore";
@@ -188,6 +189,7 @@ function Body({
         onHeaderPointerDown={onHeaderPointerDown}
       />
 
+      <AutoApproveStrip sessionId={sessionId} />
       <PlanModeStrip />
 
       <div className="flex min-h-0 flex-1 flex-col">
@@ -209,6 +211,36 @@ function Body({
 
       <TodoStrip sessionId={sessionId} />
     </>
+  );
+}
+
+function AutoApproveStrip({ sessionId }: { sessionId: string }) {
+  const mode = useActiveApprovalMode();
+  const setMode = useChatStore((s) => s.setSessionApprovalMode);
+  if (mode !== "auto") return null;
+  return (
+    <div className="flex shrink-0 items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-1.5">
+      <HugeiconsIcon
+        icon={FlashIcon}
+        size={11}
+        strokeWidth={2}
+        className="shrink-0 text-amber-700 dark:text-amber-400"
+      />
+      <span className="text-[11px] font-medium text-amber-700 dark:text-amber-400">
+        Auto-approve
+      </span>
+      <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+        · edits and commands run without asking
+      </span>
+      <span className="flex-1" />
+      <button
+        type="button"
+        onClick={() => setMode(sessionId, "ask")}
+        className="shrink-0 rounded px-1.5 py-0.5 text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        Turn off
+      </button>
+    </div>
   );
 }
 

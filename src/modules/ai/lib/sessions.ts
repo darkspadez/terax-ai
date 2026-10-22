@@ -3,12 +3,16 @@ import { activeChatKey } from "@/lib/appWindow";
 import { invoke } from "@tauri-apps/api/core";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { toast } from "sonner";
+import type { ApprovalMode } from "./approvalMode";
 
 export type SessionMeta = {
   id: string;
   title: string;
   createdAt: number;
   updatedAt: number;
+  /** Read through `normalizeApprovalMode`: absent (older conversations) or
+   *  anything but "auto" asks. */
+  approvalMode?: ApprovalMode;
 };
 
 const STORE_PATH = "terax-ai-sessions.json";

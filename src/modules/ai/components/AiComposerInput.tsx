@@ -11,6 +11,7 @@ import { SLASH_COMMANDS } from "../lib/slashCommands";
 import { useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
 import { AgentSwitcher } from "./AgentSwitcher";
+import { ApprovalModeControl } from "./ApprovalModeControl";
 import { FilePickerContent } from "./FilePicker";
 import { SnippetPickerContent, type PickerItem } from "./SnippetPicker";
 
@@ -266,6 +267,7 @@ export function AiComposerInput() {
                 "placeholder:text-muted-foreground/60",
               )}
             />
+            <ApprovalModeControl />
             <AgentSwitcher />
           </div>
         </PopoverAnchor>

@@ -35,7 +35,7 @@ Until `1.0.0`, only the latest minor gets security fixes. See the current versio
 
 - **API keys** live in the OS keychain via `keyring` - not on disk, not in `localStorage`, not in logs.
 - **No telemetry.** Terax only talks to the network when you ask it to (AI requests, update checks, web preview).
-- **AI tool approval.** File writes and shell commands from the agent need your OK before they run.
+- **AI tool approval.** File writes and shell commands from the agent need your OK before they run, unless you turn on Auto-approve for a chat (an always-visible chip shows it). Launching or messaging a coding agent always asks, and no mode skips the path and command deny-lists.
 - **No Node in the renderer.** The frontend only reaches the host through the allow-listed Tauri commands.
 - **Signed releases.** Updates are verified before they're applied.
 
