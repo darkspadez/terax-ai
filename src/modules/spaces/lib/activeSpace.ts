@@ -1,6 +1,6 @@
 import type { Tab } from "@/modules/tabs";
 import { findLeafCwd } from "@/modules/terminal/lib/panes";
-import type { WorkspaceEnv } from "@/modules/workspace";
+import { type WorkspaceEnv, workspaceScopeKey } from "@/modules/workspace";
 import { basename, freshTerminalTab } from "./serialize";
 import { newSpaceId, type SpaceMeta } from "./store";
 
@@ -31,6 +31,31 @@ export function freshTabCwd(
   home: string | null,
 ): string | null {
   return restoredHome ?? (env.kind === "local" ? (launchCwd ?? home) : null);
+}
+
+export type EnvSwitch =
+  | { kind: "stay" }
+  | { kind: "activate"; spaceId: string }
+  | { kind: "create"; name: string };
+
+/**
+ * Where the status-bar environment picker takes the window. A space keeps one
+ * environment for its shells, so picking another one moves to a space that
+ * has it (the first in order), or to a new one, and never touches the shells
+ * of any space.
+ */
+export function planEnvSwitch(
+  spaces: SpaceMeta[],
+  activeId: string | null,
+  env: WorkspaceEnv,
+): EnvSwitch {
+  const key = workspaceScopeKey(env);
+  if (workspaceScopeKey(activeSpaceEnv(spaces, activeId)) === key) {
+    return { kind: "stay" };
+  }
+  const match = spaces.find((s) => workspaceScopeKey(s.env) === key);
+  if (match) return { kind: "activate", spaceId: match.id };
+  return { kind: "create", name: env.kind === "wsl" ? env.distro : "Windows" };
 }
 
 /**

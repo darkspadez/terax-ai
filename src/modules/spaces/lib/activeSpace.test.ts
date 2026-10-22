@@ -7,6 +7,7 @@ import {
   findActiveSpace,
   freshTabCwd,
   localPathKey,
+  planEnvSwitch,
 } from "./activeSpace";
 import type { SpaceMeta } from "./store";
 
@@ -210,6 +211,44 @@ describe("applyExplicitLaunchDir", () => {
       id: result.activeTabId,
       spaceId: "sp-new",
       cwd: "/work/new-repo",
+    });
+  });
+});
+
+describe("planEnvSwitch", () => {
+  // crynta/terax-ai#608, #977: the picker used to replace every tab.
+  const ubuntu: WorkspaceEnv = { kind: "wsl", distro: "Ubuntu" };
+  const spaces = [
+    space({ id: "a", env: { kind: "local" } }),
+    space({ id: "b", env: ubuntu }),
+    space({ id: "c", env: ubuntu }),
+  ];
+
+  it("stays when the active space already has the environment", () => {
+    expect(planEnvSwitch(spaces, "c", ubuntu)).toEqual({ kind: "stay" });
+    expect(planEnvSwitch(spaces, "a", { kind: "local" })).toEqual({
+      kind: "stay",
+    });
+  });
+
+  it("moves to the first space with the environment", () => {
+    expect(planEnvSwitch(spaces, "a", ubuntu)).toEqual({
+      kind: "activate",
+      spaceId: "b",
+    });
+    expect(planEnvSwitch(spaces, "c", { kind: "local" })).toEqual({
+      kind: "activate",
+      spaceId: "a",
+    });
+  });
+
+  it("opens a space for an environment no space has", () => {
+    expect(
+      planEnvSwitch(spaces, "a", { kind: "wsl", distro: "Debian" }),
+    ).toEqual({ kind: "create", name: "Debian" });
+    expect(planEnvSwitch(spaces.slice(1), "b", { kind: "local" })).toEqual({
+      kind: "create",
+      name: "Windows",
     });
   });
 });
