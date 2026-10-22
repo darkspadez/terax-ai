@@ -18,6 +18,7 @@ import {
   excludeNestedSources,
   type FsMoveResult,
 } from "./batchMove";
+import { refreshTargets } from "./refreshTargets";
 import { listenFsChanged, watchAdd, watchRemove } from "./watch";
 import { createWatchRegistry, planVisibilityEdge } from "./watchRegistry";
 
@@ -411,6 +412,16 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     [fetchChildren, addWatch, rootPath, scopeKey],
   );
 
+  const refreshAll = useCallback(async () => {
+    if (scopeKeyRef.current !== scopeKey) return;
+    const targets = refreshTargets(
+      rootPath,
+      nodesRef.current,
+      expandedRef.current,
+    );
+    await Promise.all(targets.map((path) => fetchChildren(path)));
+  }, [fetchChildren, rootPath, scopeKey]);
+
   // --- mutations ---
 
   const beginCreate = useCallback(
@@ -610,6 +621,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     toggle,
     expand,
     refresh,
+    refreshAll,
     beginCreate,
     cancelCreate,
     commitCreate,

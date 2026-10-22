@@ -16,7 +16,7 @@ mod portable;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, Manager};
@@ -30,6 +30,9 @@ use plan::{Batch, DirSet, FileStamp, Pending, WatchSet};
 // Quiet-gap before a batch flushes; MAX_WINDOW caps latency under a long stream.
 const DEBOUNCE: Duration = Duration::from_millis(150);
 const MAX_WINDOW: Duration = Duration::from_millis(1000);
+// The WSL 9P share delivers no change notifications, so its directories are re-listed on this
+// interval instead. Slow enough that an idle explorer costs almost nothing over the share.
+const WSL_POLL_INTERVAL: Duration = Duration::from_millis(1500);
 
 #[cfg(target_os = "macos")]
 type PlatformBackend = macos::FsEvents;
@@ -75,11 +78,26 @@ impl Sink {
 struct Shared {
     set: Mutex<WatchSet>,
     dirs: Arc<RwLock<Arc<DirSet>>>,
+    /// Wakes the share poller, which sleeps while nothing on the share is watched.
+    polling: Condvar,
+}
+
+impl Shared {
+    fn new() -> Self {
+        Self {
+            set: Mutex::new(WatchSet::default()),
+            dirs: Arc::new(RwLock::new(Arc::new(DirSet::new()))),
+            polling: Condvar::new(),
+        }
+    }
 }
 
 struct Running {
     shared: Arc<Shared>,
     backend: Box<dyn Backend>,
+    /// The batch channel for the share poller, taken when the first directory on the share is
+    /// watched. Only WSL workspaces ever start it.
+    poll_tx: Option<mpsc::Sender<Batch>>,
 }
 
 #[derive(Default)]
@@ -93,14 +111,18 @@ pub struct FsWatchState {
 #[derive(Default)]
 struct WatchOwners(HashMap<String, Held>);
 
+/// Directories as (key, spelling) and files as (directory key, key, spelling).
+type HeldDir = (String, String);
+type HeldFile = (String, String, String);
+
 #[derive(Default, Debug, PartialEq)]
 struct Held {
-    dirs: HashMap<String, usize>,
-    files: HashMap<(String, String), usize>,
+    dirs: HashMap<HeldDir, usize>,
+    files: HashMap<HeldFile, usize>,
 }
 
 impl WatchOwners {
-    fn add(&mut self, owner: &str, dirs: &[String], files: &[(String, String)]) {
+    fn add(&mut self, owner: &str, dirs: &[HeldDir], files: &[HeldFile]) {
         let held = self.0.entry(owner.to_owned()).or_default();
         for dir in dirs {
             *held.dirs.entry(dir.clone()).or_default() += 1;
@@ -110,7 +132,7 @@ impl WatchOwners {
         }
     }
 
-    fn remove(&mut self, owner: &str, dirs: &[String], files: &[(String, String)]) {
+    fn remove(&mut self, owner: &str, dirs: &[HeldDir], files: &[HeldFile]) {
         let Some(held) = self.0.get_mut(owner) else {
             return;
         };
@@ -145,10 +167,8 @@ struct ChangedPayload {
 
 fn start(app: &AppHandle) -> Result<Running, String> {
     let (tx, rx) = mpsc::channel::<Batch>();
-    let shared = Arc::new(Shared {
-        set: Mutex::new(WatchSet::default()),
-        dirs: Arc::new(RwLock::new(Arc::new(DirSet::new()))),
-    });
+    let poll_tx = Some(tx.clone());
+    let shared = Arc::new(Shared::new());
     let index = app.state::<FileIndexState>().inner().clone();
     let sink = Sink {
         tx,
@@ -164,7 +184,89 @@ fn start(app: &AppHandle) -> Result<Running, String> {
         .stack_size(256 * 1024)
         .spawn(move || drain_loop(rx, drain_shared, app, index))
         .map_err(|e| e.to_string())?;
-    Ok(Running { shared, backend })
+    Ok(Running {
+        shared,
+        backend,
+        poll_tx,
+    })
+}
+
+/// Re-lists the directories on the WSL share on a timer: the share never notifies, so a change
+/// would otherwise stay invisible until the tree is reloaded by hand. It feeds the same channel
+/// as the backends, so polling reuses the debounce, `resolve_changes` and the `fs:changed` emit.
+fn poll_loop(tx: mpsc::Sender<Batch>, shared: Arc<Shared>) {
+    loop {
+        {
+            let set = shared.set.lock().unwrap_or_else(|e| e.into_inner());
+            let _parked = shared
+                .polling
+                .wait_while(set, |set| !set.has_polled_dirs())
+                .unwrap_or_else(|e| e.into_inner());
+        }
+        std::thread::sleep(WSL_POLL_INTERVAL);
+        let alive = crate::modules::panics::isolate("fs watch poll", || poll_once(&tx, &shared))
+            .unwrap_or(true);
+        if !alive {
+            return;
+        }
+    }
+}
+
+/// One tick. Returns false once the drain loop is gone and nothing can consume a batch.
+fn poll_once(tx: &mpsc::Sender<Batch>, shared: &Shared) -> bool {
+    // Copied out and read outside the lock, like `resolve_changes`: add/remove never wait
+    // for the share.
+    let polled = {
+        let set = shared.set.lock().unwrap_or_else(|e| e.into_inner());
+        set.polled_dirs()
+    };
+    if polled.is_empty() {
+        return true;
+    }
+    let signatures: Vec<Option<u64>> = polled
+        .iter()
+        .map(|(_, path)| plan::listing_signature(path))
+        .collect();
+    // The files open in editors are registered under the same directory. An edit in place
+    // leaves the listing untouched, so their own stamps are what move.
+    let watched_files: Vec<Vec<String>> = {
+        let set = shared.set.lock().unwrap_or_else(|e| e.into_inner());
+        polled
+            .iter()
+            .map(|(key, _)| set.file_keys(key))
+            .collect::<Vec<_>>()
+    };
+    let stamps: Vec<HashMap<String, Option<FileStamp>>> = watched_files
+        .iter()
+        .map(|files| {
+            files
+                .iter()
+                .map(|file| (file.clone(), FileStamp::of(std::path::Path::new(file))))
+                .collect()
+        })
+        .collect();
+    let moved: Vec<String> = {
+        let set = shared.set.lock().unwrap_or_else(|e| e.into_inner());
+        polled
+            .iter()
+            .zip(signatures)
+            .zip(stamps)
+            .filter(|(((key, _), signature), stamps)| {
+                set.listing_moved(key, *signature) || set.files_moved(key, stamps)
+            })
+            .map(|(((key, _), _), _)| key.clone())
+            .collect()
+    };
+    if moved.is_empty() {
+        return true;
+    }
+    // `resolve_changes` re-reads and remembers the listing and re-stamps the files: the
+    // poller only decides that something moved.
+    tx.send(Batch {
+        dirs: moved,
+        subtrees: Vec::new(),
+    })
+    .is_ok()
 }
 
 fn drain_loop(
@@ -235,19 +337,20 @@ fn resolve_changes(pending: Pending, shared: &Shared) -> Changes {
     let mut report = Vec::new();
     for (dir, signature) in touched.iter().zip(signatures) {
         if set.listing_changed(dir, signature) {
-            report.push(dir.clone());
+            report.extend(set.dir_spellings(dir));
         }
         report.extend(set.changed_files_in(dir, &stamp_of));
     }
     Changes { touched, report }
 }
 
-// Canonical keys keep add/remove symmetric regardless of how the path was spelled.
+/// Each requested directory with its canonical path. Canonical keys keep add/remove symmetric
+/// whatever the spelling, and the spelling is what changes are reported under.
 fn prepare_dirs(
     registry: &WorkspaceRegistry,
     workspace: &WorkspaceEnv,
     paths: Vec<String>,
-) -> Vec<PathBuf> {
+) -> Vec<(String, PathBuf)> {
     paths
         .into_iter()
         .filter_map(|raw| {
@@ -259,9 +362,22 @@ fn prepare_dirs(
             {
                 return None;
             }
-            Some(canonical)
+            Some((raw, canonical))
         })
         .collect()
+}
+
+/// The key a directory being released was registered under. A removed or renamed directory no
+/// longer canonicalizes, but its parent usually still does.
+fn removal_dir_key(workspace: &WorkspaceEnv, raw: &str) -> String {
+    let resolved = resolve_path(raw, workspace);
+    if let Ok(canonical) = std::fs::canonicalize(&resolved) {
+        return to_canon(canonical);
+    }
+    match canonical_file(workspace, raw) {
+        Some((_, key, _)) => key,
+        None => to_canon(resolved),
+    }
 }
 
 /// A file is identified by its canonical directory plus its own name, so the
@@ -289,14 +405,14 @@ impl FsWatchState {
         let _ = self.with_running(app, false, |running| {
             running.apply(|set| {
                 let mut moved = false;
-                for (dir, count) in &held.dirs {
+                for ((dir, spelling), count) in &held.dirs {
                     for _ in 0..*count {
-                        moved |= set.remove_dir(dir);
+                        moved |= set.remove_dir(dir, spelling);
                     }
                 }
-                for ((dir, key), count) in &held.files {
+                for ((dir, key, spelling), count) in &held.files {
                     for _ in 0..*count {
-                        set.remove_file(dir, key);
+                        set.remove_file(dir, key, spelling);
                     }
                 }
                 moved
@@ -331,6 +447,26 @@ impl Running {
         }
         *self.shared.dirs.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(set.snapshot());
         self.backend.sync(&set);
+        let poll = set.has_polled_dirs();
+        drop(set);
+        if poll {
+            self.start_polling();
+            self.shared.polling.notify_one();
+        }
+    }
+
+    fn start_polling(&mut self) {
+        let Some(tx) = self.poll_tx.take() else {
+            return;
+        };
+        let shared = self.shared.clone();
+        let spawned = std::thread::Builder::new()
+            .name("terax-fs-poll".into())
+            .stack_size(256 * 1024)
+            .spawn(move || poll_loop(tx, shared));
+        if let Err(e) = spawned {
+            log::warn!("fs watch poller failed to start: {e}");
+        }
     }
 }
 
@@ -348,39 +484,44 @@ pub async fn fs_watch_add(
         let dirs = prepare_dirs(&app.state::<WorkspaceRegistry>(), &workspace, paths);
         let files: Vec<_> = files
             .unwrap_or_default()
-            .iter()
-            .filter_map(|raw| canonical_file(&workspace, raw))
-            .map(|(dir, key, path)| {
-                let stamp = FileStamp::of(&path);
-                (dir, key, stamp)
+            .into_iter()
+            .filter_map(|raw| {
+                let (dir, key, path) = canonical_file(&workspace, &raw)?;
+                Some((dir, key, raw, FileStamp::of(&path)))
             })
             .collect();
         if dirs.is_empty() && files.is_empty() {
             return Ok(());
         }
-        let held_dirs: Vec<String> = dirs.iter().map(to_canon).collect();
-        let held_files: Vec<(String, String)> = files
+        let held_dirs: Vec<HeldDir> = dirs
             .iter()
-            .map(|(dir, key, _)| (dir.clone(), key.clone()))
+            .map(|(spelling, dir)| (to_canon(dir), spelling.clone()))
+            .collect();
+        let held_files: Vec<HeldFile> = files
+            .iter()
+            .map(|(dir, key, spelling, _)| (dir.clone(), key.clone(), spelling.clone()))
             .collect();
         // Taken before the OS watch starts (inside `apply`), so a change after it differs.
         let baselines: Vec<Option<u64>> = dirs
             .iter()
-            .map(|dir| plan::listing_signature(dir))
+            .map(|(_, dir)| plan::listing_signature(dir))
             .collect();
         app.state::<FsWatchState>()
             .with_running(&app, true, |running| {
                 running.apply(|set| {
                     let mut moved = false;
-                    for (dir, signature) in dirs.into_iter().zip(baselines) {
+                    for ((spelling, dir), signature) in dirs.into_iter().zip(baselines) {
                         let key = to_canon(&dir);
-                        if set.add_dir(key.clone(), dir) {
+                        // A `/mnt/<drive>` workspace path already became a native drive path in
+                        // `prepare_dirs`; what is left on the share can never notify.
+                        let poll = plan::is_wsl_share(&key);
+                        if set.add_dir(key.clone(), spelling, dir, poll) {
                             set.record_listing(&key, signature);
                             moved = true;
                         }
                     }
-                    for (dir, key, stamp) in files {
-                        set.add_file(dir, key, stamp);
+                    for (dir, key, spelling, stamp) in files {
+                        set.add_file(dir, key, spelling, stamp);
                     }
                     moved
                 });
@@ -404,30 +545,27 @@ pub async fn fs_watch_remove(
     let owner = webview.label().to_owned();
     blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
-        // A removed/renamed dir no longer canonicalizes; fall back so the
-        // refcount entry is still released.
-        let dirs: Vec<String> = paths
+        let dirs: Vec<HeldDir> = paths
             .into_iter()
-            .map(|raw| {
-                let resolved = resolve_path(&raw, &workspace);
-                to_canon(std::fs::canonicalize(&resolved).unwrap_or(resolved))
-            })
+            .map(|raw| (removal_dir_key(&workspace, &raw), raw))
             .collect();
-        let files: Vec<(String, String)> = files
+        let files: Vec<HeldFile> = files
             .unwrap_or_default()
-            .iter()
-            .filter_map(|raw| canonical_file(&workspace, raw))
-            .map(|(dir, key, _)| (dir, key))
+            .into_iter()
+            .filter_map(|raw| {
+                let (dir, key, _) = canonical_file(&workspace, &raw)?;
+                Some((dir, key, raw))
+            })
             .collect();
         app.state::<FsWatchState>()
             .with_running(&app, false, |running| {
                 running.apply(|set| {
                     let mut moved = false;
-                    for dir in &dirs {
-                        moved |= set.remove_dir(dir);
+                    for (dir, spelling) in &dirs {
+                        moved |= set.remove_dir(dir, spelling);
                     }
-                    for (dir, key) in &files {
-                        set.remove_file(dir, key);
+                    for (dir, key, spelling) in &files {
+                        set.remove_file(dir, key, spelling);
                     }
                     moved
                 });
@@ -446,8 +584,8 @@ mod tests {
     #[test]
     fn a_window_gives_back_the_watches_it_still_holds() {
         let mut owners = WatchOwners::default();
-        let dir = |d: &str| d.to_owned();
-        let file = |d: &str, f: &str| (d.to_owned(), f.to_owned());
+        let dir = |d: &str| (d.to_owned(), d.to_owned());
+        let file = |d: &str, f: &str| (d.to_owned(), f.to_owned(), f.to_owned());
         owners.add("main", &[dir("/a"), dir("/a")], &[file("/a", "/a/x")]);
         owners.add("w-1", &[dir("/a")], &[]);
         owners.remove("main", &[dir("/a")], &[]);
@@ -468,13 +606,12 @@ mod tests {
 
     fn shared_watching(dir: &std::path::Path) -> Shared {
         let key = to_canon(dir);
-        let mut set = WatchSet::default();
-        assert!(set.add_dir(key.clone(), dir.to_path_buf()));
+        let shared = Shared::new();
+        let mut set = shared.set.lock().unwrap();
+        assert!(set.add_dir(key.clone(), key.clone(), dir.to_path_buf(), false));
         set.record_listing(&key, plan::listing_signature(dir));
-        Shared {
-            set: Mutex::new(set),
-            dirs: Arc::new(RwLock::new(Arc::new(DirSet::new()))),
-        }
+        drop(set);
+        shared
     }
 
     fn burst(dir: &std::path::Path) -> Pending {
@@ -484,6 +621,140 @@ mod tests {
             subtrees: Vec::new(),
         });
         pending
+    }
+
+    fn shared_polling(dir: &std::path::Path) -> Shared {
+        let key = to_canon(dir);
+        let shared = Shared::new();
+        let mut set = shared.set.lock().unwrap();
+        assert!(set.add_dir(key.clone(), key.clone(), dir.to_path_buf(), true));
+        set.record_listing(&key, plan::listing_signature(dir));
+        drop(set);
+        shared
+    }
+
+    /// A polled directory that also holds an open editor file, as the editor registers it.
+    fn shared_polling_with_file(dir: &std::path::Path, file: &std::path::Path) -> Shared {
+        let shared = shared_polling(dir);
+        let mut set = shared.set.lock().unwrap();
+        set.add_file(
+            to_canon(dir),
+            to_canon(file),
+            to_canon(file),
+            FileStamp::of(file),
+        );
+        drop(set);
+        shared
+    }
+
+    #[test]
+    fn an_edited_open_file_reaches_the_frontend_through_the_poller() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("open.ts");
+        std::fs::write(&file, "one").unwrap();
+        let shared = shared_polling_with_file(dir.path(), &file);
+        let (tx, rx) = mpsc::channel::<Batch>();
+
+        assert!(poll_once(&tx, &shared));
+        assert!(rx.try_recv().is_err(), "an untouched file is not a tick");
+
+        // An edit in place: the listing is unchanged, only the file's stamp moved.
+        std::fs::write(&file, "two, a different length").unwrap();
+        assert!(poll_once(&tx, &shared));
+        let batch = rx.try_recv().expect("the moved file is a batch");
+        assert_eq!(batch.dirs, vec![to_canon(dir.path())]);
+
+        // The batch takes the normal resolve path, which re-stamps the file.
+        let mut pending = Pending::default();
+        pending.merge(batch);
+        let changes = resolve_changes(pending, &shared);
+        assert_eq!(
+            changes.report,
+            vec![to_canon(&file)],
+            "the file is reported, not the directory"
+        );
+
+        // The new stamp is the baseline: the next tick is quiet again.
+        assert!(poll_once(&tx, &shared));
+        assert!(
+            rx.try_recv().is_err(),
+            "a reported change is not reported twice"
+        );
+    }
+
+    #[test]
+    fn a_deleted_open_file_reaches_the_frontend_through_the_poller() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("open.ts");
+        std::fs::write(&file, "one").unwrap();
+        let shared = shared_polling_with_file(dir.path(), &file);
+        let (tx, rx) = mpsc::channel::<Batch>();
+
+        std::fs::remove_file(&file).unwrap();
+        assert!(poll_once(&tx, &shared));
+        let batch = rx.try_recv().expect("the deleted file is a batch");
+        assert_eq!(batch.dirs, vec![to_canon(dir.path())]);
+
+        let mut pending = Pending::default();
+        pending.merge(batch);
+        let changes = resolve_changes(pending, &shared);
+        assert_eq!(
+            changes.report,
+            vec![to_canon(dir.path()), to_canon(&file)],
+            "the directory loses the entry and the file is reported as gone"
+        );
+    }
+
+    #[test]
+    fn a_polled_directory_reaches_the_frontend_through_the_backend_batch_path() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.ts"), "one").unwrap();
+        let shared = shared_polling(dir.path());
+        let (tx, rx) = mpsc::channel::<Batch>();
+
+        assert!(poll_once(&tx, &shared));
+        assert!(rx.try_recv().is_err(), "an unchanged listing is not a tick");
+
+        std::fs::write(dir.path().join("b.ts"), "").unwrap();
+        assert!(poll_once(&tx, &shared));
+        let batch = rx.try_recv().expect("the moved listing is a batch");
+        assert_eq!(batch.dirs, vec![to_canon(dir.path())]);
+        assert!(batch.subtrees.is_empty());
+
+        // The batch takes the normal resolve path, which remembers the listing.
+        let mut pending = Pending::default();
+        pending.merge(batch);
+        let changes = resolve_changes(pending, &shared);
+        assert_eq!(changes.report, vec![to_canon(dir.path())]);
+
+        assert!(poll_once(&tx, &shared));
+        assert!(
+            rx.try_recv().is_err(),
+            "the new listing is now the baseline"
+        );
+    }
+
+    #[test]
+    fn a_polled_directory_that_cannot_be_read_does_not_report_every_tick() {
+        let dir = tempfile::tempdir().unwrap();
+        let shared = shared_polling(dir.path());
+        let (tx, rx) = mpsc::channel::<Batch>();
+        std::fs::remove_dir_all(dir.path()).unwrap();
+
+        assert!(poll_once(&tx, &shared));
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn the_poller_stops_once_nothing_consumes_batches() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.ts"), "one").unwrap();
+        let shared = shared_polling(dir.path());
+        let (tx, rx) = mpsc::channel::<Batch>();
+        drop(rx);
+
+        std::fs::write(dir.path().join("b.ts"), "").unwrap();
+        assert!(!poll_once(&tx, &shared), "a dead channel ends the loop");
     }
 
     #[test]
@@ -521,11 +792,61 @@ mod tests {
         shared.set.lock().unwrap().add_file(
             to_canon(dir.path()),
             to_canon(&file),
+            to_canon(&file),
             FileStamp::of(&file),
         );
 
         std::fs::write(&file, "two, a different length").unwrap();
         let changes = resolve_changes(burst(dir.path()), &shared);
         assert_eq!(changes.report, vec![to_canon(&file)]);
+    }
+
+    /// A project opened through a link (`/tmp` on macOS, `/home` on Fedora Atomic) is watched
+    /// at its canonical path but keyed by the frontend under the path it was given.
+    #[cfg(unix)]
+    #[test]
+    fn changes_under_a_linked_root_are_reported_in_the_spelling_the_frontend_used() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real = std::fs::canonicalize(tmp.path()).unwrap().join("real");
+        std::fs::create_dir_all(real.join("src")).unwrap();
+        std::fs::write(real.join("src/open.ts"), "one").unwrap();
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let registry = WorkspaceRegistry::default();
+        registry.authorize(&real).unwrap();
+        let spelled = |path: &std::path::Path| path.to_string_lossy().into_owned();
+        let link_src = spelled(&link.join("src"));
+        let link_file = spelled(&link.join("src/open.ts"));
+
+        let dirs = prepare_dirs(&registry, &WorkspaceEnv::Local, vec![link_src.clone()]);
+        assert_eq!(dirs, vec![(link_src.clone(), real.join("src"))]);
+        let (dir_key, file_key, file_path) =
+            canonical_file(&WorkspaceEnv::Local, &link_file).unwrap();
+        assert_eq!(dir_key, to_canon(real.join("src")));
+
+        let shared = Shared::new();
+        {
+            let mut set = shared.set.lock().unwrap();
+            let (spelling, dir) = dirs.into_iter().next().unwrap();
+            assert!(set.add_dir(dir_key.clone(), spelling, dir.clone(), false));
+            set.record_listing(&dir_key, plan::listing_signature(&dir));
+            set.add_file(
+                dir_key.clone(),
+                file_key,
+                link_file.clone(),
+                FileStamp::of(&file_path),
+            );
+        }
+
+        std::fs::write(real.join("src/new.ts"), "").unwrap();
+        std::fs::write(real.join("src/open.ts"), "two, a different length").unwrap();
+        let changes = resolve_changes(burst(&real.join("src")), &shared);
+        assert_eq!(changes.touched, vec![dir_key.clone()]);
+        assert_eq!(changes.report, vec![link_src.clone(), link_file]);
+
+        // Released under the same spelling, also once the directory itself is gone.
+        std::fs::remove_dir_all(real.join("src")).unwrap();
+        assert_eq!(removal_dir_key(&WorkspaceEnv::Local, &link_src), dir_key);
+        assert!(shared.set.lock().unwrap().remove_dir(&dir_key, &link_src));
     }
 }

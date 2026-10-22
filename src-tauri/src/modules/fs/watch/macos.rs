@@ -271,7 +271,9 @@ mod tests {
 
         fn watch_unsettled(&mut self, dir: &Path) {
             let canonical = std::fs::canonicalize(dir).unwrap();
-            self.set.add_dir(to_canon(&canonical), canonical);
+            // FSEvents on a local volume always notifies, so nothing here is polled.
+            let key = to_canon(&canonical);
+            self.set.add_dir(key.clone(), key, canonical, false);
             *self.sink.dirs.write().unwrap() = Arc::new(self.set.snapshot());
             self.backend.sync(&self.set);
         }
@@ -384,7 +386,7 @@ mod tests {
             first,
             "nested directories are covered by the existing stream"
         );
-        fx.set.remove_dir(&canon(root.path()));
+        fx.set.remove_dir(&canon(root.path()), &canon(root.path()));
         fx.backend.sync(&fx.set);
         assert_eq!(
             fx.backend.spec.as_ref().map(|s| s.roots.clone()),
@@ -454,7 +456,10 @@ mod tests {
         assert!(fx.backend.stream.is_some());
         assert_eq!(fx.backend.resume_from, None, "consumed by a running stream");
         // ...and unwatching everything forgets it: there is no gap to cover.
-        fx.set.remove_dir(&canon(&root.path().join("a")));
+        fx.set.remove_dir(
+            &canon(&root.path().join("a")),
+            &canon(&root.path().join("a")),
+        );
         fx.backend.resume_from = Some(latest);
         fx.backend.sync(&fx.set);
         assert!(fx.backend.stream.is_none());
@@ -467,7 +472,7 @@ mod tests {
         let mut fx = Fixture::new();
         fx.watch(root.path());
         assert!(fx.backend.stream.is_some());
-        fx.set.remove_dir(&canon(root.path()));
+        fx.set.remove_dir(&canon(root.path()), &canon(root.path()));
         fx.backend.sync(&fx.set);
         assert!(fx.backend.stream.is_none());
         std::fs::write(root.path().join("late.txt"), "x").unwrap();
