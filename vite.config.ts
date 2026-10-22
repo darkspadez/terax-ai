@@ -159,6 +159,10 @@ function lazyChunk(id: string): string | null {
   // stay in the chunks of their own dynamic imports, loaded when a formula
   // or a diagram first appears.
   if (pkg === "streamdown") return "streamdown";
+  // One marked serves Streamdown, Mermaid and the LSP client (see the
+  // overrides in package.json). Left to Rolldown it joins the streamdown
+  // chunk, and the LSP client would load all of Streamdown to get it.
+  if (pkg === "marked") return "marked";
 
   return null;
 }
