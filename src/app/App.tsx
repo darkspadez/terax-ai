@@ -67,6 +67,7 @@ import {
   shouldDeferShortcutToTerminal,
   shouldDisablePaneSwapShortcut,
   useGlobalShortcuts,
+  useMenuShortcuts,
 } from "@/modules/shortcuts";
 import {
   SIDEBAR_MAX_WIDTH,
@@ -540,7 +541,11 @@ export default function App() {
     return [activeId, ...ordered.filter((id) => id !== activeId)];
   }, [activeId, activeSpaceId]);
 
-  const { state: switcherState, step: stepSwitcher } = useTabSwitcher({
+  const {
+    state: switcherState,
+    step: stepSwitcher,
+    jump: jumpSwitcher,
+  } = useTabSwitcher({
     getOrder: getSwitcherOrder,
     onCommit: (id) => {
       if (tabsRef.current.some((t) => t.id === id)) setActiveId(id);
@@ -1217,6 +1222,15 @@ export default function App() {
   );
 
   useGlobalShortcuts(shortcutHandlers, { isDisabled: shortcutsDisabled });
+  // The macOS menu bar runs these too, also while a preview frame has the
+  // keyboard. It has no key release to wait for, so tab switching commits.
+  useMenuShortcuts(shortcutHandlers, {
+    isDisabled: shortcutsDisabled,
+    instead: {
+      "tab.next": () => jumpSwitcher(1),
+      "tab.prev": () => jumpSwitcher(-1),
+    },
+  });
 
   const registerTerminalHandle = useCallback(
     (leafId: number, h: TerminalPaneHandle | null) => {

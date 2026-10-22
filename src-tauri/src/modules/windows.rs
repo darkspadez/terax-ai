@@ -468,7 +468,7 @@ fn close_target(label: &str) -> CloseTarget {
 
 /// The key window, whatever kind: the one a menu command acts on.
 #[cfg(target_os = "macos")]
-fn key_window(app: &AppHandle) -> Option<WebviewWindow> {
+pub fn key_window(app: &AppHandle) -> Option<WebviewWindow> {
     app.webview_windows()
         .into_values()
         .find(|window| window.is_focused().unwrap_or(false))

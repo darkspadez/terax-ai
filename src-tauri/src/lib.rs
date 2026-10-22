@@ -461,6 +461,8 @@ pub fn run() {
             windows::app_window_ready,
             windows::app_quit,
             windows::app_quit_ready,
+            #[cfg(target_os = "macos")]
+            app_menu::app_menu_set_shortcuts,
             #[cfg(feature = "bench")]
             modules::bench::bench_config,
             #[cfg(feature = "bench")]

@@ -633,10 +633,11 @@ export function matchBinding(
 export function matchShortcut(
   e: KeyboardEvent,
   userBindings: Partial<Record<ShortcutId, KeyBinding[]>>,
+  shortcuts: readonly Shortcut[] = SHORTCUTS,
 ): ShortcutId | null {
   if (e.isComposing) return null;
   let byDefault: ShortcutId | null = null;
-  for (const s of SHORTCUTS) {
+  for (const s of shortcuts) {
     if (e.repeat && !s.allowRepeat) continue;
     const custom = userBindings[s.id];
     const bindings = custom || s.defaultBindings;
