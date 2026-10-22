@@ -408,11 +408,13 @@ export class GhosttyInputController {
   };
 
   private encodeKeyDown(event: KeyboardEvent, key: Key): Uint8Array {
+    const utf8 = event.key.length === 1 ? event.key : undefined;
     const data = {
       action: event.repeat ? KeyAction.REPEAT : KeyAction.PRESS,
       key,
       mods: modifiers(event),
-      utf8: event.key.length === 1 ? event.key : undefined,
+      consumedMods: consumedModifiers(event, utf8),
+      utf8,
       unshiftedCodepoint: unshiftedCodepoint(event),
     };
     const encoded = this.options.model.encodeKey(data);
@@ -448,8 +450,11 @@ export class GhosttyInputController {
       action: event.repeat ? KeyAction.REPEAT : KeyAction.PRESS,
       key,
       mods: modifiers(event),
+      consumedMods: consumedModifiers(event, text),
       utf8: text,
-      unshiftedCodepoint: text.toLowerCase().codePointAt(0) ?? 0,
+      unshiftedCodepoint:
+        baseCharacter({ code: event.code, shiftKey: false }).codePointAt(0) ??
+        0,
     };
     const encoded = this.options.model.encodeKey(data);
     if (encoded.byteLength === 0) return false;
@@ -771,6 +776,27 @@ function unshiftedCodepoint(event: KeyboardEvent): number {
   return event.code.startsWith("Key") && event.code.length === 4
     ? event.code.toLowerCase().charCodeAt(3)
     : 0;
+}
+
+/**
+ * Modifiers used up in typing `text`, as Ghostty's own apprts report them
+ * (xkb's consumed modifiers): Shift when it picked the key's shifted level.
+ * Kitty modes below report-all then send the text itself (Shift+; types ":"),
+ * while report-all still names the unshifted key with Shift (`CSI 59:58;2u`).
+ * Space and keypad keys type the same text either way, so Shift stays a
+ * modifier there (Shift+Space is `CSI 32;2u`).
+ */
+function consumedModifiers(
+  event: Pick<KeyboardEvent, "code" | "shiftKey">,
+  text: string | undefined,
+): Mods {
+  return event.shiftKey &&
+    text !== undefined &&
+    text !== "" &&
+    event.code !== "Space" &&
+    !event.code.startsWith("Numpad")
+    ? Mods.SHIFT
+    : Mods.NONE;
 }
 
 /**

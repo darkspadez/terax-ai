@@ -591,6 +591,81 @@ describe.each(["ghostty-vt.wasm", "ghostty-vt-scalar.wasm"])(
       dispose();
     });
 
+    // crynta/terax-ai#1381: Neovim pushes flags 3, and Shift+; must type ":".
+    it.each([
+      [false, 1],
+      [false, 3],
+      [true, 1],
+      [true, 3],
+    ])(
+      "types Shift text as text in Kitty modes below report-all (macOS %s, flags %i)",
+      (isMac, flags) => {
+        const { input, sent, write, dispose } = setup({ isMac });
+        write(`\x1b[>${flags}u`);
+        const typed = [
+          { key: ":", code: "Semicolon" },
+          { key: "!", code: "Digit1" },
+          { key: "A", code: "KeyA" },
+          { key: '"', code: "Quote" },
+          // Another layout's shifted character (German Shift+7).
+          { key: "/", code: "Digit7" },
+        ].map((values) => {
+          input.dispatchEvent(keyboardEvent({ ...values, shiftKey: true }));
+          return sent.splice(0).join("");
+        });
+        expect(typed).toEqual([":", "!", "A", '"', "/"]);
+        // Shift stays a modifier where it types nothing different, and
+        // with Control.
+        input.dispatchEvent(
+          keyboardEvent({ key: " ", code: "Space", shiftKey: true }),
+        );
+        input.dispatchEvent(
+          keyboardEvent({
+            key: "A",
+            code: "KeyA",
+            shiftKey: true,
+            ctrlKey: true,
+          }),
+        );
+        expect(sent).toEqual(["\x1b[32;2u", "\x1b[97;6u"]);
+        dispose();
+      },
+    );
+
+    it("reports the unshifted key with Shift under report-all", () => {
+      const { input, sent, write, dispose } = setup();
+      write("\x1b[>15u");
+      input.dispatchEvent(
+        keyboardEvent({ key: ":", code: "Semicolon", shiftKey: true }),
+      );
+      input.dispatchEvent(
+        keyboardEvent({ key: "A", code: "KeyA", shiftKey: true }),
+      );
+      expect(sent).toEqual(["\x1b[59:58;2u", "\x1b[97:65;2u"]);
+      dispose();
+    });
+
+    it("encodes Option-as-Alt with Shift from the unshifted key", () => {
+      const { input, sent, write, dispose } = setup({
+        isMac: true,
+        optionAsAlt: () => "both",
+      });
+      const type = () =>
+        input.dispatchEvent(
+          keyboardEvent({
+            key: "Ú",
+            code: "Semicolon",
+            altKey: true,
+            shiftKey: true,
+          }),
+        );
+      type();
+      write("\x1b[>1u");
+      type();
+      expect(sent).toEqual(["\x1b:", "\x1b[59;4u"]);
+      dispose();
+    });
+
     it("asks before an unbracketed paste with line breaks", async () => {
       const answers = [false, true];
       const confirmPaste = vi.fn(async () => answers.shift() ?? false);

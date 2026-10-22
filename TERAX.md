@@ -242,6 +242,9 @@ Character drags retain a native selection pin from pointerdown, including before
 the first pointermove. Unmoved clicks and lost captures discard provisional pins.
 Key encoding supplies the base character required by Kitty keyboard mode; plain
 keys and key releases also use Ghostty encoding when the application requests it.
+Shift that picked a key's typed character is passed as consumed, as Ghostty's
+own apprts do, so Kitty modes below report-all send the text (Shift+; is `:`)
+and report-all names the unshifted key with Shift.
 Terminal text uses the configured font, an installed Nerd Font when detected,
 or bundled JetBrains Mono: the official variable fonts, upright and italic, with
 every glyph, weight (100-800) and OpenType feature, split by Unicode range into
