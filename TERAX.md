@@ -552,7 +552,7 @@ BYOK. Cloud providers via `@ai-sdk/*`: **OpenAI, Anthropic, Google, xAI, Cerebra
 ### Bundle config
 
 - `bundle.targets: "all"` plus per-platform sections in `tauri.conf.json`:
-  - **macOS**: `minimumSystemVersion: 13.0`.
+  - **macOS**: `minimumSystemVersion: 13.3`, the first release whose WebKit (Safari 16.4) parses the bundle: class static blocks (Radix, in the startup chunk) and regular expression lookbehind (Streamdown) are syntax errors in macOS 13.0 to 13.2, and a startup chunk that fails leaves the window blank. Tailwind v4 also targets Safari 16.4. `dist-budget.test.ts` scans every built chunk for syntax newer than the declared minimum's Safari.
   - **Linux**: deb depends `libwebkit2gtk-4.1-0`, `libgtk-3-0`; rpm `webkit2gtk4.1`, `gtk3`; AppImage bundles its media framework.
   - **Windows**: NSIS installer in `currentUser` mode (no admin required), WebView2 via `downloadBootstrapper`. Installing a missing WebView2 runtime requires internet access; there is no bundled offline runtime. Packaged and offline-install validation remains in the release-readiness gates.
 - Auto-updater configured with a public minisign key; release artifacts at `https://github.com/crynta/terax-ai/releases/latest/download/latest.json`.

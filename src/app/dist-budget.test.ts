@@ -9,6 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseSync, Visitor } from "vite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   analyzeDist,
@@ -30,6 +31,67 @@ import {
 // reachable only through dynamic `import()`.
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
+
+/**
+ * The Safari (system WebKit, which WKWebView uses) each macOS release ships.
+ * A chunk with syntax its WebKit cannot parse fails as a whole; in a startup
+ * chunk that leaves the window blank (crynta/terax-ai#933, macOS 13.0.1).
+ */
+const SAFARI_OF_MACOS: Record<string, number> = {
+  "13.0": 16.1,
+  "13.1": 16.2,
+  "13.2": 16.3,
+  "13.3": 16.4,
+  "14.0": 17.0,
+};
+
+/**
+ * Syntax in `code` that WebKit learned late, with the first Safari that
+ * parses it. Build targets lower class static blocks but never regular
+ * expression features.
+ */
+function lateWebKitSyntax(code: string): Map<string, number> {
+  const found = new Map<string, number>();
+  const { program, errors } = parseSync("chunk.js", code);
+  if (errors.length > 0) found.set("unparsable", Number.POSITIVE_INFINITY);
+  new Visitor({
+    StaticBlock: () => {
+      found.set("class static block", 16.4);
+    },
+    Literal: (node) => {
+      if (!("regex" in node) || !node.regex) return;
+      if (/(?:^|[^\\])\(\?<[=!]/.test(node.regex.pattern)) {
+        found.set("regex lookbehind", 16.4);
+      }
+      if (node.regex.flags.includes("v")) found.set("regex v flag", 17);
+    },
+  }).visit(program);
+  return found;
+}
+
+describe("late WebKit syntax", () => {
+  it("finds what Safari 16.1 to 16.3 cannot parse", () => {
+    expect([
+      ...lateWebKitSyntax(
+        "class A{static{A.x=1}};const r=/(?<=a)b/,s=/(?<!a)b/;",
+      ),
+    ]).toEqual([
+      ["class static block", 16.4],
+      ["regex lookbehind", 16.4],
+    ]);
+    expect([...lateWebKitSyntax("const r=/[a--b]/v;")]).toEqual([
+      ["regex v flag", 17],
+    ]);
+  });
+
+  it("passes older syntax and escaped look-alikes", () => {
+    expect(
+      lateWebKitSyntax(
+        "class A{static x=1;#y=2;m(){return #y in this}};const r=/\\(?<=a/,n=/(?<name>a)(?=b)/u;",
+      ).size,
+    ).toBe(0);
+  });
+});
 
 describe("dist graph analyzer", () => {
   it("reads only static import edges, not dynamic ones", () => {
@@ -276,6 +338,24 @@ describe("built startup graph", () => {
     );
     // Nothing was emitted by either attempt.
     expect(existsSync(join(outDir, "guarded"))).toBe(false);
+  });
+
+  it("parses in the WebKit of the oldest macOS the bundle declares", () => {
+    const config = JSON.parse(
+      readFileSync(join(root, "src-tauri/tauri.conf.json"), "utf8"),
+    ) as { bundle: { macOS: { minimumSystemVersion: string } } };
+    const minimum = config.bundle.macOS.minimumSystemVersion;
+    const safari = SAFARI_OF_MACOS[minimum];
+    expect(safari, `Safari of macOS ${minimum}`).toBeDefined();
+    const assets = join(outDir, "assets");
+    const offenders = readdirSync(assets)
+      .filter((file) => file.endsWith(".js"))
+      .flatMap((file) =>
+        [...lateWebKitSyntax(readFileSync(join(assets, file), "utf8"))]
+          .filter(([, needs]) => needs > safari)
+          .map(([feature, needs]) => `${file}: ${feature} (Safari ${needs})`),
+      );
+    expect(offenders).toEqual([]);
   });
 
   it("contains none of the app-lab benchmark driver (TERAX_BENCH is off)", () => {

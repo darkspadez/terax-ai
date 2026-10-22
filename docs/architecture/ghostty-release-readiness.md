@@ -29,8 +29,10 @@ below do.
 
 ## Platform configuration
 
-- macOS minimum is 13.0 (Tauri config); the scalar WASM artifact covers webviews
-  without SIMD. A packaged run on macOS 13 is still worth doing.
+- macOS minimum is 13.3 (Tauri config): earlier 13.x WebKit (Safari 16.1 to
+  16.3) cannot parse the bundle's class static blocks and regex lookbehind. The
+  scalar WASM artifact covers webviews without SIMD. A packaged run on macOS 13.3
+  is still worth doing.
 - Windows uses a per-user NSIS installer with `downloadBootstrapper` (no bundled
   WebView2 runtime); offline installs need the runtime provisioned beforehand. No
   `minimumWebview2Version` is set.
