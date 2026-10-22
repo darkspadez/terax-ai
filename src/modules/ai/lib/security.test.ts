@@ -290,6 +290,57 @@ describe("checkWritable — layered refusals", () => {
       ok: true,
     });
   });
+
+  it("refuses login, shell-startup and autostart files under the home root", () => {
+    for (const p of [
+      "/Users/me/Library/LaunchAgents/com.x.plist",
+      "/Users/me/Library/LaunchAgents",
+      "/Users/me/.zshrc",
+      "/Users/me/.zlogin",
+      "/home/me/.bashrc",
+      "/home/me/.bash_login",
+      "/home/me/.profile",
+      "/root/.bash_profile",
+      "/var/home/me/.zshenv",
+      "/home/me/.config/fish/config.fish",
+      "/home/me/.config/fish/conf.d/x.fish",
+      "/home/me/.config/autostart/x.desktop",
+      "/home/me/.config/systemd/user/x.service",
+      "/home/me/.config/environment.d/10-x.conf",
+      "/home/me/.xprofile",
+      "/Users/me/.gitconfig",
+      "C:\\Users\\me\\.gitconfig",
+      "C:\\Users\\me\\Documents\\PowerShell\\Microsoft.PowerShell_profile.ps1",
+      "C:\\Users\\me\\OneDrive - Contoso\\Documents\\WindowsPowerShell\\profile.ps1",
+      "C:\\Users\\me\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\x.lnk",
+      "/Applications/Foo.app/Contents/MacOS/foo",
+      // Case, trailing-dot and stream variants compare equal.
+      "/Users/me/.ZSHRC",
+      "C:\\Users\\me\\.bashrc.",
+      "C:\\Users\\me\\.bashrc:stream",
+    ]) {
+      expect(checkWritable(p), p).toMatchObject({ ok: false });
+    }
+    expect(checkWritable("/Users/me/.zshrc")).toEqual({
+      ok: false,
+      reason:
+        'Refused: "~/.zshrc" can run code later as the user (login, shell start, git), so it is not writable.',
+    });
+  });
+
+  it("allows the same names outside the home root", () => {
+    for (const p of [
+      "/home/me/code/dotfiles/.zshrc",
+      "/Users/me/code/dotfiles/.gitconfig",
+      "/Users/me/project/Library/LaunchAgents/x.plist",
+      "/home/me/project/.config/fish/config.fish",
+      "/home/me/.zshrc.d/aliases.zsh",
+      "/home/me/.config/fishy/x",
+      "/home/me/Documents/notes.md",
+    ]) {
+      expect(checkWritable(p), p).toMatchObject({ ok: true });
+    }
+  });
 });
 
 describe("checkReadableCanonical — parent-directory fallback", () => {

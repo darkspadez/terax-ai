@@ -22,7 +22,8 @@ Blocked categories include:
 
 - Files: `.env*`, `*.pem`, `*.key`, `*.p12`, `id_rsa*`, `known_hosts`, `credentials`, `service-account*.json`, and similar.
 - Directories: `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube`, `~/.config/gh`, `~/.git`, system dirs (`/etc`, `/proc`, `/sys`), and Windows credential stores.
-- System write prefixes: `/etc/`, `/var/db/`, `/usr/bin/`, `/windows/`, `/program files/`, etc.
+- System write prefixes: `/etc/`, `/var/db/`, `/usr/bin/`, `/applications/`, `/windows/`, `/program files/`, etc.
+- Home persistence points (write only, directly under a home root such as `/Users/<name>`, `/home/<name>`, `/var/home/<name>`, `/root` or `C:\Users\<name>`): shell rc and login files (`.zshrc`, `.bashrc`, `.profile`, ...), `.gitconfig`, `~/.config/{fish,autostart,systemd/user,environment.d}`, `~/Library/LaunchAgents`, PowerShell profile folders and the Windows Startup folder. They run code later as the user, outside any approval; the same names elsewhere (a dotfiles repo) stay writable. This is defense in depth: an approved shell command can still write them.
 
 The comparison surface normalizes paths: backslashes to forward slashes, strips Windows drive letters, strips NTFS alternate data streams, strips trailing dots/spaces, lowercases, and collapses duplicate slashes. Protected directories are matched as exact path or descendant, not raw substring.
 
