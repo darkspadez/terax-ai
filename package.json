@@ -149,6 +149,7 @@
     "msw"
   ],
   "overrides": {
-    "@lezer/highlight": "^1.2.5"
+    "@lezer/highlight": "^1.2.5",
+    "marked": "^18.1.1"
   }
 }

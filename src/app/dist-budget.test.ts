@@ -356,6 +356,74 @@ describe("built startup graph", () => {
     expect([...sources]).toHaveLength(1);
   });
 
+  it("bundles each npm package once, except the copies Mermaid's layouts need", () => {
+    const assets = join(outDir, "assets");
+    // Install directories (`.bun/<name>@<version>`) each package came from.
+    const copies = new Map<string, Set<string>>();
+    for (const file of readdirSync(assets).filter((f) =>
+      f.endsWith(".js.map"),
+    )) {
+      const map = JSON.parse(readFileSync(join(assets, file), "utf8")) as {
+        sources: string[];
+      };
+      for (const source of map.sources) {
+        const m = source.match(
+          /node_modules\/\.bun\/([^/]+)\/node_modules\/((?:@[^/]+\/)?[^/]+)\//,
+        );
+        if (!m) continue;
+        const dirs = copies.get(m[2]) ?? new Set<string>();
+        dirs.add(m[1]);
+        copies.set(m[2], dirs);
+      }
+    }
+    expect(copies.get("marked")?.size).toBe(1);
+    // marked is shared by Streamdown, Mermaid and the LSP client through
+    // package.json overrides. Left on purpose: Mermaid's mindmap layout
+    // (cytoscape-cose-bilkent) runs on cose-base and layout-base 1, its
+    // architecture layout (cytoscape-fcose) on 2, and 2 lays mindmaps out
+    // differently; moving d3-sankey from d3-array 2, d3-shape 1 and d3-path 1
+    // to the 3.x copies saves 0.1 KB and rounds Sankey link paths.
+    expect(
+      [...copies]
+        .filter(([, dirs]) => dirs.size > 1)
+        .map(([pkg]) => pkg)
+        .sort(),
+    ).toEqual(["cose-base", "d3-array", "d3-path", "d3-shape", "layout-base"]);
+  });
+
+  it("loads marked, not Streamdown, with the LSP client", () => {
+    const assets = join(outDir, "assets");
+    const readChunk = (rel: string) => {
+      const file = join(outDir, rel);
+      return existsSync(file) ? readFileSync(file, "utf8") : null;
+    };
+    const holders = readdirSync(assets)
+      .filter((file) => file.endsWith(".js.map"))
+      .filter((file) =>
+        (
+          JSON.parse(readFileSync(join(assets, file), "utf8")) as {
+            sources: string[];
+          }
+        ).sources.some((source) =>
+          source.includes("/node_modules/codemirror-languageserver/"),
+        ),
+      )
+      .map((file) => file.replace(/\.map$/, ""));
+    expect(holders.length).toBeGreaterThan(0);
+    const trace = traceStartup(
+      holders
+        .map((file) => `<script type="module" src="/assets/${file}"></script>`)
+        .join(""),
+      readChunk,
+    );
+    expect(trace.missing).toEqual([]);
+    const packages = new Set(
+      [...trace.files.values()].flatMap((info) => [...(info.packages ?? [])]),
+    );
+    expect(packages.has("marked")).toBe(true);
+    expect(packages.has("streamdown")).toBe(false);
+  });
+
   it("refuses to build the app-lab driver without its own identifier, and under the product one", () => {
     const build = (extra: Record<string, string>) =>
       execFileSync(
