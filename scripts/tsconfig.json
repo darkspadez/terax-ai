@@ -6,6 +6,7 @@
   },
   "include": [
     "lib",
+    "eager-graph.test.ts",
     "symbols-font",
     "nerd-font-constraints",
     "jetbrains-mono",
