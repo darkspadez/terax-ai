@@ -55,21 +55,23 @@ describe("BoundedPtyWriter", () => {
     const writer = new BoundedPtyWriter(() => undefined);
     writer.enqueue(Uint8Array.of(1));
     writer.attach(pty);
-    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    // Waits compare counts: a failed check on `writes` itself would format
+    // the 1 MiB answer into its message on every poll.
+    await vi.waitFor(() => expect(writes.length).toBe(1));
     writer.enqueue(Uint8Array.of(2));
     const answer = new Uint8Array(1024 * KiB).fill(7);
     writer.enqueue(answer, true);
     writer.enqueue(Uint8Array.of(3));
-    expect(writes).toHaveLength(1);
+    expect(writes.length).toBe(1);
 
     release();
-    await vi.waitFor(() => expect(writes).toHaveLength(2));
+    await vi.waitFor(() => expect(writes.length).toBe(2));
     expect([...writes[1]]).toEqual([2]);
     release();
-    await vi.waitFor(() => expect(writes).toHaveLength(3));
+    await vi.waitFor(() => expect(writes.length).toBe(3));
     expect(writes[2]).toBe(answer);
     release();
-    await vi.waitFor(() => expect(writes).toHaveLength(4));
+    await vi.waitFor(() => expect(writes.length).toBe(4));
     expect([...writes[3]]).toEqual([3]);
     expect(writer.pendingBytes).toBe(0);
     release();

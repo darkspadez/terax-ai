@@ -1339,12 +1339,17 @@ describe.each([
   });
 
   describe("periodic render-state renewal", () => {
-    it("re-uploads once and stays correct across the 100,000-update renewal", () => {
+    // The core renews its render state every 100,000 updates, so this test's
+    // work is fixed: a fraction of a second, but far more on a loaded machine.
+    it("re-uploads once and stays correct across the 100,000-update renewal", {
+      timeout: 30_000,
+    }, () => {
       const harness = gpu(20, 4);
       try {
         harness.write("\x1b[2;1Hstable row");
         const resetsBefore = harness.terminal.resourceStats().renderStateResets;
         let fullDamageUpdates = 0;
+        let wrongDamage: { index: number; rows: number[] } | null = null;
         for (let index = 0; index < 100_050; index += 1) {
           harness.write(`\x1b[1;1H${index % 10}`);
           const state = harness.terminal.updateGpuRenderState();
@@ -1352,10 +1357,21 @@ describe.each([
           if (index > 0 && state.fullDamage) fullDamageUpdates += 1;
           // After the first frame only row 0 ever changes (the digit repeats
           // every ten updates, but each update still changes it).
-          if (index > 0 && !state.fullDamage) {
-            expect(Array.from(state.dirtyRows)).toEqual([1, 0, 0, 0]);
+          const rows = state.dirtyRows;
+          if (
+            index > 0 &&
+            !state.fullDamage &&
+            !wrongDamage &&
+            (rows.length !== 4 ||
+              rows[0] !== 1 ||
+              rows[1] !== 0 ||
+              rows[2] !== 0 ||
+              rows[3] !== 0)
+          ) {
+            wrongDamage = { index, rows: Array.from(rows) };
           }
         }
+        expect(wrongDamage).toBeNull();
         expect(harness.terminal.resourceStats().renderStateResets).toBe(
           resetsBefore + 1,
         );
