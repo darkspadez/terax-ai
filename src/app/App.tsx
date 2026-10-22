@@ -49,7 +49,10 @@ import {
   type SearchTarget,
 } from "@/modules/header";
 import { setLspNavigator } from "@/modules/lsp";
-import type { PreviewPaneHandle } from "@/modules/preview";
+import {
+  type PreviewPaneHandle,
+  terminalLinkPreviewTarget,
+} from "@/modules/preview";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { setShowHidden } from "@/modules/settings/store";
@@ -102,6 +105,7 @@ import {
   resizeActivePane,
   scrollFocusedTerminal,
   setTerminalFileOpener,
+  setTerminalPreviewOpener,
   startWindowProgress,
   type TerminalPaneHandle,
   TerminalPromptDialog,
@@ -1452,6 +1456,22 @@ export default function App() {
     });
     return () => setTerminalFileOpener(null);
   }, [openContentHit, openFileTab]);
+
+  useEffect(() => {
+    setTerminalPreviewOpener((url) => {
+      const target = terminalLinkPreviewTarget(
+        url,
+        usePreferencesStore.getState().terminalLinksInPreview,
+        tabsRef.current,
+        activeSpaceIdRef.current ?? null,
+      );
+      if (target === null) return false;
+      if (target > 0) setActiveId(target);
+      else openPreviewTab(url);
+      return true;
+    });
+    return () => setTerminalPreviewOpener(null);
+  }, [openPreviewTab, setActiveId]);
 
   // OSC 9;4 progress from every terminal drives the taskbar or dock bar.
   useEffect(() => startWindowProgress(), []);

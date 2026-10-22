@@ -28,7 +28,10 @@ export {
   useTerminalStatusStore,
 } from "./lib/terminalStatus";
 export { equalizePanes, resizeActivePane } from "./lib/paneLayout";
-export { setTerminalFileOpener } from "./lib/terminalLinkOpen";
+export {
+  setTerminalFileOpener,
+  setTerminalPreviewOpener,
+} from "./lib/terminalLinkOpen";
 export { startWindowProgress } from "./lib/windowProgress";
 export { isTerminalSurfaceTarget } from "./lib/terminalSurfaceTarget";
 export { TerminalPromptDialog } from "./TerminalPromptDialog";
