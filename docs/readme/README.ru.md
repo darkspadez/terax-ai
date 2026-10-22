@@ -33,7 +33,7 @@ Terax представляет собой легковесную среду ра
 
 ### Терминал
 
-- xterm.js с WebGL-рендерером, несколькими вкладками и фоновой передачей данных
+- libghostty-vt с WebGPU-рендерером, несколькими вкладками и фоновой передачей данных
 - Блочный терминал с ускорением GPU и вводом команд как в редакторе
 - Нативный PTY-бэкенд через `portable-pty` (zsh, bash, pwsh, fish, cmd)
 - Горизонтальное и вертикальное разделение панелей
@@ -114,30 +114,30 @@ Terax представляет собой легковесную среду ра
 **Требования**
 
 - Rust (stable), https://rustup.rs
-- Node 22+ и [pnpm](https://pnpm.io)
+- [Bun](https://bun.sh) 1.4.3+
 - Требования Tauri для вашей платформы, https://tauri.app/start/prerequisites/
 
 **Запуск**
 
 ```bash
-pnpm install
-pnpm tauri dev          # разработка
-pnpm tauri build        # производственный пакет
+bun install
+bun run tauri dev       # разработка
+bun run tauri build     # производственный пакет
 ```
 
 **Проверки**
 
 ```bash
-pnpm lint
-pnpm check-types
-pnpm test
+bun run lint
+bun run check-types
+bun run test
 cd src-tauri && cargo clippy --all-targets --locked -- -D warnings   # Rust lint как в CI
 cd src-tauri && cargo nextest run --locked                           # или cargo test --locked
 ```
 
 ## Стек технологий
 
-Tauri 2, Rust, `portable-pty`, React 19, TypeScript, Vite, xterm.js, CodeMirror 6, Vercel AI SDK v6, Tailwind v4, shadcn/ui и Zustand.
+Tauri 2, Rust, `portable-pty`, React 19, TypeScript, Vite, libghostty-vt, WebGPU, CodeMirror 6, Vercel AI SDK v7, Tailwind v4, shadcn/ui и Zustand.
 
 ## Участие в разработке
 

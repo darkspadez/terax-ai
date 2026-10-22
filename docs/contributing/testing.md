@@ -7,9 +7,9 @@ This guide elaborates on `TERAX.md` and `CONTRIBUTING.md`. If anything conflicts
 The canonical commands are what CI runs (`.github/workflows/ci.yml`):
 
 ```bash
-pnpm lint
-pnpm check-types
-pnpm test
+bun run lint
+bun run check-types
+bun run test
 
 cd src-tauri
 cargo clippy --all-targets --locked -- -D warnings

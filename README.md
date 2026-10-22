@@ -41,7 +41,7 @@ Terax is a lightweight open-source terminal-first AI-native development environm
 > [!NOTE]
 > Over the past few months, most of my development time went into building [Zephium](https://zephium.app), a new browser-native work environment rebuilt for humans and agents.
 >
-> Terax is now returning to active development. A major **v0.9.0** update is already in progress, with some substantial architectural changes, including moving from **xterm.js to libghostty + WebGPU**.
+> Terax is back in active development. The **v0.9.0** release brought substantial architectural changes, including the move from **xterm.js to libghostty + WebGPU**.
 >
 > More updates soon.
 
@@ -65,7 +65,7 @@ Terax is a lightweight open-source terminal-first AI-native development environm
 
 ### Terminal
 
-- xterm.js with WebGL renderer, multi-tab with background streaming
+- libghostty-vt terminal core with a WebGPU renderer (WebGL fallback), multi-tab with background streaming
 - GPU-accelerated block-based terminal with editor-like command input
 - Native PTY backend via `portable-pty` (zsh, bash, pwsh, fish, cmd)
 - Split panels (horizontal and vertical)
@@ -145,28 +145,28 @@ Latest installers are on the [Releases](https://github.com/crynta/terax-ai/relea
 
 **Prerequisites**
 - Rust (stable), https://rustup.rs
-- Node 22+ and [pnpm](https://pnpm.io)
+- [Bun](https://bun.sh) 1.4.3+
 - Tauri prerequisites for your platform, https://tauri.app/start/prerequisites/
 
 **Run**
 ```bash
-pnpm install
-pnpm tauri dev          # development
-pnpm tauri build        # production bundle
+bun install
+bun run tauri dev       # development
+bun run tauri build     # production bundle
 ```
 
 **Checks**
 ```bash
-pnpm lint
-pnpm check-types
-pnpm test
+bun run lint
+bun run check-types
+bun run test
 cd src-tauri && cargo clippy --all-targets --locked -- -D warnings   # Rust lint (matches CI)
 cd src-tauri && cargo nextest run --locked                           # or: cargo test --locked
 ```
 
 ## Tech stack
 
-Tauri 2, Rust, `portable-pty`, React 19, TypeScript, Vite, xterm.js, CodeMirror 6, Vercel AI SDK v6, Tailwind v4, shadcn/ui, Zustand.
+Tauri 2, Rust, `portable-pty`, React 19, TypeScript, Vite, libghostty-vt, WebGPU, CodeMirror 6, Vercel AI SDK v7, Tailwind v4, shadcn/ui, Zustand.
 
 ## Contributing
 

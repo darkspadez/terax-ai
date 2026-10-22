@@ -62,7 +62,7 @@ reviews:
 
   path_filters:
     - "!**/*.lock"
-    - "!**/pnpm-lock.yaml"
+    - "!**/bun.lock"
     - "!src-tauri/Cargo.lock"
     - "!src-tauri/gen/**"
     - "!src-tauri/icons/**"

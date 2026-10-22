@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // File-system churn for the app lab `fs-churn` scenario (scripts/app-lab/run.py).
 //
 // Stands in for coding agents working in a repository the app has open in its explorer:

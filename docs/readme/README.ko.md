@@ -33,7 +33,7 @@ Terax는 Tauri 2 + Rust와 React 19로 만든 가볍고 오픈 소스이며 터�
 
 ### 터미널
 
-- WebGL 렌더러, 다중 탭, 백그라운드 스트리밍을 지원하는 xterm.js
+- WebGPU 렌더러, 다중 탭, 백그라운드 스트리밍을 지원하는 libghostty-vt
 - 편집기와 같은 명령 입력을 갖춘 GPU 가속 블록 기반 터미널
 - `portable-pty`를 통한 네이티브 PTY 백엔드(zsh, bash, pwsh, fish, cmd)
 - 가로 및 세로 분할 패널
@@ -114,30 +114,30 @@ Terax는 Tauri 2 + Rust와 React 19로 만든 가볍고 오픈 소스이며 터�
 **필수 항목**
 
 - Rust(stable), https://rustup.rs
-- Node 22+와 [pnpm](https://pnpm.io)
+- [Bun](https://bun.sh) 1.4.3+
 - 플랫폼별 Tauri 필수 항목, https://tauri.app/start/prerequisites/
 
 **실행**
 
 ```bash
-pnpm install
-pnpm tauri dev          # 개발
-pnpm tauri build        # 프로덕션 번들
+bun install
+bun run tauri dev       # 개발
+bun run tauri build     # 프로덕션 번들
 ```
 
 **검사**
 
 ```bash
-pnpm lint
-pnpm check-types
-pnpm test
+bun run lint
+bun run check-types
+bun run test
 cd src-tauri && cargo clippy --all-targets --locked -- -D warnings   # CI와 동일한 Rust 린트
 cd src-tauri && cargo nextest run --locked                           # 또는 cargo test --locked
 ```
 
 ## 기술 스택
 
-Tauri 2, Rust, `portable-pty`, React 19, TypeScript, Vite, xterm.js, CodeMirror 6, Vercel AI SDK v6, Tailwind v4, shadcn/ui, Zustand.
+Tauri 2, Rust, `portable-pty`, React 19, TypeScript, Vite, libghostty-vt, WebGPU, CodeMirror 6, Vercel AI SDK v7, Tailwind v4, shadcn/ui, Zustand.
 
 ## 기여
 

@@ -190,7 +190,7 @@ if args.reuse_build and (dist / "index.html").exists() and executable.exists():
     print(f"Reusing the build in {output} (artifact hashes are recorded in the report)", flush=True)
 else:
     with (output / "build.log").open("w") as log:
-        subprocess.run(["pnpm", "exec", "vite", "build", "--config", str(root / "vite.config.ts")], cwd=repo, env=env, stdout=log, stderr=log, check=True)
+        subprocess.run(["bun", "run", "vite", "build", "--config", str(root / "vite.config.ts")], cwd=repo, env=env, stdout=log, stderr=log, check=True)
         subprocess.run(["swiftc", "-module-cache-path", str(output / "swift-cache"), str(root / "Lab.swift"), "-o", str(executable)], stdout=log, stderr=log, check=True)
 
 

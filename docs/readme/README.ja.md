@@ -33,7 +33,7 @@ Terax は、Tauri 2 + Rust と React 19 で構築された、軽量かつオー�
 
 ### ターミナル
 
-- WebGL レンダラー、マルチタブ、バックグラウンドストリーミング対応の xterm.js
+- WebGPU レンダラー、マルチタブ、バックグラウンドストリーミング対応の libghostty-vt
 - エディターのようなコマンド入力を備えた GPU アクセラレーション対応ブロック型ターミナル
 - `portable-pty` によるネイティブ PTY バックエンド（zsh、bash、pwsh、fish、cmd）
 - 水平および垂直の分割パネル
@@ -114,30 +114,30 @@ Terax は、Tauri 2 + Rust と React 19 で構築された、軽量かつオー�
 **前提条件**
 
 - Rust（stable）、https://rustup.rs
-- Node 22+ と [pnpm](https://pnpm.io)
+- [Bun](https://bun.sh) 1.4.3+
 - プラットフォームごとの Tauri 前提条件、https://tauri.app/start/prerequisites/
 
 **実行**
 
 ```bash
-pnpm install
-pnpm tauri dev          # 開発
-pnpm tauri build        # 本番バンドル
+bun install
+bun run tauri dev       # 開発
+bun run tauri build     # 本番バンドル
 ```
 
 **チェック**
 
 ```bash
-pnpm lint
-pnpm check-types
-pnpm test
+bun run lint
+bun run check-types
+bun run test
 cd src-tauri && cargo clippy --all-targets --locked -- -D warnings   # CI と同じ Rust lint
 cd src-tauri && cargo nextest run --locked                           # または cargo test --locked
 ```
 
 ## 技術スタック
 
-Tauri 2、Rust、`portable-pty`、React 19、TypeScript、Vite、xterm.js、CodeMirror 6、Vercel AI SDK v6、Tailwind v4、shadcn/ui、Zustand。
+Tauri 2、Rust、`portable-pty`、React 19、TypeScript、Vite、libghostty-vt、WebGPU、CodeMirror 6、Vercel AI SDK v7、Tailwind v4、shadcn/ui、Zustand。
 
 ## コントリビューション
 

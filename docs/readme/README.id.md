@@ -33,7 +33,7 @@ Terax adalah lingkungan pengembangan (ADE) ringan, sumber terbuka, berfokus pada
 
 ### Terminal
 
-- xterm.js dengan perender WebGL, multitab, dan streaming latar belakang
+- libghostty-vt dengan perender WebGPU, multitab, dan streaming latar belakang
 - Terminal berbasis blok dengan akselerasi GPU dan masukan perintah seperti editor
 - Backend PTY native melalui `portable-pty` (zsh, bash, pwsh, fish, cmd)
 - Panel terbagi secara horizontal dan vertikal
@@ -114,30 +114,30 @@ Penginstal terbaru tersedia di halaman [Releases](https://github.com/crynta/tera
 **Prasyarat**
 
 - Rust (stable), https://rustup.rs
-- Node 22+ dan [pnpm](https://pnpm.io)
+- [Bun](https://bun.sh) 1.4.3+
 - Prasyarat Tauri untuk platform Anda, https://tauri.app/start/prerequisites/
 
 **Jalankan**
 
 ```bash
-pnpm install
-pnpm tauri dev          # pengembangan
-pnpm tauri build        # paket produksi
+bun install
+bun run tauri dev       # pengembangan
+bun run tauri build     # paket produksi
 ```
 
 **Pemeriksaan**
 
 ```bash
-pnpm lint
-pnpm check-types
-pnpm test
+bun run lint
+bun run check-types
+bun run test
 cd src-tauri && cargo clippy --all-targets --locked -- -D warnings   # lint Rust seperti CI
 cd src-tauri && cargo nextest run --locked                           # atau cargo test --locked
 ```
 
 ## Stack teknologi
 
-Tauri 2, Rust, `portable-pty`, React 19, TypeScript, Vite, xterm.js, CodeMirror 6, Vercel AI SDK v6, Tailwind v4, shadcn/ui, dan Zustand.
+Tauri 2, Rust, `portable-pty`, React 19, TypeScript, Vite, libghostty-vt, WebGPU, CodeMirror 6, Vercel AI SDK v7, Tailwind v4, shadcn/ui, dan Zustand.
 
 ## Berkontribusi
 

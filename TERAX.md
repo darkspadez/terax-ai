@@ -4,12 +4,12 @@ Terax loads `TERAX.md` from the workspace root as agent memory (similar to AGENT
 
 ## Project
 
-**Terax**: open-source AI-native terminal emulator. Tauri 2 + Rust (`portable-pty`) backend, React 19 + TypeScript + libghostty-vt WASM client (WebGPU, Terax WebGL fallback), BYOK AI via Vercel AI SDK v6.
+**Terax**: open-source AI-native terminal emulator. Tauri 2 + Rust (`portable-pty`) backend, React 19 + TypeScript + libghostty-vt WASM client (WebGPU, Terax WebGL fallback), BYOK AI via Vercel AI SDK v7.
 
 - Bundle id: `app.crynta.terax`
-- Package manager: **pnpm**
+- Package manager and runtime: **Bun** (`bun install`, `bun run <script>`). `bunfig.toml` runs scripts and their tools on Bun rather than Node, keeps a three-day minimum release age, and uses the isolated linker so undeclared dependencies fail
 - Platforms: macOS, Linux, Windows
-- Frontend checks: `pnpm lint`, `pnpm check-types`, `pnpm test`
+- Frontend checks: `bun run lint`, `bun run check-types`, `bun run test`
 - Rust checks: `cd src-tauri && cargo clippy --all-targets --locked -- -D warnings`, `cd src-tauri && cargo nextest run --locked` (local fallback: `cargo test --locked`)
 
 ## Quality bar
@@ -24,7 +24,7 @@ Production-grade or it does not ship. Every change is judged against all of thes
 
 Verify before claiming done:
 
-- Frontend: `pnpm lint`, `pnpm check-types`, `pnpm test`
+- Frontend: `bun run lint`, `bun run check-types`, `bun run test`
 - Rust: `cd src-tauri && cargo clippy --all-targets --locked -- -D warnings`, `cd src-tauri && cargo nextest run --locked` (or `cargo test --locked`)
 
 A change to a core subsystem (terminal/shell spawn, workspace auth, git, fs, IPC or AI tool surface) needs a test that locks the invariant.
@@ -298,14 +298,14 @@ User wheel, drag, and keyboard interaction gives only its pane 150 ms of focused
 cadence, including in an unfocused visible window. It starts no idle timer or
 frame loop.
 `window.__teraxTermTrace()` explicitly starts a bounded ten-minute resource trace;
-it is never started automatically. `pnpm soak:ghostty` exercises real WASM models
-without launching the application. `pnpm profile:ghostty` compares allocation
+it is never started automatically. `bun run soak:ghostty` exercises real WASM models
+without launching the application. `bun run profile:ghostty` compares allocation
 and parsing workloads in a fresh process per artifact and optional baseline.
-`pnpm profile:renderer:macos` exercises the real renderer in an isolated native
+`bun run profile:renderer:macos` exercises the real renderer in an isolated native
 WKWebView, including optional four-pane layouts and live visual inspection.
 `scripts/terminal-visual` draws a fixed pattern through any source tree and reads
 the canvas back as exact pixels for comparison.
-`pnpm test:ipc:macos` verifies binary AI streaming, cancellation, and conversation
+`bun run test:ipc:macos` verifies binary AI streaming, cancellation, and conversation
 storage in a separate Tauri profile with synthetic local HTTP responses.
 Resource evidence and limitations live in
 `docs/architecture/ghostty-resource-efficiency.md`.
@@ -320,7 +320,7 @@ establish production readiness, platform parity, or multi-day resource stability
 - **No em-dash** anywhere: code, comments, commits, docs.
 - **No emojis** anywhere.
 - **Imports**: always `@/...` on the frontend, never relative across modules.
-- **pnpm only**, never npm/npx/yarn.
+- **Bun only**, never npm/npx/pnpm/yarn. Invoke package binaries through `bun run <bin>` (`bun x` does not apply `bunfig.toml`'s `[run]` settings and falls back to Node).
 
 ## Architecture
 
@@ -407,13 +407,13 @@ BYOK. Cloud providers via `@ai-sdk/*`: **OpenAI, Anthropic, Google, xAI, Cerebra
 
 ### UI conventions
 
-- **shadcn/ui** is configured (`components.json`, style `radix-luma`, base `mist`, icon lib **hugeicons**). Primitives in `src/components/ui/` - don't hand-edit; re-run `pnpm dlx shadcn add` to upgrade.
+- **shadcn/ui** is configured (`components.json`, style `radix-luma`, base `mist`, icon lib **hugeicons**). Primitives in `src/components/ui/` - don't hand-edit; re-run `bun x --bun shadcn add` to upgrade.
 - **AI Elements** (Vercel) live in `src/components/ai-elements/` from the `@ai-elements` registry in `components.json`. Same rule: regenerate, don't hand-patch - composition wrappers belong in `modules/ai/components/`.
 - **Tailwind v4** - no `tailwind.config.*`, config is in `src/App.css` via `@theme`. Use `cn()` from `@/lib/utils`.
 - Animation: `motion` (Framer Motion successor). Resizable layout: `react-resizable-panels`.
 - **Animation cost**: nothing animates forever at display rate. Tailwind `animate-spin`/`animate-pulse` are redefined in `globals.css` with `steps()` (12 and ~4 fps), the text shimmer uses 40 steps per sweep, recording indicators use `.terax-blink`, a pending tool approval uses the finite `.terax-attention-pulse`, and persisted history (`bash_background`) never animates. `modules/theme/windowActivity.ts` sets `html[data-window-inactive]` while the window is unfocused, hidden or occluded (DOM focus, document visibility and the terminal's shared native presentation feed, no extra native listener); that attribute pauses every CSS animation and an animated background image freezes on a still frame (`surfaceFrame.ts`). `prefers-reduced-motion` still removes the rest.
 - **Compositing budget**: every composited layer costs a backing store, and WebKit allocates a new one per window-resize step for each layer that follows the window. At rest the shell has three layers with contents (page tile, terminal canvas, the terminal's hidden textarea); everything else is clip layers without backing. Do not add `will-change`, 3D transforms (`translateZ`, `transform-gpu`), `backdrop-filter`/`backdrop-blur` or blur filters to anything mounted by default; popovers, HUDs and chips use an opaque `bg-popover`/`bg-card` instead of a translucent blurred one. Only the allowlist in `src/styles/compositingBudget.test.ts` (modal scrims, the background-image overlay, ...) may, each with a reason. A static background image gets no layer (`surfaceOwnsLayer`). While a window drag is live, `html[data-live-resize]` (`modules/theme/livePageResize`, macOS only) gives the document an invisible size rounded up to 512 px so WebKit keeps one page tile size across the drag instead of one per step (`docs/architecture/app-lab.md`, "Compositing layers").
-- **Startup graph**: neither window may preload the AI SDK, zod, Streamdown, CodeMirror or the icon set. `vite.config.ts` splits chunks with two prioritised `codeSplitting` groups (eager `react`/`radix`/`ghostty-vt` outrank lazy features, because a lazy chunk's recursive dependency capture once swallowed React's CJS entry and made the eager `react` chunk import every AI provider). `src/app/dist-budget.test.ts` builds into a temp dir with sourcemaps and fails if any forbidden package or chunk is reachable from `index.html`/`settings.html`; `pnpm check:dist` runs the same check on `dist/`. `eager-budget.test.ts` keeps the source-graph check.
+- **Startup graph**: neither window may preload the AI SDK, zod, Streamdown, CodeMirror or the icon set. `vite.config.ts` splits chunks with two prioritised `codeSplitting` groups (eager `react`/`radix`/`ghostty-vt` outrank lazy features, because a lazy chunk's recursive dependency capture once swallowed React's CJS entry and made the eager `react` chunk import every AI provider). `src/app/dist-budget.test.ts` builds into a temp dir with sourcemaps and fails if any forbidden package or chunk is reachable from `index.html`/`settings.html`; `bun run check:dist` runs the same check on `dist/`. `eager-budget.test.ts` keeps the source-graph check.
 - **Long AI chats**: messages older than the newest two get `content-visibility: auto` with an estimated `contain-intrinsic-size` (`messageHeightEstimate.ts`), so layout and paint cost tracks what is near the viewport.
 - **Window vibrancy**: the `windowVibrancy` pref drives `WindowVibrancyBridge` (main window only - `window_set_backdrop` targets its caller). `html[data-vibrancy="on"]` (off by default; an explicitly stored choice always wins) makes `<html>`/`<body>` transparent and redefines `--frame` with alpha, so only the chrome frosts; panes keep `--background` so terminal text stays on a solid surface and the terminal canvas still matches its container. The opaque colour the pre-paint script parks on `<html>` would cover the backdrop, so `applyVibrancy` clears it while the effect is on; there is deliberately no localStorage fast path, since pre-declaring the effect would show a see-through window on any launch where the native call has not landed yet. Repeat applications are deduped, and only Mica is rebuilt on a light/dark flip (NSVisualEffectView adapts on its own).
 - **Floating panes**: header and status bar are window chrome painted on `--frame` (derived from `--card`, so no theme declares it); the sidebar and the tab surface are `.terax-pane` cards on `--background` - same tone as the terminal canvas. Panes meet the chrome flush and are inset only horizontally, because the header centers its content and any vertical gutter would stack onto that padding and read as asymmetric. `.terax-pane` carries no drop shadow: `react-resizable-panels` clips panel content at the panel box, so a shadow would only render on the gutter sides.

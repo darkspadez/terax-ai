@@ -52,7 +52,7 @@ describe("startup bundle budget", () => {
       ),
     ).toEqual([]);
     const lock = readFileSync(
-      new URL("../../pnpm-lock.yaml", import.meta.url),
+      new URL("../../bun.lock", import.meta.url),
       "utf8",
     );
     expect(lock).not.toMatch(/(?:@xterm\/|xterm-addon-|\bxterm@)/);

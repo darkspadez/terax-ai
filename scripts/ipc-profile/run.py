@@ -87,9 +87,9 @@ env = {**os.environ, "TERAX_IPC_BASE_URL": f"http://127.0.0.1:{server.server_por
 process = None
 try:
     with (output / "build.log").open("w") as log:
-        subprocess.run(["pnpm", "exec", "vite", "build", "--config", str(root / "vite.config.ts")], cwd=repo, env=env, stdout=log, stderr=log, check=True)
-        subprocess.run(["pnpm", "build:cli:dev"], cwd=repo, env=env, stdout=log, stderr=log, check=True)
-        subprocess.run(["pnpm", "exec", "tauri", "build", "--debug", "--no-bundle", "--config", str(config)], cwd=repo, env=env, stdout=log, stderr=log, check=True)
+        subprocess.run(["bun", "run", "vite", "build", "--config", str(root / "vite.config.ts")], cwd=repo, env=env, stdout=log, stderr=log, check=True)
+        subprocess.run(["bun", "run", "build:cli:dev"], cwd=repo, env=env, stdout=log, stderr=log, check=True)
+        subprocess.run(["bun", "run", "tauri", "build", "--debug", "--no-bundle", "--config", str(config)], cwd=repo, env=env, stdout=log, stderr=log, check=True)
     metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--locked", "--no-deps", "--format-version=1", "--manifest-path", "src-tauri/Cargo.toml"], cwd=repo))
     with (output / "app.log").open("w") as log:
         process = subprocess.Popen([str(Path(metadata["target_directory"]) / "debug/terax")], cwd=repo, stdout=log, stderr=log)

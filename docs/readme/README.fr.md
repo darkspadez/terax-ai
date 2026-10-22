@@ -33,7 +33,7 @@ Terax est un environnement de développement (ADE) léger, open source, axé sur
 
 ### Terminal
 
-- xterm.js avec moteur WebGL, plusieurs onglets et flux en arrière-plan
+- libghostty-vt avec moteur WebGPU, plusieurs onglets et flux en arrière-plan
 - Terminal par blocs accéléré par GPU avec saisie de commandes proche d'un éditeur
 - Backend PTY natif via `portable-pty` (zsh, bash, pwsh, fish, cmd)
 - Panneaux divisés horizontalement et verticalement
@@ -114,30 +114,30 @@ Les installateurs récents sont disponibles sur la page [Releases](https://githu
 **Prérequis**
 
 - Rust (stable), https://rustup.rs
-- Node 22+ et [pnpm](https://pnpm.io)
+- [Bun](https://bun.sh) 1.4.3+
 - Prérequis Tauri pour votre plateforme, https://tauri.app/start/prerequisites/
 
 **Exécution**
 
 ```bash
-pnpm install
-pnpm tauri dev          # développement
-pnpm tauri build        # paquet de production
+bun install
+bun run tauri dev       # développement
+bun run tauri build     # paquet de production
 ```
 
 **Vérifications**
 
 ```bash
-pnpm lint
-pnpm check-types
-pnpm test
+bun run lint
+bun run check-types
+bun run test
 cd src-tauri && cargo clippy --all-targets --locked -- -D warnings   # lint Rust identique à la CI
 cd src-tauri && cargo nextest run --locked                           # ou : cargo test --locked
 ```
 
 ## Technologies
 
-Tauri 2, Rust, `portable-pty`, React 19, TypeScript, Vite, xterm.js, CodeMirror 6, Vercel AI SDK v6, Tailwind v4, shadcn/ui et Zustand.
+Tauri 2, Rust, `portable-pty`, React 19, TypeScript, Vite, libghostty-vt, WebGPU, CodeMirror 6, Vercel AI SDK v7, Tailwind v4, shadcn/ui et Zustand.
 
 ## Contribuer
 

@@ -33,7 +33,7 @@ Terax to lekkie, otwartoźródłowe, terminalowe środowisko programistyczne (AD
 
 ### Terminal
 
-- xterm.js z rendererem WebGL, wieloma kartami i strumieniowaniem w tle
+- libghostty-vt z rendererem WebGPU, wieloma kartami i strumieniowaniem w tle
 - Akcelerowany przez GPU terminal blokowy z wprowadzaniem poleceń jak w edytorze
 - Natywny backend PTY przez `portable-pty` (zsh, bash, pwsh, fish, cmd)
 - Panele dzielone poziomo i pionowo
@@ -114,30 +114,30 @@ Najnowsze instalatory znajdują się na stronie [Releases](https://github.com/cr
 **Wymagania**
 
 - Rust (stable), https://rustup.rs
-- Node 22+ i [pnpm](https://pnpm.io)
+- [Bun](https://bun.sh) 1.4.3+
 - Wymagania Tauri dla platformy, https://tauri.app/start/prerequisites/
 
 **Uruchamianie**
 
 ```bash
-pnpm install
-pnpm tauri dev          # środowisko deweloperskie
-pnpm tauri build        # pakiet produkcyjny
+bun install
+bun run tauri dev       # środowisko deweloperskie
+bun run tauri build     # pakiet produkcyjny
 ```
 
 **Kontrole**
 
 ```bash
-pnpm lint
-pnpm check-types
-pnpm test
+bun run lint
+bun run check-types
+bun run test
 cd src-tauri && cargo clippy --all-targets --locked -- -D warnings   # lint Rust zgodny z CI
 cd src-tauri && cargo nextest run --locked                           # lub cargo test --locked
 ```
 
 ## Stos technologiczny
 
-Tauri 2, Rust, `portable-pty`, React 19, TypeScript, Vite, xterm.js, CodeMirror 6, Vercel AI SDK v6, Tailwind v4, shadcn/ui i Zustand.
+Tauri 2, Rust, `portable-pty`, React 19, TypeScript, Vite, libghostty-vt, WebGPU, CodeMirror 6, Vercel AI SDK v7, Tailwind v4, shadcn/ui i Zustand.
 
 ## Współtworzenie
 

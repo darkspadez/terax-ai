@@ -67,11 +67,11 @@ describe("dist graph analyzer", () => {
     expect(chunkName("assets/react-Cg0CyNNP.js")).toBe("react");
   });
 
-  it("resolves npm packages through pnpm's nested node_modules", () => {
+  it("resolves npm packages through the isolated install's nested node_modules", () => {
     const map = JSON.stringify({
       sources: [
-        "../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core.js",
-        "../../node_modules/.pnpm/@ai-sdk+gateway@3/node_modules/@ai-sdk/gateway/dist/index.mjs",
+        "../../node_modules/.bun/zod@4.4.3/node_modules/zod/v4/core.js",
+        "../../node_modules/.bun/@ai-sdk+gateway@3+969a6d035afea0f4/node_modules/@ai-sdk/gateway/dist/index.mjs",
         "../../src/main.tsx",
       ],
     });
@@ -113,7 +113,7 @@ describe("dist graph analyzer", () => {
       "assets/esm-CCCC3333.js": "export const x=1;",
       "assets/esm-CCCC3333.js.map": JSON.stringify({
         sources: [
-          "../../node_modules/.pnpm/x/node_modules/@codemirror/state/a.js",
+          "../../node_modules/.bun/x/node_modules/@codemirror/state/a.js",
         ],
       }),
     };

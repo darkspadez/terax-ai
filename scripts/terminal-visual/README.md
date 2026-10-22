@@ -21,9 +21,9 @@ link `node_modules`), start a second server with
 `TERAX_VISUAL_SOURCE_ROOT=dir` and another port, and load the same URL.
 
 ```sh
-node scripts/terminal-visual/compare.mjs diff /tmp/visual a b diff.png
-node scripts/terminal-visual/compare.mjs png /tmp/visual a 4 0 0 200 80
-node scripts/terminal-visual/compare.mjs crisp /tmp/visual a
+bun scripts/terminal-visual/compare.mjs diff /tmp/visual a b diff.png
+bun scripts/terminal-visual/compare.mjs png /tmp/visual a 4 0 0 200 80
+bun scripts/terminal-visual/compare.mjs crisp /tmp/visual a
 ```
 
 Query parameters: `dpr` (override the display ratio), `w` `h` `left` `top` (host
@@ -92,7 +92,7 @@ same pane size:
 # reaches the scissor edge; without it panes are equal shares of w x h and carry slack
 open "http://localhost:5199/grid.html?grid=1x1&exact=1&cols=40&rows=12&dpr=2&capture=single-d2"
 open "http://localhost:5199/grid.html?grid=2x2&exact=1&cols=40&rows=12&dpr=2&gap=1&capture=split-d2"
-node scripts/terminal-visual/compare.mjs grid /tmp/visual split-d2 single-d2
+bun scripts/terminal-visual/compare.mjs grid /tmp/visual split-d2 single-d2
 ```
 
 It requires every pane's grid area to equal the single pane byte for byte (no bleed across

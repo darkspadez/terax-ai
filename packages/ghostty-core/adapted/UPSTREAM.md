@@ -101,7 +101,7 @@ scheduling, shell integration, semantic routing, and fallback selection.
 A single shared instance can never give memory back: WebAssembly memory only
 grows, so twenty agent tabs left the app at their joint high-water mark until
 every model was gone. Each model now owns an instance of one cached
-`WebAssembly.Module`. Measured with `pnpm profile:ghostty` (Node 24) and in a
+`WebAssembly.Module`. Measured on Node 24 with the `profile:ghostty` script and in a
 real WKWebView on macOS 26 (footprint of the WebContent process):
 
 - blank instance: 1,310,720 bytes before, 327,680 after (stack 1 MiB to 96 KiB;
@@ -121,7 +121,7 @@ WebKit and V8 both collect when it is allocated (`reclaim` option). With the hin
 the footprint is back within about a second (212 MB after one second without it).
 `node scripts/ghostty-webkit-memory.mjs` repeats the WKWebView run.
 
-Stack safety: `pnpm soak:ghostty` writes about 33 MB of adversarial input per
+Stack safety: `bun run soak:ghostty` writes about 33 MB of adversarial input per
 artifact and render format (1 MiB OSC strings, 200,000-parameter SGR, nested
 string introducers, DCS/APC/kitty floods, 100,000 combining marks, malformed
 UTF-8, scroll-region extremes, reflow, search, selection, key encoding) with a
@@ -189,7 +189,7 @@ process RSS and GPU allocations are separate release gates.
 ## Rebuild
 
 From `packages/ghostty-core/adapted/wasm` (add `-Dwasm-stack-kib=N` to change the
-96 KiB shadow stack; `pnpm soak:ghostty` reports the deepest stack use):
+96 KiB shadow stack; `bun run soak:ghostty` reports the deepest stack use):
 
 ```sh
 zig build -Dtarget=wasm32-freestanding -Doptimize=ReleaseFast
@@ -206,5 +206,5 @@ terminal compatibility and resource gates.
 Both variants run the same adapted-core regression suite. The Rust integration
 test `ghostty_artifacts` additionally validates the scalar binary with SIMD and
 relaxed SIMD disabled and confirms that the primary binary requires SIMD.
-`pnpm bench:ghostty` compares both variants at the same source revision; those
+`bun run bench:ghostty` compares both variants at the same source revision; those
 measurements exclude IPC, webview presentation, process RSS, and energy.

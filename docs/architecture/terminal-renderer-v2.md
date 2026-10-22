@@ -191,8 +191,8 @@ every 250 ms.
 | Divider drag fps (100 Hz panel) / resizes per gesture | 43 / 46 | 91 / 1 |
 | Idle focused terminal CPU / wakeups per second | 3.1 % / 254 | 0.24 % / ~11 |
 
-Reproduce with `pnpm profile:app` (real app, `docs/architecture/app-lab.md`),
-`pnpm profile:renderer:*` (isolated renderer) and `scripts/terminal-visual`
+Reproduce with `bun run profile:app` (real app, `docs/architecture/app-lab.md`),
+`bun run profile:renderer:*` (isolated renderer) and `scripts/terminal-visual`
 (pixel readback).
 
 ## Not verified

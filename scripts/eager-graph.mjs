@@ -5,7 +5,7 @@
 // the eager runtime graph. Reports which heavy node_modules packages end up in
 // the eager graph and the first local file that pulls each.
 //
-// CLI:  node scripts/eager-graph.mjs [entry] [comma,separated,watchlist]
+// CLI:  bun scripts/eager-graph.mjs [entry] [comma,separated,watchlist]
 // Used as a library by src/app/eager-budget.test.ts to lock the startup budget.
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";

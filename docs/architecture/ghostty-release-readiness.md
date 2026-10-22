@@ -7,10 +7,10 @@ below do.
 ## Verified on macOS (M4, macOS 26)
 
 - Frontend: lint (no new warnings), types, all vitest suites, production build,
-  size budgets, startup-graph check (`pnpm check:dist`), React Compiler health.
+  size budgets, startup-graph check (`bun run check:dist`), React Compiler health.
 - Rust: clippy `-D warnings`, nextest (incl. live FSEvents and PTY tests),
   Windows cross-check (`--target x86_64-pc-windows-gnu`).
-- Real-app benchmarks (`pnpm profile:app`): tab switching, window and divider
+- Real-app benchmarks (`bun run profile:app`): tab switching, window and divider
   drags, occlusion, steady agents, idle, file churn, keyboard/IME input injection.
 - Real transport (`scripts/pty-smoke`): echo, exit ordering, 16 MiB floods,
   keepalive, reload, origin/token admission.

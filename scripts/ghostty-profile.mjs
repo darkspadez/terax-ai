@@ -15,9 +15,9 @@ try {
     for (const artifact of ["ghostty-vt.wasm", "ghostty-vt-scalar.wasm"]) {
       const path = join(temporary, "sample.json");
       const child = spawnSync(
-        "pnpm",
+        "bun",
         [
-          "exec",
+          "run",
           "vitest",
           "run",
           "--config",
@@ -46,7 +46,7 @@ try {
   }
   report = {
     ...report,
-    isolation: "Fresh Node process per artifact and revision",
+    isolation: "Fresh Bun process per artifact and revision",
     results,
   };
   const output = `${JSON.stringify(report, null, 2)}\n`;

@@ -33,7 +33,7 @@ Terax एक हल्का, ओपन-सोर्स, टर्मिनल-�
 
 ### टर्मिनल
 
-- WebGL रेंडरर, मल्टी-टैब और बैकग्राउंड स्ट्रीमिंग के साथ xterm.js
+- WebGPU रेंडरर, मल्टी-टैब और बैकग्राउंड स्ट्रीमिंग के साथ libghostty-vt
 - एडिटर जैसे कमांड इनपुट वाला GPU-त्वरित ब्लॉक-आधारित टर्मिनल
 - `portable-pty` के माध्यम से नेटिव PTY बैकएंड (zsh, bash, pwsh, fish, cmd)
 - क्षैतिज और लंबवत स्प्लिट पैनल
@@ -114,30 +114,30 @@ Terax एक हल्का, ओपन-सोर्स, टर्मिनल-�
 **आवश्यकताएँ**
 
 - Rust (stable), https://rustup.rs
-- Node 22+ और [pnpm](https://pnpm.io)
+- [Bun](https://bun.sh) 1.4.3+
 - आपके प्लेटफ़ॉर्म के लिए Tauri आवश्यकताएँ, https://tauri.app/start/prerequisites/
 
 **चलाएँ**
 
 ```bash
-pnpm install
-pnpm tauri dev          # डेवलपमेंट
-pnpm tauri build        # प्रोडक्शन बंडल
+bun install
+bun run tauri dev       # डेवलपमेंट
+bun run tauri build     # प्रोडक्शन बंडल
 ```
 
 **जाँच**
 
 ```bash
-pnpm lint
-pnpm check-types
-pnpm test
+bun run lint
+bun run check-types
+bun run test
 cd src-tauri && cargo clippy --all-targets --locked -- -D warnings   # CI के समान Rust lint
 cd src-tauri && cargo nextest run --locked                           # या cargo test --locked
 ```
 
 ## टेक स्टैक
 
-Tauri 2, Rust, `portable-pty`, React 19, TypeScript, Vite, xterm.js, CodeMirror 6, Vercel AI SDK v6, Tailwind v4, shadcn/ui और Zustand।
+Tauri 2, Rust, `portable-pty`, React 19, TypeScript, Vite, libghostty-vt, WebGPU, CodeMirror 6, Vercel AI SDK v7, Tailwind v4, shadcn/ui और Zustand।
 
 ## योगदान
 

@@ -20,13 +20,13 @@ takes precedence; the renderer details are in
 
 ## Measuring
 
-- `pnpm profile:app` (`scripts/app-lab`, [app lab](app-lab.md)): the real app in an
+- `bun run profile:app` (`scripts/app-lab`, [app lab](app-lab.md)): the real app in an
   isolated profile with real PTYs. Scenarios: `tabs`, `resize`, `split-drag`,
   `occlusion`, `agents-steady`, `idle`, `fs-churn`, `input`. Per-process footprint
   categories, rusage CPU/energy/wakeups, in-app counters.
-- `pnpm profile:renderer:*` (`scripts/renderer-profile`): the renderer alone in a
+- `bun run profile:renderer:*` (`scripts/renderer-profile`): the renderer alone in a
   native WKWebView, incl. raw-WebGPU canvas probes.
-- `pnpm profile:ghostty`, `pnpm soak:ghostty`, `node scripts/ghostty-webkit-memory.mjs`:
+- `bun run profile:ghostty`, `bun run soak:ghostty`, `bun scripts/ghostty-webkit-memory.mjs`:
   WASM core allocation, stack depth, and memory return per instance.
 - `scripts/pty-smoke`: the real transport inside the real webview (latency, floods,
   reload, admission checks).

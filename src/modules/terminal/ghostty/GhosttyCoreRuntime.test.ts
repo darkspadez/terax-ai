@@ -9,8 +9,15 @@ import { GhosttyCoreRuntime } from "./GhosttyCoreRuntime";
 let wasmBytes: ArrayBuffer;
 let wasmModule: WebAssembly.Module;
 
-v8.setFlagsFromString("--expose-gc");
-const collectGarbage = vm.runInNewContext("gc") as () => void;
+// Bun runs a synchronous full collection on request; V8 only hands out gc()
+// to new contexts once --expose-gc is set.
+function garbageCollector(): () => void {
+  const bun = (globalThis as { Bun?: { gc(force: boolean): void } }).Bun;
+  if (bun) return () => bun.gc(true);
+  v8.setFlagsFromString("--expose-gc");
+  return vm.runInNewContext("gc") as () => void;
+}
+const collectGarbage = garbageCollector();
 
 type Weak = { deref(): object | undefined };
 const weak = (target: object): Weak =>

@@ -59,7 +59,7 @@ Terax 是一个轻量、开源、终端优先的 AI 原生开发环境（ADE）�
 
 ### 终端
 
-- 使用 WebGL 渲染器的 xterm.js，支持多标签和后台流式输出
+- 使用 WebGPU 渲染器的 libghostty-vt，支持多标签和后台流式输出
 - GPU 加速的块式终端，提供类似编辑器的命令输入
 - 通过 `portable-pty` 提供原生 PTY 后端（zsh、bash、pwsh、fish、cmd）
 - 水平和垂直拆分面板
@@ -140,30 +140,30 @@ Terax 是一个轻量、开源、终端优先的 AI 原生开发环境（ADE）�
 **前置要求**
 
 - Rust（stable），https://rustup.rs
-- Node 22+ 和 [pnpm](https://pnpm.io)
+- [Bun](https://bun.sh) 1.4.3+
 - 适用于你平台的 Tauri 前置要求，https://tauri.app/start/prerequisites/
 
 **运行**
 
 ```bash
-pnpm install
-pnpm tauri dev          # 开发
-pnpm tauri build        # 生产构建包
+bun install
+bun run tauri dev       # 开发
+bun run tauri build     # 生产构建包
 ```
 
 **检查**
 
 ```bash
-pnpm lint
-pnpm check-types
-pnpm test
+bun run lint
+bun run check-types
+bun run test
 cd src-tauri && cargo clippy --all-targets --locked -- -D warnings   # Rust 检查（与 CI 一致）
 cd src-tauri && cargo nextest run --locked                           # 或：cargo test --locked
 ```
 
 ## 技术栈
 
-Tauri 2、Rust、`portable-pty`、React 19、TypeScript、Vite、xterm.js、CodeMirror 6、Vercel AI SDK v6、Tailwind v4、shadcn/ui、Zustand。
+Tauri 2、Rust、`portable-pty`、React 19、TypeScript、Vite、libghostty-vt、WebGPU、CodeMirror 6、Vercel AI SDK v7、Tailwind v4、shadcn/ui、Zustand。
 
 ## 贡献
 

@@ -44,12 +44,9 @@ jobs:
             libssl-dev \
             patchelf
 
-      - uses: pnpm/action-setup@v6
-
-      - uses: actions/setup-node@v7
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 24
-          cache: pnpm
+          bun-version-file: package.json
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -62,7 +59,7 @@ jobs:
           key: ${{ matrix.platform }}-${{ matrix.rust-target }}
 
       - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Write Apple API key to disk
         if: startsWith(matrix.platform, 'macos')
@@ -95,6 +92,7 @@ jobs:
           releaseBody: "See the assets to download and install. Auto-update is built in."
           releaseDraft: true
           prerelease: false
+          tauriScript: bun run tauri
           args: ${{ matrix.args }}
 
       # Strip the bundled libwayland-* libs from the AppImage so it loads the
@@ -154,7 +152,7 @@ jobs:
           cp "$WORK/$BASENAME" "$APPIMAGE"
 
           rm -f "$APPIMAGE.sig"
-          pnpm tauri signer sign "$APPIMAGE"
+          bun run tauri signer sign "$APPIMAGE"
 
           TAG="${GITHUB_REF_NAME}"
           gh release upload "$TAG" "$APPIMAGE" "$APPIMAGE.sig" \
@@ -232,8 +230,8 @@ jobs:
           Copy-Item $signedMsi $env:MSI_REAL_PATH -Force
           Remove-Item "$($env:EXE_REAL_PATH).sig" -ErrorAction SilentlyContinue
           Remove-Item "$($env:MSI_REAL_PATH).sig" -ErrorAction SilentlyContinue
-          pnpm tauri signer sign $env:EXE_REAL_PATH
-          pnpm tauri signer sign $env:MSI_REAL_PATH
+          bun run tauri signer sign $env:EXE_REAL_PATH
+          bun run tauri signer sign $env:MSI_REAL_PATH
           gh release upload $env:GITHUB_REF_NAME `
             $env:EXE_REAL_PATH "$($env:EXE_REAL_PATH).sig" `
             $env:MSI_REAL_PATH "$($env:MSI_REAL_PATH).sig" `

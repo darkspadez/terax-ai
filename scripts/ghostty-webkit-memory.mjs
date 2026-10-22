@@ -4,8 +4,8 @@
 // process's physical footprint (what Activity Monitor reports) while the page is
 // idle. RSS is not used: macOS keeps freed pages in it until memory pressure.
 //
-//   node scripts/ghostty-webkit-memory.mjs
-//   TERAX_WEBKIT_RECLAIM=0 node scripts/ghostty-webkit-memory.mjs   # no collection hint
+//   bun scripts/ghostty-webkit-memory.mjs
+//   TERAX_WEBKIT_RECLAIM=0 bun scripts/ghostty-webkit-memory.mjs   # no collection hint
 //
 // Environment: TERAX_WEBKIT_ARTIFACT (ghostty-vt.wasm), TERAX_WEBKIT_OPEN (20),
 // TERAX_WEBKIT_CLOSE (15), TERAX_WEBKIT_RECLAIM (1), TERAX_WEBKIT_REPORT (json path).

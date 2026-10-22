@@ -7,8 +7,15 @@ import { TeraxGhostty } from "@terax/ghostty-core/adapted";
 import { it } from "vitest";
 import { readWasmLayout } from "../src/modules/terminal/ghostty/wasmStackProbe";
 
-v8.setFlagsFromString("--expose-gc");
-const collectGarbage = vm.runInNewContext("gc") as () => void;
+// Bun runs a synchronous full collection on request; V8 only hands out gc()
+// to new contexts once --expose-gc is set.
+function garbageCollector(): () => void {
+  const bun = (globalThis as { Bun?: { gc(force: boolean): void } }).Bun;
+  if (bun) return () => bun.gc(true);
+  v8.setFlagsFromString("--expose-gc");
+  return vm.runInNewContext("gc") as () => void;
+}
+const collectGarbage = garbageCollector();
 const MEBIBYTE = 1024 * 1024;
 const terminalOptions = {
   maxScrollbackBytes: 8 * MEBIBYTE,

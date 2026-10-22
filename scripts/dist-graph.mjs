@@ -9,7 +9,7 @@
 // the transitive *static* imports of those chunks. Dynamic `import()` edges are
 // lazy boundaries and do not count.
 //
-// CLI:  node scripts/dist-graph.mjs [distDir]   (exits 1 on a violation)
+// CLI:  bun scripts/dist-graph.mjs [distDir]   (exits 1 on a violation)
 // Library: used by src/app/dist-budget.test.ts.
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join, posix, resolve } from "node:path";
@@ -126,8 +126,8 @@ export function chunkName(file) {
 
 /**
  * npm packages named in a chunk's sourcemap (null when no map was emitted).
- * Resolved from the last `node_modules/` segment so pnpm's
- * `.pnpm/<pkg>@<ver>/node_modules/` indirection yields the real package.
+ * Resolved from the last `node_modules/` segment so the isolated install's
+ * `.bun/<pkg>@<ver>/node_modules/` indirection yields the real package.
  */
 export function packagesFromMap(mapText) {
   if (mapText == null) return null;

@@ -10,7 +10,7 @@ const host = process.env.TAURI_DEV_HOST;
 const rootDir = import.meta.dirname;
 
 // The app-lab driver (`TERAX_BENCH=1`) may only be built for the lab's own identifier
-// (scripts/app-lab/run.py sets TERAX_BENCH_IDENTIFIER): a stray `TERAX_BENCH=1 pnpm build` or
+// (scripts/app-lab/run.py sets TERAX_BENCH_IDENTIFIER): a stray `TERAX_BENCH=1 bun run build` or
 // `tauri build` would otherwise ship the driver under the product identifier. The Rust side
 // refuses to start a bench binary under it too (modules/bench.rs); this fails the build early.
 if (process.env.TERAX_BENCH === "1") {
@@ -28,17 +28,17 @@ if (process.env.TERAX_BENCH === "1") {
   }
 }
 
-// Bundle/treemap analysis is opt-in: `ANALYZE=true pnpm build` emits stats.html.
+// Bundle/treemap analysis is opt-in: `ANALYZE=true bun run build` emits stats.html.
 const analyze = process.env.ANALYZE === "true";
 
-// Module-graph inspector is opt-in via `pnpm dev:inspect`; keeps plain
-// `pnpm dev` from paying its transform-tracking overhead on every run.
+// Module-graph inspector is opt-in via `bun run dev:inspect`; keeps plain
+// `bun run dev` from paying its transform-tracking overhead on every run.
 const inspectGraph = process.env.INSPECT === "true";
 
 /**
  * npm package a module id belongs to (`@scope/name` or `name`), resolved from
- * the *last* `node_modules/` segment so pnpm's `.pnpm/<pkg>@<ver>/node_modules/`
- * indirection yields the real package. Substring tests such as `/react/` are
+ * the *last* `node_modules/` segment so the isolated install's
+ * `.bun/<pkg>@<ver>/node_modules/` indirection yields the real package. Substring tests such as `/react/` are
  * wrong here: `@ai-sdk/react/dist` and `@hugeicons/react/dist` both contain it.
  */
 function packageOf(id: string): string | null {
@@ -137,7 +137,7 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => ({
     react(),
     tailwindcss(),
     // Module-graph inspector at /__inspect (who-imports-what, per-plugin
-    // transforms). Opt-in via `pnpm dev:inspect`, never in a production build.
+    // transforms). Opt-in via `bun run dev:inspect`, never in a production build.
     ...(mode === "development" && inspectGraph
       ? [Inspect() as PluginOption]
       : []),

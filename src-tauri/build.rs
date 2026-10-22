@@ -20,7 +20,7 @@ fn configure_sidecar() {
     }
     if std::env::var("PROFILE").as_deref() == Ok("release") {
         panic!(
-            "release sidecar {} is missing or empty; run pnpm build:cli before packaging",
+            "release sidecar {} is missing or empty; run bun run build:cli before packaging",
             path.display()
         );
     }

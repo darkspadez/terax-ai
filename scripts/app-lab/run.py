@@ -354,10 +354,10 @@ def main() -> int:
 
 def scenario_json(args) -> dict:
     width, height = (float(v) for v in args.window.lower().split("x"))
-    node = shutil.which("node")
-    if not node:
-        raise SystemExit("node is required for the synthetic agent")
-    agent = f"exec {node} {HERE / 'agent-sim.mjs'} {args.agent_args}".strip()
+    bun = shutil.which("bun")
+    if not bun:
+        raise SystemExit("bun is required for the synthetic agent")
+    agent = f"exec {bun} {HERE / 'agent-sim.mjs'} {args.agent_args}".strip()
     local = {}
     for entry in args.local_storage:
         key, _, value = entry.partition("=")
@@ -468,7 +468,7 @@ def run(args, app: Path, source: Path, output: Path) -> int:
     if args.scenario == "fs-churn":
         if not args.cwd_shell:
             args.cwd_shell = output / "workspace"
-            subprocess.run([shutil.which("node"), str(HERE / "fs-churn.mjs"), "prepare", str(args.cwd_shell), str(REPO)], check=True)
+            subprocess.run([shutil.which("bun"), str(HERE / "fs-churn.mjs"), "prepare", str(args.cwd_shell), str(REPO)], check=True)
         scenario["cwds"] = {"shell": str(args.cwd_shell.resolve())}
         env["TERAX_BENCH_SCENARIO"] = json.dumps(scenario)
     launch_args = [str(args.cwd_shell.resolve())] if args.cwd_shell else []
@@ -490,7 +490,7 @@ def run(args, app: Path, source: Path, output: Path) -> int:
         if args.scenario != "fs-churn":
             return
         if phase == "measure-start" and churn is None and not args.no_churn:
-            churn = subprocess.Popen([shutil.which("node"), str(HERE / "fs-churn.mjs"), "run", str(args.cwd_shell.resolve()), *args.churn_args.split()], stdout=(output / "churn.log").open("w"), stderr=subprocess.STDOUT, start_new_session=True)
+            churn = subprocess.Popen([shutil.which("bun"), str(HERE / "fs-churn.mjs"), "run", str(args.cwd_shell.resolve()), *args.churn_args.split()], stdout=(output / "churn.log").open("w"), stderr=subprocess.STDOUT, start_new_session=True)
         if phase == "measure-start" and args.unfocused:
             subprocess.run(["open", "-a", "Finder"], check=False)
         if phase == "measure-end" and churn is not None:

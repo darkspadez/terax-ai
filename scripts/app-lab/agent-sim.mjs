@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Synthetic coding-agent workload for the app lab (scripts/app-lab/run.py).
 //
 // It runs inside a real PTY and writes what Ink applications such as Claude Code and Codex

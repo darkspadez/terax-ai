@@ -12,7 +12,7 @@ if (USE_CUSTOM_WINDOW_CONTROLS) {
   document.documentElement.dataset.chrome = "borderless";
 }
 
-// Render-instrumentation overlay, opt-in: `VITE_REACT_SCAN=true pnpm dev`.
+// Render-instrumentation overlay, opt-in: `VITE_REACT_SCAN=true bun run dev`.
 // Dev-only dynamic import so it never reaches the production bundle.
 if (import.meta.env.DEV && import.meta.env.VITE_REACT_SCAN === "true") {
   const { scan } = await import("react-scan");

@@ -16,11 +16,11 @@ This is normal for a solo project. A "no" on a PR is not personal.
 ## Quick start
 
 ```bash
-pnpm install
-pnpm tauri dev
+bun install
+bun run tauri dev
 ```
 
-Prereqs: Rust (stable), Node 22+, pnpm, plus your platform's [Tauri prerequisites](https://tauri.app/start/prerequisites/).
+Prereqs: Rust (stable), [Bun](https://bun.sh) 1.4.3+, plus your platform's [Tauri prerequisites](https://tauri.app/start/prerequisites/).
 
 For the architecture and how to contribute safely, see [TERAX.md](TERAX.md) and the [docs/ index](docs/README.md).
 
@@ -76,9 +76,9 @@ A 10-minute conversation saves a 500-line PR that doesn't fit the roadmap.
 
 Terax positions itself as **lightweight, fast, production-grade**. Every PR is reviewed against:
 
-- `pnpm lint` clean
-- `pnpm check-types` clean
-- `pnpm test` clean
+- `bun run lint` clean
+- `bun run check-types` clean
+- `bun run test` clean
 - `cargo clippy --all-targets --locked -- -D warnings` clean
 - `cargo nextest run --locked` clean (or `cargo test --locked`)
 - `cargo fmt` applied before pushing
@@ -219,7 +219,7 @@ src/                        React frontend
     spaces/                 Workspace spaces/projects with per-space tab persistence
     statusbar/              Bottom bar and cwd breadcrumb
     tabs/                   Tab/split model
-    terminal/               xterm.js sessions, OSC handlers, renderer pool
+    terminal/               libghostty-vt sessions, WebGPU/WebGL renderers, OSC handlers
     theme/                  Custom theme engine and presets
     updater/                Auto-updater UI
     workspace/              Workspace environment switching
