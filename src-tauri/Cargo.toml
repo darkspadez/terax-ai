@@ -103,7 +103,9 @@ objc2 = { version = "0.6", features = ["exception"] }
 block2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSColor", "NSPasteboard", "NSPasteboardItem", "NSWindow", "NSWorkspace"] }
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSURL", "NSString", "NSUserDefaults", "NSValue"] }
-fsevent-sys = "4.1"
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFArray", "CFString"] }
+objc2-core-services = { version = "0.3", default-features = false, features = ["std", "FSEvents", "dispatch2"] }
+dispatch2 = { version = "0.3", default-features = false, features = ["std"] }
 window-vibrancy = "0.8"
 
 [target.'cfg(target_os = "windows")'.dependencies]
