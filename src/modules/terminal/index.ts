@@ -25,6 +25,7 @@ export {
   type TerminalTabStatus,
   useTerminalStatusStore,
 } from "./lib/terminalStatus";
+export { setTerminalFileOpener } from "./lib/terminalLinkOpen";
 export { isTerminalSurfaceTarget } from "./lib/terminalSurfaceTarget";
 export { TerminalPromptDialog } from "./TerminalPromptDialog";
 export {

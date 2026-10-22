@@ -131,5 +131,25 @@ describe.each(["ghostty-vt", "ghostty-vt-scalar"])(
         model.dispose();
       }
     });
+
+    it("reports the cells a hovered link covers, explicit or detected", () => {
+      const { model, write } = create();
+      try {
+        write(
+          "see \x1b]8;;https://terax.app\x1b\\terax\x1b]8;;\x1b\\ and src/main.rs:4",
+        );
+        expect(model.linkAtViewportCell(0, 6)).toEqual({
+          uri: "https://terax.app",
+          spans: [{ row: 0, startColumn: 4, endColumn: 8 }],
+        });
+        expect(model.linkAtViewportCell(0, 18)).toEqual({
+          uri: "src/main.rs:4",
+          spans: [{ row: 0, startColumn: 14, endColumn: 26 }],
+        });
+        expect(model.linkAtViewportCell(0, 1)).toBeNull();
+      } finally {
+        model.dispose();
+      }
+    });
   },
 );

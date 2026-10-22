@@ -68,6 +68,19 @@ export type GhosttyMouseEvent = TeraxGhosttyMouseEvent;
 
 export type GhosttyTextFormat = TeraxGhosttyTextFormat;
 
+/**
+ * A link under a viewport cell (an OSC 8 hyperlink or a detected URL or
+ * path) and the cells it covers, per viewport row, columns inclusive.
+ */
+export type GhosttyViewportLink = {
+  readonly uri: string;
+  readonly spans: readonly {
+    readonly row: number;
+    readonly startColumn: number;
+    readonly endColumn: number;
+  }[];
+};
+
 export type GhosttyGpuFrameOptions = {
   /**
    * The consumer has no glyph map or no uploaded cells for this model (a new
@@ -170,6 +183,8 @@ export interface GhosttyTerminalModelApi extends TerminalModel {
   ): void;
   grapheme(row: number, column: number): string;
   hyperlinkAtViewportCell(row: number, column: number): string | null;
+  /** The link under a viewport cell with the cells it covers (hover underline). */
+  linkAtViewportCell?(row: number, column: number): GhosttyViewportLink | null;
   scrollPosition(): { readonly offset: number; readonly history: number };
   scrollBy(lines: number): boolean;
   scrollTo(offset: number): boolean;

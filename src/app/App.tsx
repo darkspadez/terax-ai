@@ -93,6 +93,7 @@ import {
   navigateFocusedBlocks,
   type PaneBounds,
   ptyIdForLeaf,
+  setTerminalFileOpener,
   type TerminalPaneHandle,
   TerminalPromptDialog,
   useAgentActivityStore,
@@ -1326,6 +1327,16 @@ export default function App() {
     },
     [openFileTab],
   );
+
+  // Terminal links to files (paths printed by tools, file:// hyperlinks)
+  // open in the editor, at the line when the link names one.
+  useEffect(() => {
+    setTerminalFileOpener((path, line) => {
+      if (line !== null) openContentHit(path, line);
+      else openFileTab(path, true);
+    });
+    return () => setTerminalFileOpener(null);
+  }, [openContentHit, openFileTab]);
 
   const openControlFile = useCallback(
     ({

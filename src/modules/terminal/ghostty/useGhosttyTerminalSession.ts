@@ -9,6 +9,7 @@ import { replaceSessionSurface } from "@/modules/terminal/ghostty/replaceSession
 import { openExternalUrl } from "@/lib/external-link";
 import { ensureMonoFontsLoaded, resolveFontFamily } from "@/lib/fonts";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { currentWorkspaceEnv } from "@/modules/workspace/env";
 import type { TerminalBackendKind } from "@/modules/terminal/backend/contracts";
 import { setLeafPresentation } from "@/modules/terminal/lib/ptyPresentation";
 import { PtyResizeDelivery } from "@/modules/terminal/lib/ptyResizeDelivery";
@@ -22,6 +23,7 @@ import {
   writePrimarySelection,
   writeTerminalClipboard,
 } from "../lib/terminalClipboard";
+import { openTerminalFile, resolveTerminalLink } from "../lib/terminalLinkOpen";
 import { requestTerminalPrompt } from "../lib/terminalPrompts";
 import { useTerminalStatusStore } from "../lib/terminalStatus";
 import { LatestClipboardWrite } from "@/modules/terminal/lib/LatestClipboardWrite";
@@ -756,7 +758,7 @@ async function initializeSessionGeneration(
     onFrame: () => ghosttyBlocks(session.leafId)?.present(),
     onRequestFocus: () => focusGhosttySession(session.leafId),
     onOpenLink: (uri: string) => {
-      void openExternalUrl(uri, () => focusGhosttySession(session.leafId));
+      void openGhosttyLink(session, uri);
     },
   };
   session.surfaceOptions = surfaceBaseOptions;
@@ -875,6 +877,36 @@ async function initializeSessionGeneration(
   session.writer.attach(pty);
   if (model.cols !== startCols || model.rows !== startRows) {
     session.ptyResize.send(model.cols, model.rows);
+  }
+}
+
+let homeDirectory: Promise<string | null> | null = null;
+
+/** URLs open in the browser; files (file://, paths) in the editor at their line. */
+async function openGhosttyLink(
+  session: GhosttySession,
+  uri: string,
+): Promise<void> {
+  homeDirectory ??= import("@tauri-apps/api/path")
+    .then(({ homeDir }) => homeDir())
+    .catch(() => null);
+  const target = resolveTerminalLink(
+    uri,
+    session.lastCwd ?? session.initialCwd ?? null,
+    await homeDirectory,
+  );
+  if (!target) return;
+  if (target.kind === "external") {
+    void openExternalUrl(target.url, () => focusGhosttySession(session.leafId));
+    return;
+  }
+  // Detected paths are guesses: open only what exists and is a file.
+  const stat = await invoke<{ kind: string }>("fs_stat", {
+    path: target.path,
+    workspace: currentWorkspaceEnv(),
+  }).catch(() => null);
+  if (stat && stat.kind !== "dir") {
+    openTerminalFile(target.path, target.line, target.column);
   }
 }
 

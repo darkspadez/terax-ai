@@ -49,6 +49,7 @@ import type {
   GhosttyTerminalModelApi,
   GhosttyTerminalModelOptions,
   GhosttyTextFormat,
+  GhosttyViewportLink,
   TerminalBufferPoint,
   TerminalBufferSelection,
 } from "./GhosttyTerminalModel";
@@ -60,6 +61,25 @@ const FULL_DAMAGE: TerminalDamage = { kind: "full" };
 const NO_GLYPHS: readonly GhosttyGpuGlyph[] = Object.freeze([]);
 const NO_RANGES: readonly TerminalRowRange[] = Object.freeze([]);
 const NO_PLACEMENTS: readonly GhosttyImagePlacement[] = Object.freeze([]);
+/** A link is followed across at most this many rows from the hovered cell. */
+const MAX_LINK_ROWS = 8;
+
+/** Inclusive viewport cell range [start, end] as per-row spans. */
+function viewportSpans(
+  start: number,
+  end: number,
+  cols: number,
+): GhosttyViewportLink["spans"] {
+  const spans: { row: number; startColumn: number; endColumn: number }[] = [];
+  for (let row = Math.floor(start / cols); row <= Math.floor(end / cols); row++) {
+    spans.push({
+      row,
+      startColumn: row === Math.floor(start / cols) ? start % cols : 0,
+      endColumn: row === Math.floor(end / cols) ? end % cols : cols - 1,
+    });
+  }
+  return spans;
+}
 
 type BufferLine = {
   readonly cells: string[];
@@ -607,6 +627,10 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
   }
 
   hyperlinkAtViewportCell(row: number, column: number): string | null {
+    return this.linkAtViewportCell(row, column)?.uri ?? null;
+  }
+
+  linkAtViewportCell(row: number, column: number): GhosttyViewportLink | null {
     this.assertLive();
     if (
       row < 0 ||
@@ -617,11 +641,28 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
       return null;
     }
     const state = this.ensureCurrentState();
-    const explicit = this.terminal.hyperlinkAt(
-      state,
-      row * state.cols + column,
-    );
-    if (explicit) return explicit;
+    const index = row * state.cols + column;
+    const explicit = this.terminal.hyperlinkAt(state, index);
+    if (explicit) {
+      // An OSC 8 link covers the contiguous cells carrying its URI.
+      const limit = MAX_LINK_ROWS * state.cols;
+      const cells = state.rows * state.cols;
+      let start = index;
+      while (
+        start > 0 &&
+        index - start < limit &&
+        this.terminal.hyperlinkAt(state, start - 1) === explicit
+      )
+        start--;
+      let end = index;
+      while (
+        end + 1 < cells &&
+        end - index < limit &&
+        this.terminal.hyperlinkAt(state, end + 1) === explicit
+      )
+        end++;
+      return { uri: explicit, spans: viewportSpans(start, end, state.cols) };
+    }
     const origin = this.viewportOriginLine();
     let cache = this.plainLinks;
     if (
@@ -665,10 +706,23 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
       this.plainLinks = cache;
     }
     const offset = cache.offsets[(row - cache.startRow) * state.cols + column];
-    return (
-      cache.links.find((link) => offset >= link.start && offset < link.end)
-        ?.uri ?? null
+    const link = cache.links.find(
+      (entry) => offset >= entry.start && offset < entry.end,
     );
+    if (!link) return null;
+    let first = -1;
+    let last = -1;
+    for (let cell = 0; cell < cache.offsets.length; cell++) {
+      const at = cache.offsets[cell];
+      if (at < link.start || at >= link.end) continue;
+      if (first < 0) first = cell;
+      last = cell;
+    }
+    const base = cache.startRow * state.cols;
+    return {
+      uri: link.uri,
+      spans: viewportSpans(base + first, base + last, state.cols),
+    };
   }
 
   scrollPosition(): ScrollPosition {
