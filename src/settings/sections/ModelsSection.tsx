@@ -90,6 +90,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { type PingState, pingEndpoint } from "./endpointPing";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useMemo, useState } from "react";
+import { ModelBrowseButton } from "../components/ModelBrowseButton";
 import { ProviderIcon } from "../components/ProviderIcon";
 import { ProviderKeyCard } from "../components/ProviderKeyCard";
 import { SectionHeader } from "../components/SectionHeader";
@@ -954,17 +955,29 @@ function LocalProviderCard({
         )}
 
         <FieldRow label="Model ID">
-          <Input
-            value={modelDraft}
-            onChange={(e) => setModelDraft(e.target.value)}
-            onBlur={() => {
-              const v = modelDraft.trim();
-              if (v !== modelId) void setModelId(v);
-            }}
-            placeholder={meta.modelPlaceholder}
-            spellCheck={false}
-            className="h-8 font-mono text-[11.5px]"
-          />
+          <div className="flex flex-1 gap-1.5">
+            <Input
+              value={modelDraft}
+              onChange={(e) => setModelDraft(e.target.value)}
+              onBlur={() => {
+                const v = modelDraft.trim();
+                if (v !== modelId) void setModelId(v);
+              }}
+              placeholder={meta.modelPlaceholder}
+              spellCheck={false}
+              className="h-8 font-mono text-[11.5px]"
+            />
+            {noBaseURL ? null : (
+              <ModelBrowseButton
+                baseURL={urlDraft}
+                apiKey={compatKey}
+                onSelect={(id) => {
+                  setModelDraft(id);
+                  if (id !== modelId) void setModelId(id);
+                }}
+              />
+            )}
+          </div>
         </FieldRow>
 
         {setContextLimit ? (
@@ -1184,17 +1197,27 @@ function CustomEndpointCard({
           </FieldRow>
 
           <FieldRow label="Model ID">
-            <Input
-              value={modelDraft}
-              onChange={(e) => setModelDraft(e.target.value)}
-              onBlur={() => {
-                const v = modelDraft.trim();
-                if (v !== endpoint.modelId) void onUpdate({ modelId: v });
-              }}
-              placeholder="gpt-4o, qwen3-max, glm-4.6, …"
-              spellCheck={false}
-              className="h-8 font-mono text-[11.5px]"
-            />
+            <div className="flex flex-1 gap-1.5">
+              <Input
+                value={modelDraft}
+                onChange={(e) => setModelDraft(e.target.value)}
+                onBlur={() => {
+                  const v = modelDraft.trim();
+                  if (v !== endpoint.modelId) void onUpdate({ modelId: v });
+                }}
+                placeholder="gpt-4o, qwen3-max, glm-4.6, …"
+                spellCheck={false}
+                className="h-8 font-mono text-[11.5px]"
+              />
+              <ModelBrowseButton
+                baseURL={urlDraft}
+                apiKey={endpointKey}
+                onSelect={(id) => {
+                  setModelDraft(id);
+                  if (id !== endpoint.modelId) void onUpdate({ modelId: id });
+                }}
+              />
+            </div>
           </FieldRow>
 
           <FieldRow label="Context">
