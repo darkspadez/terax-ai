@@ -14,10 +14,11 @@ use crate::modules::git::types::{
     GitRepoInfo, GitStatusSnapshot, TextSource, COMMIT_TIMEOUT_SECS, DEFAULT_TIMEOUT_SECS,
     NETWORK_TIMEOUT_SECS,
 };
-use crate::modules::git::untracked;
 use crate::modules::git::utils::{
-    authorized_repo_root, canonical_dir, resolve_within_repo, split_upstream, ResolvedGitDirectory,
+    authorized_repo_root, canonical_dir, resolve_within_repo, split_upstream, validate_branch_name,
+    ResolvedGitDirectory,
 };
+use crate::modules::git::{untracked, worktree};
 use crate::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
 
 pub fn resolve_repo(
@@ -37,15 +38,10 @@ fn resolve_repo_in_authorized(
     registry: &WorkspaceRegistry,
     cwd: &ResolvedGitDirectory,
 ) -> Result<Option<GitRepoInfo>> {
-    let Some(root_line) = git_stdout_line_opt(
-        &cwd.workspace,
-        &cwd.git_path,
-        ["rev-parse", "--show-toplevel"],
-    )?
-    else {
+    let Some(location) = worktree::locate_work_tree(&cwd.workspace, &cwd.git_path)? else {
         return Ok(None);
     };
-    let canonical_root = canonical_dir(registry, &root_line, &cwd.workspace)?;
+    let canonical_root = canonical_dir(registry, &location.toplevel, &cwd.workspace)?;
     let _ = registry.authorize(&canonical_root.local_path);
 
     let head = match git_stdout_lines(
@@ -79,6 +75,7 @@ fn resolve_repo_in_authorized(
         branch: head.clone(),
         upstream,
         is_detached: head == "HEAD",
+        linked_worktree: location.linked_worktree,
     }))
 }
 
@@ -161,18 +158,13 @@ pub fn panel_snapshot(
         return Err(GitError::PathOutsideWorkspace(cwd.local_path));
     }
     ensure_git_available(&cwd.workspace)?;
-    let Some(root_line) = git_stdout_line_opt(
-        &cwd.workspace,
-        &cwd.git_path,
-        ["rev-parse", "--show-toplevel"],
-    )?
-    else {
+    let Some(location) = worktree::locate_work_tree(&cwd.workspace, &cwd.git_path)? else {
         return Ok(GitPanelSnapshot {
             repo: None,
             status: None,
         });
     };
-    let canonical_root = canonical_dir(registry, &root_line, &cwd.workspace)?;
+    let canonical_root = canonical_dir(registry, &location.toplevel, &cwd.workspace)?;
     let _ = registry.authorize(&canonical_root.local_path);
 
     let status = status_inner(&canonical_root)?;
@@ -181,6 +173,7 @@ pub fn panel_snapshot(
         branch: status.branch.clone(),
         upstream: status.upstream.clone(),
         is_detached: status.is_detached,
+        linked_worktree: location.linked_worktree,
     };
     Ok(GitPanelSnapshot {
         repo: Some(repo),
@@ -1274,8 +1267,6 @@ pub fn list_branches(
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
     ensure_git_available(&repo_root.workspace)?;
 
-    let mut branches: Vec<GitBranchEntry> = Vec::new();
-
     let current_branch = git_stdout_line_opt(
         &repo_root.workspace,
         &repo_root.git_path,
@@ -1284,7 +1275,9 @@ pub fn list_branches(
     .ok()
     .flatten();
     let is_detached_head = current_branch.as_deref() == Some("HEAD");
+    let worktrees = worktree::list_worktrees(registry, &repo_root).unwrap_or_default();
 
+    let mut branches: Vec<GitBranchEntry> = Vec::new();
     if let Ok(lines) = git_stdout_lines(
         &repo_root.workspace,
         &repo_root.git_path,
@@ -1293,127 +1286,28 @@ pub fn list_branches(
         for line in &lines {
             let mut parts = line.split('\0');
             let name = parts.next().unwrap_or("").to_string();
-            let head_marker = parts.next().unwrap_or("");
-            let is_head = head_marker == "*";
-            if !name.is_empty() {
-                branches.push(GitBranchEntry {
-                    name,
-                    kind: "local".into(),
-                    worktree_path: None,
-                    is_head,
-                    is_detached: is_head && is_detached_head,
-                });
+            let is_head = parts.next().unwrap_or("") == "*";
+            if name.is_empty() {
+                continue;
             }
+            let worktree_path = worktrees
+                .iter()
+                .find(|wt| !wt.is_current && wt.branch.as_deref() == Some(name.as_str()))
+                .map(|wt| wt.path.clone());
+            branches.push(GitBranchEntry {
+                name,
+                worktree_path,
+                is_head,
+                is_detached: is_head && is_detached_head,
+            });
         }
     }
+    branches.sort_by(|a, b| a.name.cmp(&b.name));
 
-    if let Ok(lines) = git_stdout_lines(
-        &repo_root.workspace,
-        &repo_root.git_path,
-        ["worktree", "list", "--porcelain"],
-    ) {
-        let mut current_worktree: Option<String> = None;
-        let mut worktree_branch: Option<String> = None;
-        let mut worktree_bare = false;
-        let mut head_sha: Option<String> = None;
-        for line in &lines {
-            if let Some(rest) = line.strip_prefix("worktree ") {
-                if let Some(wt_path) = current_worktree.take() {
-                    if !worktree_bare {
-                        push_worktree(
-                            &mut branches,
-                            wt_path,
-                            worktree_branch.take(),
-                            head_sha.take(),
-                        );
-                    }
-                }
-                current_worktree = Some(rest.trim().to_string());
-                worktree_branch = None;
-                worktree_bare = false;
-                head_sha = None;
-            } else if let Some(rest) = line.strip_prefix("HEAD ") {
-                head_sha = Some(rest.trim().to_string());
-            } else if let Some(rest) = line.strip_prefix("branch ") {
-                let raw = rest.trim();
-                worktree_branch = Some(raw.strip_prefix("refs/heads/").unwrap_or(raw).to_string());
-            } else if line.starts_with("bare") {
-                worktree_bare = true;
-            }
-        }
-        if let Some(wt_path) = current_worktree.take() {
-            if !worktree_bare {
-                push_worktree(
-                    &mut branches,
-                    wt_path,
-                    worktree_branch.take(),
-                    head_sha.take(),
-                );
-            }
-        }
-    }
-
-    // Prefer a branch's worktree entry over its local one, except for the current
-    // branch: the main worktree is always listed, so !is_head keeps it local.
-    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    let mut deduped: Vec<GitBranchEntry> = Vec::with_capacity(branches.len());
-    for b in branches {
-        if let Some(&existing_idx) = seen.get(&b.name) {
-            let existing = &deduped[existing_idx];
-            let should_replace = b.kind == "worktree"
-                && existing.kind == "local"
-                && existing.worktree_path.is_none()
-                && !existing.is_head;
-            if should_replace {
-                let is_head = existing.is_head || b.is_head;
-                deduped[existing_idx] = GitBranchEntry { is_head, ..b };
-            } else if b.is_head && !existing.is_head {
-                let mut updated = deduped[existing_idx].clone();
-                updated.is_head = true;
-                deduped[existing_idx] = updated;
-            }
-        } else {
-            seen.insert(b.name.clone(), deduped.len());
-            deduped.push(b);
-        }
-    }
-
-    deduped.sort_by(|a, b| {
-        let kind_ord = |k: &str| if k == "local" { 0u8 } else { 1u8 };
-        kind_ord(&a.kind)
-            .cmp(&kind_ord(&b.kind))
-            .then_with(|| a.name.cmp(&b.name))
-    });
-
-    Ok(GitBranchListResult { branches: deduped })
-}
-
-fn push_worktree(
-    branches: &mut Vec<GitBranchEntry>,
-    path: String,
-    branch: Option<String>,
-    head_sha: Option<String>,
-) {
-    let name = if let Some(ref b) = branch {
-        b.clone()
-    } else if let Some(ref sha) = head_sha {
-        // if detached HEAD with no branch — show shortened SHA as name
-        let short = if sha.len() >= 7 {
-            &sha[..7]
-        } else {
-            sha.as_str()
-        };
-        format!("(detached @ {})", short)
-    } else {
-        return;
-    };
-    branches.push(GitBranchEntry {
-        name,
-        kind: "worktree".into(),
-        worktree_path: Some(path),
-        is_head: false,
-        is_detached: branch.is_none(),
-    });
+    Ok(GitBranchListResult {
+        branches,
+        worktrees,
+    })
 }
 
 pub fn checkout_branch(
@@ -1424,9 +1318,7 @@ pub fn checkout_branch(
 ) -> Result<()> {
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
     ensure_git_available(&repo_root.workspace)?;
-    if branch_name.starts_with('-') || branch_name.is_empty() {
-        return Err(GitError::InvalidPath(branch_name.into()));
-    }
+    validate_branch_name(branch_name)?;
     // `git checkout <name>` falls back to restoring a file of that name when no such branch
     // exists (one deleted since the list was loaded), discarding its changes. `switch` only
     // ever switches branches.
@@ -1490,6 +1382,77 @@ mod tests {
         std::fs::write(outside.path().join("x.ts"), "x").unwrap();
         let path = outside.path().join("x.ts").to_string_lossy().into_owned();
         assert!(file_base(&registry, &path, &local).is_err());
+    }
+
+    #[test]
+    fn branches_list_where_another_worktree_has_them_checked_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = std::fs::canonicalize(dir.path()).unwrap();
+        let root = base.join("app");
+        std::fs::create_dir(&root).unwrap();
+        if !git(&root, &["init", "-q", "-b", "main"]) {
+            return;
+        }
+        assert!(git(&root, &["commit", "-q", "--allow-empty", "-m", "init"]));
+        assert!(git(&root, &["branch", "free"]));
+        let root_path = crate::modules::git::utils::display_path(&root);
+        let linked_path = crate::modules::git::utils::display_path(&base.join("app-feat"));
+        assert!(git(
+            &root,
+            &["worktree", "add", "-q", "-b", "feat", &linked_path]
+        ));
+        let registry = WorkspaceRegistry::default();
+        registry.authorize(&base).unwrap();
+        let local = WorkspaceEnv::Local;
+
+        let listed = list_branches(&registry, &root_path, &local).unwrap();
+        let summary: Vec<(&str, Option<&str>, bool)> = listed
+            .branches
+            .iter()
+            .map(|b| (b.name.as_str(), b.worktree_path.as_deref(), b.is_head))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("feat", Some(linked_path.as_str()), false),
+                ("free", None, false),
+                ("main", None, true),
+            ]
+        );
+        assert_eq!(listed.worktrees.len(), 2);
+        assert!(listed.worktrees[0].is_current && listed.worktrees[0].is_main);
+
+        // From the linked worktree, `main` is the one checked out elsewhere.
+        let listed = list_branches(&registry, &linked_path, &local).unwrap();
+        let main = listed.branches.iter().find(|b| b.name == "main").unwrap();
+        assert_eq!(main.worktree_path.as_deref(), Some(root_path.as_str()));
+        let feat = listed.branches.iter().find(|b| b.name == "feat").unwrap();
+        assert!(feat.is_head && feat.worktree_path.is_none());
+        assert!(listed.worktrees[1].is_current);
+    }
+
+    #[test]
+    fn checkout_refuses_names_git_would_read_otherwise() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path();
+        if !git(root, &["init", "-q"]) {
+            return;
+        }
+        let registry = WorkspaceRegistry::default();
+        registry.authorize(root).unwrap();
+        for name in ["-f", "--orphan=x", "", "a..b", "HEAD"] {
+            let err = checkout_branch(
+                &registry,
+                &root.to_string_lossy(),
+                name,
+                &WorkspaceEnv::Local,
+            )
+            .unwrap_err();
+            assert!(
+                matches!(err, GitError::InvalidBranchName(_)),
+                "{name:?}: {err}"
+            );
+        }
     }
 
     #[test]

@@ -680,16 +680,16 @@ fn checkout_branch_rejects_unsafe_names() {
 
     let err_empty =
         operations::checkout_branch(&fx.registry, &fx.repo_str(), "", &fx.workspace).unwrap_err();
-    assert!(matches!(err_empty, GitError::InvalidPath(p) if p.is_empty()));
+    assert!(matches!(err_empty, GitError::InvalidBranchName(p) if p.is_empty()));
 
     let err_dash =
         operations::checkout_branch(&fx.registry, &fx.repo_str(), "-f", &fx.workspace).unwrap_err();
-    assert!(matches!(err_dash, GitError::InvalidPath(p) if p == "-f"));
+    assert!(matches!(err_dash, GitError::InvalidBranchName(p) if p == "-f"));
 
     let err_dash_long =
         operations::checkout_branch(&fx.registry, &fx.repo_str(), "--detach", &fx.workspace)
             .unwrap_err();
-    assert!(matches!(err_dash_long, GitError::InvalidPath(p) if p == "--detach"));
+    assert!(matches!(err_dash_long, GitError::InvalidBranchName(p) if p == "--detach"));
 }
 
 #[test]
@@ -716,13 +716,12 @@ fn list_branches_keeps_current_branch_local_and_surfaces_worktrees() {
     let result = operations::list_branches(&fx.registry, &fx.repo_str(), &fx.workspace)
         .expect("list_branches");
 
-    // current branch stays local+head despite the main worktree being listed
+    // the current branch is head, with no other worktree, though the main worktree is listed
     let main = result
         .branches
         .iter()
         .find(|b| b.name == "main")
         .expect("main branch present");
-    assert_eq!(main.kind, "local");
     assert!(main.is_head);
     assert!(main.worktree_path.is_none());
 
@@ -732,9 +731,16 @@ fn list_branches_keeps_current_branch_local_and_surfaces_worktrees() {
         .filter(|b| b.name == "feature")
         .collect();
     assert_eq!(feature.len(), 1);
-    assert_eq!(feature[0].kind, "worktree");
     assert!(!feature[0].is_head);
     assert!(feature[0].worktree_path.is_some());
+
+    assert_eq!(result.worktrees.len(), 2);
+    assert!(result.worktrees[0].is_main && result.worktrees[0].is_current);
+    assert_eq!(result.worktrees[1].branch.as_deref(), Some("feature"));
+    assert_eq!(
+        result.worktrees[1].path,
+        feature[0].worktree_path.clone().unwrap()
+    );
 }
 
 /// Source Control refreshes when the git dir changes, so its own reads must leave the git dir

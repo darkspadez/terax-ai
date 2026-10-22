@@ -93,7 +93,8 @@ All git commands are gated through the workspace authorization registry.
 - `git_fetch` / `git_pull_ff_only` / `git_push`
 - `git_log` / `git_show_commit` / `git_commit_files` / `git_commit_file_diff`
 - `git_remote_url`
-- `git_list_branches` / `git_checkout_branch`
+- `git_list_branches` / `git_checkout_branch` - local branches and worktrees, switching
+- `git_worktree_add` / `git_worktree_remove` - create a worktree (its folder is authorized) or remove a linked one
 
 ### Shell (`src-tauri/src/modules/shell/`)
 

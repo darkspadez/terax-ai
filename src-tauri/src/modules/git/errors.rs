@@ -13,6 +13,7 @@ pub enum GitError {
     NotADirectory(String),
     PathOutsideWorkspace(PathBuf),
     InvalidPath(String),
+    InvalidBranchName(String),
     FileTooLarge {
         path: PathBuf,
         size: u64,
@@ -60,6 +61,7 @@ impl Display for GitError {
                 p.display()
             ),
             GitError::InvalidPath(p) => write!(f, "invalid path: {p}"),
+            GitError::InvalidBranchName(name) => write!(f, "invalid branch name: {name}"),
             GitError::FileTooLarge { path, size, max } => write!(
                 f,
                 "file too large to diff ({size} bytes, max {max}): {}",

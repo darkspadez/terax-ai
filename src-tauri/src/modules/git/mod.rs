@@ -6,3 +6,4 @@ mod process;
 pub mod types;
 mod untracked;
 pub mod utils;
+mod worktree;

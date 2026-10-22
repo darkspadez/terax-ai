@@ -37,7 +37,12 @@ import {
 } from "@/components/ui/tooltip";
 import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
-import { type GitBranchEntry, native } from "@/modules/ai/lib/native";
+import {
+  type GitBranchListResult,
+  type GitLinkedWorktree,
+  type GitWorktreeEntry,
+  native,
+} from "@/modules/ai/lib/native";
 import {
   copyToClipboard,
   revealInFinder,
@@ -59,9 +64,12 @@ import {
   Download01Icon,
   FileEditIcon,
   Folder01Icon,
+  FolderAddIcon,
   FolderCloudIcon,
   FolderGitTwoIcon,
+  FolderRemoveIcon,
   GitBranchIcon,
+  GitForkIcon,
   Refresh01Icon,
   RemoveSquareIcon,
   Tick02Icon,
@@ -89,6 +97,16 @@ import {
   type CheckState,
   type SourceControlFileEntry,
 } from "./useSourceControlPanel";
+import { NewWorktreeDialog, RemoveWorktreeDialog } from "./WorktreeDialogs";
+import type { WorktreeAddResult } from "./worktreeCommands";
+import {
+  branchesHere,
+  otherWorktrees,
+  removableWorktrees,
+  repositoryHeaderName,
+  worktreeBranchLabel,
+  worktreeName,
+} from "./worktrees";
 
 type Props = {
   open: boolean;
@@ -168,10 +186,18 @@ function checkboxValue(state: CheckState): boolean | "indeterminate" {
   return false;
 }
 
+type WorktreeDialog = "new" | "remove";
+
+const EMPTY_LISTING: GitBranchListResult = { branches: [], worktrees: [] };
+
+const SECTION_LABEL_CLASS =
+  "text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/85";
+
 function BranchDropdown({
   repoRoot,
   repoLabel,
   displayRepoRoot,
+  linkedWorktree,
   repositoryTarget,
   onFollowRepositoryContext,
   onNavigateToPath,
@@ -180,23 +206,29 @@ function BranchDropdown({
   repoRoot: string | null;
   repoLabel: string;
   displayRepoRoot: string | null;
+  linkedWorktree: GitLinkedWorktree | null;
   repositoryTarget: SourceControlRepositoryTarget;
   onFollowRepositoryContext: () => void;
   onNavigateToPath?: (path: string) => void;
   onRefresh: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [branches, setBranches] = useState<GitBranchEntry[]>([]);
+  const [listing, setListing] = useState<GitBranchListResult>(EMPTY_LISTING);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkingOut, setCheckingOut] = useState(false);
+  const [worktreeDialog, setWorktreeDialog] = useState<WorktreeDialog | null>(
+    null,
+  );
   const requestRef = useRef(0);
   const checkoutInFlight = useRef(false);
+  // Opened once the menu has closed and handed focus back.
+  const dialogAfterClose = useRef<WorktreeDialog | null>(null);
 
   const loadBranches = useCallback(async () => {
     const id = ++requestRef.current;
     if (!repoRoot) {
-      setBranches([]);
+      setListing(EMPTY_LISTING);
       setError(null);
       setLoading(false);
       return;
@@ -206,11 +238,11 @@ function BranchDropdown({
     try {
       const result = await native.gitListBranches(repoRoot);
       if (id !== requestRef.current) return;
-      setBranches(result.branches);
+      setListing(result);
     } catch (e) {
       if (id !== requestRef.current) return;
       setError(String(e));
-      setBranches([]);
+      setListing(EMPTY_LISTING);
     } finally {
       if (id === requestRef.current) {
         setLoading(false);
@@ -231,7 +263,7 @@ function BranchDropdown({
       setCheckingOut(true);
       try {
         await native.gitCheckoutBranch(repoRoot, branch);
-        setBranches([]);
+        setListing(EMPTY_LISTING);
         setOpen(false);
         onRefresh();
       } catch (e) {
@@ -245,150 +277,270 @@ function BranchDropdown({
   );
 
   const localBranches = useMemo(
-    () => branches.filter((b) => b.kind === "local"),
-    [branches],
+    () => branchesHere(listing.branches),
+    [listing.branches],
   );
   const worktrees = useMemo(
-    () => branches.filter((b) => b.kind === "worktree"),
-    [branches],
+    () => otherWorktrees(listing.worktrees),
+    [listing.worktrees],
+  );
+  const removable = useMemo(
+    () => removableWorktrees(listing.worktrees),
+    [listing.worktrees],
+  );
+  const listed = !loading && !error && listing.worktrees.length > 0;
+
+  const handleWorktreeCreated = useCallback(
+    (result: WorktreeAddResult) => {
+      setWorktreeDialog(null);
+      toast.success(`Created worktree ${worktreeName(result.path)}`, {
+        description: `${result.branch} is checked out in ${result.path}.`,
+        action: onNavigateToPath
+          ? {
+              label: "Open in New Tab",
+              onClick: () => onNavigateToPath(result.path),
+            }
+          : undefined,
+      });
+    },
+    [onNavigateToPath],
   );
 
+  const handleWorktreeRemoved = useCallback((worktree: GitWorktreeEntry) => {
+    setWorktreeDialog(null);
+    toast.success(`Removed worktree ${worktreeName(worktree.path)}`, {
+      description: worktree.branch
+        ? `The branch ${worktree.branch} is still in the repository.`
+        : undefined,
+    });
+  }, []);
+
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          disabled={checkingOut}
-          title={displayRepoRoot ?? repoLabel}
-          className="inline-flex min-w-0 cursor-pointer items-center gap-1.5 rounded-md bg-foreground/5 px-2 py-1 text-[11.5px] font-medium leading-none text-foreground transition-colors hover:bg-foreground/10 disabled:cursor-default disabled:opacity-70"
+    <>
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            disabled={checkingOut}
+            title={displayRepoRoot ?? repoLabel}
+            className="inline-flex min-w-0 cursor-pointer items-center gap-1.5 rounded-md bg-foreground/5 px-2 py-1 text-[11.5px] font-medium leading-none text-foreground transition-colors hover:bg-foreground/10 disabled:cursor-default disabled:opacity-70"
+          >
+            <HugeiconsIcon
+              icon={FolderGitTwoIcon}
+              size={12}
+              strokeWidth={1.9}
+              className="shrink-0 text-muted-foreground"
+            />
+            {displayRepoRoot ? (
+              <>
+                <span className="max-w-22 truncate">
+                  {repositoryHeaderName(displayRepoRoot, linkedWorktree)}
+                </span>
+                <span className="text-muted-foreground/60">/</span>
+              </>
+            ) : null}
+            <span className="max-w-24 truncate">{repoLabel}</span>
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="start"
+          className="w-64"
+          onCloseAutoFocus={(event) => {
+            const dialog = dialogAfterClose.current;
+            if (!dialog) return;
+            event.preventDefault();
+            dialogAfterClose.current = null;
+            requestAnimationFrame(() => setWorktreeDialog(dialog));
+          }}
         >
-          <HugeiconsIcon
-            icon={FolderGitTwoIcon}
-            size={12}
-            strokeWidth={1.9}
-            className="shrink-0 text-muted-foreground"
-          />
           {displayRepoRoot ? (
             <>
-              <span className="max-w-22 truncate">
-                {basename(displayRepoRoot)}
-              </span>
-              <span className="text-muted-foreground/60">/</span>
+              <DropdownMenuLabel className={SECTION_LABEL_CLASS}>
+                {linkedWorktree ? "Worktree" : "Repository"}
+              </DropdownMenuLabel>
+              <div
+                className="truncate px-2 pb-1.5 text-[11px] text-muted-foreground"
+                title={displayRepoRoot}
+              >
+                {displayRepoRoot}
+              </div>
+              {repositoryTarget.mode === "fixed" ? (
+                <DropdownMenuItem
+                  onSelect={() => {
+                    onFollowRepositoryContext();
+                    setOpen(false);
+                  }}
+                  className="cursor-pointer text-[12px]"
+                >
+                  Follow Active Context
+                </DropdownMenuItem>
+              ) : null}
+              <DropdownMenuSeparator />
             </>
           ) : null}
-          <span className="max-w-24 truncate">{repoLabel}</span>
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-56">
-        {displayRepoRoot ? (
-          <>
-            <DropdownMenuLabel className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/85">
-              Repository
-            </DropdownMenuLabel>
-            <div
-              className="truncate px-2 pb-1.5 text-[11px] text-muted-foreground"
-              title={displayRepoRoot}
-            >
-              {displayRepoRoot}
+          {loading ? (
+            <div className="flex items-center gap-2 px-3 py-3 text-[11px] text-muted-foreground">
+              <Spinner className="size-3" />
+              Loading branches…
             </div>
-            {repositoryTarget.mode === "fixed" ? (
-              <DropdownMenuItem
-                onSelect={() => {
-                  onFollowRepositoryContext();
-                  setOpen(false);
-                }}
-                className="cursor-pointer text-[12px]"
-              >
-                Follow Active Context
-              </DropdownMenuItem>
-            ) : null}
-            <DropdownMenuSeparator />
-          </>
-        ) : null}
-        {loading ? (
-          <div className="flex items-center gap-2 px-3 py-3 text-[11px] text-muted-foreground">
-            <Spinner className="size-3" />
-            Loading branches…
-          </div>
-        ) : error ? (
-          <div className="px-3 py-3 text-[11px] leading-snug text-destructive">
-            {error}
-          </div>
-        ) : (
-          <>
-            {localBranches.length > 0 && (
-              <>
-                <DropdownMenuLabel className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/85">
-                  Local Branches
-                </DropdownMenuLabel>
-                <DropdownMenuGroup>
-                  {localBranches.map((b) => (
-                    <DropdownMenuItem
-                      key={b.name}
-                      onSelect={() => void handleCheckout(b.name)}
-                      className="flex cursor-pointer items-center gap-2 text-[12px]"
-                    >
-                      {b.isHead ? (
-                        <HugeiconsIcon
-                          icon={Tick02Icon}
-                          size={14}
-                          strokeWidth={1.8}
-                          className="shrink-0"
-                        />
-                      ) : (
-                        <span className="w-3.5 shrink-0" />
-                      )}
-                      <span className="min-w-0 flex-1 truncate">{b.name}</span>
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuGroup>
-              </>
-            )}
-            {worktrees.length > 0 && (
-              <>
-                {localBranches.length > 0 && <DropdownMenuSeparator />}
-                <DropdownMenuLabel className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/85">
-                  Worktrees
-                </DropdownMenuLabel>
-                <DropdownMenuGroup>
-                  {worktrees.map((b) => (
-                    <DropdownMenuItem
-                      key={b.worktreePath ?? b.name}
-                      onSelect={() => {
-                        if (b.worktreePath && onNavigateToPath) {
-                          onNavigateToPath(b.worktreePath);
+          ) : error ? (
+            <div className="px-3 py-3 text-[11px] leading-snug text-destructive">
+              {error}
+            </div>
+          ) : (
+            <>
+              {localBranches.length > 0 && (
+                <>
+                  <DropdownMenuLabel className={SECTION_LABEL_CLASS}>
+                    Local Branches
+                  </DropdownMenuLabel>
+                  <DropdownMenuGroup>
+                    {localBranches.map((b) => (
+                      <DropdownMenuItem
+                        key={b.name}
+                        onSelect={() => void handleCheckout(b.name)}
+                        className="flex cursor-pointer items-center gap-2 text-[12px]"
+                      >
+                        {b.isHead ? (
+                          <HugeiconsIcon
+                            icon={Tick02Icon}
+                            size={14}
+                            strokeWidth={1.8}
+                            className="shrink-0"
+                          />
+                        ) : (
+                          <span className="w-3.5 shrink-0" />
+                        )}
+                        <span className="min-w-0 flex-1 truncate">
+                          {b.name}
+                        </span>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                </>
+              )}
+              {worktrees.length > 0 && (
+                <>
+                  {localBranches.length > 0 && <DropdownMenuSeparator />}
+                  <DropdownMenuLabel className={SECTION_LABEL_CLASS}>
+                    Worktrees
+                  </DropdownMenuLabel>
+                  <DropdownMenuGroup>
+                    {worktrees.map((wt) => (
+                      <DropdownMenuItem
+                        key={wt.path}
+                        disabled={wt.prunable || !onNavigateToPath}
+                        title={
+                          wt.prunable
+                            ? `${wt.path} no longer exists`
+                            : `Open ${wt.path} in a new terminal tab`
                         }
+                        onSelect={() => onNavigateToPath?.(wt.path)}
+                        className="flex cursor-pointer items-center gap-2 text-[12px]"
+                      >
+                        <HugeiconsIcon
+                          icon={Folder01Icon}
+                          size={14}
+                          strokeWidth={1.5}
+                          className="shrink-0 text-muted-foreground"
+                        />
+                        <div className="flex min-w-0 flex-1 flex-col">
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            <span className="truncate">
+                              {worktreeBranchLabel(wt)}
+                            </span>
+                            {wt.isMain ? (
+                              <WorktreeBadge>main</WorktreeBadge>
+                            ) : null}
+                            {wt.locked !== null ? (
+                              <WorktreeBadge>locked</WorktreeBadge>
+                            ) : null}
+                            {wt.prunable ? (
+                              <WorktreeBadge>missing</WorktreeBadge>
+                            ) : null}
+                          </span>
+                          <span className="truncate text-[10px] text-muted-foreground">
+                            {wt.path}
+                          </span>
+                        </div>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                </>
+              )}
+              {localBranches.length === 0 && worktrees.length === 0 && (
+                <div className="px-3 py-3 text-[11px] text-muted-foreground">
+                  No branches found.
+                </div>
+              )}
+              {listed && repoRoot ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      dialogAfterClose.current = "new";
+                    }}
+                    className="flex cursor-pointer items-center gap-2 text-[12px]"
+                  >
+                    <HugeiconsIcon
+                      icon={FolderAddIcon}
+                      size={14}
+                      strokeWidth={1.6}
+                      className="shrink-0 text-muted-foreground"
+                    />
+                    New Worktree…
+                  </DropdownMenuItem>
+                  {removable.length > 0 ? (
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        dialogAfterClose.current = "remove";
                       }}
                       className="flex cursor-pointer items-center gap-2 text-[12px]"
                     >
                       <HugeiconsIcon
-                        icon={Folder01Icon}
+                        icon={FolderRemoveIcon}
                         size={14}
-                        strokeWidth={1.5}
+                        strokeWidth={1.6}
                         className="shrink-0 text-muted-foreground"
                       />
-                      <div className="flex min-w-0 flex-col">
-                        <span className="truncate">{b.name}</span>
-                        {b.worktreePath && (
-                          <span className="truncate text-[10px] text-muted-foreground">
-                            {b.worktreePath}
-                          </span>
-                        )}
-                      </div>
+                      Remove Worktree…
                     </DropdownMenuItem>
-                  ))}
-                </DropdownMenuGroup>
-              </>
-            )}
-            {branches.length === 0 && (
-              <div className="px-3 py-3 text-[11px] text-muted-foreground">
-                No branches found.
-              </div>
-            )}
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+                  ) : null}
+                </>
+              ) : null}
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {repoRoot ? (
+        <>
+          <NewWorktreeDialog
+            open={worktreeDialog === "new"}
+            onOpenChange={(next) => setWorktreeDialog(next ? "new" : null)}
+            repoRoot={repoRoot}
+            branches={listing.branches}
+            worktrees={listing.worktrees}
+            headLabel={repoLabel}
+            onCreated={handleWorktreeCreated}
+          />
+          <RemoveWorktreeDialog
+            open={worktreeDialog === "remove"}
+            onOpenChange={(next) => setWorktreeDialog(next ? "remove" : null)}
+            repoRoot={repoRoot}
+            worktrees={removable}
+            onRemoved={handleWorktreeRemoved}
+          />
+        </>
+      ) : null}
+    </>
+  );
+}
+
+function WorktreeBadge({ children }: { children: ReactNode }) {
+  return (
+    <span className="shrink-0 rounded bg-muted/60 px-1 py-px text-[9.5px] font-medium uppercase tracking-wider text-muted-foreground">
+      {children}
+    </span>
   );
 }
 
@@ -426,6 +578,9 @@ export const SourceControlPanel = memo(function SourceControlPanel({
   });
   const panelState = fixedTargetPending ? "loading" : scm.panelState;
   const isRefreshing = panelState === "loading";
+  const linkedWorktree = fixedTargetPending
+    ? null
+    : (scm.repo?.linkedWorktree ?? null);
   const repoLabel = useMemo(() => {
     if (fixedTargetPending) return "Loading";
     if (!scm.status) return "Source Control";
@@ -694,11 +849,26 @@ export const SourceControlPanel = memo(function SourceControlPanel({
                   ? repositoryTarget.repoRoot
                   : (scm.repo?.repoRoot ?? null)
               }
+              linkedWorktree={linkedWorktree}
               repositoryTarget={repositoryTarget}
               onFollowRepositoryContext={onFollowRepositoryContext}
               onNavigateToPath={onNavigateToPath}
               onRefresh={handleRefresh}
             />
+            {linkedWorktree ? (
+              <span
+                title={`Worktree ${linkedWorktree.name} of ${linkedWorktree.repositoryName}`}
+                className="inline-flex min-w-0 items-center gap-1 rounded bg-muted/55 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+              >
+                <HugeiconsIcon
+                  icon={GitForkIcon}
+                  size={10}
+                  strokeWidth={2}
+                  className="shrink-0"
+                />
+                <span className="max-w-20 truncate">{linkedWorktree.name}</span>
+              </span>
+            ) : null}
             {scm.status && (scm.status.ahead > 0 || scm.status.behind > 0) ? (
               <div className="flex shrink-0 items-center gap-0.5 text-[10px] font-semibold tabular-nums leading-none text-muted-foreground">
                 {scm.status.ahead > 0 ? (
