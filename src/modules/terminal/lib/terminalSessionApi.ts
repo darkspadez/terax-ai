@@ -18,6 +18,7 @@ import {
   leaveGhosttySessionDrag,
   offerDragToGhosttySession,
   pasteIntoGhosttySession,
+  restartGhosttySession,
   scrollGhosttySession,
   submitToGhosttySession,
   whenGhosttySessionReady,
@@ -228,6 +229,14 @@ export async function leafShellAtPrompt(
   if (useTerminalStatusStore.getState().leaves[leafId]?.running) return false;
   const job = await ghosttyLeafHasForegroundJob(leafId);
   return job === null ? null : !job;
+}
+
+/**
+ * Ends the pane's shell, and any program running in it, and starts a new one
+ * in the folder the shell was in.
+ */
+export function restartSession(leafId: number): Promise<boolean> {
+  return restartGhosttySession(leafId);
 }
 
 export function disposeSession(leafId: number): void {

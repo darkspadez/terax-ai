@@ -167,6 +167,8 @@ import {
 import { aiToggleAction } from "./hooks/aiToggle";
 import { useAppCloseGuard } from "./hooks/useAppCloseGuard";
 import { useTabCloseGuards } from "./hooks/useTabCloseGuards";
+import { restartTarget } from "./hooks/terminalRestart";
+import { useTerminalRestart } from "./hooks/useTerminalRestart";
 import { useWorkspaceSwitcher } from "./hooks/useWorkspaceSwitcher";
 
 // Real-application benchmark driver (scripts/app-lab). `__TERAX_BENCH__` is the literal `false`
@@ -482,6 +484,9 @@ export default function App() {
 
   const { pendingAppClose, confirmAppClose, cancelAppClose } =
     useAppCloseGuard(tabsRef);
+
+  const { pendingRestartLeaf, requestRestart, confirmRestart, cancelRestart } =
+    useTerminalRestart();
 
   useEffect(() => {
     const live = new Set<number>();
@@ -954,6 +959,11 @@ export default function App() {
     void handleClose(activeId);
   }, [activeId, closeActivePane, handleClose]);
 
+  const restartActiveTerminal = useCallback(() => {
+    const leafId = restartTarget(tabsRef.current, activeId);
+    if (leafId !== null) void requestRestart(leafId);
+  }, [activeId, requestRestart]);
+
   // The macOS menu's Close Tab (Cmd+W) lands here too, also while a preview
   // frame has the keyboard and the tab.close shortcut never sees the key.
   const closeTabFromMenu = useEffectEvent(handleCloseTabOrPane);
@@ -1034,6 +1044,7 @@ export default function App() {
       "terminal.clear": () => {
         clearFocusedTerminal();
       },
+      "terminal.restart": restartActiveTerminal,
       "terminal.toggleInput": () =>
         window.dispatchEvent(new CustomEvent(TOGGLE_BLOCK_INPUT_EVENT)),
       "blocks.prev": () => navigateFocusedBlocks(-1),
@@ -1092,6 +1103,7 @@ export default function App() {
       stepSwitcher,
       cycleSpace,
       handleCloseTabOrPane,
+      restartActiveTerminal,
       openNewTab,
       openNewBlockTab,
       openNewPrivateTab,
@@ -1163,6 +1175,7 @@ export default function App() {
       if (id === "terminal.toggleInput") {
         return !(activeTab?.kind === "terminal" && activeTab.blocks === true);
       }
+      if (id === "terminal.restart") return activeTab?.kind !== "terminal";
       if (id === "blocks.prev" || id === "blocks.next") {
         if (activeTab?.kind !== "terminal") return true;
         // Block tabs navigate blocks; plain terminals jump between prompts,
@@ -1450,6 +1463,7 @@ export default function App() {
             splitPaneRight: () => splitActivePaneInActiveTab("row"),
             splitPaneDown: () => splitActivePaneInActiveTab("col"),
             movePaneToNewTab: () => handleMovePaneToNewTab(),
+            restartTerminal: restartActiveTerminal,
             focusSearch: () => searchInlineRef.current?.focus(),
             focusExplorerSearch: () => explorerRef.current?.focusSearch(),
             toggleSidebar,
@@ -1482,6 +1496,7 @@ export default function App() {
       handleCloseTabOrPane,
       splitActivePaneInActiveTab,
       handleMovePaneToNewTab,
+      restartActiveTerminal,
       toggleSidebar,
       toggleHiddenFiles,
       togglePanelAndFocus,
@@ -1862,6 +1877,9 @@ export default function App() {
             pendingTerminalCloseTab={pendingTerminalCloseTab}
             onCancelTerminalClose={cancelTerminalClose}
             onConfirmTerminalClose={confirmTerminalClose}
+            pendingTerminalRestart={pendingRestartLeaf}
+            onCancelTerminalRestart={cancelRestart}
+            onConfirmTerminalRestart={confirmRestart}
             pendingDeleteTabs={pendingDeleteTabs}
             onCancelDeleteClose={cancelDeleteClose}
             onConfirmDeleteClose={confirmDeleteClose}

@@ -608,6 +608,25 @@ export function ghosttySessionInAlternateScreen(leafId: number): boolean {
   return sessions.get(leafId)?.model?.modes().alternateScreen ?? false;
 }
 
+/**
+ * Ends the pane's shell and whatever runs in it and starts a new one in the
+ * folder it was last in. False when the pane has no session.
+ */
+export function restartGhosttySession(leafId: number): Promise<boolean> {
+  const session = sessions.get(leafId);
+  if (!session || session.disposed) return Promise.resolve(false);
+  useTerminalStatusStore.getState().clear(leafId);
+  return respawnGhosttySession(leafId, session.lastCwd ?? undefined).catch(
+    (error: unknown) => {
+      session.callbacks.onError?.({
+        kind: "startup",
+        message: toError(error).message,
+      });
+      return false;
+    },
+  );
+}
+
 async function respawnGhosttySession(
   leafId: number,
   cwd?: string,

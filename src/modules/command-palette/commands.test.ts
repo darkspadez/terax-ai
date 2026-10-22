@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Tab } from "@/modules/tabs";
 import {
   type CommandPaletteActionContext,
@@ -41,6 +41,7 @@ function baseContext(
     splitPaneRight: noop,
     splitPaneDown: noop,
     movePaneToNewTab: noop,
+    restartTerminal: noop,
     focusSearch: noop,
     focusExplorerSearch: noop,
     toggleSidebar: noop,
@@ -98,6 +99,24 @@ describe("createCommandItems", () => {
   it("disables move pane to new tab without a terminal tab", () => {
     const editorTab = { ...terminalTab(1), kind: "editor" } as unknown as Tab;
     expect(reasonById({ tabs: [editorTab] }, "pane.moveToNewTab")).toBe(
+      "No terminal tab",
+    );
+  });
+
+  it("restarts the terminal through the palette and its own shortcut", () => {
+    const restartTerminal = vi.fn();
+    const item = createCommandItems(baseContext({ restartTerminal })).find(
+      (i) => i.id === "terminal.restart",
+    );
+    expect(item?.shortcutId).toBe("terminal.restart");
+    expect(item?.disabledReason).toBeUndefined();
+    item?.run();
+    expect(restartTerminal).toHaveBeenCalledOnce();
+  });
+
+  it("disables restarting without a terminal tab", () => {
+    const editorTab = { ...terminalTab(1), kind: "editor" } as unknown as Tab;
+    expect(reasonById({ tabs: [editorTab] }, "terminal.restart")).toBe(
       "No terminal tab",
     );
   });

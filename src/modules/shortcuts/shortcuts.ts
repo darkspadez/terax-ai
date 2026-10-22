@@ -40,6 +40,7 @@ export type ShortcutId =
   | "pane.equalize"
   | "pane.source"
   | "terminal.clear"
+  | "terminal.restart"
   | "terminal.toggleInput"
   | "blocks.prev"
   | "blocks.next"
@@ -283,6 +284,13 @@ export function defaultShortcuts(platform: ShortcutPlatform): Shortcut[] {
       // macOS — on other platforms Ctrl+K is readline's kill-line, so we leave it
       // unbound and let users assign their own in settings.
       defaultBindings: mac ? [{ meta: true, key: "k" }] : [],
+    },
+    // Unbound by default, since it ends what runs in the pane; in the palette.
+    {
+      id: "terminal.restart",
+      label: "Restart terminal",
+      group: "Terminal",
+      defaultBindings: [],
     },
     {
       id: "terminal.toggleInput",
