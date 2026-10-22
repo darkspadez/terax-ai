@@ -31,7 +31,7 @@ export type ImageTextureLimits = {
   readonly graceUpdates: number;
 };
 
-export const DEFAULT_IMAGE_TEXTURE_LIMITS: ImageTextureLimits = {
+const DEFAULT_IMAGE_TEXTURE_LIMITS: ImageTextureLimits = {
   // Ghostty's storage limit per screen, so a screen of RGBA images always fits.
   budgetBytes: 64 * 1024 * 1024,
   maxTextures: 256,

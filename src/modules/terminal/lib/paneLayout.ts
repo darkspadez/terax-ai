@@ -9,7 +9,7 @@ import {
 } from "./panes";
 
 /** Resize step for one keyboard resize, in percent of the split. */
-export const PANE_RESIZE_STEP = 5;
+const PANE_RESIZE_STEP = 5;
 /** Matches the panels' `minSize`. */
 const MIN_PANE_PERCENT = 10;
 

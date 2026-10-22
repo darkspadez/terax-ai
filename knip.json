@@ -25,7 +25,6 @@
   "workspaces": {
     ".": {
       "entry": [
-        "src/settings/main.tsx",
         "src/**/*.test.{ts,tsx}",
         "src/**/*.bench.ts",
         "scripts/**/*.html",

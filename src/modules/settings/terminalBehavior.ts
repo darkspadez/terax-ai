@@ -12,10 +12,10 @@ export type TerminalOptionAsAlt = "off" | "left" | "right" | "both";
  * (pasted with the middle button) and does nothing elsewhere; "clipboard"
  * also fills the system clipboard.
  */
-export type TerminalCopyOnSelect = "off" | "primary" | "clipboard";
+type TerminalCopyOnSelect = "off" | "primary" | "clipboard";
 
 /** A program reading the clipboard with OSC 52. */
-export type TerminalClipboardRead = "ask" | "allow" | "deny";
+type TerminalClipboardRead = "ask" | "allow" | "deny";
 
 /**
  * Global hotkeys offered for the quick terminal, in Tauri's accelerator syntax
@@ -58,10 +58,10 @@ export type TerminalBehavior = {
   readonly quickTerminalAutohide: boolean;
 };
 
-export const NOTIFY_AFTER_SECONDS_MIN = 1;
-export const NOTIFY_AFTER_SECONDS_MAX = 3600;
-export const SCROLL_MULTIPLIER_MIN = 1;
-export const SCROLL_MULTIPLIER_MAX = 20;
+const NOTIFY_AFTER_SECONDS_MIN = 1;
+const NOTIFY_AFTER_SECONDS_MAX = 3600;
+const SCROLL_MULTIPLIER_MIN = 1;
+const SCROLL_MULTIPLIER_MAX = 20;
 
 export function defaultTerminalBehavior(
   platform: "linux" | "macos" | "windows" | "other",

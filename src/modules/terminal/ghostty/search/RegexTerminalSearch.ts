@@ -5,7 +5,7 @@ import type {
 } from "../GhosttyTerminalModel";
 
 /** Matches kept; a pattern matching more stops counting there. */
-export const MAX_REGEX_MATCHES = 10_000;
+const MAX_REGEX_MATCHES = 10_000;
 
 type Match = {
   /** Buffer line (0 is the oldest line of history). */

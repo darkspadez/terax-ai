@@ -25,7 +25,6 @@ export {
 export {
   selectTerminalTabStatus,
   type TerminalProgress,
-  type TerminalTabStatus,
   useTerminalStatusStore,
 } from "./lib/terminalStatus";
 export { equalizePanes, resizeActivePane } from "./lib/paneLayout";
