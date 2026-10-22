@@ -38,6 +38,7 @@ Until `1.0.0`, only the latest minor gets security fixes. See the current versio
 - **AI tool approval.** File writes and shell commands from the agent need your OK before they run, unless you turn on Auto-approve for a chat (an always-visible chip shows it). Launching or messaging a coding agent always asks, and no mode skips the path and command deny-lists.
 - **No Node in the renderer.** The frontend only reaches the host through the allow-listed Tauri commands.
 - **Files stay in your folders.** Terax's file commands read, write and list only inside folders you opened or browsed (and the folders of files you opened), judged on the real path, so a link or `..` cannot lead out. The agent's file tools are refused anywhere else.
+- **Programs ask first, natively.** Open in Default App runs a program or script only after you confirm in your OS's own dialog, which nothing in the app's pages can answer.
 - **Signed releases.** Updates are verified before they're applied.
 
 ## What we can't promise
