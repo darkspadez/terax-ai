@@ -134,6 +134,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -940,6 +941,24 @@ export default function App() {
     }
     void handleClose(activeId);
   }, [activeId, closeActivePane, handleClose]);
+
+  // The macOS menu's Close Tab (Cmd+W) lands here too, also while a preview
+  // frame has the keyboard and the tab.close shortcut never sees the key.
+  const closeTabFromMenu = useEffectEvent(handleCloseTabOrPane);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void getCurrentWindow()
+      .listen("terax:close-tab-requested", () => closeTabFromMenu())
+      .then((stop) => {
+        if (disposed) stop();
+        else unlisten = stop;
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   const [zenMode, setZenMode] = useState(false);
 

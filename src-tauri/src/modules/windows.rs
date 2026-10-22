@@ -42,6 +42,8 @@ const MAX_WINDOWS: usize = 32;
 
 const QUIT_REQUESTED_EVENT: &str = "terax:quit-requested";
 const NEW_WINDOW_EVENT: &str = "terax:new-window-requested";
+#[cfg(target_os = "macos")]
+const CLOSE_TAB_EVENT: &str = "terax:close-tab-requested";
 
 /// `main`, or `w-` and 1 to 32 ASCII letters and digits.
 pub fn is_app_window(label: &str) -> bool {
@@ -417,6 +419,58 @@ pub fn request_new_window(app: &AppHandle) {
     }
 }
 
+/// What `Close Tab` (Command+W in the macOS menu) closes in the window in
+/// front: an app window's active tab or pane, which its page closes (the menu
+/// reaches it even while a preview frame has the keyboard), or the whole
+/// window for one without tabs (Settings, the quick terminal).
+#[cfg(any(target_os = "macos", test))]
+#[derive(Debug, PartialEq, Eq)]
+enum CloseTarget {
+    Tab,
+    Window,
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn close_target(label: &str) -> CloseTarget {
+    if is_app_window(label) {
+        CloseTarget::Tab
+    } else {
+        CloseTarget::Window
+    }
+}
+
+/// The key window, whatever kind: the one a menu command acts on.
+#[cfg(target_os = "macos")]
+fn key_window(app: &AppHandle) -> Option<WebviewWindow> {
+    app.webview_windows()
+        .into_values()
+        .find(|window| window.is_focused().unwrap_or(false))
+}
+
+#[cfg(target_os = "macos")]
+pub fn request_close_tab(app: &AppHandle) {
+    let Some(window) = key_window(app) else {
+        return;
+    };
+    match close_target(window.label()) {
+        CloseTarget::Tab => {
+            let _ = window.emit_to(window.label(), CLOSE_TAB_EVENT, ());
+        }
+        CloseTarget::Window => {
+            let _ = window.close();
+        }
+    }
+}
+
+/// `Close Window` from the native menu. Closing asks the page first (running
+/// commands, unsaved files), as the window's close button does.
+#[cfg(target_os = "macos")]
+pub fn close_key_window(app: &AppHandle) {
+    if let Some(window) = key_window(app) {
+        let _ = window.close();
+    }
+}
+
 pub fn on_focus(app: &AppHandle, label: &str) {
     if is_app_window(label) {
         app.state::<WindowsState>().lock().focused = Some(label.to_owned());
@@ -688,6 +742,16 @@ mod tests {
 
     fn labels(items: &[&str]) -> Vec<String> {
         items.iter().map(|item| (*item).to_owned()).collect()
+    }
+
+    #[test]
+    fn close_tab_closes_a_tab_in_app_windows_and_other_windows_whole() {
+        for label in ["main", "w-1", "w-12"] {
+            assert_eq!(close_target(label), CloseTarget::Tab, "{label}");
+        }
+        for label in ["settings", "quick", ""] {
+            assert_eq!(close_target(label), CloseTarget::Window, "{label}");
+        }
     }
 
     #[test]
