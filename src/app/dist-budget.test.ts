@@ -21,6 +21,10 @@ import {
   traceStartup,
 } from "../../scripts/dist-graph.mjs";
 
+/** Formula and diagram renderers: npm packages only their own chunks hold. */
+const MARKDOWN_RENDERERS =
+  /^(?:katex|mermaid|@mermaid-js\/.+|@streamdown\/.+)$/;
+
 // Complements eager-budget.test.ts. That one walks the *source* import graph;
 // this one reads what the bundler actually emitted, because chunk assignment
 // can drag heavy code into the startup graph even when the source graph is
@@ -265,6 +269,7 @@ describe("built startup graph", () => {
       "streamdown",
       "codemirror",
       "iconEngine",
+      "mathPlugin",
     ]) {
       const file = chunks.find((f) => chunkName(f) === stem);
       expect(file, `${stem} chunk should be emitted`).toBeDefined();
@@ -278,6 +283,58 @@ describe("built startup graph", () => {
         true,
       );
     }
+  });
+
+  it("loads the formula and diagram renderers on demand, not with the preview or chat", () => {
+    const assets = join(outDir, "assets");
+    const readChunk = (rel: string) => {
+      const file = join(outDir, rel);
+      return existsSync(file) ? readFileSync(file, "utf8") : null;
+    };
+    // The chunks holding the preview pane and the chat's reply renderer, and
+    // everything they import statically.
+    const holders = readdirSync(assets)
+      .filter((file) => file.endsWith(".js.map"))
+      .filter((file) =>
+        (
+          JSON.parse(readFileSync(join(assets, file), "utf8")) as {
+            sources: string[];
+          }
+        ).sources.some((source) =>
+          /src\/(?:modules\/markdown\/MarkdownPreviewPane|components\/ai-elements\/message)\.tsx$/.test(
+            source,
+          ),
+        ),
+      )
+      .map((file) => file.replace(/\.map$/, ""));
+    expect(holders.length).toBeGreaterThan(0);
+    const trace = traceStartup(
+      holders
+        .map((file) => `<script type="module" src="/assets/${file}"></script>`)
+        .join(""),
+      readChunk,
+    );
+    expect(trace.missing).toEqual([]);
+    expect(
+      [...trace.files].flatMap(([file, info]) =>
+        [...(info.packages ?? [])]
+          .filter((pkg) => MARKDOWN_RENDERERS.test(pkg))
+          .map((pkg) => `${file}: ${pkg}`),
+      ),
+    ).toEqual([]);
+  });
+
+  it("ships KaTeX's fonts as woff2 only", () => {
+    const assets = readdirSync(join(outDir, "assets"));
+    const fonts = assets.filter((file) => file.startsWith("KaTeX_"));
+    expect(fonts.length).toBeGreaterThan(10);
+    expect(fonts.filter((file) => !file.endsWith(".woff2"))).toEqual([]);
+    const css = assets
+      .filter((file) => file.endsWith(".css"))
+      .map((file) => readFileSync(join(outDir, "assets", file), "utf8"))
+      .filter((text) => text.includes("font-family:KaTeX_Main"));
+    expect(css).toHaveLength(1);
+    expect(css[0]).not.toMatch(/\.(?:woff|ttf)\)/);
   });
 
   it("bundles one shared Lezer highlighter for parsers and themes", () => {

@@ -9,6 +9,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useMathPlugins } from "@/modules/markdown/math";
+import { RenderBoundary } from "@/modules/markdown/RenderBoundary";
 import { ArrowLeft01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { UIMessage } from "ai";
@@ -323,19 +325,45 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown> & {
 
 const streamdownComponents = { code: MarkdownCode };
 
+// A reply that fails to render shows as plain text instead of taking the
+// chat (and the window) down with it.
+const renderFailed = (text: string) => () => (
+  <div className="flex flex-col gap-1">
+    <p className="text-[11px] text-destructive">
+      This reply could not be rendered as Markdown.
+    </p>
+    <p className="whitespace-pre-wrap wrap-break-word">{text}</p>
+  </div>
+);
+
 export const MessageResponse = memo(
-  ({ className, streaming = false, ...props }: MessageResponseProps) => (
-    <ChatStreamingProvider value={streaming}>
-      <Streamdown
-        className={cn(
-          "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-          className,
-        )}
-        components={streamdownComponents}
-        {...props}
-      />
-    </ChatStreamingProvider>
-  ),
+  ({
+    className,
+    streaming = false,
+    children,
+    ...props
+  }: MessageResponseProps) => {
+    const text = children ?? "";
+    // Math (KaTeX) loads with the first reply that has any.
+    const plugins = useMathPlugins(text);
+    return (
+      <ChatStreamingProvider value={streaming}>
+        <RenderBoundary resetKey={text} fallback={renderFailed(text)}>
+          <Streamdown
+            className={cn(
+              "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+              className,
+            )}
+            components={streamdownComponents}
+            plugins={plugins}
+            {...props}
+          >
+            {text}
+          </Streamdown>
+        </RenderBoundary>
+      </ChatStreamingProvider>
+    );
+  },
   (prevProps, nextProps) =>
     prevProps.children === nextProps.children &&
     prevProps.streaming === nextProps.streaming &&

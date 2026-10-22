@@ -12,6 +12,7 @@ import { MarkdownImage } from "./MarkdownImage";
 import "./markdownPreview.css";
 import { MarkdownViewToggle } from "./MarkdownViewToggle";
 import { dirOf } from "./localImages";
+import { useMathPlugins } from "./math";
 import { PreviewLink } from "./PreviewLink";
 import { previewRehypePlugins } from "./previewPipeline";
 import {
@@ -19,6 +20,7 @@ import {
   type PreviewStatus,
   previewAfterRead,
 } from "./previewStatus";
+import { RenderBoundary } from "./RenderBoundary";
 
 type Props = {
   path: string;
@@ -124,10 +126,12 @@ export function MarkdownPreviewPane({ path, visible, onSetView }: Props) {
             </p>
           )}
           {status.kind === "ready" && (
-            <RenderedFile
-              content={status.content}
-              rehypePlugins={rehypePlugins}
-            />
+            <RenderBoundary resetKey={status.content} fallback={renderFailed}>
+              <RenderedFile
+                content={status.content}
+                rehypePlugins={rehypePlugins}
+              />
+            </RenderBoundary>
           )}
         </div>
       </div>
@@ -135,8 +139,15 @@ export function MarkdownPreviewPane({ path, visible, onSetView }: Props) {
   );
 }
 
+const renderFailed = () => (
+  <p className="text-[12px] text-destructive">
+    Failed to render this file as Markdown. Use the Raw view to inspect it.
+  </p>
+);
+
 // A leading YAML frontmatter block shows as a key/value table, as on
-// GitHub; values render as plain text.
+// GitHub; values render as plain text. Math loads with the first file that
+// has any.
 function RenderedFile({
   content,
   rehypePlugins,
@@ -145,6 +156,7 @@ function RenderedFile({
   rehypePlugins: ReturnType<typeof previewRehypePlugins>;
 }) {
   const { entries, body } = splitFrontmatter(content);
+  const plugins = useMathPlugins(body);
   return (
     <>
       {entries.length > 0 && (
@@ -171,6 +183,7 @@ function RenderedFile({
         className="select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
         components={components}
         rehypePlugins={rehypePlugins}
+        plugins={plugins}
         mode="static"
         parseIncompleteMarkdown={false}
       >

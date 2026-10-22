@@ -1,6 +1,7 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { defineConfig, type PluginOption, type UserConfig } from "vite";
 import Inspect from "vite-plugin-inspect";
@@ -25,6 +26,39 @@ if (process.env.TERAX_BENCH === "1") {
         `(not the product identifier ${product}); run scripts/app-lab/run.ts instead`,
     );
   }
+}
+
+/**
+ * `virtual:katex.css`, the stylesheet of the KaTeX that @streamdown/math
+ * renders with. KaTeX is not a direct dependency (the isolated install has no
+ * top-level `katex`), so it resolves through that package. The stylesheet
+ * offers every font as woff2, woff and ttf; every webview Terax runs in reads
+ * woff2, so the fallbacks (0.9 MB that would never load) are dropped and only
+ * the woff2 files are emitted.
+ */
+function katexStylesheet(): PluginOption {
+  const streamdownMath = realpathSync(
+    path.join(rootDir, "node_modules/@streamdown/math/package.json"),
+  );
+  const stylesheet = createRequire(streamdownMath).resolve(
+    "katex/dist/katex.min.css",
+  );
+  return {
+    name: "terax:katex-stylesheet",
+    enforce: "pre",
+    resolveId: (source) =>
+      source === "virtual:katex.css" ? stylesheet : null,
+    transform(code, id) {
+      if (id.split("?")[0] !== stylesheet) return null;
+      return {
+        code: code.replace(
+          /,\s*url\([^)]*\.(?:woff|ttf)\)\s*format\(["'](?:woff|truetype)["']\)/g,
+          "",
+        ),
+        map: null,
+      };
+    },
+  };
 }
 
 // Bundle/treemap analysis is opt-in: `ANALYZE=true bun run build` emits stats.html.
@@ -121,8 +155,10 @@ function lazyChunk(id: string): string | null {
     pkg.startsWith("@replit/codemirror")
   )
     return "codemirror";
-  if (pkg === "streamdown" || pkg.startsWith("@streamdown/"))
-    return "streamdown";
+  // Only Streamdown itself: its math and Mermaid plugins (KaTeX, Mermaid)
+  // stay in the chunks of their own dynamic imports, loaded when a formula
+  // or a diagram first appears.
+  if (pkg === "streamdown") return "streamdown";
 
   return null;
 }
@@ -135,6 +171,7 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => ({
     // whose try/catch value blocks babel-plugin-react-compiler skips.
     react({ compiler: { target: "19" } }),
     tailwindcss(),
+    katexStylesheet(),
     // Module-graph inspector at /__inspect (who-imports-what, per-plugin
     // transforms). Opt-in via `bun run dev:inspect`, never in a production build.
     ...(mode === "development" && inspectGraph

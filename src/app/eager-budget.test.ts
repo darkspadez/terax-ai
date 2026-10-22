@@ -11,6 +11,9 @@ const HEAVY = [
   "@ai-sdk",
   "ai",
   "streamdown",
+  // Markdown math (KaTeX) and diagram renderers.
+  "@streamdown",
+  "katex",
   "@codemirror",
   "@uiw",
   "motion",
@@ -64,5 +67,18 @@ describe("startup bundle budget", () => {
 
   it("settings window does not eagerly pull editor/AI/markdown stacks", () => {
     expect(heavyEagerHits("src/settings/main.tsx")).toEqual([]);
+  });
+
+  // The preview and the chat are lazy themselves; inside them the math and
+  // diagram renderers load only when a document or reply needs them.
+  it("Markdown preview and chat load the math and diagram renderers on demand", () => {
+    const renderers = ["@streamdown", "katex", "mermaid"];
+    for (const entry of [
+      "src/modules/markdown/MarkdownPreviewPane.tsx",
+      "src/modules/ai/components/AiChat.tsx",
+    ]) {
+      const { hits } = traceEager(entry, renderers);
+      expect([...hits.keys()], entry).toEqual([]);
+    }
   });
 });
