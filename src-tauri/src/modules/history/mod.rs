@@ -33,7 +33,8 @@ fn read_histories() -> Vec<(String, i64)> {
     let mut all = Vec::new();
     let home = dirs::home_dir();
 
-    if let Some(path) = zsh_histfile(std::env::var_os("HISTFILE"), home.as_ref()) {
+    let dotdir = zsh_dotdir();
+    if let Some(path) = zsh_histfile(std::env::var_os("HISTFILE"), dotdir.as_ref(), home.as_ref()) {
         if let Ok(bytes) = std::fs::read(&path) {
             let content = String::from_utf8_lossy(&demetafy(&bytes)).into_owned();
             all.extend(parse_zsh(&content));
@@ -52,14 +53,80 @@ fn read_histories() -> Vec<(String, i64)> {
     all
 }
 
-fn zsh_histfile(histfile: Option<OsString>, home: Option<&PathBuf>) -> Option<PathBuf> {
+/// `$HISTFILE` when it exists, then `.zsh_history` in zsh's dot directory
+/// (where macOS's /etc/zshrc and most configs that set a `ZDOTDIR` keep it),
+/// then in home.
+fn zsh_histfile(
+    histfile: Option<OsString>,
+    dotdir: Option<&PathBuf>,
+    home: Option<&PathBuf>,
+) -> Option<PathBuf> {
     if let Some(p) = histfile {
         let pb = PathBuf::from(p);
         if pb.exists() {
             return Some(pb);
         }
     }
+    if let Some(pb) = dotdir.map(|d| d.join(".zsh_history")) {
+        if pb.exists() {
+            return Some(pb);
+        }
+    }
     home.map(|h| h.join(".zsh_history"))
+}
+
+#[cfg(unix)]
+const ZDOTDIR_MARKER: &str = "__TERAX_ZDOTDIR_3c9e__";
+
+/// zsh's `ZDOTDIR`: Terax's own, or the one the user's `.zshenv` sets (often
+/// `~/.config/zsh`), which a GUI app's environment lacks. zsh reads
+/// `.zshenv` for every shell, so a non-interactive one answers quickly.
+#[cfg(unix)]
+fn zsh_dotdir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("ZDOTDIR").filter(|d| !d.is_empty()) {
+        return Some(dir.into());
+    }
+    let shell = PathBuf::from(std::env::var_os("SHELL")?);
+    if shell.file_name()? != "zsh" {
+        return None;
+    }
+    read_zsh_dotdir(zsh_dotdir_query(&shell))
+}
+
+#[cfg(not(unix))]
+fn zsh_dotdir() -> Option<PathBuf> {
+    None
+}
+
+#[cfg(unix)]
+fn zsh_dotdir_query(zsh: &std::path::Path) -> std::process::Command {
+    use std::process::{Command, Stdio};
+    let mut cmd = Command::new(zsh);
+    cmd.arg("-c")
+        .arg(format!("print -rn -- \"{ZDOTDIR_MARKER}$ZDOTDIR\""))
+        .env("TERAX_RESOLVING_ENVIRONMENT", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    cmd
+}
+
+/// Runs the query; `.zshenv` may print before the marker.
+#[cfg(unix)]
+fn read_zsh_dotdir(mut cmd: std::process::Command) -> Option<PathBuf> {
+    use crate::modules::proc::capture::{self, Limits};
+    let limits = Limits {
+        stdout: 64 * 1024,
+        stderr: 4 * 1024,
+        stop_on_stdout_cap: true,
+    };
+    let out = capture::run(&mut cmd, std::time::Duration::from_secs(5), limits).ok()?;
+    if out.timed_out || out.exit_code != Some(0) {
+        return None;
+    }
+    let text = String::from_utf8(out.stdout).ok()?;
+    let (_, dir) = text.rsplit_once(ZDOTDIR_MARKER)?;
+    (!dir.is_empty()).then(|| PathBuf::from(dir))
 }
 
 fn fish_histfile(xdg_data_home: Option<OsString>, home: Option<&PathBuf>) -> Option<PathBuf> {
@@ -237,9 +304,28 @@ mod tests {
         std::fs::write(&custom, b"").unwrap();
         let home = tmp.path().join("home");
 
-        let got = zsh_histfile(Some(custom.clone().into()), Some(&home));
+        let got = zsh_histfile(Some(custom.clone().into()), None, Some(&home));
 
         assert_eq!(got, Some(custom));
+    }
+
+    #[test]
+    fn zsh_histfile_looks_in_the_dot_directory_before_home() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let dotdir = home.join(".config/zsh");
+        std::fs::create_dir_all(&dotdir).unwrap();
+
+        assert_eq!(
+            zsh_histfile(None, Some(&dotdir), Some(&home)),
+            Some(home.join(".zsh_history")),
+            "no history in the dot directory"
+        );
+        std::fs::write(dotdir.join(".zsh_history"), b"").unwrap();
+        assert_eq!(
+            zsh_histfile(None, Some(&dotdir), Some(&home)),
+            Some(dotdir.join(".zsh_history"))
+        );
     }
 
     #[test]
@@ -249,14 +335,52 @@ mod tests {
 
         let missing = Some(tmp.path().join("missing").into());
         assert_eq!(
-            zsh_histfile(missing, Some(&home)),
+            zsh_histfile(missing, None, Some(&home)),
             Some(home.join(".zsh_history"))
         );
         assert_eq!(
-            zsh_histfile(None, Some(&home)),
+            zsh_histfile(None, None, Some(&home)),
             Some(home.join(".zsh_history"))
         );
-        assert_eq!(zsh_histfile(None, None), None);
+        assert_eq!(zsh_histfile(None, None, None), None);
+    }
+
+    #[cfg(unix)]
+    fn fake_zsh(dir: &std::path::Path, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("zsh");
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_dot_directory_query_reads_past_what_zshenv_prints() {
+        let tmp = tempfile::tempdir().unwrap();
+        let zsh = fake_zsh(
+            tmp.path(),
+            &format!("printf 'Welcome\\n'; printf '%s' '{ZDOTDIR_MARKER}/home/me/.config/zsh'"),
+        );
+        assert_eq!(
+            read_zsh_dotdir(zsh_dotdir_query(&zsh)),
+            Some(PathBuf::from("/home/me/.config/zsh"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_dot_directory_query_gives_up_without_an_answer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let unset = fake_zsh(tmp.path(), &format!("printf '%s' '{ZDOTDIR_MARKER}'"));
+        assert_eq!(read_zsh_dotdir(zsh_dotdir_query(&unset)), None);
+        let failing = fake_zsh(
+            tmp.path(),
+            &format!("printf '%s' '{ZDOTDIR_MARKER}/x'; exit 1"),
+        );
+        assert_eq!(read_zsh_dotdir(zsh_dotdir_query(&failing)), None);
+        let silent = fake_zsh(tmp.path(), "printf 'banner only'");
+        assert_eq!(read_zsh_dotdir(zsh_dotdir_query(&silent)), None);
     }
 
     #[test]
