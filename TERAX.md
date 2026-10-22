@@ -275,7 +275,10 @@ Bare shells keep direct terminal input. Bash before 4.4 reports
 Settings offer Automatic or WebGL for new terminals, plus opt-in screen reader
 output. Accessible text is limited to 256 rows / 64 KiB and refreshes at most four
 times per second while visible. Ordinary URL detection runs on pointer demand;
-OSC 8 links take precedence. OSC 52 side effects retain one in-flight write and
+OSC 8 links take precedence. A clicked link opens in the browser (URLs), the
+editor (files, at their line) or the system file manager (local folders); a
+file:// link counts as local with no host, `localhost` or this machine's name,
+which `ls --hyperlink` and eza write (`terminalLinkOpen.ts`). OSC 52 side effects retain one in-flight write and
 only the latest pending value across the window. OSC 52 writes carry up to
 6 MiB of text (about the 8 MiB of base64 Ghostty takes per OSC) and reads are
 answered with up to 8 MiB. Terminal replies have a PTY budget of their own,
