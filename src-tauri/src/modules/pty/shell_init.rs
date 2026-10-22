@@ -704,6 +704,7 @@ mod windows {
     use portable_pty::CommandBuilder;
 
     const PROFILE_PS1: &str = include_str!("scripts/profile.ps1");
+    const PROFILE_CMD: &str = include_str!("scripts/profile.cmd");
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     enum ShellKind {
@@ -766,6 +767,7 @@ mod windows {
             .unwrap_or_default();
         let is_powershell = shell_name == "pwsh.exe" || shell_name == "powershell.exe";
         let is_bash = shell_name == "bash.exe";
+        let is_cmd = shell_name == "cmd.exe";
 
         let mut cmd = CommandBuilder::new(&shell_path);
         super::apply_common(&mut cmd, cwd, blocks, control.as_ref());
@@ -798,6 +800,17 @@ mod windows {
                 }
                 Err(e) => {
                     log::warn!("bash shell integration disabled: {e}");
+                }
+            }
+        } else if is_cmd {
+            match prepare_cmd_profile() {
+                Ok(profile) => {
+                    // After AutoRun, so the PROMPT it sets gets wrapped too.
+                    cmd.arg("/k");
+                    cmd.arg(profile);
+                }
+                Err(e) => {
+                    log::warn!("cmd shell integration disabled: {e}");
                 }
             }
         } else {
@@ -1017,6 +1030,14 @@ mod windows {
         Ok(root)
     }
 
+    fn prepare_cmd_profile() -> Result<PathBuf, String> {
+        let dir = integration_root()?.join("cmd");
+        fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+        let file = dir.join("profile.cmd");
+        write_if_changed(&file, &super::crlf(PROFILE_CMD))?;
+        Ok(file)
+    }
+
     fn prepare_ps_profile() -> Result<PathBuf, String> {
         let dir = integration_root()?.join("powershell");
         fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
@@ -1068,7 +1089,7 @@ mod windows {
                 .join("powershell.exe"),
             true,
         );
-        add(&mut out, "Command Prompt", system32.join("cmd.exe"), false);
+        add(&mut out, "Command Prompt", system32.join("cmd.exe"), true);
         if let Some(p) = git_bash_path() {
             add(&mut out, "Git Bash", p, true);
         }
@@ -1250,6 +1271,41 @@ mod windows {
             );
         }
 
+        /// Loads the integration profile in cmd.exe `times` times (as a
+        /// nested cmd would), then echoes PROMPT.
+        fn prompt_after_loading_profile(times: usize) -> String {
+            use std::os::windows::process::CommandExt;
+            let profile = prepare_cmd_profile().unwrap();
+            let call = format!("call \"{}\" & ", profile.display());
+            // raw_arg: Command escapes quotes as \", which cmd.exe rejects.
+            let line = format!("/c {}echo PROMPT=!PROMPT!", call.repeat(times));
+            let output = std::process::Command::new("cmd.exe")
+                .raw_arg("/d")
+                .raw_arg("/v:on")
+                .raw_arg(&line)
+                .env_remove("PROMPT")
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&output.stdout).into_owned()
+        }
+
+        #[test]
+        fn cmd_profile_wraps_the_prompt_once() {
+            let stdout = prompt_after_loading_profile(2);
+            assert!(stdout.contains("]7;file://"), "{stdout:?}");
+            assert!(stdout.contains("$P$G"), "{stdout:?}");
+            assert_eq!(stdout.matches("]133;A").count(), 1, "{stdout:?}");
+        }
+
+        #[test]
+        fn command_prompt_is_integrated() {
+            let cmd = list_shells()
+                .into_iter()
+                .find(|s| s.name == "Command Prompt")
+                .expect("cmd.exe is listed on Windows");
+            assert!(cmd.integrated);
+        }
+
         #[test]
         fn builds_wsl_other_shell_without_integration() {
             let spec = build_wsl_launch_spec(
@@ -1272,6 +1328,12 @@ mod windows {
             );
         }
     }
+}
+
+/// cmd.exe can misparse batch files with LF-only line ends.
+#[cfg(any(windows, test))]
+fn crlf(content: &str) -> String {
+    content.replace("\r\n", "\n").replace('\n', "\r\n")
 }
 
 #[cfg(windows)]
@@ -1408,6 +1470,29 @@ mod tests {
                 .and_then(|path| std::env::split_paths(path).next()),
             Some(std::path::PathBuf::from("/app/bin"))
         );
+    }
+
+    #[test]
+    fn cmd_profile_wraps_prompt_with_cwd_and_prompt_marks() {
+        // crynta/terax-ai#1271: the explorer did not follow cd in cmd.exe.
+        let profile = super::crlf(include_str!("scripts/profile.cmd"));
+        assert!(!profile.replace("\r\n", "").contains('\n'));
+        let prompt = profile
+            .lines()
+            .find(|line| line.starts_with("set \"PROMPT=$E"))
+            .expect("profile.cmd sets the prompt");
+        let marks: Vec<_> = [
+            "]133;D",
+            "]133;A",
+            "]7;file://%COMPUTERNAME%/$P",
+            "%PROMPT%",
+        ]
+        .iter()
+        .map(|mark| prompt.find(mark).expect(mark))
+        .collect();
+        assert!(marks.windows(2).all(|w| w[0] < w[1]), "{prompt}");
+        // No preexec hook: block tabs keep cmd's own prompt.
+        assert!(prompt.ends_with("]133;B;terax_blocks=0$E\\\""), "{prompt}");
     }
 
     #[test]

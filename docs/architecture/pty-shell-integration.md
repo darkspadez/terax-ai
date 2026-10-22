@@ -81,7 +81,7 @@ On Windows the shell priority is:
 
 1. `pwsh.exe` (PowerShell 7+)
 2. `powershell.exe` (Windows PowerShell 5.1)
-3. `cmd.exe` (no integration)
+3. `cmd.exe` (`cmd /k profile.cmd`: OSC 7 and OSC 133 D/A/B around the user's `PROMPT`; no OSC 133 C, so block tabs keep its prompt with `terax_blocks=0`)
 
 PowerShell loads `profile.ps1` via:
 

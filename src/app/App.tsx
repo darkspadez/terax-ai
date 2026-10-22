@@ -13,7 +13,7 @@ import {
 } from "@/lib/launchDir";
 import { toast } from "sonner";
 import { IS_MAC } from "@/lib/platform";
-import { quoteShellArg } from "@/lib/shellQuote";
+import { cdCommandLine } from "@/lib/shellQuote";
 import { usePresence } from "@/lib/usePresence";
 import { useZoom } from "@/lib/useZoom";
 import { isMarkdownPath } from "@/lib/utils";
@@ -128,7 +128,11 @@ import {
   WindowVibrancyBridge,
 } from "@/modules/theme";
 import { UpdaterDialog } from "@/modules/updater";
-import { useWorkspaceEnvStore, workspaceScopeKey } from "@/modules/workspace";
+import {
+  currentWorkspaceEnv,
+  useWorkspaceEnvStore,
+  workspaceScopeKey,
+} from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -142,6 +146,7 @@ import {
   useState,
 } from "react";
 import { CloseDialogs } from "./components/CloseDialogs";
+import { detectShell } from "./components/useSystemInfo";
 import {
   TOGGLE_BLOCK_INPUT_EVENT,
   WorkspaceInputBar,
@@ -713,7 +718,11 @@ export default function App() {
         );
         return;
       }
-      term.write(`cd ${quoteShellArg(path)}\r`);
+      const shell =
+        usePreferencesStore.getState().terminalShell || (await detectShell());
+      if (request !== cdRequest.current) return;
+      const wsl = currentWorkspaceEnv().kind === "wsl";
+      term.write(`${cdCommandLine(path, shell, wsl)}\r`);
       term.focus();
     },
     [activeLeafId, cdInNewTab],
