@@ -204,8 +204,11 @@ pub fn run() {
         .plugin(
             tauri_plugin_window_state::Builder::new()
                 .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
+                // Placed under the pointer on every show, never restored.
+                .with_denylist(&[modules::quick_terminal::LABEL])
                 .build(),
         )
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_os::init())
@@ -259,6 +262,7 @@ pub fn run() {
         .manage(shell::ShellState::default())
         .manage(secrets::SecretsState::default())
         .manage(primary_selection::PrimarySelection::default())
+        .manage(modules::quick_terminal::QuickTerminalState::default())
         .manage(fs::watch::FsWatchState::default())
         .manage(history::HistoryState::default())
         .manage(lsp::LspState::default())
@@ -303,6 +307,8 @@ pub fn run() {
             fs::clipboard::fs_clipboard_paths,
             primary_selection::terminal_primary_selection_write,
             primary_selection::terminal_primary_selection_read,
+            modules::quick_terminal::quick_terminal_toggle,
+            modules::quick_terminal::quick_terminal_set_hotkey,
             fs::watch::fs_watch_add,
             fs::watch::fs_watch_remove,
             lsp::lsp_detect,
@@ -399,6 +405,14 @@ pub fn run() {
                     }
                     if let Some(state) = app.try_state::<pty::PtyState>() {
                         state.destroy_webview(&label);
+                    }
+                    // The quick terminal floats on its own (not a child window),
+                    // so it would keep the app alive after the main window.
+                    if label == "main" {
+                        if let Some(quick) = app.get_webview_window(modules::quick_terminal::LABEL)
+                        {
+                            let _ = quick.destroy();
+                        }
                     }
                 }
                 // Servers exit on stdin EOF, but destructors are not guaranteed

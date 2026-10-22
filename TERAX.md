@@ -146,6 +146,13 @@ Ghostty's cell rule: a wide cell, or a symbol followed by a free cell or a
 space that neither ends the row nor follows another symbol (the core marks it
 with `GPU_GLYPH_TWO_CELLS` for WebGPU; WebGL applies `constraintCells`). Text is never
 transformed. One rasterizer (`gpu/GlyphRasterizer.ts`) serves both atlases.
+Font ligatures (Settings, "Font ligatures", on by default, off while letter
+spacing is set) use runs of 2 to 16 adjacent narrow ASCII punctuation cells
+drawn alike (`gpu/ligatureRuns.ts`; the core interns each cell as the whole run
+plus its index, `GPU_GLYPH_LIGATURE`, and WebGL applies the same rule): every
+cell's glyph is the run drawn with that cell's character on its pen origin, cut
+to the cell, so `->` or `!=` joins while each cell keeps its own pixels.
+Letters, digits and spaces never form runs and keep the ASCII fast path.
 Kitty graphics draw in both renderers in Ghostty's three layers (under cell
 backgrounds, between backgrounds and text, above text; `gpu/imageLayer.ts`,
 pure and shared). The image code loads the first time a pane shows an image
@@ -381,6 +388,7 @@ establish production readiness, platform parity, or multi-day resource stability
 - `net::*` (`ai_http_stream`, `ai_http_cancel`, `ai_http_ack`, `lm_ping`): AI HTTP proxy with SSRF guard; keeps provider calls and local-model pings off the webview. Clients are cached per `(profile, host, pinned IPs, allow_private)` with a 90 s idle TTL and at most eight entries, so connections and HTTP/2 sessions are reused while DNS-rebinding protection stays per request. Classification (`net/ip.rs`) looks through IPv6 forms that carry an IPv4 destination (mapped, compatible, NAT64, 6to4, Teredo) and treats everything outside global unicast as non-public.
 - `secrets::secrets_*`: OS keychain via the `keyring` crate. Service constant `terax-ai`. Linux uses a file-based fallback gated behind `#[cfg(target_os = "linux")]`.
 - `open_settings_window`: separate webview window for Settings (optional `tab` arg deep-links a section).
+- `quick_terminal::*` (`quick_terminal_toggle`, `quick_terminal_set_hotkey`): the quick terminal, a borderless always-on-top `quick` window (`quick.html`, `src/quick/`) holding one terminal. It is created on first use and kept, so its shell survives hiding; each show places it across the top of the work area of the monitor under the pointer at 40 % height (never restored by window-state). The hotkey (`terminalBehavior.quickTerminalHotkey`, off by default, one of a fixed list) is registered process-wide through `tauri-plugin-global-shortcut` from the main window (`terminal/quick/quickTerminalHotkey.ts`); a refused hotkey (taken, or Wayland without global shortcuts) is reported. The page hides the window when its shell exits (the next show starts a new one in the home directory) and, with `quickTerminalAutohide`, when it loses focus. It is not a child window, so the main window's destruction destroys it (`lib.rs`). `pty_close_all` reaps only the calling window's shells.
 - `vibrancy::window_*`: native window backdrop (`window_backdrop_kind`, `window_set_backdrop`). macOS gets `NSVisualEffectMaterial::UnderWindowBackground`, Windows 11 gets Mica (gated on build >= 22000 via `RtlGetVersion`, since `apply_mica` fails on Windows 10), Linux reports `none` because blur there belongs to the compositor. The `window-vibrancy` crate is a macOS/Windows-only dependency so Linux builds never pull it.
 
 ### PTY shell integration

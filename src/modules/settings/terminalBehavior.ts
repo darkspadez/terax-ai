@@ -17,6 +17,21 @@ export type TerminalCopyOnSelect = "off" | "primary" | "clipboard";
 /** A program reading the clipboard with OSC 52. */
 export type TerminalClipboardRead = "ask" | "allow" | "deny";
 
+/**
+ * Global hotkeys offered for the quick terminal, in Tauri's accelerator syntax
+ * ("off" is none). A fixed list: each is known to parse and to be free of the
+ * usual system bindings on the platforms that offer it.
+ */
+export const QUICK_TERMINAL_HOTKEYS = [
+  "off",
+  "CommandOrControl+`",
+  "Control+`",
+  "Alt+Space",
+  "CommandOrControl+Shift+Space",
+  "F12",
+] as const;
+export type QuickTerminalHotkey = (typeof QUICK_TERMINAL_HOTKEYS)[number];
+
 /** Notify when a command that ran long enough finishes. */
 export type TerminalNotifyOnFinish = "never" | "unfocused" | "always";
 
@@ -37,6 +52,10 @@ export type TerminalBehavior = {
   readonly scrollMultiplier: number;
   /** Save each pane's recent history and show it again after a restart. */
   readonly restoreScrollback: boolean;
+  /** Global hotkey that shows and hides the quick terminal, or "off". */
+  readonly quickTerminalHotkey: QuickTerminalHotkey;
+  /** Hide the quick terminal when another window takes focus. */
+  readonly quickTerminalAutohide: boolean;
 };
 
 export const NOTIFY_AFTER_SECONDS_MIN = 1;
@@ -58,6 +77,8 @@ export function defaultTerminalBehavior(
     bellSound: false,
     scrollMultiplier: 3,
     restoreScrollback: true,
+    quickTerminalHotkey: "off",
+    quickTerminalAutohide: true,
   };
 }
 
@@ -139,6 +160,15 @@ export function normalizeTerminalBehavior(
       typeof raw.restoreScrollback === "boolean"
         ? raw.restoreScrollback
         : defaults.restoreScrollback,
+    quickTerminalHotkey: oneOf(
+      raw.quickTerminalHotkey,
+      QUICK_TERMINAL_HOTKEYS,
+      defaults.quickTerminalHotkey,
+    ),
+    quickTerminalAutohide:
+      typeof raw.quickTerminalAutohide === "boolean"
+        ? raw.quickTerminalAutohide
+        : defaults.quickTerminalAutohide,
   };
 }
 

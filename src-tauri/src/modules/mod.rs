@@ -15,6 +15,7 @@ pub mod panics;
 pub mod primary_selection;
 pub mod proc;
 pub mod pty;
+pub mod quick_terminal;
 pub mod runtime;
 pub mod secrets;
 pub mod shell;

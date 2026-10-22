@@ -10,6 +10,8 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import { setTerminalBehavior } from "@/modules/settings/store";
 import {
   currentPlatform,
+  QUICK_TERMINAL_HOTKEYS,
+  type QuickTerminalHotkey,
   type TerminalBehavior,
 } from "@/modules/settings/terminalBehavior";
 import { SCROLLBACK_MAX_LINES } from "@/modules/terminal/lib/terminalScrollback";
@@ -57,6 +59,27 @@ function Choice<T extends string | number>({
 
 const set = (patch: Partial<TerminalBehavior>) =>
   void setTerminalBehavior(patch);
+
+/** The hotkeys this platform offers, labelled the way it writes them. */
+function quickTerminalHotkeyOptions(
+  platform: ReturnType<typeof currentPlatform>,
+): Option<QuickTerminalHotkey>[] {
+  const mac = platform === "macos";
+  const labels: Record<QuickTerminalHotkey, string | null> = {
+    off: "Off",
+    "CommandOrControl+`": mac ? "⌘`" : "Ctrl+`",
+    // Same keys as the entry above outside macOS.
+    "Control+`": mac ? "⌃`" : null,
+    // Alt+Space opens the window menu on Windows.
+    "Alt+Space": platform === "windows" ? null : mac ? "⌥Space" : "Alt+Space",
+    "CommandOrControl+Shift+Space": mac ? "⇧⌘Space" : "Ctrl+Shift+Space",
+    F12: "F12",
+  };
+  return QUICK_TERMINAL_HOTKEYS.flatMap((value) => {
+    const label = labels[value];
+    return label === null ? [] : [{ value, label }];
+  });
+}
 
 /** Terminal input, clipboard and notification behaviour (Ghostty's defaults). */
 export function TerminalBehaviorSettings() {
@@ -195,6 +218,27 @@ export function TerminalBehaviorSettings() {
         <Switch
           checked={behavior.restoreScrollback}
           onCheckedChange={(restoreScrollback) => set({ restoreScrollback })}
+        />
+      </SettingRow>
+      <SettingRow
+        title="Quick terminal hotkey"
+        description="A system-wide key that drops a terminal down from the top of the screen, from any app, and puts it away again."
+      >
+        <Choice
+          value={behavior.quickTerminalHotkey}
+          onChange={(quickTerminalHotkey) => set({ quickTerminalHotkey })}
+          options={quickTerminalHotkeyOptions(currentPlatform())}
+        />
+      </SettingRow>
+      <SettingRow
+        title="Hide the quick terminal when it loses focus"
+        description="Otherwise it stays on top until the hotkey is pressed again."
+      >
+        <Switch
+          checked={behavior.quickTerminalAutohide}
+          onCheckedChange={(quickTerminalAutohide) =>
+            set({ quickTerminalAutohide })
+          }
         />
       </SettingRow>
     </>

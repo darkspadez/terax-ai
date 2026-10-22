@@ -4,7 +4,8 @@
   "description": "Native clipboard read/write for terminal copy and paste on desktop platforms.",
   "platforms": ["linux", "macOS", "windows"],
   "windows": [
-    "main"
+    "main",
+    "quick"
   ],
   "permissions": [
     "clipboard-manager:allow-read-text",

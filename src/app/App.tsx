@@ -75,8 +75,8 @@ import {
 } from "@/modules/spaces";
 import { StatusBar } from "@/modules/statusbar";
 import {
-  TabSwitcherHud,
   type CloseTabsPlan,
+  TabSwitcherHud,
   useTabSwitcher,
   useTabs,
   useWindowTitle,
@@ -84,20 +84,20 @@ import {
 } from "@/modules/tabs";
 import { DEFAULT_SPACE_ID } from "@/modules/tabs/lib/useTabs";
 import {
+  adjustFocusedTerminalFont,
   clearFocusedTerminal,
   disposeSession,
+  equalizePanes,
   findLeafCwd,
+  focusedTerminalInAlternateScreen,
   hasLeaf,
   isTerminalSurfaceTarget,
   leafIds,
-  adjustFocusedTerminalFont,
-  equalizePanes,
-  focusedTerminalInAlternateScreen,
   navigateFocusedBlocks,
   type PaneBounds,
+  ptyIdForLeaf,
   resizeActivePane,
   scrollFocusedTerminal,
-  ptyIdForLeaf,
   setTerminalFileOpener,
   startWindowProgress,
   type TerminalPaneHandle,
@@ -107,9 +107,10 @@ import {
   whenSessionReady,
   writeToSession,
 } from "@/modules/terminal";
-import type { TerminalSearchController } from "@/modules/terminal/search/TerminalSearchController";
 import { bindTerminalWindowFocus } from "@/modules/terminal/ghostty/renderScheduling";
 import { subscribeWindowPresentation } from "@/modules/terminal/ghostty/windowPresentation";
+import { useQuickTerminalHotkey } from "@/modules/terminal/quick/quickTerminalHotkey";
+import type { TerminalSearchController } from "@/modules/terminal/search/TerminalSearchController";
 import {
   LivePageResizeBridge,
   ThemeProvider,
@@ -142,12 +143,12 @@ import {
   WorkspaceInputBar,
 } from "./components/WorkspaceInputBar";
 import { WorkspaceSurface } from "./components/WorkspaceSurface";
-import { useAppCloseGuard } from "./hooks/useAppCloseGuard";
 import {
   hasOpenPathTab,
   renamedPath,
   spacesEmptiedByTabs,
 } from "./hooks/tabCloseGuards";
+import { useAppCloseGuard } from "./hooks/useAppCloseGuard";
 import { useTabCloseGuards } from "./hooks/useTabCloseGuards";
 import { useWorkspaceSwitcher } from "./hooks/useWorkspaceSwitcher";
 
@@ -1096,11 +1097,16 @@ export default function App() {
         // except while a full-screen program owns the keys.
         return activeTab.blocks !== true && focusedTerminalInAlternateScreen();
       }
-      if (id.startsWith("terminal.scroll") || id.startsWith("terminal.fontSize")) {
+      if (
+        id.startsWith("terminal.scroll") ||
+        id.startsWith("terminal.fontSize")
+      ) {
         const target =
           (e.target as HTMLElement | null) ?? document.activeElement;
         if (!isTerminalSurfaceTarget(target)) return true;
-        return id.startsWith("terminal.scroll") && focusedTerminalInAlternateScreen();
+        return (
+          id.startsWith("terminal.scroll") && focusedTerminalInAlternateScreen()
+        );
       }
       if (SPLIT_PANE_SHORTCUTS.has(id)) {
         // Pane keys mean nothing without split terminal panes; let them through.
@@ -1416,6 +1422,7 @@ export default function App() {
 
   // OSC 9;4 progress from every terminal drives the taskbar or dock bar.
   useEffect(() => startWindowProgress(), []);
+  useQuickTerminalHotkey();
 
   const openControlFile = useCallback(
     ({
