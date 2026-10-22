@@ -320,11 +320,13 @@ export const EDITOR_WORD_WRAP_COLUMN_DEFAULT = 80;
 export const EDITOR_WORD_WRAP_COLUMN_MIN = 20;
 export const EDITOR_WORD_WRAP_COLUMN_MAX = 500;
 
-const TERMINAL_SCROLLBACK_DEFAULT = 2000;
+// Ghostty keeps about 10 MB of history per terminal; the global budget in
+// scrollbackBudget.ts bounds the total across terminals.
+const TERMINAL_SCROLLBACK_DEFAULT = 10_000;
 const TERMINAL_SCROLLBACK_MIN = 200;
-const TERMINAL_SCROLLBACK_MAX = 50_000;
+const TERMINAL_SCROLLBACK_MAX = 100_000;
 export const TERMINAL_SCROLLBACK_PRESETS = [
-  500, 1000, 2000, 5000, 10_000, 25_000,
+  1000, 2000, 5000, 10_000, 25_000, 50_000, 100_000,
 ] as const;
 
 export const DEFAULT_PREFERENCES: Preferences = {

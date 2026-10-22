@@ -486,7 +486,7 @@ export function GeneralSection() {
         </SettingRow>
         <SettingRow
           title="Scrollback"
-          description="Lines of history kept per terminal. Higher uses more RAM (~3 KB / line)."
+          description="Lines of history kept per terminal (about 1 KB per line at 120 columns). All terminals together stay within a shared memory budget."
         >
           <Select
             value={String(terminalScrollback)}
