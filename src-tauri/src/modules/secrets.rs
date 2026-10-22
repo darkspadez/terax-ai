@@ -1,7 +1,10 @@
 //! Secret storage with platform-appropriate backends.
 //!
-//! - macOS: macOS Keychain (via `keyring` crate)
-//! - Windows: Credential Manager (via `keyring` crate)
+//! - macOS: the login Keychain (`keyring-core` + `apple-native-keyring-store`)
+//! - Windows: Credential Manager (`keyring-core` + `windows-native-keyring-store`)
+//!   Both stores keep the item layout of `keyring` 3 (generic password with
+//!   service/account; Windows target `account.service`, UTF-16 blob), so keys
+//!   saved by earlier releases are found; `keychain_compat` tests lock that.
 //! - Linux: a file in the app's local data dir, mode 0600. The default
 //!   `keyring` backend on Linux is the Secret Service over D-Bus, which
 //!   silently fails on systems without gnome-keyring/kwallet (and on the
@@ -105,9 +108,30 @@ where
     Ok(f(map))
 }
 
+/// The platform credential store, created on first use.
 #[cfg(not(target_os = "linux"))]
-fn entry(service: &str, account: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(service, account).map_err(|e| e.to_string())
+fn store() -> Result<&'static std::sync::Arc<keyring_core::CredentialStore>, String> {
+    use std::sync::{Arc, OnceLock};
+    static STORE: OnceLock<Result<Arc<keyring_core::CredentialStore>, String>> = OnceLock::new();
+    STORE
+        .get_or_init(|| {
+            #[cfg(target_os = "macos")]
+            let store = apple_native_keyring_store::keychain::Store::new();
+            #[cfg(target_os = "windows")]
+            let store = windows_native_keyring_store::Store::new();
+            store
+                .map(|store| store as Arc<keyring_core::CredentialStore>)
+                .map_err(|e| e.to_string())
+        })
+        .as_ref()
+        .map_err(Clone::clone)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn entry(service: &str, account: &str) -> Result<keyring_core::Entry, String> {
+    store()?
+        .build(service, account, None)
+        .map_err(|e| e.to_string())
 }
 
 // The keychain and the Linux file store both block (a locked keychain can wait
@@ -151,7 +175,7 @@ fn get_secret(
         let e = entry(service, account)?;
         match e.get_password() {
             Ok(v) => Ok(Some(v)),
-            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(keyring_core::Error::NoEntry) => Ok(None),
             Err(err) => Err(err.to_string()),
         }
     }
@@ -232,7 +256,7 @@ fn delete_secret(
         let _ = (app, state);
         let e = entry(service, account)?;
         match e.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
             Err(err) => Err(err.to_string()),
         }
     }
@@ -321,6 +345,61 @@ mod tests {
     }
 }
 
+/// Uses the real Keychain / Credential Manager, so it is ignored by default;
+/// CI runs it on macOS and Windows (`cargo nextest run --run-ignored only`).
+#[cfg(all(test, not(target_os = "linux")))]
+mod keychain_compat {
+    use super::entry;
+
+    /// Deletes the test item however the test ends.
+    struct Cleanup(String, String);
+
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            if let Ok(item) = keyring3::Entry::new(&self.0, &self.1) {
+                let _ = item.delete_credential();
+            }
+        }
+    }
+
+    fn unique_item() -> Cleanup {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        Cleanup(
+            format!("app.crynta.terax.test.{}.{nanos}", std::process::id()),
+            "openai".into(),
+        )
+    }
+
+    #[test]
+    #[ignore = "uses the real keychain; CI runs it on macOS and Windows"]
+    fn keychain_compat_reads_and_replaces_keyring3_items() {
+        let item = unique_item();
+        let (service, account) = (&item.0, &item.1);
+        let old = keyring3::Entry::new(service, account).unwrap();
+        old.set_password("sk-written-by-keyring-3 \u{1f511}")
+            .unwrap();
+
+        let new = entry(service, account).unwrap();
+        assert_eq!(
+            new.get_password().unwrap(),
+            "sk-written-by-keyring-3 \u{1f511}"
+        );
+
+        new.set_password("sk-written-by-keyring-core").unwrap();
+        assert_eq!(old.get_password().unwrap(), "sk-written-by-keyring-core");
+
+        new.delete_credential().unwrap();
+        assert!(matches!(old.get_password(), Err(keyring3::Error::NoEntry)));
+        assert!(matches!(
+            new.get_password(),
+            Err(keyring_core::Error::NoEntry)
+        ));
+    }
+}
+
 /// Batch read — single IPC roundtrip for the cold-boot fan-out.
 #[tauri::command]
 pub async fn secrets_get_all(
@@ -354,11 +433,7 @@ fn get_all_secrets(
         let _ = (app, state);
         Ok(accounts
             .into_iter()
-            .map(|a| {
-                keyring::Entry::new(service, &a)
-                    .ok()
-                    .and_then(|e| e.get_password().ok())
-            })
+            .map(|a| entry(service, &a).ok().and_then(|e| e.get_password().ok()))
             .collect())
     }
 }
