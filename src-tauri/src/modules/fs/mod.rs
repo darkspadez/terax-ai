@@ -12,7 +12,9 @@ pub mod watch;
 
 use std::path::Path;
 
-use crate::modules::workspace::WorkspaceEnv;
+use tauri::Manager;
+
+use crate::modules::workspace::{resolve_path, WorkspaceEnv, WorkspaceRegistry};
 
 /// Runs blocking filesystem work off the async workers and the main thread.
 /// Tauri runs a non-async command inline in the IPC handler (the main thread on
@@ -26,6 +28,19 @@ where
     tauri::async_runtime::spawn_blocking(work)
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// Refuses a folder (or file) to list or search outside every authorized folder. The work then
+/// goes through the spelling the page used, which the paths it reports follow.
+pub(crate) fn authorized_root(
+    app: &tauri::AppHandle,
+    path: &str,
+    workspace: Option<&WorkspaceEnv>,
+) -> Result<(), String> {
+    let workspace = workspace.cloned().unwrap_or_default();
+    app.state::<WorkspaceRegistry>()
+        .authorized_existing(&resolve_path(path, &workspace))
+        .map(drop)
 }
 
 /// How a path under a search root is shown to the frontend. WSL roots keep the

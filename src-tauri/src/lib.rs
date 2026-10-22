@@ -384,9 +384,7 @@ pub fn run() {
         .manage({
             let registry = workspace::WorkspaceRegistry::default();
             workspace::bootstrap_registry(&registry);
-            if let Some(ref launch_dir) = cli_dir {
-                let _ = registry.authorize(launch_dir);
-            }
+            modules::second_launch::authorize_launch(&registry, cli_dir.as_deref(), &launch.files);
             registry
         })
         .manage(LaunchDir::new(launch.folder))
@@ -579,10 +577,12 @@ pub fn run() {
                         .filter_map(launch_entry)
                         .collect();
                     let target = resolve_launch_target(entries);
-                    if let Some(dir) = &target.dir {
-                        if let Some(registry) = app.try_state::<workspace::WorkspaceRegistry>() {
-                            let _ = registry.authorize(dir);
-                        }
+                    if let Some(registry) = app.try_state::<workspace::WorkspaceRegistry>() {
+                        modules::second_launch::authorize_launch(
+                            &registry,
+                            target.dir.as_deref(),
+                            &target.files,
+                        );
                     }
                     // A folder (Open With, dropped on the Dock icon) is a launch
                     // folder while the main window has not started, later it

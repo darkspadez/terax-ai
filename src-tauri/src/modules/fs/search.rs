@@ -3,11 +3,11 @@ use std::path::Path;
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use super::index::{FileIndexState, IndexKey, Packed};
 use super::supersede::Supersede;
-use super::{blocking, display_path};
+use super::{authorized_root, blocking, display_path};
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
 #[derive(Serialize, Clone)]
@@ -57,6 +57,7 @@ const MAX_SEARCH_LIMIT: usize = 1000;
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn fs_search(
+    app: AppHandle,
     index: State<'_, FileIndexState>,
     supersede: State<'_, Supersede>,
     root: String,
@@ -69,6 +70,7 @@ pub async fn fs_search(
     let ticket = request_key.as_deref().map(|key| supersede.begin(key));
     let index = index.inner().clone();
     blocking(move || {
+        authorized_root(&app, &root, workspace.as_ref())?;
         let cancelled = || ticket.as_ref().is_some_and(|t| t.is_superseded());
         run_search(
             &index,
@@ -176,6 +178,7 @@ pub struct ListFilesResult {
 
 #[tauri::command]
 pub async fn fs_list_files(
+    app: AppHandle,
     index: State<'_, FileIndexState>,
     root: String,
     limit: Option<usize>,
@@ -184,7 +187,11 @@ pub async fn fs_list_files(
     show_hidden: Option<bool>,
 ) -> Result<ListFilesResult, String> {
     let index = index.inner().clone();
-    blocking(move || run_list_files(&index, root, limit, max_depth, workspace, show_hidden)).await
+    blocking(move || {
+        authorized_root(&app, &root, workspace.as_ref())?;
+        run_list_files(&index, root, limit, max_depth, workspace, show_hidden)
+    })
+    .await
 }
 
 pub fn run_list_files(

@@ -8,10 +8,10 @@ use grep_searcher::sinks::UTF8;
 use grep_searcher::{BinaryDetection, SearcherBuilder};
 use ignore::{WalkBuilder, WalkState};
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use super::supersede::Supersede;
-use super::{blocking, display_path, to_canon};
+use super::{authorized_root, blocking, display_path, to_canon};
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
 const FILE_SIZE_CAP: u64 = 5 * 1024 * 1024;
@@ -175,6 +175,7 @@ fn search_tree(
 
 #[tauri::command]
 pub async fn fs_grep(
+    app: AppHandle,
     pattern: String,
     root: String,
     glob: Option<Vec<String>>,
@@ -183,6 +184,7 @@ pub async fn fs_grep(
     workspace: Option<WorkspaceEnv>,
 ) -> Result<GrepResponse, String> {
     blocking(move || {
+        authorized_root(&app, &root, workspace.as_ref())?;
         run_grep(
             pattern,
             root,
@@ -240,6 +242,7 @@ pub fn run_grep(
 /// stops even though it is still occupying a blocking thread.
 #[tauri::command]
 pub async fn fs_grep_interactive(
+    app: AppHandle,
     supersede: State<'_, Supersede>,
     pattern: String,
     root: String,
@@ -248,6 +251,7 @@ pub async fn fs_grep_interactive(
 ) -> Result<GrepResponse, String> {
     let ticket = supersede.begin(INTERACTIVE_KEY);
     blocking(move || {
+        authorized_root(&app, &root, workspace.as_ref())?;
         run_grep_interactive(pattern, root, max_results, workspace, &|| {
             ticket.is_superseded()
         })
@@ -299,12 +303,17 @@ pub struct GlobResponse {
 
 #[tauri::command]
 pub async fn fs_glob(
+    app: AppHandle,
     pattern: String,
     root: String,
     max_results: Option<usize>,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<GlobResponse, String> {
-    blocking(move || run_glob(pattern, root, max_results, workspace)).await
+    blocking(move || {
+        authorized_root(&app, &root, workspace.as_ref())?;
+        run_glob(pattern, root, max_results, workspace)
+    })
+    .await
 }
 
 pub fn run_glob(

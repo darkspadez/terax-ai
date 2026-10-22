@@ -11,7 +11,7 @@ import { expandSnippetTokens, type Snippet } from "../lib/snippets";
 import { tryRunSlashCommand, type SlashCommandMeta } from "./slashCommands";
 import { getChat, useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
-import { currentWorkspaceEnv } from "@/modules/workspace";
+import { authorizeFileFolder, currentWorkspaceEnv } from "@/modules/workspace";
 
 export type FileAttachment = {
   id: string;
@@ -179,8 +179,10 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const removeCommand = (name: string) =>
     setPickedCommands((prev) => prev.filter((c) => c.name !== name));
 
+  // Picked by the user (Attach to Agent, an @ mention): its folder may be reached.
   const attachFileByPath = async (path: string) => {
     try {
+      await authorizeFileFolder(path);
       type ReadResult =
         | { kind: "text"; content: string; size: number }
         | { kind: "binary"; size: number }

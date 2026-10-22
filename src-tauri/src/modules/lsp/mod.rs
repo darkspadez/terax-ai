@@ -7,8 +7,11 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
 
 use tauri::ipc::{Channel, Response};
+use tauri::Manager;
 
-use crate::modules::workspace::{authorize_spawn_cwd, WorkspaceEnv, WorkspaceRegistry};
+use crate::modules::workspace::{
+    authorize_spawn_cwd, is_plain_name, WorkspaceEnv, WorkspaceRegistry,
+};
 use session::LspSession;
 
 pub struct LspState {
@@ -107,25 +110,37 @@ pub async fn lsp_spawn(
 }
 
 #[tauri::command]
-pub async fn lsp_resolve_root(path: String, markers: Vec<String>) -> Option<String> {
-    tauri::async_runtime::spawn_blocking(move || resolve_root(&path, &markers))
-        .await
-        .ok()
-        .flatten()
+pub async fn lsp_resolve_root(
+    app: tauri::AppHandle,
+    path: String,
+    markers: Vec<String>,
+) -> Option<String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        resolve_root(&app.state::<WorkspaceRegistry>(), &path, &markers)
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 // Stops below the home directory: a stray ~/package.json must not make a
-// server index the entire home dir.
-fn resolve_root(path: &str, markers: &[String]) -> Option<String> {
+// server index the entire home dir. Looks only into authorized folders, for
+// markers that are plain names.
+fn resolve_root(registry: &WorkspaceRegistry, path: &str, markers: &[String]) -> Option<String> {
     let home = dirs::home_dir();
     let start = std::path::PathBuf::from(path);
+    registry.authorized_existing(&start).ok()?;
+    let markers: Vec<&String> = markers
+        .iter()
+        .filter(|m| is_plain_name(m.as_ref()))
+        .collect();
     let mut dir = if start.is_dir() {
         start.as_path()
     } else {
         start.parent()?
     };
     loop {
-        if home.as_deref() == Some(dir) {
+        if home.as_deref() == Some(dir) || registry.authorized_existing(dir).is_err() {
             return None;
         }
         if markers.iter().any(|m| dir.join(m).exists()) {
@@ -167,6 +182,12 @@ pub fn lsp_kill(state: tauri::State<'_, LspState>, id: u32) {
 mod tests {
     use super::*;
 
+    fn authorized(path: &std::path::Path) -> WorkspaceRegistry {
+        let registry = WorkspaceRegistry::default();
+        registry.authorize(path).unwrap();
+        registry
+    }
+
     #[test]
     fn resolve_root_finds_nearest_marker() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -177,6 +198,7 @@ mod tests {
         std::fs::write(nested.join("main.rs"), "").unwrap();
 
         let found = resolve_root(
+            &authorized(tmp.path()),
             nested.join("main.rs").to_str().unwrap(),
             &["Cargo.toml".to_string()],
         );
@@ -191,6 +213,7 @@ mod tests {
         std::fs::write(nested.join("f.rs"), "").unwrap();
 
         let found = resolve_root(
+            &authorized(tmp.path()),
             nested.join("f.rs").to_str().unwrap(),
             &["Cargo.toml".to_string()],
         );
@@ -201,9 +224,54 @@ mod tests {
     fn resolve_root_stops_at_home() {
         let home = dirs::home_dir().expect("home");
         let found = resolve_root(
-            home.join("somefile.ts").to_str().unwrap(),
+            &authorized(&home),
+            home.to_str().unwrap(),
             &["nonexistent-marker-xyz".to_string()],
         );
         assert_eq!(found, None);
+    }
+
+    #[test]
+    fn resolve_root_looks_only_into_authorized_folders() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let member = tmp.path().join("crates").join("app");
+        std::fs::create_dir_all(&member).unwrap();
+        std::fs::write(tmp.path().join("Cargo.toml"), "").unwrap();
+        std::fs::write(member.join("main.rs"), "").unwrap();
+        let markers = ["Cargo.toml".to_string()];
+        let file = member.join("main.rs");
+
+        assert_eq!(
+            resolve_root(&authorized(&member), file.to_str().unwrap(), &markers),
+            None,
+            "the marker above the authorized folder is not probed"
+        );
+        assert_eq!(
+            resolve_root(
+                &WorkspaceRegistry::default(),
+                file.to_str().unwrap(),
+                &markers
+            ),
+            None,
+            "a file outside every authorized folder"
+        );
+    }
+
+    #[test]
+    fn resolve_root_ignores_markers_that_are_not_plain_names() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let proj = tmp.path().join("proj");
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::write(proj.join("f.rs"), "").unwrap();
+        std::fs::write(tmp.path().join("secret"), "").unwrap();
+        let file = proj.join("f.rs");
+        let markers = [
+            "../secret".to_string(),
+            tmp.path().join("secret").to_string_lossy().into_owned(),
+        ];
+        assert_eq!(
+            resolve_root(&authorized(tmp.path()), file.to_str().unwrap(), &markers),
+            None
+        );
     }
 }

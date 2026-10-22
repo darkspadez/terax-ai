@@ -1,5 +1,11 @@
 export { useWorkspaceAssetUrl } from "./assetUrl";
 export {
+  authorizationSettled,
+  authorizeFileFolder,
+  authorizeFolder,
+  authorizeRoot,
+} from "./authorize";
+export {
   currentWorkspaceScopeKey,
   currentWorkspaceEnv,
   getWslHome,

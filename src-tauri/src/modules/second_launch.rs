@@ -84,6 +84,21 @@ fn forward(app: &tauri::AppHandle, action: SecondLaunch) {
     });
 }
 
+/// Authorizes what a launch asks to open: its folder, and the folder each file is really in, so
+/// every file opens wherever it lies.
+pub(crate) fn authorize_launch(
+    registry: &workspace::WorkspaceRegistry,
+    dir: Option<&str>,
+    files: &[String],
+) {
+    if let Some(dir) = dir {
+        let _ = registry.authorize(dir);
+    }
+    for file in files {
+        let _ = registry.authorize_opened(file, workspace::Opened::File);
+    }
+}
+
 fn open_second_launch(app: &tauri::AppHandle, action: SecondLaunch) {
     let authorize = |dir: &str| {
         if let Some(registry) = app.try_state::<workspace::WorkspaceRegistry>() {
@@ -92,8 +107,8 @@ fn open_second_launch(app: &tauri::AppHandle, action: SecondLaunch) {
     };
     let opened = match action {
         SecondLaunch::Files { dir, files } => {
-            if let Some(dir) = &dir {
-                authorize(dir);
+            if let Some(registry) = app.try_state::<workspace::WorkspaceRegistry>() {
+                authorize_launch(&registry, dir.as_deref(), &files);
             }
             match open_files(app, files) {
                 Some(window) => {
@@ -124,6 +139,29 @@ fn open_second_launch(app: &tauri::AppHandle, action: SecondLaunch) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_launch_authorizes_the_folder_of_every_file() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let a = first.path().join("a.txt");
+        let b = second.path().join("b.txt");
+        std::fs::write(&a, b"a").unwrap();
+        std::fs::write(&b, b"b").unwrap();
+        let registry = workspace::WorkspaceRegistry::default();
+        authorize_launch(
+            &registry,
+            Some(&fs::to_canon(first.path())),
+            &[fs::to_canon(&a), fs::to_canon(&b)],
+        );
+        assert!(registry.authorized_existing(&a).is_ok());
+        assert!(
+            registry.authorized_existing(&b).is_ok(),
+            "not only the first file's"
+        );
+        let elsewhere = tempfile::tempdir().unwrap();
+        assert!(registry.authorized_existing(elsewhere.path()).is_err());
+    }
 
     #[test]
     fn a_later_launch_opens_files_else_its_folder_else_a_window() {

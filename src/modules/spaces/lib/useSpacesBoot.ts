@@ -1,16 +1,21 @@
-import { native } from "@/modules/ai/lib/native";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { Tab } from "@/modules/tabs";
 import { DEFAULT_SPACE_ID } from "@/modules/tabs/lib/useTabs";
-import { isLeaf, type PaneNode } from "@/modules/terminal/lib/panes";
 import { adoptScrollbackKey } from "@/modules/terminal/lib/terminalScrollbackRestore";
 import { parseWorkspaceScopeKey, type WorkspaceEnv } from "@/modules/workspace";
+import { authorizeRoot } from "@/modules/workspace/authorize";
 import { useEffect, useRef } from "react";
 import {
   activeSpaceEnv,
   applyExplicitLaunchDir,
   freshTabCwd,
 } from "./activeSpace";
+import {
+  deferRestoreGrants,
+  grantRestored,
+  planRestoreGrants,
+  type RestoredGrant,
+} from "./restoreGrants";
 import {
   type AdoptScrollbackKey,
   freshTerminalTab,
@@ -39,7 +44,10 @@ export type BootDependencies = {
   loadAll: typeof loadAll;
   saveSpacesList: typeof saveSpacesList;
   saveActiveId: typeof saveActiveId;
-  workspaceAuthorize: (path: string) => Promise<unknown>;
+  /** The folder Terax was asked to open, in the local environment. */
+  authorizeLaunchDir: (path: string) => Promise<unknown>;
+  grant: (grant: RestoredGrant) => Promise<unknown>;
+  deferGrants: (later: Map<string, RestoredGrant[]>) => void;
   hydrate: (
     spaces: SpaceMeta[],
     activeId: string | null,
@@ -53,7 +61,9 @@ const defaultDependencies: BootDependencies = {
   loadAll,
   saveSpacesList,
   saveActiveId,
-  workspaceAuthorize: (path) => native.workspaceAuthorize(path),
+  authorizeLaunchDir: (path) => authorizeRoot(path, { kind: "local" }),
+  grant: grantRestored,
+  deferGrants: deferRestoreGrants,
   hydrate: (spaces, activeId, initialActiveIndex) =>
     useSpaces.getState().hydrate(spaces, activeId, initialActiveIndex),
   defaultWorkspaceEnv: async () => {
@@ -69,17 +79,16 @@ const defaultDependencies: BootDependencies = {
   adoptScrollbackKey,
 };
 
-function uniqueCwds(tabs: Tab[]): string[] {
-  const set = new Set<string>();
-  const walk = (n: PaneNode) => {
-    if (isLeaf(n)) {
-      if (n.cwd) set.add(n.cwd);
-      return;
-    }
-    for (const c of n.children) walk(c);
-  };
-  for (const t of tabs) if (t.kind === "terminal") walk(t.paneTree);
-  return [...set];
+/** Authorizes what the restored spaces work in; see `planRestoreGrants`. */
+async function grantRestore(
+  deps: BootDependencies,
+  spaces: SpaceMeta[],
+  tabs: Tab[],
+  activeId: string,
+): Promise<void> {
+  const plan = planRestoreGrants(spaces, tabs, activeId);
+  deps.deferGrants(plan.later);
+  await Promise.allSettled(plan.now.map((grant) => deps.grant(grant)));
 }
 
 /** Restores the window's spaces and tabs, or creates its first space. */
@@ -112,7 +121,7 @@ export async function bootSpaces(
     };
     if (explicitLaunchDir) {
       await adoptWorkspaceEnv(meta.env).catch(() => null);
-      await deps.workspaceAuthorize(explicitLaunchDir).catch(() => null);
+      await deps.authorizeLaunchDir(explicitLaunchDir).catch(() => null);
     }
     await deps.saveSpacesList([meta]);
     await deps.saveActiveId(DEFAULT_SPACE_ID);
@@ -145,7 +154,12 @@ export async function bootSpaces(
     await Promise.allSettled([
       deps.saveSpacesList(launched.spaces),
       deps.saveActiveId(launched.activeSpaceId),
-      ...uniqueCwds(launched.tabs).map((cwd) => deps.workspaceAuthorize(cwd)),
+      grantRestore(
+        deps,
+        launched.spaces,
+        launched.tabs,
+        launched.activeSpaceId,
+      ),
     ]);
     deps.hydrate(launched.spaces, launched.activeSpaceId, initialActiveIndex);
     replaceTabs(launched.tabs, launched.activeTabId);
@@ -167,9 +181,7 @@ export async function bootSpaces(
     restored.push(freshTerminalTab(active, cwd, allocId));
   }
 
-  await Promise.allSettled(
-    uniqueCwds(restored).map((cwd) => deps.workspaceAuthorize(cwd)),
-  );
+  await grantRestore(deps, spaces, restored, active);
 
   deps.hydrate(spaces, active, initialActiveIndex);
 

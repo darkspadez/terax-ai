@@ -8,7 +8,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { currentWorkspaceEnv } from "@/modules/workspace";
+import { authorizeFileFolder, currentWorkspaceEnv } from "@/modules/workspace";
 import { File02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
@@ -69,6 +69,8 @@ export function NewEditorDialog({
       ? trimmed
       : joinPath(rootPath, trimmed);
     try {
+      // An absolute name may point anywhere the user chose.
+      await authorizeFileFolder(path);
       await invoke("fs_create_file", {
         path,
         workspace: currentWorkspaceEnv(),

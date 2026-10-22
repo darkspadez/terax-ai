@@ -4,6 +4,7 @@ import { native } from "@/modules/ai/lib/native";
 import { useSpaces } from "@/modules/spaces";
 import { planEnvSwitch } from "@/modules/spaces/lib/activeSpace";
 import {
+  authorizeRoot,
   getWslHome,
   LOCAL_WORKSPACE,
   type WorkspaceEnv,
@@ -38,14 +39,10 @@ export function useWorkspaceSwitcher({
 
   useEffect(() => {
     homeDir()
-      .then(async (p) => {
+      .then((p) => {
         const normalized = p.replace(/\\/g, "/");
+        void authorizeRoot(normalized);
         setHome(normalized);
-        try {
-          await native.workspaceAuthorize(normalized);
-        } catch {
-          // Bootstrap already authorizes home from Rust; ignore.
-        }
       })
       .catch(() => setHome(null));
   }, []);
@@ -59,13 +56,11 @@ export function useWorkspaceSwitcher({
   }, []);
 
   const authorizeHome = useCallback(async (nextHome: string) => {
+    // Before the explorer can list it: its listing waits for this.
+    const authorized = authorizeRoot(nextHome);
     setHome(nextHome);
     setLaunchCwd(nextHome);
-    try {
-      await native.workspaceAuthorize(nextHome);
-    } catch {
-      // Non-fatal — git panel will surface "not authorized" if needed.
-    }
+    await authorized;
   }, []);
 
   const switchWorkspace = useCallback(

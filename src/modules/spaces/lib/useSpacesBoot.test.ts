@@ -2,6 +2,7 @@ import type { Tab, TerminalTab } from "@/modules/tabs/lib/useTabs";
 import { findLeafCwd } from "@/modules/terminal/lib/panes";
 import type { WorkspaceEnv } from "@/modules/workspace";
 import { describe, expect, it, vi } from "vitest";
+import type { RestoredGrant } from "./restoreGrants";
 import type { SpaceMeta, SpaceState } from "./store";
 import { type BootDependencies, bootSpaces } from "./useSpacesBoot";
 
@@ -53,10 +54,15 @@ function setup({
       await laterTask();
       events.push("saved-active");
     }),
-    workspaceAuthorize: vi.fn(async (cwd: string) => {
+    authorizeLaunchDir: vi.fn(async (path: string) => {
       await laterTask();
-      events.push(`authorized:${cwd}`);
+      events.push(`authorized:${path}`);
     }),
+    grant: vi.fn(async (grant: RestoredGrant) => {
+      await laterTask();
+      events.push(`authorized:${grant.path}`);
+    }),
+    deferGrants: vi.fn((_later: Map<string, RestoredGrant[]>) => {}),
     hydrate: vi.fn(() => {
       events.push("hydrate");
     }),
@@ -160,7 +166,11 @@ describe("bootSpaces", () => {
     });
     expect(activeTab().spaceId).toBe(created.id);
     expect(activeCwd()).toBe("D:/test");
-    expect(deps.workspaceAuthorize).toHaveBeenCalledWith("D:/test");
+    expect(deps.grant).toHaveBeenCalledWith({
+      path: "D:/test",
+      file: false,
+      env: { kind: "local" },
+    });
   });
 
   it("roots the first space at a launch folder, as a local space", async () => {
@@ -208,12 +218,75 @@ describe("bootSpaces", () => {
     expect(params.adoptWorkspaceEnv).not.toHaveBeenCalled();
   });
 
+  it("authorizes the restored files' folders before the tabs show", async () => {
+    const { deps, events, params } = setup({
+      states: new Map([
+        [
+          "repo",
+          {
+            tabs: [
+              { kind: "editor", path: "D:/notes/todo.txt" },
+              { kind: "markdown", path: "E:/docs/readme.md" },
+            ],
+            activeTabIndex: 0,
+          },
+        ],
+        ["other", state("C:/work/other")],
+      ]),
+    });
+
+    await bootSpaces(params, deps);
+
+    expect(deps.grant).toHaveBeenCalledWith({
+      path: "D:/notes/todo.txt",
+      file: true,
+      env: { kind: "local" },
+    });
+    expect(deps.grant).toHaveBeenCalledWith({
+      path: "C:/work/repo",
+      file: false,
+      env: { kind: "local" },
+    });
+    for (const event of [
+      "authorized:D:/notes/todo.txt",
+      "authorized:E:/docs/readme.md",
+      "authorized:C:/work/other",
+    ]) {
+      expect(events.indexOf(event)).toBeGreaterThan(-1);
+      expect(events.indexOf(event)).toBeLessThan(events.indexOf("hydrate"));
+    }
+  });
+
+  it("leaves an inactive WSL space's folders until it is activated", async () => {
+    const ubuntu = { kind: "wsl", distro: "Ubuntu" } as const;
+    const { deps, params } = setup({
+      spaces: [
+        space({ id: "linux", root: "/home/me/app", env: ubuntu }),
+        space({ id: "other", name: "Other", root: "C:/work/other" }),
+      ],
+      states: new Map([
+        ["linux", state("/home/me/app")],
+        ["other", state("C:/work/other")],
+      ]),
+    });
+
+    await bootSpaces(params, deps);
+
+    const granted = deps.grant.mock.calls.map(([grant]) => grant.path);
+    expect(granted).toEqual(["C:/work/other"]);
+    expect(deps.deferGrants).toHaveBeenCalledWith(
+      new Map([
+        ["linux", [{ path: "/home/me/app", file: false, env: ubuntu }]],
+      ]),
+    );
+  });
+
   it("still shows the spaces when saving or authorizing fails", async () => {
     const { deps, events, params } = setup();
     params.explicitLaunchDir = "C:/work/repo";
     deps.saveSpacesList.mockRejectedValue(new Error("save spaces"));
     deps.saveActiveId.mockRejectedValue(new Error("save active"));
-    deps.workspaceAuthorize.mockRejectedValue(new Error("authorize"));
+    deps.grant.mockRejectedValue(new Error("authorize"));
     params.adoptWorkspaceEnv.mockRejectedValue(new Error("adopt"));
 
     await bootSpaces(params, deps);

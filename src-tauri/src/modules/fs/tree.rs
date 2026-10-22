@@ -6,7 +6,7 @@ use std::time::UNIX_EPOCH;
 use ignore::WalkBuilder;
 use serde::Serialize;
 
-use super::blocking;
+use super::{authorized_root, blocking};
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
 #[derive(Serialize, Debug, PartialEq, Eq)]
@@ -146,12 +146,17 @@ fn natural_cmp(a: &str, b: &str) -> Ordering {
 /// callers pay nothing.
 #[tauri::command]
 pub async fn fs_read_dir(
+    app: tauri::AppHandle,
     path: String,
     show_hidden: bool,
     git_decorations: Option<bool>,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<Vec<DirEntry>, String> {
-    blocking(move || read_dir_entries(path, show_hidden, git_decorations, workspace)).await
+    blocking(move || {
+        authorized_root(&app, &path, workspace.as_ref())?;
+        read_dir_entries(path, show_hidden, git_decorations, workspace)
+    })
+    .await
 }
 
 pub fn read_dir_entries(
@@ -245,11 +250,16 @@ pub fn read_dir_entries(
 /// Hidden entries are filtered by dot-prefix only.
 #[tauri::command]
 pub async fn list_subdirs(
+    app: tauri::AppHandle,
     path: String,
     show_hidden: bool,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<Vec<String>, String> {
-    blocking(move || subdirs(path, show_hidden, workspace)).await
+    blocking(move || {
+        authorized_root(&app, &path, workspace.as_ref())?;
+        subdirs(path, show_hidden, workspace)
+    })
+    .await
 }
 
 pub fn subdirs(

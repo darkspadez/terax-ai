@@ -1,9 +1,11 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::UNIX_EPOCH;
 use std::{fs, io::Write};
 
 use serde::Serialize;
 use tauri::{Emitter, Manager};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tempfile::NamedTempFile;
 
 use super::blocking;
@@ -60,13 +62,17 @@ fn mtime_millis(meta: &fs::Metadata) -> u64 {
 
 #[tauri::command]
 pub async fn fs_read_file(
+    app: tauri::AppHandle,
     path: String,
     workspace: Option<WorkspaceEnv>,
     force: Option<bool>,
 ) -> Result<ReadResult, String> {
     blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
-        read_file_sync(&resolve_path(&path, &workspace), force.unwrap_or(false))
+        let real = app
+            .state::<WorkspaceRegistry>()
+            .authorized_existing(&resolve_path(&path, &workspace))?;
+        read_file_sync(&real, force.unwrap_or(false))
     })
     .await
 }
@@ -176,7 +182,9 @@ pub async fn fs_write_file(
     let watcher = app.clone();
     let (path, mtime) = blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
-        let target = resolve_path(&path, &workspace);
+        let target = watcher
+            .state::<WorkspaceRegistry>()
+            .authorized_write_target(&resolve_path(&path, &workspace))?;
         let (real, existed) = write_file_sync(&target, content.as_bytes()).map_err(|e| {
             log::warn!("fs_write_file({}) failed: {e}", target.display());
             e.to_string()
@@ -197,29 +205,42 @@ pub async fn fs_write_file(
 
 #[tauri::command]
 pub async fn fs_canonicalize(
+    app: tauri::AppHandle,
     path: String,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<String, String> {
     blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
-        let p = resolve_path(&path, &workspace);
-        let canon = std::fs::canonicalize(&p).map_err(|e| e.to_string())?;
-        Ok(super::to_canon(&canon))
+        let real = app
+            .state::<WorkspaceRegistry>()
+            .authorized_existing(&resolve_path(&path, &workspace))?;
+        Ok(super::to_canon(&real))
     })
     .await
 }
 
 /// The host path a workspace file is read through. The asset protocol (media
 /// and Markdown image previews) opens host paths, so a WSL path must become
-/// its share or drvfs drive path first; local paths come back unchanged.
+/// its share or drvfs drive path first; local paths come back unchanged,
+/// without touching the disk.
 #[tauri::command]
-pub async fn fs_host_path(path: String, workspace: Option<WorkspaceEnv>) -> Result<String, String> {
+pub async fn fs_host_path(
+    app: tauri::AppHandle,
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<String, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if !workspace.is_wsl() {
         return Ok(path);
     }
     // Mapping a WSL path probes the share, which can stall.
-    blocking(move || Ok(host_path(&path, &workspace))).await
+    blocking(move || {
+        let host = host_path(&path, &workspace);
+        app.state::<WorkspaceRegistry>()
+            .authorized_existing(Path::new(&host))?;
+        Ok(host)
+    })
+    .await
 }
 
 fn host_path(path: &str, workspace: &WorkspaceEnv) -> String {
@@ -230,12 +251,9 @@ fn host_path(path: &str, workspace: &WorkspaceEnv) -> String {
 /// inside an authorized workspace (a link pointing out of it is refused). A folder goes to the
 /// file manager through Reveal instead.
 fn default_app_target(registry: &WorkspaceRegistry, path: &Path) -> Result<PathBuf, String> {
-    let canonical = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
+    let canonical = registry.authorized_existing(path)?;
     if !canonical.is_file() {
         return Err("only files open in their default app".into());
-    }
-    if !registry.is_authorized(&canonical) {
-        return Err("path is outside the authorized workspace".into());
     }
     // Applications get the path in its ordinary spelling, not `\\?\`-prefixed.
     #[cfg(windows)]
@@ -248,74 +266,165 @@ fn default_app_target(registry: &WorkspaceRegistry, path: &Path) -> Result<PathB
 enum OpenStep {
     /// Hand this path to the OS.
     Open(PathBuf),
-    /// The file would run as a program, which the user has not confirmed yet.
-    Confirm,
+    /// The file would run as a program: the user is asked first, in a native dialog.
+    AskFirst(PathBuf),
 }
 
 /// Decides on the real path, so a link or an innocent-looking name cannot skip the question.
 fn open_step(
     registry: &WorkspaceRegistry,
     path: &Path,
-    confirmed: bool,
     runs_as_program: impl Fn(&Path) -> bool,
 ) -> Result<OpenStep, String> {
     let target = default_app_target(registry, path)?;
-    if !confirmed && runs_as_program(&target) {
-        return Ok(OpenStep::Confirm);
+    if runs_as_program(&target) {
+        return Ok(OpenStep::AskFirst(target));
     }
     Ok(OpenStep::Open(target))
+}
+
+/// The path to hand the OS: a document at once, a program only once `ask` says the user agreed.
+async fn consented<F, A>(step: OpenStep, ask: A) -> Option<PathBuf>
+where
+    A: FnOnce(PathBuf) -> F,
+    F: std::future::Future<Output = bool>,
+{
+    match step {
+        OpenStep::Open(target) => Some(target),
+        OpenStep::AskFirst(target) => ask(target.clone()).await.then_some(target),
+    }
+}
+
+/// The question's title and text: the file's name, and that it runs as a program.
+fn run_prompt_text(target: &Path) -> (String, String) {
+    let name = target.file_name().map_or_else(
+        || target.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    (
+        format!("Run \u{201c}{name}\u{201d}?"),
+        format!(
+            "Opening \u{201c}{name}\u{201d} runs it as a program on your computer. Only run it if you \
+             trust where it came from.\n\n{}",
+            target.display()
+        ),
+    )
+}
+
+/// Set while a run question is on screen, so a second request does not stack another dialog.
+static RUN_PROMPT_OPEN: AtomicBool = AtomicBool::new(false);
+
+struct RunPrompt;
+
+impl RunPrompt {
+    fn begin() -> Option<Self> {
+        (!RUN_PROMPT_OPEN.swap(true, Ordering::AcqRel)).then_some(Self)
+    }
+}
+
+impl Drop for RunPrompt {
+    fn drop(&mut self) {
+        RUN_PROMPT_OPEN.store(false, Ordering::Release);
+    }
+}
+
+/// Asks in the OS's own dialog, attached to the calling window, whether to run `target`. The
+/// dialog runs on the main thread and answers on another; this waits without holding a thread.
+/// Nothing in a page can answer it.
+async fn ask_to_run(app: &tauri::AppHandle, window: &tauri::Window, target: &Path) -> bool {
+    let (title, message) = run_prompt_text(target);
+    let (answer, answered) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .message(message)
+        .title(title)
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Run".into(),
+            "Cancel".into(),
+        ))
+        .parent(window)
+        .show(move |run| {
+            let _ = answer.send(run);
+        });
+    // A dialog that never showed (the app is closing) dropped the sender: nothing runs.
+    answered.await.unwrap_or(false)
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OpenOutcome {
     Opened,
-    /// Nothing was opened: the file would run as a program. Calling again with `confirmed`
-    /// opens it.
-    Confirm,
+    /// Nothing was opened: the file would run as a program and the user said no.
+    Cancelled,
 }
 
 /// Opens a file with the application the OS associates with it, as a double-click in the file
 /// manager would. A file that would run as a program (`launch::runs_as_program`) opens only
-/// when the call says the user confirmed that.
+/// after the user agrees in a native dialog the backend shows; the page cannot approve it.
 #[tauri::command]
 pub async fn fs_open_default(
     app: tauri::AppHandle,
+    window: tauri::Window,
     path: String,
     workspace: Option<WorkspaceEnv>,
-    confirmed: Option<bool>,
 ) -> Result<OpenOutcome, String> {
-    blocking(move || {
+    let gate = app.clone();
+    let step = blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
-        let step = open_step(
-            &app.state::<WorkspaceRegistry>(),
+        open_step(
+            &gate.state::<WorkspaceRegistry>(),
             &resolve_path(&path, &workspace),
-            confirmed.unwrap_or(false),
             launch::file_runs_as_program,
-        )?;
-        let OpenStep::Open(target) = step else {
-            return Ok(OpenOutcome::Confirm);
-        };
+        )
+    })
+    .await?;
+    let prompt = match &step {
+        OpenStep::AskFirst(_) => {
+            Some(RunPrompt::begin().ok_or("another program is waiting for an answer to run")?)
+        }
+        OpenStep::Open(_) => None,
+    };
+    let (app_ref, window_ref) = (&app, &window);
+    let target = consented(step, |target| async move {
+        ask_to_run(app_ref, window_ref, &target).await
+    })
+    .await;
+    drop(prompt);
+    let Some(target) = target else {
+        return Ok(OpenOutcome::Cancelled);
+    };
+    blocking(move || {
+        // Still an authorized file now that the user has answered.
+        let target = default_app_target(&app.state::<WorkspaceRegistry>(), &target)?;
         tauri_plugin_opener::open_path(&target, None::<&str>).map_err(|e| {
             log::warn!("fs_open_default({}) failed: {e}", target.display());
             e.to_string()
-        })?;
-        Ok(OpenOutcome::Opened)
+        })
+    })
+    .await?;
+    Ok(OpenOutcome::Opened)
+}
+
+#[tauri::command]
+pub async fn fs_stat(
+    app: tauri::AppHandle,
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<FileStat, String> {
+    blocking(move || {
+        let workspace = WorkspaceEnv::from_option(workspace);
+        let p = resolve_path(&path, &workspace);
+        let real = app.state::<WorkspaceRegistry>().authorized_existing(&p)?;
+        stat_path(&p, &real)
     })
     .await
 }
 
-#[tauri::command]
-pub async fn fs_stat(path: String, workspace: Option<WorkspaceEnv>) -> Result<FileStat, String> {
-    blocking(move || stat_path(path, workspace)).await
-}
-
-fn stat_path(path: String, workspace: Option<WorkspaceEnv>) -> Result<FileStat, String> {
-    let workspace = WorkspaceEnv::from_option(workspace);
-    let p = resolve_path(&path, &workspace);
-    let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
+/// `path` as the page named it (a link reports itself), `real` where it leads.
+fn stat_path(p: &Path, real: &Path) -> Result<FileStat, String> {
+    let meta = std::fs::metadata(real).map_err(|e| e.to_string())?;
     // fs::metadata follows symlinks, so the link check needs symlink_metadata.
-    let kind = if std::fs::symlink_metadata(&p)
+    let kind = if std::fs::symlink_metadata(p)
         .map(|m| m.file_type().is_symlink())
         .unwrap_or(false)
     {
@@ -374,7 +483,7 @@ mod tests {
     }
 
     #[test]
-    fn a_program_opens_only_once_confirmed() {
+    fn a_program_is_asked_about_and_a_document_is_not() {
         let dir = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
         let doc = root.join("report.pdf");
@@ -383,23 +492,63 @@ mod tests {
         std::fs::write(&script, b"@echo off").unwrap();
         let registry = WorkspaceRegistry::default();
         registry.authorize(&root).unwrap();
-        let step = |path: &Path, confirmed| {
-            open_step(&registry, path, confirmed, launch::file_runs_as_program)
-        };
+        let step = |path: &Path| open_step(&registry, path, launch::file_runs_as_program);
 
-        assert_eq!(step(&doc, false), Ok(OpenStep::Open(doc.clone())));
-        assert_eq!(step(&script, false), Ok(OpenStep::Confirm));
-        assert_eq!(step(&script, true), Ok(OpenStep::Open(script.clone())));
+        assert_eq!(step(&doc), Ok(OpenStep::Open(doc.clone())));
+        assert_eq!(step(&script), Ok(OpenStep::AskFirst(script.clone())));
     }
 
     #[test]
-    fn confirming_never_opens_outside_the_workspace() {
+    fn a_program_opens_only_with_the_users_consent() {
+        let run = |step, answer: bool| {
+            let asked = std::cell::Cell::new(None);
+            let target = tauri::async_runtime::block_on(consented(step, |target| {
+                asked.set(Some(target));
+                std::future::ready(answer)
+            }));
+            (target, asked.take())
+        };
+        let script = PathBuf::from("/w/setup.sh");
+        assert_eq!(
+            run(OpenStep::AskFirst(script.clone()), false),
+            (None, Some(script.clone()))
+        );
+        assert_eq!(
+            run(OpenStep::AskFirst(script.clone()), true),
+            (Some(script.clone()), Some(script))
+        );
+        let doc = PathBuf::from("/w/report.pdf");
+        assert_eq!(
+            run(OpenStep::Open(doc.clone()), false),
+            (Some(doc), None),
+            "a document opens without a question"
+        );
+    }
+
+    #[test]
+    fn the_question_names_the_file_and_says_it_runs_as_a_program() {
+        let (title, message) = run_prompt_text(Path::new("/w/tools/setup.sh"));
+        assert_eq!(title, "Run \u{201c}setup.sh\u{201d}?");
+        assert!(message.starts_with("Opening \u{201c}setup.sh\u{201d} runs it as a program"));
+        assert!(message.ends_with(&Path::new("/w/tools/setup.sh").display().to_string()));
+    }
+
+    #[test]
+    fn one_run_question_is_on_screen_at_a_time() {
+        let first = RunPrompt::begin().expect("no question is open");
+        assert!(RunPrompt::begin().is_none(), "a second one would stack");
+        drop(first);
+        assert!(RunPrompt::begin().is_some(), "answered: the next may ask");
+    }
+
+    #[test]
+    fn nothing_outside_the_workspace_is_asked_about() {
         let dir = tempfile::tempdir().unwrap();
         let script = std::fs::canonicalize(dir.path()).unwrap().join("setup.bat");
         std::fs::write(&script, b"@echo off").unwrap();
         let registry = WorkspaceRegistry::default();
-        assert!(open_step(&registry, &script, true, |_| true).is_err());
-        assert!(open_step(&registry, &script, false, |_| true).is_err());
+        assert!(open_step(&registry, &script, |_| true).is_err());
+        assert!(open_step(&registry, &script, |_| false).is_err());
     }
 
     #[cfg(unix)]
@@ -414,8 +563,8 @@ mod tests {
         let registry = WorkspaceRegistry::default();
         registry.authorize(&root).unwrap();
         assert_eq!(
-            open_step(&registry, &link, false, launch::file_runs_as_program),
-            Ok(OpenStep::Confirm)
+            open_step(&registry, &link, launch::file_runs_as_program),
+            Ok(OpenStep::AskFirst(script))
         );
     }
 
@@ -426,8 +575,8 @@ mod tests {
             r#""opened""#
         );
         assert_eq!(
-            serde_json::to_string(&OpenOutcome::Confirm).unwrap(),
-            r#""confirm""#
+            serde_json::to_string(&OpenOutcome::Cancelled).unwrap(),
+            r#""cancelled""#
         );
     }
 

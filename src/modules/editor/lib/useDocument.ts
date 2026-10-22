@@ -1,6 +1,7 @@
 import { notifyDocumentSaved } from "@/modules/lsp";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { currentWorkspaceEnv } from "@/modules/workspace";
+import { authorizationSettled } from "@/modules/workspace/authorize";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -20,13 +21,16 @@ type Options = {
   onDirtyChange?: (dirty: boolean) => void;
 };
 
+// A tab opened a moment ago may still be waiting for its folder's authorization.
 const tauriDocumentIo: DocumentIo = {
   read: (path, force) =>
-    invoke<ReadResult>("fs_read_file", {
-      path,
-      workspace: currentWorkspaceEnv(),
-      force,
-    }),
+    authorizationSettled(path).then(() =>
+      invoke<ReadResult>("fs_read_file", {
+        path,
+        workspace: currentWorkspaceEnv(),
+        force,
+      }),
+    ),
   mtime: (path) =>
     invoke<{ mtime: number }>("fs_stat", {
       path,

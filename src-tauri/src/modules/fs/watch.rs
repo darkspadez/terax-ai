@@ -517,12 +517,17 @@ pub async fn fs_watch_add(
     let owner = webview.label().to_owned();
     blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
-        let dirs = prepare_dirs(&app.state::<WorkspaceRegistry>(), &workspace, paths);
+        let registry = app.state::<WorkspaceRegistry>();
+        let dirs = prepare_dirs(&registry, &workspace, paths);
         let files: Vec<_> = files
             .unwrap_or_default()
             .into_iter()
             .filter_map(|raw| {
                 let (dir, key, path) = canonical_file(&workspace, &raw)?;
+                // Its folder, as the watch sees it: the file's own changes are reported from there.
+                if !registry.is_authorized(path.parent()?) {
+                    return None;
+                }
                 Some((dir, key, raw, FileStamp::of(&path)))
             })
             .collect();

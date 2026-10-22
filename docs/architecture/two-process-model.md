@@ -43,6 +43,8 @@ Output streams over the `terax-pty` custom URI scheme (one held `poll` request p
 
 ### File system (`src-tauri/src/modules/fs/`)
 
+Every command here that takes a path is refused outside the folders the workspace registry authorizes (see `security-model.md`, "File commands").
+
 #### Tree
 
 - `list_subdirs` - list subdirectories
@@ -55,6 +57,7 @@ Output streams over the `terax-pty` custom URI scheme (one held `poll` request p
 - `fs_stat` - file metadata
 - `fs_canonicalize` - canonical path
 - `fs_host_path` - host path of a workspace file (WSL share or drive), for asset URLs
+- `fs_open_default` - open a file in its default app; a program only after the user agrees in a native dialog the backend shows
 
 #### Mutate
 
@@ -106,7 +109,7 @@ Three distinct surfaces:
 
 ### Workspace (`src-tauri/src/modules/workspace.rs`)
 
-- `workspace_authorize` / `workspace_current_dir` - the spawn/git/AI cwd authorization registry
+- `workspace_authorize` / `workspace_current_dir` - the authorization registry behind file commands, spawn cwds, git and the AI tools (`opened`: a folder browsed or a file opened, adding no root an authorized folder covers)
 - `wsl_list_distros` / `wsl_default_distro` / `wsl_home` - WSL bridge
 
 ### Network (`src-tauri/src/modules/net.rs`, `net/`)

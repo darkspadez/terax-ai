@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 #[cfg(target_os = "linux")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -72,6 +72,101 @@ impl WorkspaceRegistry {
         set.iter().any(|root| target.starts_with(root))
     }
 
+    /// Lets the file commands reach what the user opened: a folder, or the folder a file is
+    /// really in (a link is followed; for a missing file, the folder it would be in). A folder an
+    /// authorized one already covers is left alone, so browsing and opening add no roots.
+    pub fn authorize_opened<P: AsRef<Path>>(
+        &self,
+        path: P,
+        opened: Opened,
+    ) -> std::io::Result<PathBuf> {
+        let path = path.as_ref();
+        let folder = match (opened, std::fs::canonicalize(path)) {
+            (_, Ok(real)) if real.is_dir() => real,
+            (Opened::File, Ok(real)) => real.parent().map_or(real.clone(), Path::to_path_buf),
+            (Opened::File, Err(_)) => std::fs::canonicalize(
+                path.parent()
+                    .ok_or_else(|| std::io::Error::other("path has no folder"))?,
+            )?,
+            (Opened::Folder, Ok(_)) => return Err(std::io::Error::other("not a folder")),
+            (Opened::Folder, Err(error)) => return Err(error),
+        };
+        if self.is_authorized(&folder) {
+            return Ok(folder);
+        }
+        self.authorize(folder)
+    }
+
+    /// The real path of an existing `path` (links followed), for a command that reads, lists,
+    /// stats, searches or watches it. Refused outside every authorized folder, and a missing path
+    /// out there reads as outside too, so the answer never tells whether it exists.
+    pub fn authorized_existing(&self, path: &Path) -> Result<PathBuf, String> {
+        require_absolute(path)?;
+        match std::fs::canonicalize(path) {
+            Ok(real) if self.is_authorized(&real) => Ok(real),
+            Ok(_) => Err(outside(path)),
+            Err(error) => Err(self.missing(path, error)),
+        }
+    }
+
+    /// A directory entry itself, not what a link points to: its name in its real folder, which
+    /// must be authorized. For renaming, moving, deleting and copying entries.
+    pub fn authorized_entry(&self, path: &Path) -> Result<PathBuf, String> {
+        require_absolute(path)?;
+        let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+            return Err(format!("not a file or folder: {}", path.display()));
+        };
+        if !is_plain_name(name) {
+            return Err(format!("not a file or folder: {}", path.display()));
+        }
+        Ok(self.authorized_existing(parent)?.join(name))
+    }
+
+    /// A path that may not exist yet (a file or folder to create): its nearest existing ancestor,
+    /// as it really is, must be authorized and every name below it a plain name, so neither a
+    /// link nor `..` leads out.
+    pub fn authorized_new(&self, path: &Path) -> Result<PathBuf, String> {
+        require_absolute(path)?;
+        let (real, rest) = nearest_real_ancestor(path).ok_or_else(|| outside(path))?;
+        if !self.is_authorized(&real) {
+            return Err(outside(path));
+        }
+        if !is_plain_relative(rest) {
+            return Err(format!(
+                "not a plain path below its folder: {}",
+                path.display()
+            ));
+        }
+        Ok(real.join(rest))
+    }
+
+    /// The file a write lands in: an existing file (a link followed to its file) or a new one.
+    /// A dangling link is an error, never a new file at a place the user did not name.
+    pub fn authorized_write_target(&self, path: &Path) -> Result<PathBuf, String> {
+        require_absolute(path)?;
+        match std::fs::symlink_metadata(path) {
+            Ok(meta) if meta.file_type().is_symlink() => match std::fs::canonicalize(path) {
+                Ok(_) => self.authorized_existing(path),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    self.authorized_entry(path)?;
+                    Err("symlink target does not exist".into())
+                }
+                Err(error) => Err(self.missing(path, error)),
+            },
+            Ok(_) => self.authorized_existing(path),
+            Err(_) => self.authorized_new(path),
+        }
+    }
+
+    /// The error for a path that could not be resolved: the real one inside an authorized
+    /// folder, "outside" anywhere else.
+    fn missing(&self, path: &Path, error: std::io::Error) -> String {
+        match nearest_real_ancestor(path) {
+            Some((real, _)) if self.is_authorized(&real) => error.to_string(),
+            _ => outside(path),
+        }
+    }
+
     pub fn canonicalize_cached<P: AsRef<Path>>(&self, path: P) -> std::io::Result<PathBuf> {
         let key = path.as_ref().to_path_buf();
         {
@@ -105,6 +200,42 @@ impl WorkspaceRegistry {
         );
         Ok(canonical)
     }
+}
+
+fn outside(path: &Path) -> String {
+    format!("{} is outside the authorized folders", path.display())
+}
+
+fn require_absolute(path: &Path) -> Result<(), String> {
+    if path.is_absolute() {
+        Ok(())
+    } else {
+        Err(format!("not an absolute path: {}", path.display()))
+    }
+}
+
+/// The deepest ancestor of `path` (itself included) that resolves, as it really is, and the
+/// part of `path` below it.
+fn nearest_real_ancestor(path: &Path) -> Option<(PathBuf, &Path)> {
+    path.ancestors().find_map(|ancestor| {
+        let real = std::fs::canonicalize(ancestor).ok()?;
+        Some((real, path.strip_prefix(ancestor).ok()?))
+    })
+}
+
+fn is_plain_relative(path: &Path) -> bool {
+    path.components()
+        .all(|component| matches!(component, Component::Normal(_)))
+}
+
+/// One plain file name: not `.`, `..` or a root, and nothing that parses as more than a name
+/// on its own (`a:b` is a drive-relative path on Windows), which would replace the folder it
+/// is joined to.
+pub(crate) fn is_plain_name(name: &std::ffi::OsStr) -> bool {
+    matches!(
+        Path::new(name).components().collect::<Vec<_>>().as_slice(),
+        [Component::Normal(_)]
+    )
 }
 
 // `None` means "use bootstrapped default". `Some` is canonicalized to defeat
@@ -176,19 +307,37 @@ pub fn bootstrap_registry(registry: &WorkspaceRegistry) {
     }
 }
 
+/// What the user opened, for `workspace_authorize`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Opened {
+    /// A folder they browse.
+    Folder,
+    /// A file: the folder it is really in.
+    File,
+}
+
+/// Makes a folder a workspace root, or with `opened` lets the file commands reach what the user
+/// opened (`WorkspaceRegistry::authorize_opened`). The page calls it for what the user chose (a
+/// folder opened or browsed, a file opened from the explorer, a link clicked, items dropped),
+/// never for a path a program or an AI reply named on its own.
 #[tauri::command]
 pub async fn workspace_authorize(
     app: tauri::AppHandle,
     path: String,
     workspace: Option<WorkspaceEnv>,
+    opened: Option<Opened>,
 ) -> Result<String, String> {
     // Canonicalizing touches the disk (possibly a network volume).
     crate::modules::fs::blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
         let resolved = resolve_path(&path, &workspace);
-        let canonical = tauri::Manager::state::<WorkspaceRegistry>(&app)
-            .authorize(&resolved)
-            .map_err(|e| e.to_string())?;
+        let registry = tauri::Manager::state::<WorkspaceRegistry>(&app);
+        let canonical = match opened {
+            Some(opened) => registry.authorize_opened(&resolved, opened),
+            None => registry.authorize(&resolved),
+        }
+        .map_err(|e| e.to_string())?;
         Ok(crate::modules::fs::to_canon(&canonical))
     })
     .await
@@ -1070,6 +1219,259 @@ mod auth_tests {
         let err = authorize_spawn_cwd(&reg, Some(&s), &WorkspaceEnv::Local)
             .expect_err("symlink-escape must be rejected");
         assert!(err.contains("outside"), "got: {err}");
+    }
+
+    fn is_outside(result: Result<PathBuf, String>) -> bool {
+        result.is_err_and(|e| e.contains("outside the authorized folders"))
+    }
+
+    #[test]
+    fn files_are_reached_only_inside_authorized_folders() {
+        let root = tempdir("gate-root");
+        let foreign = tempdir("gate-foreign");
+        fs::write(root.join("a.txt"), b"a").unwrap();
+        fs::write(foreign.join("b.txt"), b"b").unwrap();
+        let reg = WorkspaceRegistry::default();
+        reg.authorize(&root).unwrap();
+
+        assert_eq!(
+            reg.authorized_existing(&root.join("a.txt")),
+            Ok(root.join("a.txt"))
+        );
+        assert!(is_outside(reg.authorized_existing(&foreign.join("b.txt"))));
+        assert!(is_outside(reg.authorized_existing(&foreign)));
+        assert!(is_outside(
+            reg.authorized_write_target(&foreign.join("b.txt"))
+        ));
+        assert!(is_outside(reg.authorized_new(&foreign.join("new.txt"))));
+        assert!(is_outside(reg.authorized_entry(&foreign.join("b.txt"))));
+    }
+
+    #[test]
+    fn a_missing_path_outside_reads_as_outside_and_inside_as_missing() {
+        let root = tempdir("gate-missing");
+        let foreign = tempdir("gate-missing-foreign");
+        let reg = WorkspaceRegistry::default();
+        reg.authorize(&root).unwrap();
+        let inside = reg.authorized_existing(&root.join("gone.txt")).unwrap_err();
+        assert!(!inside.contains("outside"), "got: {inside}");
+        assert!(is_outside(
+            reg.authorized_existing(&foreign.join("gone.txt"))
+        ));
+        assert!(is_outside(reg.authorized_existing(
+            &foreign.join("a").join("b").join("gone.txt")
+        )));
+    }
+
+    #[test]
+    fn new_paths_need_an_authorized_folder_and_plain_names() {
+        let root = tempdir("gate-new");
+        let reg = WorkspaceRegistry::default();
+        reg.authorize(&root).unwrap();
+        let nested = root.join("a").join("b").join("c.txt");
+        assert_eq!(reg.authorized_new(&nested), Ok(nested.clone()));
+        assert_eq!(
+            reg.authorized_new(&root.join("c.txt")),
+            Ok(root.join("c.txt"))
+        );
+        let up = |start: &str| root.join(start).join("..").join("..").join("escape");
+        assert!(reg.authorized_new(&up("a")).is_err());
+        assert!(reg.authorized_new(&up("missing")).is_err());
+    }
+
+    #[test]
+    fn dot_dot_never_leads_out() {
+        let parent = tempdir("gate-dots");
+        let root = parent.join("root");
+        let other = parent.join("other");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        fs::write(other.join("secret.txt"), b"s").unwrap();
+        let reg = WorkspaceRegistry::default();
+        reg.authorize(&root).unwrap();
+        let sneaky = root.join("..").join("other").join("secret.txt");
+        assert!(is_outside(reg.authorized_existing(&sneaky)));
+        assert!(is_outside(reg.authorized_write_target(&sneaky)));
+        assert!(is_outside(reg.authorized_entry(&sneaky)));
+        assert!(reg.authorized_entry(&root.join("sub").join("..")).is_err());
+    }
+
+    #[test]
+    fn an_authorized_folder_itself_is_not_an_entry_to_delete_or_rename() {
+        let root = tempdir("gate-root-entry");
+        let reg = WorkspaceRegistry::default();
+        reg.authorize(&root).unwrap();
+        fs::create_dir(root.join("sub")).unwrap();
+        assert_eq!(
+            reg.authorized_entry(&root.join("sub")),
+            Ok(root.join("sub"))
+        );
+        assert!(is_outside(reg.authorized_entry(&root)));
+    }
+
+    #[test]
+    fn relative_paths_are_refused() {
+        let reg = WorkspaceRegistry::default();
+        reg.authorize(env::current_dir().unwrap()).unwrap();
+        for gate in [
+            WorkspaceRegistry::authorized_existing,
+            WorkspaceRegistry::authorized_entry,
+            WorkspaceRegistry::authorized_new,
+            WorkspaceRegistry::authorized_write_target,
+        ] {
+            let err = gate(&reg, Path::new("Cargo.toml")).unwrap_err();
+            assert!(err.contains("not an absolute path"), "got: {err}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn links_are_judged_by_where_they_lead() {
+        use std::os::unix::fs::symlink;
+        let root = tempdir("gate-links");
+        let foreign = tempdir("gate-links-foreign");
+        fs::write(foreign.join("secret.txt"), b"s").unwrap();
+        fs::write(root.join("real.txt"), b"r").unwrap();
+        symlink(foreign.join("secret.txt"), root.join("innocent.txt")).unwrap();
+        symlink(&foreign, root.join("escape")).unwrap();
+        symlink(root.join("real.txt"), root.join("alias.txt")).unwrap();
+        symlink(root.join("gone.txt"), root.join("dangling.txt")).unwrap();
+        let reg = WorkspaceRegistry::default();
+        reg.authorize(&root).unwrap();
+
+        assert!(is_outside(
+            reg.authorized_existing(&root.join("innocent.txt"))
+        ));
+        assert!(is_outside(
+            reg.authorized_write_target(&root.join("innocent.txt"))
+        ));
+        assert!(is_outside(
+            reg.authorized_existing(&root.join("escape/secret.txt"))
+        ));
+        assert!(is_outside(reg.authorized_existing(&root.join("escape"))));
+        assert!(is_outside(reg.authorized_new(&root.join("escape/new.txt"))));
+        assert!(is_outside(reg.authorized_new(&root.join("escape/a/b"))));
+        // The link itself lives in the folder: it may be renamed or deleted.
+        assert_eq!(
+            reg.authorized_entry(&root.join("innocent.txt")),
+            Ok(root.join("innocent.txt"))
+        );
+        assert_eq!(
+            reg.authorized_write_target(&root.join("alias.txt")),
+            Ok(root.join("real.txt"))
+        );
+        assert_eq!(
+            reg.authorized_write_target(&root.join("dangling.txt")),
+            Err("symlink target does not exist".into())
+        );
+    }
+
+    #[test]
+    fn opening_a_file_authorizes_its_folder() {
+        let folder = tempdir("file-folder");
+        fs::write(folder.join("a.txt"), b"a").unwrap();
+        let reg = WorkspaceRegistry::default();
+        assert_eq!(
+            reg.authorize_opened(folder.join("a.txt"), Opened::File)
+                .unwrap(),
+            folder
+        );
+        assert!(reg.is_authorized(&folder.join("a.txt")));
+
+        let other = tempdir("file-folder-missing");
+        let reg = WorkspaceRegistry::default();
+        assert_eq!(
+            reg.authorize_opened(other.join("new.txt"), Opened::File)
+                .unwrap(),
+            other,
+            "a file not there (any more) authorizes the folder it would be in"
+        );
+        assert_eq!(reg.authorize_opened(&other, Opened::File).unwrap(), other);
+        assert!(reg
+            .authorize_opened(folder.join("a.txt"), Opened::Folder)
+            .is_err());
+        assert!(reg
+            .authorize_opened(other.join("gone"), Opened::Folder)
+            .is_err());
+    }
+
+    #[test]
+    fn opening_inside_an_authorized_folder_adds_no_root() {
+        let root = tempdir("opened-inside");
+        fs::create_dir_all(root.join(".config").join("app")).unwrap();
+        fs::write(root.join("a.txt"), b"a").unwrap();
+        let reg = WorkspaceRegistry::default();
+        reg.authorize(&root).unwrap();
+        let added = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let sink = added.clone();
+        reg.watch_roots(move |r| sink.lock().unwrap().push(r.to_path_buf()));
+        added.lock().unwrap().clear();
+
+        reg.authorize_opened(root.join("a.txt"), Opened::File)
+            .unwrap();
+        reg.authorize_opened(root.join(".config").join("app"), Opened::Folder)
+            .unwrap();
+        assert!(added.lock().unwrap().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opening_a_linked_file_authorizes_the_folder_it_is_in() {
+        let real = tempdir("file-folder-real");
+        let links = tempdir("file-folder-links");
+        fs::write(real.join("notes.md"), b"n").unwrap();
+        std::os::unix::fs::symlink(real.join("notes.md"), links.join("notes.md")).unwrap();
+        let reg = WorkspaceRegistry::default();
+        assert_eq!(
+            reg.authorize_opened(links.join("notes.md"), Opened::File)
+                .unwrap(),
+            real
+        );
+        assert!(!reg.is_authorized(&links));
+        assert_eq!(
+            reg.authorized_existing(&links.join("notes.md")),
+            Ok(real.join("notes.md"))
+        );
+    }
+
+    #[test]
+    fn the_page_names_what_was_opened_in_one_word() {
+        assert_eq!(
+            serde_json::from_str::<Opened>(r#""file""#).unwrap(),
+            Opened::File
+        );
+        assert_eq!(
+            serde_json::from_str::<Opened>(r#""folder""#).unwrap(),
+            Opened::Folder
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn wsl_paths_are_judged_by_their_host_path() {
+        let root = tempdir("gate-wsl");
+        fs::write(root.join("a.txt"), b"a").unwrap();
+        let host = crate::modules::fs::to_canon(&root);
+        let drvfs = format!("/mnt/{}{}", host[..1].to_ascii_lowercase(), &host[2..]);
+        let ubuntu = WorkspaceEnv::Wsl {
+            distro: "Ubuntu".into(),
+        };
+        let reg = WorkspaceRegistry::default();
+        assert!(is_outside(reg.authorized_existing(&resolve_path(
+            &format!("{drvfs}/a.txt"),
+            &ubuntu
+        ))));
+        reg.authorize(&root).unwrap();
+        assert_eq!(
+            reg.authorized_existing(&resolve_path(&format!("{drvfs}/a.txt"), &ubuntu)),
+            Ok(root.join("a.txt"))
+        );
+        assert!(is_outside(
+            reg.authorized_existing(&resolve_path("/etc/passwd", &ubuntu))
+        ));
+        assert!(is_outside(
+            reg.authorized_new(&resolve_path("/home/me/new.txt", &ubuntu))
+        ));
     }
 
     #[test]

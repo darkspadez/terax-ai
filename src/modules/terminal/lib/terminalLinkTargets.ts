@@ -1,4 +1,5 @@
 import { openExternalUrl } from "@/lib/external-link";
+import { authorizeFileFolder } from "@/modules/workspace/authorize";
 import { currentWorkspaceEnv } from "@/modules/workspace/env";
 import { invoke } from "@tauri-apps/api/core";
 import { parseTerminalPathLink } from "../ghostty/core/terminalLinks";
@@ -104,8 +105,10 @@ export async function openTerminalLinkTarget(
     void openExternalUrl(target.url, onExternalSettled);
     return;
   }
-  // Detected paths are guesses: open only what exists.
+  // The user clicked it, so its folder may be reached; terminal output alone
+  // never authorizes anything. Detected paths are guesses: open only what exists.
   const workspace = currentWorkspaceEnv();
+  await authorizeFileFolder(target.path, workspace);
   const stat = await invoke<{ kind: string }>("fs_stat", {
     path: target.path,
     workspace,

@@ -3,6 +3,7 @@ import { pathKey } from "@/lib/pathKey";
 import { cn } from "@/lib/utils";
 import { listenFsChanged } from "@/modules/explorer/lib/watch";
 import { currentWorkspaceEnv } from "@/modules/workspace";
+import { authorizationSettled } from "@/modules/workspace/authorize";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useEffect, useMemo, useState } from "react";
@@ -79,19 +80,23 @@ export function MarkdownPreviewPane({ path, visible, onSetView }: Props) {
     // Each reported change of the file reads it again.
     void revision;
     let cancelled = false;
-    invoke<PreviewReadResult>("fs_read_file", {
-      path,
-      workspace: currentWorkspaceEnv(),
-    }).then(
-      (result) => {
-        if (!cancelled)
-          setStatus((prev) => previewAfterRead(prev, { ok: true, result }));
-      },
-      (error) => {
-        if (!cancelled)
-          setStatus((prev) => previewAfterRead(prev, { ok: false, error }));
-      },
-    );
+    authorizationSettled(path)
+      .then(() =>
+        invoke<PreviewReadResult>("fs_read_file", {
+          path,
+          workspace: currentWorkspaceEnv(),
+        }),
+      )
+      .then(
+        (result) => {
+          if (!cancelled)
+            setStatus((prev) => previewAfterRead(prev, { ok: true, result }));
+        },
+        (error) => {
+          if (!cancelled)
+            setStatus((prev) => previewAfterRead(prev, { ok: false, error }));
+        },
+      );
     return () => {
       cancelled = true;
     };
