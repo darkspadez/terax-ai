@@ -220,6 +220,22 @@ describe("terminal selection pointer ownership", () => {
     fixture.controller.dispose();
   });
 
+  // crynta/terax-ai#917: the release of a drag can be lost.
+  it("ends a drag whose release was lost at the first move without the button", () => {
+    const { controller, pointer } = dragFixture();
+    pointer("pointerdown", 15);
+    pointer("pointermove", 45);
+    expect(controller.value?.focus.column).toBe(4);
+    pointer("pointermove", 205, 10, 0);
+    pointer("pointermove", 305, 10, 1);
+    expect(controller.value?.focus.column).toBe(4);
+    // A plain click afterwards starts a new gesture as usual.
+    pointer("pointerdown", 25);
+    pointer("pointerup", 25);
+    expect(controller.value).toBeNull();
+    controller.dispose();
+  });
+
   it("stops autoscrolling when the history boundary is reached", () => {
     let frame: FrameRequestCallback | undefined;
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -340,11 +356,17 @@ function dragFixture(
     model,
     onChange,
     tracked: () => tracked,
-    pointer: (type: string, clientX: number, clientY = 10) =>
+    pointer: (
+      type: string,
+      clientX: number,
+      clientY = 10,
+      buttons = type === "pointerup" ? 0 : 1,
+    ) =>
       target.dispatchEvent(
         Object.assign(new Event(type, { cancelable: true }), {
           pointerId: 1,
           button: 0,
+          buttons,
           detail: 1,
           shiftKey: false,
           altKey: false,

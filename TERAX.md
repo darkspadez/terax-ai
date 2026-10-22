@@ -247,6 +247,8 @@ The block prompt retains an enabled terminal input proxy for native menus and
 routes editing keys, composed text and paste back to its command editor.
 Character drags retain a native selection pin from pointerdown, including before
 the first pointermove. Unmoved clicks and lost captures discard provisional pins.
+A drag whose release never arrived ends at the first move without the
+primary button, where the pointer last was.
 Key encoding supplies the base character required by Kitty keyboard mode; plain
 keys and key releases also use Ghostty encoding when the application requests it.
 Shift that picked a key's typed character is passed as consumed, as Ghostty's
