@@ -1,3 +1,4 @@
+import { IS_MAC } from "@/lib/platform";
 import { endpointIdFromCompatModel } from "@/modules/ai/config";
 import { getCustomEndpointKey, getKey } from "@/modules/ai/lib/keyring";
 import { native } from "@/modules/ai/lib/native";
@@ -13,7 +14,6 @@ import { redo, undo } from "@codemirror/commands";
 import {
   findNext,
   findPrevious,
-  gotoLine,
   openSearchPanel,
   SearchQuery,
   setSearchQuery,
@@ -44,6 +44,8 @@ import {
 } from "./lib/autocomplete/inlineExtension";
 import { diagnosticsReporter } from "./lib/diagnosticsReporter";
 import { useDiagnosticsStore } from "./lib/diagnosticsStore";
+import { editorClaimedModKey, editorKeymap } from "./lib/editorKeymap";
+import { normalizeToLf } from "./lib/eol";
 import {
   buildSharedExtensions,
   DEFAULT_INDENT,
@@ -60,16 +62,15 @@ import {
   resolveFormatter,
   runExternalFormatter,
 } from "./lib/externalFormat";
-import { normalizeToLf } from "./lib/eol";
 import { gitChangeGutter, setGitBase } from "./lib/gitGutter";
 import { onHeadMoved } from "./lib/gitSignals";
 import { defaultIndentUnit, detectIndentUnit } from "./lib/indent";
 import { type LanguageResult, resolveLanguage } from "./lib/languageResolver";
+import { mediaPreviewKind } from "./lib/mediaPreview";
 import { FORCE_READ_LIMIT, useDocument } from "./lib/useDocument";
 import { useEditorThemeExt } from "./lib/useEditorThemeExt";
 import { applyFormattedContent, syncViewText } from "./lib/viewSync";
 import { initVimGlobals, vimHandlersExtension } from "./lib/vim";
-import { mediaPreviewKind } from "./lib/mediaPreview";
 import { MediaPreview } from "./MediaPreview";
 
 initVimGlobals();
@@ -423,17 +424,7 @@ export const EditorPane = memo(
           getPath: () => pathRef.current,
           getLanguage: () => languageRef.current,
         }),
-        keymap.of([
-          {
-            key: "Mod-s",
-            preventDefault: true,
-            run: () => {
-              void performSaveRef.current();
-              return true;
-            },
-          },
-          { key: "Ctrl-g", run: gotoLine },
-        ]),
+        editorKeymap(() => void performSaveRef.current()),
       ],
       [],
     );
@@ -739,7 +730,10 @@ export const EditorPane = memo(
     }
 
     return (
-      <div className="flex h-full min-h-0 flex-col zoom-exempt">
+      <div
+        className="flex h-full min-h-0 flex-col zoom-exempt"
+        data-claims-mod-key={editorClaimedModKey(IS_MAC)}
+      >
         <MountedCodeMirror
           ref={cmRef}
           initialValue={doc.content}
