@@ -21,7 +21,7 @@ const EXITED_DRAIN_GRACE: Duration = Duration::from_millis(750);
 const KILLED_DRAIN_GRACE: Duration = Duration::from_millis(500);
 /// How long a process group may take to exit after SIGTERM before SIGKILL.
 #[cfg(unix)]
-const TERM_GRACE: Duration = Duration::from_secs(2);
+pub(crate) const TERM_GRACE: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy)]
 pub struct Limits {

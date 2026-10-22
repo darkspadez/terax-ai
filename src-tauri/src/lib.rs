@@ -501,6 +501,9 @@ pub fn run() {
                     if let Some(state) = app.try_state::<lsp::LspState>() {
                         state.kill_all();
                     }
+                    if let Some(state) = app.try_state::<shell::ShellState>() {
+                        state.kill_all();
+                    }
                     if let Some(state) = app.try_state::<control::ControlState>() {
                         state.shutdown();
                     }

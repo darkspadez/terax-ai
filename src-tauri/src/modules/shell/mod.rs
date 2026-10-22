@@ -12,7 +12,7 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::Manager;
 
-use crate::modules::proc::capture::{self, Limits};
+use crate::modules::proc::capture::{self, Limits, OnTimeout};
 #[cfg(windows)]
 use crate::modules::workspace::validate_wsl_distro_name;
 use crate::modules::workspace::{authorize_spawn_cwd, WorkspaceEnv, WorkspaceRegistry};
@@ -33,8 +33,9 @@ pub struct CommandOutput {
     pub truncated: bool,
 }
 
-/// Runs a one-shot command via the user's login shell. Output is capped and
-/// the process is force-killed on timeout. We deliberately do NOT pipe into
+/// Runs a one-shot command (`build_oneshot_command`). Output is capped and on
+/// timeout the command stops with everything it started (on Unix its process
+/// group gets SIGTERM, then SIGKILL). We deliberately do NOT pipe into
 /// the user's interactive PTY — that would fight their input. AI tool calls
 /// are presented in chat as their own structured result.
 #[tauri::command]
@@ -103,7 +104,7 @@ fn run_blocking(
         .stderr(Stdio::piped());
     crate::modules::proc::hide_console(&mut cmd);
 
-    let captured = capture::run(
+    let captured = capture::run_with(
         &mut cmd,
         dur,
         Limits {
@@ -111,6 +112,7 @@ fn run_blocking(
             stderr: MAX_OUTPUT_BYTES,
             stop_on_stdout_cap: false,
         },
+        OnTimeout::TerminateGroup,
     )
     .map_err(|e| {
         log::warn!("shell_run_command failed: {e}");
@@ -135,6 +137,18 @@ pub struct ShellState {
     bg: RwLock<HashMap<u32, Arc<BackgroundProc>>>,
     next_session_id: AtomicU32,
     next_bg_id: AtomicU32,
+}
+
+impl ShellState {
+    /// Stops every background process with what it started; on app exit,
+    /// since nothing would read their output or stop them afterwards.
+    pub fn kill_all(&self) {
+        let drained: Vec<Arc<BackgroundProc>> =
+            self.bg.write().unwrap().drain().map(|(_, p)| p).collect();
+        for proc in drained {
+            proc.kill();
+        }
+    }
 }
 
 impl Default for ShellState {
@@ -373,6 +387,26 @@ mod tests {
         let out = run("sleep 10", 1);
         assert!(out.timed_out);
         assert_eq!(out.exit_code, None);
+    }
+
+    #[test]
+    fn a_timed_out_command_takes_what_it_started_with_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("survived");
+        let script = format!(
+            "(trap '' TERM; sleep 1; touch '{}') & wait",
+            marker.display()
+        );
+        let out = run_blocking_inner(
+            script,
+            None,
+            WorkspaceEnv::Local,
+            Duration::from_millis(200),
+        )
+        .expect("run");
+        assert!(out.timed_out);
+        std::thread::sleep(Duration::from_millis(1500));
+        assert!(!marker.exists(), "a grandchild outlived the timeout");
     }
 
     #[test]
