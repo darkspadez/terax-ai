@@ -7,6 +7,7 @@ import type { TerminalDamage } from "@/modules/terminal/backend/contracts";
 import { CellFlags } from "@terax/ghostty-core/protocol";
 import type { Rgb, TerminalCellReader } from "../core/packedCells";
 import type { GhosttyTerminalModelApi } from "../GhosttyTerminalModel";
+import { type LinkCellRange, linkRangesEqual } from "../gpu/linkUnderline";
 import {
   CanvasBackingStore,
   type GestureGrowth,
@@ -20,6 +21,7 @@ import {
   type TerminalSelectionBounds,
 } from "../selection/TerminalSelectionController";
 import { WebGlGlyphAtlas, type WebGlGlyphEntry } from "./WebGlGlyphAtlas";
+import type { WebGlImageLayer } from "./WebGlImageLayer";
 
 const GLYPH_FLOATS = 15;
 const GLYPH_POSITION_OFFSET = 13;
@@ -31,6 +33,16 @@ const MIN_CELL_CAPACITY = 1_024;
 const CONTEXT_RESTORE_TIMEOUT_MS = 3_000;
 const SEARCH_MATCH_BACKGROUND = 0x515c6a;
 const SEARCH_ACTIVE_MATCH_BACKGROUND = 0xd18616;
+/** Rectangle style of strikethrough and overline: solid, but a decoration, not a background. */
+const SOLID_DECORATION = 6;
+/** Kitty image layers (see `gpu/imageLayer.ts`, not imported: it loads with the images). */
+const IMAGES_UNDER_BACKGROUNDS = 0;
+const IMAGES_BELOW_TEXT = 1;
+const IMAGES_ABOVE_TEXT = 2;
+
+type ImageLayerModule = typeof import("./WebGlImageLayer");
+let imageLayerModule: Promise<ImageLayerModule> | null = null;
+let loadedImageLayerModule: ImageLayerModule | null = null;
 
 const PROJECTION_MATRIX = new Float32Array([
   2, 0, 0, 0, 0, -2, 0, 0, 0, 0, 1, 0, -1, 1, 0, 1,
@@ -49,6 +61,8 @@ export type WebGlRendererFrame = {
   readonly textBlinkVisible: boolean;
   readonly selection: TerminalSelectionBounds | null;
   readonly searchMatchAt: (row: number, column: number) => 0 | 1 | 2;
+  /** Cells of the hovered link, underlined as an overlay. */
+  readonly link?: LinkCellRange | null;
 };
 
 export type WebGlCellRendererStats = {
@@ -67,11 +81,17 @@ export type WebGlCellRendererStats = {
   readonly uploadedGlyphBytes: number;
   readonly uploadedRectangleBytes: number;
   readonly contextRecoveries: number;
+  /** Kitty image textures (included in `gpuBufferBytes`). */
+  readonly imageBytes: number;
 };
 
 type Program = {
   readonly value: WebGLProgram;
   readonly projection: WebGLUniformLocation;
+};
+
+type ColorProgram = Program & {
+  readonly decorationsOnly: WebGLUniformLocation;
 };
 
 type GlyphProgram = Program & {
@@ -87,13 +107,15 @@ type RectangleVertices = {
 };
 
 type RendererResources = {
-  readonly colorProgram: Program;
+  readonly colorProgram: ColorProgram;
   readonly glyphProgram: GlyphProgram;
   readonly backgroundVao: WebGLVertexArrayObject;
   readonly cursorVao: WebGLVertexArrayObject;
+  readonly linkVao: WebGLVertexArrayObject;
   readonly glyphVao: WebGLVertexArrayObject;
   readonly backgroundBuffer: WebGLBuffer;
   readonly cursorBuffer: WebGLBuffer;
+  readonly linkBuffer: WebGLBuffer;
   readonly glyphBuffer: WebGLBuffer;
   readonly buffers: readonly WebGLBuffer[];
   readonly vaos: readonly WebGLVertexArrayObject[];
@@ -133,6 +155,12 @@ export class WebGlCellRenderer {
   };
   private readonly uploadedCursor = new Float32Array(RECTANGLE_FLOATS);
   private uploadedCursorCount = -1;
+  private readonly linkVertices: RectangleVertices = {
+    attributes: new Float32Array(0),
+    count: 0,
+  };
+  /** The link range `linkVertices` were built for. */
+  private renderedLink: LinkCellRange | null = null;
   private forcePresent = true;
   private lastTextBlinkVisible = true;
   private glyphInstanceCount = 0;
@@ -154,8 +182,19 @@ export class WebGlCellRenderer {
   private backingStoreResizeCount = 0;
   private blinkingRowCount = 0;
   private disposed = false;
-  private onContextRestored: (() => void) | null = null;
+  /** Schedules the owning surface (a restored context, images that finished loading). */
+  private requestFrame: (() => void) | null = null;
   private onContextFailure: ((error: Error) => void) | null = null;
+  /** Kitty images; the layer's code loads, and it is created, when a pane first shows one. */
+  private images: WebGlImageLayer | null = null;
+  /** The model the image textures belong to; a pooled renderer may serve another next. */
+  private imagesOwner: GhosttyTerminalModelApi | null = null;
+  /** The owner's Kitty z below which images go under the cell backgrounds. */
+  private imageBackgroundLimit: number | undefined;
+  private imagesLoading = false;
+  /** Placements must be read again without damage: the image layer just loaded. */
+  private imagesStale = false;
+  private imagesShownValue = false;
 
   constructor() {
     this.canvas.className = "block";
@@ -182,11 +221,11 @@ export class WebGlCellRenderer {
 
   configure(
     profile: WebGlRendererProfile,
-    onContextRestored: () => void,
+    requestFrame: () => void,
     onContextFailure: (error: Error) => void,
   ): void {
     this.assertLive();
-    this.onContextRestored = onContextRestored;
+    this.requestFrame = requestFrame;
     this.onContextFailure = onContextFailure;
     const fontChanged =
       !this.profile ||
@@ -209,8 +248,12 @@ export class WebGlCellRenderer {
 
   detach(): void {
     this.canvas.remove();
-    this.onContextRestored = null;
+    this.requestFrame = null;
     this.onContextFailure = null;
+    // Back in the pool: the textures are freed now, a new owner uploads its own.
+    this.images?.clear();
+    this.imagesOwner = null;
+    this.imagesShownValue = false;
   }
 
   resize(
@@ -276,6 +319,11 @@ export class WebGlCellRenderer {
       this.updateModel(frame, damage);
       if (this.atlas.takeDeferred()) this.awaitingGlyphFonts = true;
     }
+    if (damage.kind !== "none" || this.imagesStale) this.updateImages(frame);
+    const link = frame.link ?? null;
+    const linkChanged = !linkRangesEqual(link, this.renderedLink);
+    if (linkChanged || (link && damage.kind !== "none"))
+      this.buildLinkUnderline(link);
     const cursorChanged = this.updateCursor(frame);
     const blinkChanged =
       this.hasBlinkingCells &&
@@ -284,6 +332,7 @@ export class WebGlCellRenderer {
       damage.kind === "none" &&
       !cursorChanged &&
       !blinkChanged &&
+      !linkChanged &&
       !this.forcePresent
     )
       return false;
@@ -348,9 +397,12 @@ export class WebGlCellRenderer {
         this.rectangleDirtyRows.byteLength +
         this.rectangleScratch.attributes.byteLength +
         this.cursorVertices.attributes.byteLength +
+        this.linkVertices.attributes.byteLength +
         this.uploadedCursor.byteLength,
       gpuBufferBytes:
-        this.glyphGpuCapacity * GLYPH_FLOATS * 4 + this.backgroundGpuBytes,
+        this.glyphGpuCapacity * GLYPH_FLOATS * 4 +
+        this.backgroundGpuBytes +
+        (this.images?.textureBytes ?? 0),
       canvasColorBytes: this.disposed
         ? 0
         : this.canvas.width * this.canvas.height * 4,
@@ -359,11 +411,17 @@ export class WebGlCellRenderer {
       uploadedGlyphBytes: this.uploadedGlyphBytes,
       uploadedRectangleBytes: this.uploadedRectangleBytes,
       contextRecoveries: this.contextRecoveryCount,
+      imageBytes: this.images?.textureBytes ?? 0,
     };
   }
 
   get hasBlinkingCells(): boolean {
     return this.blinkingRowCount > 0;
+  }
+
+  /** The last frame that read placements found Kitty images on screen. */
+  get imagesShown(): boolean {
+    return this.imagesShownValue;
   }
 
   dispose(): void {
@@ -378,6 +436,9 @@ export class WebGlCellRenderer {
     this.canvas.remove();
     this.atlas?.dispose();
     this.atlas = null;
+    this.images?.dispose(this.contextLost);
+    this.images = null;
+    this.imagesOwner = null;
     this.deleteResources();
     this.gl.getExtension("WEBGL_lose_context")?.loseContext();
     this.canvas.width = 1;
@@ -395,15 +456,19 @@ export class WebGlCellRenderer {
     this.rectangleScratch.attributes = new Float32Array(0);
     this.backgroundGpuBytes = 0;
     this.cursorVertices.attributes = new Float32Array(0);
+    this.linkVertices.attributes = new Float32Array(0);
     this.glyphGpuCapacity = 0;
     this.cellCapacity = 0;
-    this.onContextRestored = null;
+    this.requestFrame = null;
     this.onContextFailure = null;
   }
 
   private readonly handleContextLost = (event: Event): void => {
     event.preventDefault();
     this.contextLost = true;
+    this.images?.dispose(true);
+    this.images = null;
+    this.imagesOwner = null;
     this.clearContextRestoreTimer();
     this.contextRestoreTimer = window.setTimeout(() => {
       this.contextRestoreTimer = null;
@@ -422,6 +487,8 @@ export class WebGlCellRenderer {
     this.backgroundGpuBytes = 0;
     this.resources = this.createResources();
     this.uploadedCursorCount = -1;
+    this.renderedLink = null;
+    this.linkVertices.count = 0;
     if (this.profile) {
       this.atlas = new WebGlGlyphAtlas(
         this.gl,
@@ -432,8 +499,63 @@ export class WebGlCellRenderer {
     this.contextRecoveryCount += 1;
     this.viewportDirty = true;
     this.forceFullRedraw = true;
-    this.onContextRestored?.();
+    this.requestFrame?.();
   };
+
+  /**
+   * Reads the frame's Kitty placements (after `updateModel`, so the render state they come from
+   * is current) and uploads what they need before anything else touches the model.
+   */
+  private updateImages(frame: WebGlRendererFrame): void {
+    this.imagesStale = false;
+    const model = frame.model;
+    const profile = this.profile;
+    if (!model.imagePlacements || !profile) return;
+    if (model !== this.imagesOwner) {
+      // Image ids belong to one model: another model's textures must never be drawn.
+      this.images?.clear();
+      this.imagesOwner = model;
+      this.imageBackgroundLimit = model.imageBackgroundZLimit?.();
+    }
+    const placements = model.imagePlacements();
+    this.imagesShownValue = placements.length > 0;
+    if (!this.images && placements.length > 0) {
+      this.images = this.createImageLayer();
+    }
+    this.images?.update(
+      placements,
+      this.imageBackgroundLimit,
+      profile.metrics.deviceCellWidth,
+      profile.metrics.deviceCellHeight,
+    );
+  }
+
+  private createImageLayer(): WebGlImageLayer | null {
+    if (loadedImageLayerModule)
+      return new loadedImageLayerModule.WebGlImageLayer(this.gl, {
+        createProgram,
+        requiredBuffer,
+        requiredUniform,
+        requiredVertexArray,
+      });
+    if (this.imagesLoading) return null;
+    this.imagesLoading = true;
+    imageLayerModule ??= import("./WebGlImageLayer").then((module) => {
+      loadedImageLayerModule = module;
+      return module;
+    });
+    imageLayerModule.then(
+      () => {
+        if (this.disposed) return;
+        this.imagesStale = true;
+        this.forcePresent = true;
+        this.requestFrame?.();
+      },
+      // Without its code the pane draws no images; it does not retry every frame.
+      () => {},
+    );
+    return null;
+  }
 
   private updateModel(frame: WebGlRendererFrame, damage: TerminalDamage): void {
     const cells = frame.model.renderCells();
@@ -498,7 +620,9 @@ export class WebGlCellRenderer {
             this.decorations[cellIndex] !== 0 ||
             (this.flags[cellIndex] & CellFlags.STRIKETHROUGH) !== 0;
           this.backgrounds[cellIndex] = previousBackground;
-          this.foregrounds[cellIndex] = 0;
+          // The trailing half of a wide character underlines in its lead's colour.
+          this.foregrounds[cellIndex] =
+            column > 0 ? this.foregrounds[cellIndex - 1] : 0;
           this.underlineColors[cellIndex] = 0;
           this.flags[cellIndex] = 0;
           this.decorations[cellIndex] = 0;
@@ -756,6 +880,7 @@ export class WebGlCellRenderer {
           Math.max(1 / this.profile.metrics.deviceCellHeight, 0.05),
           this.foregrounds[index],
           1,
+          SOLID_DECORATION,
         );
       }
       if ((decoration & 8) !== 0) {
@@ -768,10 +893,39 @@ export class WebGlCellRenderer {
           Math.max(1 / this.profile.metrics.deviceCellHeight, 0.05),
           this.foregrounds[index],
           1,
+          SOLID_DECORATION,
         );
       }
     }
     return count;
+  }
+
+  /** One single-underline rectangle per linked cell without an underline of its own. */
+  private buildLinkUnderline(link: LinkCellRange | null): void {
+    this.renderedLink = link;
+    const vertices = this.linkVertices;
+    vertices.count = 0;
+    const profile = this.profile;
+    if (link && profile) {
+      const height = Math.max(1 / profile.metrics.deviceCellHeight, 0.05);
+      const end = Math.min(link.end, this.cols * this.rows - 1);
+      for (let index = Math.max(0, link.start); index <= end; index += 1) {
+        if ((this.decorations[index] & 7) !== 0) continue;
+        const row = Math.floor(index / this.cols);
+        this.writeRectangle(
+          vertices,
+          vertices.count++,
+          index - row * this.cols,
+          row + 0.88,
+          1,
+          height,
+          this.foregrounds[index],
+          1,
+          1,
+        );
+      }
+    }
+    this.uploadRectangles(vertices, this.resources?.linkBuffer ?? null);
   }
 
   private updateCursor(frame: WebGlRendererFrame): boolean {
@@ -890,17 +1044,31 @@ export class WebGlCellRenderer {
     );
     gl.clear(gl.COLOR_BUFFER_BIT);
 
+    // Ghostty's layering: images under the cell backgrounds (only explicit backgrounds are
+    // rectangles here, so default cells show them), then between backgrounds and text, where
+    // decorations and the cursor are drawn again over them, then above the text.
+    const images = this.images;
+    const gridWidth = this.cols * profile.metrics.deviceCellWidth;
+    const gridHeight = this.rows * profile.metrics.deviceCellHeight;
+    images?.draw(IMAGES_UNDER_BACKGROUNDS, gridWidth, gridHeight);
     gl.disable(gl.BLEND);
     this.drawRectangles(
       resources.colorProgram,
       resources.backgroundVao,
       this.backgroundVertices.count,
     );
-    this.drawRectangles(
-      resources.colorProgram,
-      resources.cursorVao,
-      this.cursorVertices.count,
-    );
+    this.drawOverlays(resources);
+    if (images?.has(IMAGES_BELOW_TEXT)) {
+      images.draw(IMAGES_BELOW_TEXT, gridWidth, gridHeight);
+      gl.disable(gl.BLEND);
+      this.drawRectangles(
+        resources.colorProgram,
+        resources.backgroundVao,
+        this.backgroundVertices.count,
+        true,
+      );
+      this.drawOverlays(resources);
+    }
 
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -931,12 +1099,28 @@ export class WebGlCellRenderer {
       0,
       this.glyphInstanceCount,
     );
+    images?.draw(IMAGES_ABOVE_TEXT, gridWidth, gridHeight);
+  }
+
+  /** The hovered link's underline, then the cursor over it. */
+  private drawOverlays(resources: RendererResources): void {
+    this.drawRectangles(
+      resources.colorProgram,
+      resources.linkVao,
+      this.linkVertices.count,
+    );
+    this.drawRectangles(
+      resources.colorProgram,
+      resources.cursorVao,
+      this.cursorVertices.count,
+    );
   }
 
   private drawRectangles(
-    program: Program,
+    program: ColorProgram,
     vao: WebGLVertexArrayObject,
     count: number,
+    decorationsOnly = false,
   ): void {
     if (count === 0) return;
     const gl = this.gl;
@@ -944,6 +1128,7 @@ export class WebGlCellRenderer {
     gl.useProgram(program.value);
     gl.bindVertexArray(vao);
     gl.uniformMatrix4fv(program.projection, false, PROJECTION_MATRIX);
+    gl.uniform1i(program.decorationsOnly, decorationsOnly ? 1 : 0);
     gl.drawElementsInstanced(gl.TRIANGLE_STRIP, 4, gl.UNSIGNED_BYTE, 0, count);
   }
 
@@ -1079,6 +1264,7 @@ export class WebGlCellRenderer {
 
     const backgroundBuffer = requiredBuffer(gl);
     const cursorBuffer = requiredBuffer(gl);
+    const linkBuffer = requiredBuffer(gl);
     const glyphBuffer = requiredBuffer(gl);
     const unitQuadBuffer = requiredBuffer(gl);
     gl.bindBuffer(gl.ARRAY_BUFFER, unitQuadBuffer);
@@ -1106,6 +1292,12 @@ export class WebGlCellRenderer {
       unitQuadBuffer,
       elementBuffer,
     );
+    const linkVao = createRectangleVao(
+      gl,
+      linkBuffer,
+      unitQuadBuffer,
+      elementBuffer,
+    );
     const glyphVao = createGlyphVao(
       gl,
       glyphBuffer,
@@ -1117,6 +1309,11 @@ export class WebGlCellRenderer {
       colorProgram: {
         value: colorProgramValue,
         projection: colorProjection,
+        decorationsOnly: requiredUniform(
+          gl,
+          colorProgramValue,
+          "u_decorations_only",
+        ),
       },
       glyphProgram: {
         value: glyphProgramValue,
@@ -1128,18 +1325,21 @@ export class WebGlCellRenderer {
       },
       backgroundVao,
       cursorVao,
+      linkVao,
       glyphVao,
       backgroundBuffer,
       cursorBuffer,
+      linkBuffer,
       glyphBuffer,
       buffers: [
         backgroundBuffer,
         cursorBuffer,
+        linkBuffer,
         glyphBuffer,
         unitQuadBuffer,
         elementBuffer,
       ],
-      vaos: [backgroundVao, cursorVao, glyphVao],
+      vaos: [backgroundVao, cursorVao, linkVao, glyphVao],
       programs: [colorProgramValue, glyphProgramValue],
     };
   }
@@ -1419,12 +1619,14 @@ void main() {
 
 const COLOR_FRAGMENT_SHADER = `#version 300 es
 precision mediump float;
+uniform bool u_decorations_only;
 in vec4 v_color;
 in vec2 v_unitquad;
 flat in float v_decoration;
 out vec4 outColor;
 void main() {
   int style = int(v_decoration + 0.5);
+  if (u_decorations_only && style == 0) discard;
   if (style == 2 && v_unitquad.y > 0.28 && v_unitquad.y < 0.72) discard;
   if (style == 3) {
     float wave = 0.5 + sin(v_unitquad.x * 12.5663706) * 0.27;

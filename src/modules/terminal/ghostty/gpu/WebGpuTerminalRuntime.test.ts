@@ -270,6 +270,48 @@ describe("WebGpuTerminalRuntime", () => {
     expect(harness.submit.mock.calls.length - baseline).toBe(changedFlushes);
   });
 
+  it("compiles Kitty image pipelines only when a pane asks, once per device, and schedules the panes that waited", async () => {
+    const h = createHarness();
+    const runtime = await createRuntime();
+    const compiled = () =>
+      vi.mocked(h.device.createRenderPipelineAsync).mock.calls.length;
+    const atStart = compiled();
+    const first = createSurface();
+    const second = createSurface();
+    const gone = createSurface();
+    join(runtime, first);
+    join(runtime, second);
+    join(runtime, gone);
+    expect(compiled()).toBe(atStart);
+
+    expect(runtime.imageSupport(first)).toBe("pending");
+    expect(runtime.imageSupport(second)).toBe("pending");
+    expect(runtime.imageSupport(gone)).toBe("pending");
+    runtime.unregister(gone);
+    await vi.waitFor(() =>
+      expect(runtime.imageSupport(first)).not.toBe("pending"),
+    );
+    // One image pipeline and the two layered cell passes, for both panes.
+    expect(compiled()).toBe(atStart + 3);
+    expect(runtime.imageSupport(second)).toBe(runtime.imageSupport(first));
+    expect(runtime.diagnostics().pendingSurfaces).toBe(2);
+    expect(runtime.imageSupport(first)).toMatchObject({
+      createLayer: expect.any(Function),
+    });
+
+    // A replacement device compiles its own.
+    h.loseDevice();
+    await vi.waitFor(() =>
+      expect(runtime.diagnostics().deviceRecoveries).toBe(1),
+    );
+    const recovered = compiled();
+    expect(runtime.imageSupport(first)).toBe("pending");
+    await vi.waitFor(() =>
+      expect(runtime.imageSupport(first)).not.toBe("pending"),
+    );
+    expect(compiled()).toBe(recovered + 3);
+  });
+
   it("defers device recreation while hidden and resumes it once visible", async () => {
     const harness = createHarness();
     const runtime = await createRuntime();

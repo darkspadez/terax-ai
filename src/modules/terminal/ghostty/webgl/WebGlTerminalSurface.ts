@@ -23,6 +23,12 @@ import {
   measureGestureBackingEnvironment,
   windowInnerSize,
 } from "../gpu/GestureBacking";
+import { ImageAnimationClock } from "../gpu/imageAnimation";
+import {
+  type LinkCellRange,
+  linkCellRange,
+  linkRangesEqual,
+} from "../gpu/linkUnderline";
 import { fitTerminalViewport } from "../gpu/TerminalFit";
 import {
   TerminalFitQueue,
@@ -132,9 +138,15 @@ export class WebGlTerminalSurface
   private contentRevision: number;
   private hoveredCell = -1;
   private hoveredLink: string | null = null;
+  /** Cells of the hovered link, underlined as an overlay; valid for `hoveredLinkOrigin`. */
+  private hoveredLinkCells: LinkCellRange | null = null;
+  private hoveredLinkOrigin = 0;
   private mouseDownLink: string | null = null;
   private applyingFit = false;
   private readonly unsubscribePresentation: () => void;
+  private readonly imageAnimation = new ImageAnimationClock(() =>
+    this.runtime.schedule(this),
+  );
   private disposed = false;
 
   constructor(private readonly options: WebGlTerminalSurfaceOptions) {
@@ -274,11 +286,13 @@ export class WebGlTerminalSurface
 
   detach(): void {
     if (!this.host) return;
+    this.clearHoveredLink(false);
     this.resizeObserver.disconnect();
     this.fitQueue.clear();
     this.pixelRatioMonitor.stop();
     this.clearCursorTimer();
     this.clearTextBlinkTimer();
+    this.imageAnimation.reset();
     this.runtime.release(this);
     this.renderer = null;
     this.root.remove();
@@ -333,6 +347,8 @@ export class WebGlTerminalSurface
     } else {
       this.clearCursorTimer();
       this.clearTextBlinkTimer();
+      this.imageAnimation.reset();
+      this.clearHoveredLink(false);
       this.textBlinkVisible = true;
       this.search.suspend();
       this.selection.suspend();
@@ -439,9 +455,15 @@ export class WebGlTerminalSurface
     const revision = this.options.model.revision();
     if (revision !== this.contentRevision) {
       this.contentRevision = revision;
-      if (this.hoveredCell >= 0) this.clearHoveredLink();
+      if (this.hoveredCell >= 0) this.clearHoveredLink(false);
       this.mouseDownLink = null;
     }
+    // The view scrolled under the pointer: the link's cells are elsewhere now.
+    if (
+      this.hoveredLinkCells &&
+      this.options.model.viewportOriginLine() !== this.hoveredLinkOrigin
+    )
+      this.clearHoveredLink(false);
     this.selection.reconcile();
     this.search.refreshOverlay();
     this.updateScrollbar();
@@ -454,6 +476,12 @@ export class WebGlTerminalSurface
       cursor.y < this.options.model.rows;
     this.cursorBlinking = cursor.blinking;
     this.armCursorBlink();
+    // Animations advance before the frame reads the model, so it shows the frame due now.
+    this.imageAnimation.beforeFrame(
+      this.options.model,
+      performance.now(),
+      true,
+    );
     const rendered = renderer.render({
       model: this.options.model,
       damage: this.options.model.consumeDamage(),
@@ -461,8 +489,10 @@ export class WebGlTerminalSurface
       textBlinkVisible: this.textBlinkVisible,
       selection: this.selection.normalizedBounds(),
       searchMatchAt: (row, column) => this.search.matchAt(row, column),
+      link: this.hoveredLinkCells,
     });
     this.hasBlinkingCells = renderer.hasBlinkingCells;
+    this.imageAnimation.afterFrame(renderer.imagesShown);
     this.syncTextBlink();
     if (!rendered) {
       this.options.onFrame?.();
@@ -480,6 +510,7 @@ export class WebGlTerminalSurface
     this.discardRenderer();
     this.clearCursorTimer();
     this.clearTextBlinkTimer();
+    this.imageAnimation.reset();
     if (this.documentSuspended) return;
     if (
       this.recoveringRenderer ||
@@ -585,6 +616,7 @@ export class WebGlTerminalSurface
     if (!visible) {
       this.clearCursorTimer();
       this.clearTextBlinkTimer();
+      this.imageAnimation.suspend();
       this.textBlinkVisible = true;
       this.search.suspend();
       this.selection.suspend();
@@ -677,14 +709,35 @@ export class WebGlTerminalSurface
     const cell = row * this.options.model.cols + column;
     if (cell === this.hoveredCell) return;
     this.hoveredCell = cell;
-    this.hoveredLink = this.options.model.hyperlinkAtViewportCell(row, column);
+    const model = this.options.model;
+    if (model.linkAtViewportCell) {
+      const link = model.linkAtViewportCell(row, column);
+      this.hoveredLink = link?.uri ?? null;
+      this.setHoveredLinkCells(
+        link
+          ? linkCellRange(link.spans, model.cols, model.rows, row, column)
+          : null,
+      );
+    } else {
+      this.hoveredLink = model.hyperlinkAtViewportCell(row, column);
+    }
     this.root.style.cursor = this.hoveredLink ? "pointer" : "text";
   }
 
-  private clearHoveredLink(): void {
+  private clearHoveredLink(redraw = true): void {
     this.hoveredCell = -1;
     this.hoveredLink = null;
     this.root.style.cursor = "text";
+    if (this.hoveredLinkCells === null) return;
+    this.hoveredLinkCells = null;
+    if (redraw) this.runtime.schedule(this);
+  }
+
+  private setHoveredLinkCells(cells: LinkCellRange | null): void {
+    if (linkRangesEqual(cells, this.hoveredLinkCells)) return;
+    this.hoveredLinkCells = cells;
+    this.hoveredLinkOrigin = this.options.model.viewportOriginLine();
+    this.runtime.schedule(this);
   }
 
   private queueFit(bounds?: Pick<DOMRectReadOnly, "width" | "height">): void {

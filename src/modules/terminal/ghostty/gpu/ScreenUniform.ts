@@ -6,6 +6,7 @@ import {
   SCREEN_OFFSET,
   SCREEN_UNIFORM_BYTES,
 } from "./shaders";
+import type { LinkCellRange } from "./linkUnderline";
 import type {
   CursorRect,
   DecorationMetrics,
@@ -44,6 +45,8 @@ export type ScreenUniformState = {
   readonly decoration: DecorationMetrics;
   readonly leftOverhangPadding: number;
   readonly contrast: TextContrast;
+  /** Cells of the hovered link to underline; absent or null for none. */
+  readonly link?: LinkCellRange | null;
 };
 
 /** Packs the shader's `Screen` uniform and detects changes without allocating. */
@@ -113,6 +116,9 @@ export class ScreenUniform {
     for (let index = 0; index < DWRITE_GAMMA_RATIOS.length; index += 1) {
       floats[SCREEN_OFFSET.gamma / 4 + index] = DWRITE_GAMMA_RATIOS[index];
     }
+    // An empty range (start after end) underlines nothing.
+    ints[SCREEN_OFFSET.linkCells / 4] = state.link ? state.link.start : 1;
+    ints[SCREEN_OFFSET.linkCells / 4 + 1] = state.link ? state.link.end : 0;
   }
 
   /** True if the packed state differs from what `markUploaded` last recorded. */

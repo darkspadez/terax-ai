@@ -6,13 +6,21 @@ import type { TerminalDamage } from "@/modules/terminal/backend/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   GhosttyGpuFrame,
+  GhosttyImagePlacement,
   GhosttyTerminalModelApi,
 } from "@/modules/terminal/ghostty/GhosttyTerminalModel";
+import { DEFAULT_IMAGE_BACKGROUND_Z_LIMIT } from "@/modules/terminal/ghostty/gpu/imageLayer";
 import type { DeviceRect } from "@/modules/terminal/ghostty/gpu/PaneRects";
 import {
+  BACKGROUND_SHADER,
   SCREEN_OFFSET,
+  SCREEN_STRUCT,
   SCREEN_UNIFORM_BYTES,
 } from "@/modules/terminal/ghostty/gpu/shaders";
+import {
+  createWebGpuImageSupport,
+  type WebGpuImageSupport,
+} from "@/modules/terminal/ghostty/gpu/WebGpuImageLayer";
 import { WebGpuTerminalSurface } from "@/modules/terminal/ghostty/gpu/WebGpuTerminalSurface";
 import { deriveFontMetrics } from "@/modules/terminal/ghostty/gpu/terminalVisuals";
 import { resetTerminalResizeGestureForTest } from "@/modules/terminal/lib/terminalResizeGesture";
@@ -1115,6 +1123,360 @@ describe("failure paths", () => {
   });
 });
 
+describe("Kitty images", () => {
+  const LIMIT = DEFAULT_IMAGE_BACKGROUND_Z_LIMIT;
+  const image = (
+    overrides: Partial<GhosttyImagePlacement> = {},
+  ): GhosttyImagePlacement => ({
+    imageId: 1,
+    channels: 4,
+    imageWidth: 4,
+    imageHeight: 2,
+    pixels: new Uint8Array(4 * 2 * 4),
+    generation: 1,
+    col: 2,
+    row: 1,
+    z: 0,
+    width: 4,
+    height: 2,
+    offsetX: 0,
+    offsetY: 0,
+    sourceX: 0,
+    sourceY: 0,
+    sourceWidth: 4,
+    sourceHeight: 2,
+    ...overrides,
+  });
+  const pipelines = (h: Awaited<ReturnType<typeof harness>>) =>
+    h.pass.setPipeline.mock.calls.map(
+      ([pipeline]) => (pipeline as { name: string }).name,
+    );
+  const ready = async (h: Awaited<ReturnType<typeof harness>>) => {
+    await h.imagesReady();
+    h.render();
+  };
+
+  it("costs nothing, not even its code, until a placement appears", async () => {
+    const h = await harness({ images: true });
+    h.render();
+    h.gpu.dirty([{ start: 0, end: 0 }]);
+    h.render();
+    expect(h.requestImageSupport).not.toHaveBeenCalled();
+    expect(h.createTexture).not.toHaveBeenCalled();
+    h.encode();
+    expect(pipelines(h)).toEqual(["background", "glyph"]);
+    expect(h.pass.setBindGroup).toHaveBeenCalledOnce();
+  });
+
+  it("asks for the image pipelines on the first placement and draws it once they are ready", async () => {
+    const h = await harness({ images: true });
+    h.render();
+    h.place([image()]);
+    h.render();
+    expect(h.requestImageSupport).toHaveBeenCalledOnce();
+    expect(h.createTexture).not.toHaveBeenCalled();
+    // The runtime schedules the pane when they are ready; the frame needs no new damage.
+    await h.imagesReady();
+    h.writeTexture.mockClear();
+    expect(h.render()).toBe(true);
+    expect(h.createTexture).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ size: [4, 2], format: "rgba8unorm" }),
+    );
+    expect(h.writeTexture).toHaveBeenCalledOnce();
+    // Straight from the model's memory, a tightly packed RGBA layout.
+    const uploaded = h.writeTexture.mock.calls[0][1] as Uint8Array;
+    expect(uploaded.buffer).toBe(h.images.placements[0].pixels.buffer);
+    expect(h.writeTexture.mock.calls[0][2]).toEqual({
+      bytesPerRow: 16,
+      rowsPerImage: 2,
+    });
+    h.encode();
+    expect(pipelines(h)).toEqual(["background", "glyph", "fragment_main"]);
+    expect(h.pass.draw).toHaveBeenLastCalledWith(6, 1, 0, 0);
+  });
+
+  it("uploads placement pixels before any other model call after the frame", async () => {
+    const h = await harness({ images: true });
+    await h.imagesReady();
+    h.render();
+    h.calls.length = 0;
+    h.place([image({ imageId: 1 }), image({ imageId: 2, generation: 5 })]);
+    h.render();
+    const afterFrame = h.calls.slice(h.calls.indexOf("consumeGpuFrame") + 1);
+    const next = afterFrame.filter((call) => !call.startsWith("writeBuffer"));
+    expect(next.slice(0, 3)).toEqual([
+      "imagePlacements",
+      "writeTexture",
+      "writeTexture",
+    ]);
+  });
+
+  it("keeps one texture per image and uploads again only for a new generation", async () => {
+    const h = await harness({ images: true });
+    await h.imagesReady();
+    h.place([image(), image({ row: 5 })]);
+    h.render();
+    expect(h.createTexture).toHaveBeenCalledOnce();
+    expect(h.writeTexture).toHaveBeenCalledOnce();
+    for (let frame = 0; frame < 20; frame++) {
+      h.place([image({ row: frame })]);
+      h.render();
+    }
+    expect(h.writeTexture).toHaveBeenCalledOnce();
+    // An animation frame or new pixels: same texture, new upload.
+    h.place([image({ generation: 2 })]);
+    h.render();
+    expect(h.writeTexture).toHaveBeenCalledTimes(2);
+    expect(h.createTexture).toHaveBeenCalledOnce();
+    // Gray pixels are expanded to RGBA on upload.
+    h.place([
+      image({
+        imageId: 9,
+        channels: 1,
+        pixels: Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8),
+      }),
+    ]);
+    h.render();
+    const gray = h.writeTexture.mock.calls[2][1] as Uint8Array;
+    expect([...gray.subarray(0, 8)]).toEqual([1, 1, 1, 255, 2, 2, 2, 255]);
+  });
+
+  it("frees the texture of an image left unplaced for the grace period", async () => {
+    const h = await harness({ images: true });
+    await h.imagesReady();
+    h.place([image()]);
+    h.render();
+    expect(h.surface.diagnostics().imageTextures).toBe(1);
+    for (let frame = 0; frame < 60; frame++) {
+      h.place([]);
+      h.render();
+    }
+    expect(h.textures[0].destroy).not.toHaveBeenCalled();
+    h.place([]);
+    h.render();
+    expect(h.textures[0].destroy).toHaveBeenCalledOnce();
+    expect(h.surface.diagnostics()).toMatchObject({
+      imageTextures: 0,
+      imageBytes: expect.any(Number),
+    });
+  });
+
+  it("draws Ghostty's three layers around the cell passes", async () => {
+    const h = await harness({ images: true });
+    await h.imagesReady();
+    h.place([
+      image({ imageId: 1, z: LIMIT - 1 }),
+      image({ imageId: 2, z: -1 }),
+      image({ imageId: 3, z: 0 }),
+      image({ imageId: 3, z: 0, row: 4 }),
+    ]);
+    h.render();
+    const { cols, rows } = h.surface.diagnostics();
+    h.encode();
+    expect(pipelines(h)).toEqual([
+      "background",
+      "fragment_main",
+      // Explicit backgrounds and decorations over the images under the backgrounds.
+      "fragment_over_images",
+      "fragment_main",
+      // Cursor and decorations over the images between backgrounds and text.
+      "fragment_decorations",
+      "glyph",
+      "fragment_main",
+    ]);
+    // One instanced draw for both placements of image 3, after the cell passes.
+    expect(h.pass.draw.mock.calls).toEqual([
+      [3],
+      [6, 1, 0, 0],
+      [3],
+      [6, 1, 0, 1],
+      [3],
+      [6, cols * rows],
+      [6, 2, 0, 2],
+    ]);
+  });
+
+  it("releases every texture when the pane is hidden or the device is lost, and uploads again after", async () => {
+    const h = await harness({ images: true });
+    await h.imagesReady();
+    h.place([image()]);
+    h.render();
+    expect(h.surface.diagnostics().imageBytes).toBeGreaterThanOrEqual(32);
+    h.surface.setVisible(false);
+    expect(h.textures[0].destroy).toHaveBeenCalledOnce();
+    expect(h.surface.diagnostics().imageBytes).toBe(0);
+    h.surface.setVisible(true);
+    h.render();
+    expect(h.createTexture).toHaveBeenCalledTimes(2);
+    h.surface.handleDeviceLoss();
+    expect(h.textures[1].destroy).toHaveBeenCalledOnce();
+  });
+
+  it("advances animations before the frame reads the model and wakes for the next frame", async () => {
+    vi.useFakeTimers();
+    const h = await harness({ images: true });
+    await ready(h);
+    h.images.delays.push(40, 40);
+    h.schedule.mockClear();
+    h.place([image()]);
+    h.render();
+    // The frame that shows images asks for one more, which starts their clock.
+    expect(h.schedule).toHaveBeenCalledWith(h.surface);
+    h.calls.length = 0;
+    h.schedule.mockClear();
+    h.render();
+    expect(h.calls.indexOf("advanceImageAnimations")).toBeLessThan(
+      h.calls.indexOf("consumeGpuFrame"),
+    );
+    vi.advanceTimersByTime(39);
+    expect(h.schedule).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(h.schedule).toHaveBeenCalledOnce();
+    h.render();
+    expect(h.model.advanceImageAnimations).toHaveBeenCalledTimes(2);
+    // Occluded: nothing wakes the pane.
+    h.schedule.mockClear();
+    h.visibility(false);
+    vi.advanceTimersByTime(1_000);
+    expect(h.schedule).not.toHaveBeenCalled();
+  });
+
+  it("tells the model the new cell pixel size when only the display ratio changes", async () => {
+    const h = await harness({ scale: 1.25 });
+    h.render();
+    const before = h.surface.diagnostics();
+    h.onResize.mockClear();
+    h.setScale(1.5);
+    h.dprChange();
+    const after = h.surface.diagnostics();
+    expect([after.cols, after.rows]).toEqual([before.cols, before.rows]);
+    expect(after.deviceCellWidth).toBeGreaterThan(before.deviceCellWidth);
+    expect(h.onResize).not.toHaveBeenCalled();
+    expect(h.model.setPixelSize).toHaveBeenLastCalledWith(
+      after.cols * after.deviceCellWidth,
+      after.rows * after.deviceCellHeight,
+    );
+  });
+});
+
+describe("hovered link underline", () => {
+  type Harness = Awaited<ReturnType<typeof harness>>;
+  const hover = (h: Harness, row: number, column: number) => {
+    const cell = h.surface.cellSize();
+    h.surface.eventTarget().dispatchEvent(
+      Object.assign(new Event("mousemove"), {
+        clientX: (column + 0.5) * cell.width,
+        clientY: (row + 0.5) * cell.height,
+      }),
+    );
+  };
+  const uploadedLink = (h: Harness) => {
+    const upload = h.writeBuffer.mock.calls.find(
+      ([buffer]) => buffer === h.lastUniformBuffer(),
+    );
+    if (!upload) return null;
+    const ints = new Int32Array((upload[2] as Float32Array).buffer);
+    return [
+      ints[SCREEN_OFFSET.linkCells / 4],
+      ints[SCREEN_OFFSET.linkCells / 4 + 1],
+    ];
+  };
+  const withLink = (h: Harness) => {
+    const { cols } = h.surface.diagnostics();
+    // A URL wrapped from the end of row 2 onto row 3.
+    const link = {
+      uri: "https://example.com/a",
+      spans: [
+        { row: 2, startColumn: cols - 2, endColumn: cols - 1 },
+        { row: 3, startColumn: 0, endColumn: 4 },
+      ],
+    };
+    const linkAtViewportCell = vi.fn((row: number, column: number) =>
+      (row === 2 && column >= cols - 2) || (row === 3 && column <= 4)
+        ? link
+        : null,
+    );
+    Object.assign(h.model, { linkAtViewportCell });
+    return { cols, linkAtViewportCell };
+  };
+
+  it("underlines every cell of the hovered link through the uniform alone", async () => {
+    const h = await harness();
+    h.render();
+    const { cols } = withLink(h);
+    h.schedule.mockClear();
+    h.writeBuffer.mockClear();
+    hover(h, 3, 2);
+    expect(h.schedule).toHaveBeenCalledWith(h.surface);
+    expect(h.render()).toBe(true);
+    // No cell record is rewritten: only the uniform goes up.
+    expect(h.writeBuffer).toHaveBeenCalledOnce();
+    expect(uploadedLink(h)).toEqual([2 * cols + cols - 2, 3 * cols + 4]);
+    // Moving inside the same link changes nothing.
+    h.schedule.mockClear();
+    hover(h, 2, cols - 1);
+    hover(h, 3, 0);
+    expect(h.schedule).not.toHaveBeenCalled();
+    // Leaving the terminal removes it.
+    h.surface.eventTarget().dispatchEvent(new Event("mouseleave"));
+    expect(h.schedule).toHaveBeenCalledOnce();
+    h.writeBuffer.mockClear();
+    expect(h.render()).toBe(true);
+    const [start, end] = uploadedLink(h) ?? [];
+    expect(start).toBeGreaterThan(end);
+  });
+
+  it("drops the underline when the content changes or the view scrolls", async () => {
+    const h = await harness();
+    h.render();
+    withLink(h);
+    hover(h, 3, 1);
+    h.render();
+    h.model.revision = () => 1;
+    h.writeBuffer.mockClear();
+    expect(h.render()).toBe(true);
+    const [start, end] = uploadedLink(h) ?? [];
+    expect(start).toBeGreaterThan(end);
+
+    hover(h, 3, 1);
+    h.render();
+    h.origin = 4;
+    h.writeBuffer.mockClear();
+    h.render();
+    const [afterScroll, afterScrollEnd] = uploadedLink(h) ?? [];
+    expect(afterScroll).toBeGreaterThan(afterScrollEnd);
+  });
+
+  it("drops the underline when the pane is hidden", async () => {
+    const h = await harness();
+    h.render();
+    withLink(h);
+    hover(h, 3, 1);
+    h.render();
+    h.surface.setVisible(false);
+    h.surface.setVisible(true);
+    h.writeBuffer.mockClear();
+    h.render();
+    const [start, end] = uploadedLink(h) ?? [];
+    expect(start).toBeGreaterThan(end);
+  });
+
+  it("only points at a link, without an underline, when the model reports no spans", async () => {
+    const h = await harness();
+    h.render();
+    const hyperlinkAtViewportCell = vi.fn(() => "https://example.com");
+    Object.assign(h.model, { hyperlinkAtViewportCell });
+    h.schedule.mockClear();
+    hover(h, 1, 1);
+    expect(hyperlinkAtViewportCell).toHaveBeenCalledWith(1, 1);
+    expect(h.schedule).not.toHaveBeenCalled();
+    const root = h.elements.find(
+      (e) => e.getAttribute("data-terax-ghostty-surface") === "webgpu",
+    ) as unknown as { style: { cursor: string } };
+    expect(root.style.cursor).toBe("pointer");
+  });
+});
+
 const FONT = {
   family: "monospace",
   size: 14,
@@ -1141,7 +1503,7 @@ type FakeFrameState = {
   setCell(index: number, glyph: number): void;
 };
 
-async function harness(options: { scale?: number } = {}) {
+async function harness(options: { scale?: number; images?: boolean } = {}) {
   let scale = options.scale ?? 1;
   bridge.visible = true;
   const destroy = vi.fn();
@@ -1259,7 +1621,14 @@ async function harness(options: { scale?: number } = {}) {
       disconnect() {}
     },
   );
-  vi.stubGlobal("GPUBufferUsage", { UNIFORM: 1, COPY_DST: 2, STORAGE: 4 });
+  vi.stubGlobal("GPUBufferUsage", {
+    UNIFORM: 1,
+    COPY_DST: 2,
+    STORAGE: 4,
+    VERTEX: 8,
+  });
+  vi.stubGlobal("GPUTextureUsage", { TEXTURE_BINDING: 1, COPY_DST: 2 });
+  vi.stubGlobal("GPUShaderStage", { VERTEX: 1, FRAGMENT: 2 });
 
   const calls: string[] = [];
   const sparseApiCalls: string[] = [];
@@ -1294,11 +1663,40 @@ async function harness(options: { scale?: number } = {}) {
     );
   });
   const createBindGroup = vi.fn(() => ({}));
+  const textures: Array<{
+    width: number;
+    height: number;
+    destroy: ReturnType<typeof vi.fn>;
+  }> = [];
+  const createTexture = vi.fn((descriptor: GPUTextureDescriptor) => {
+    const [width, height] = descriptor.size as number[];
+    const texture = {
+      width,
+      height,
+      destroy: vi.fn(),
+      createView: () => ({}),
+    };
+    textures.push(texture);
+    return texture;
+  });
+  const writeTexture = vi.fn((..._args: unknown[]) => {
+    calls.push("writeTexture");
+  });
   const resources = {
     device: {
       createBuffer,
       createBindGroup,
-      queue: { writeBuffer },
+      createTexture,
+      createBindGroupLayout: () => ({}),
+      createShaderModule: () => ({}),
+      createPipelineLayout: () => ({}),
+      createRenderPipelineAsync: async (
+        descriptor: GPURenderPipelineDescriptor,
+      ) => ({
+        name: descriptor.fragment?.entryPoint,
+      }),
+      limits: { maxTextureDimension2D: 8192 },
+      queue: { writeBuffer, writeTexture },
     },
     generation: 1,
     format: "bgra8unorm" as GPUTextureFormat,
@@ -1324,13 +1722,22 @@ async function harness(options: { scale?: number } = {}) {
     invalidate,
   }));
   const unregister = vi.fn();
+  const imageSupport: { value: WebGpuImageSupport | "pending" | null } = {
+    value: "pending",
+  };
+  const requestImageSupport = vi.fn(() => imageSupport.value);
   bridge.runtime = {
     register,
     unregister,
     schedule,
     interact,
     acquireGlyphAtlas,
+    imageSupport: requestImageSupport,
     resources: () => resources,
+  };
+  const images = {
+    placements: [] as GhosttyImagePlacement[],
+    delays: [] as Array<number | null>,
   };
   const position = { history: 0, offset: 0 };
   const cursor = { x: 0, y: 0, visible: true, blinking: false, style: "block" };
@@ -1398,12 +1805,27 @@ async function harness(options: { scale?: number } = {}) {
       dims.rows = rows;
       gpu.resize(cols, rows);
     },
+    ...(options.images
+      ? {
+          imagePlacements: vi.fn(
+            track("imagePlacements", () => images.placements),
+          ),
+          imageBackgroundZLimit: () => DEFAULT_IMAGE_BACKGROUND_Z_LIMIT,
+          advanceImageAnimations: vi.fn(
+            track(
+              "advanceImageAnimations",
+              (_now: number) => images.delays.shift() ?? null,
+            ),
+          ),
+        }
+      : {}),
   };
   const pass = {
     setPipeline: vi.fn(),
     setBindGroup: vi.fn(),
     setViewport: vi.fn(),
     setScissorRect: vi.fn(),
+    setVertexBuffer: vi.fn(),
     draw: vi.fn(),
     end: vi.fn(),
   };
@@ -1535,6 +1957,24 @@ async function harness(options: { scale?: number } = {}) {
     },
     setScale(value: number) {
       scale = value;
+    },
+    images,
+    textures,
+    createTexture,
+    writeTexture,
+    requestImageSupport,
+    /** Places images the way the model reports them: with full damage. */
+    place(placements: GhosttyImagePlacement[]) {
+      images.placements = placements;
+      gpu.damage = { kind: "full" };
+    },
+    async imagesReady() {
+      imageSupport.value = await createWebGpuImageSupport(
+        resources.device as unknown as GPUDevice,
+        "bgra8unorm",
+        {} as GPUBindGroupLayout,
+        { screenStruct: SCREEN_STRUCT, background: BACKGROUND_SHADER },
+      );
     },
     dprChange() {
       dprListener?.();

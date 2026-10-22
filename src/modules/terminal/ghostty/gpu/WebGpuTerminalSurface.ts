@@ -1,6 +1,9 @@
 import { terminalWindowFocused } from "@/modules/terminal/ghostty/renderScheduling";
 import { bindTerminalInteraction } from "@/modules/terminal/ghostty/input/terminalInteraction";
-import { isClampedScrollEcho, TerminalScrollbarSync } from "@/modules/terminal/ghostty/gpu/terminalScrollbar";
+import {
+  isClampedScrollEcho,
+  TerminalScrollbarSync,
+} from "@/modules/terminal/ghostty/gpu/terminalScrollbar";
 import { terminalWindowPresentation } from "@/modules/terminal/ghostty/windowPresentation";
 import type { TerminalSurface } from "@/modules/terminal/backend/contracts";
 import { smoothHooks } from "@/bench/smoothHooks";
@@ -20,6 +23,12 @@ import { TerminalSelectionController } from "../selection/TerminalSelectionContr
 import { DevicePixelRatioMonitor } from "./DevicePixelRatioMonitor";
 import { documentGlyphFontGate } from "./GlyphFontGate";
 import { TerminalGlyphMap, type RasterBudget } from "./GlyphMap";
+import { ImageAnimationClock } from "./imageAnimation";
+import {
+  type LinkCellRange,
+  linkCellRange,
+  linkRangesEqual,
+} from "./linkUnderline";
 import { type DeviceRect, deviceRectsEqual } from "./PaneRects";
 import { ScreenUniform, type ScreenUniformState } from "./ScreenUniform";
 import { SCREEN_UNIFORM_BYTES } from "./shaders";
@@ -56,6 +65,7 @@ import {
   nextWebGpuCellCapacity,
   packSearchMask,
 } from "./WebGpuCellBuffer";
+import type { WebGpuImageLayer } from "./WebGpuImageLayer";
 import {
   createRasterBudget,
   FIRST_FRAME_RASTER_BUDGET_MS,
@@ -111,6 +121,9 @@ export type WebGpuTerminalSurfaceStats = {
   readonly uploads: number;
   readonly uploadedBytes: number;
   readonly pendingGlyphs: number;
+  /** Kitty image textures and their bytes (included in `gpuBufferBytes`). */
+  readonly imageTextures: number;
+  readonly imageBytes: number;
   readonly fit: TerminalFitQueueDiagnostics;
 };
 
@@ -188,6 +201,9 @@ export class WebGpuTerminalSurface
   private contentRevision: number;
   private hoveredCell = -1;
   private hoveredLink: string | null = null;
+  /** Cells of the hovered link, underlined through the uniform; valid for `hoveredLinkOrigin`. */
+  private hoveredLinkCells: LinkCellRange | null = null;
+  private hoveredLinkOrigin = 0;
   private mouseDownLink: string | null = null;
   private applyingFit = false;
   private disposed = false;
@@ -199,6 +215,18 @@ export class WebGpuTerminalSurface
   private drawCells = 0;
   /** What the uniform last held, kept to repack it when only the pane's rectangle moves. */
   private lastScreenState: ScreenUniformState | null = null;
+  /** Kitty images; created when the pane first shows one, released with its other resources. */
+  private imageLayer: WebGpuImageLayer | null = null;
+  /** Placements must be read again without damage: the image layer just became available. */
+  private imagesStale = false;
+  /** Kitty z below which images go under the cell backgrounds; constant for a model. */
+  private readonly imageBackgroundLimit: number | undefined;
+  private readonly imageAnimation = new ImageAnimationClock(() =>
+    this.runtime.schedule(this),
+  );
+  /** Terminal pixel size last given to the model (Kitty placement sizes and mode 2048 use it). */
+  private reportedPixelWidth = 0;
+  private reportedPixelHeight = 0;
 
   private constructor(
     private readonly runtime: WebGpuTerminalRuntime,
@@ -230,6 +258,7 @@ export class WebGpuTerminalSurface
     });
     this.cursorBlinking = options.cursorBlink;
     this.theme = options.theme;
+    this.imageBackgroundLimit = options.model.imageBackgroundZLimit?.();
     options.model.setCursorOptions(options.cursorStyle, options.cursorBlink);
     this.contentRevision = options.model.revision();
     this.root.className = "absolute inset-0 overflow-hidden";
@@ -343,6 +372,7 @@ export class WebGpuTerminalSurface
 
   detach(): void {
     if (!this.host) return;
+    this.clearHoveredLink(false);
     this.resizeObserver.disconnect();
     window.removeEventListener?.("resize", this.handleWindowResize);
     this.fitQueue.clear();
@@ -402,6 +432,7 @@ export class WebGpuTerminalSurface
     } else {
       this.clearCursorTimer();
       this.clearTextBlinkTimer();
+      this.clearHoveredLink(false);
       this.textBlinkVisible = true;
       this.search.suspend();
       this.selection.suspend();
@@ -538,11 +569,14 @@ export class WebGpuTerminalSurface
   /** Called inside the window pass; viewport and scissor already cover the pane's rectangle. */
   encode(pass: GPURenderPassEncoder, resources: WebGpuSharedResources): void {
     if (!this.bindGroup) return;
+    const images = this.imageLayer?.hasDraws ? this.imageLayer : null;
     pass.setBindGroup(0, this.bindGroup);
     pass.setPipeline(resources.backgroundPipeline);
     pass.draw(3);
+    images?.encodeBelowText(pass, this.bindGroup);
     pass.setPipeline(resources.glyphPipeline);
     pass.draw(6, this.drawCells);
+    images?.encodeAboveText(pass);
   }
 
   handleCanvasRevealed(): void {
@@ -586,7 +620,7 @@ export class WebGpuTerminalSurface
     const revision = model.revision();
     if (revision !== this.contentRevision) {
       this.contentRevision = revision;
-      if (this.hoveredCell >= 0) this.clearHoveredLink();
+      if (this.hoveredCell >= 0) this.clearHoveredLink(false);
       this.mouseDownLink = null;
     }
     this.selection.reconcile();
@@ -599,6 +633,8 @@ export class WebGpuTerminalSurface
     // any other call into the model.
     const atlasStale = lease.atlas.epoch !== this.glyphMap.atlasEpoch;
     const resync = this.needsResync || atlasStale;
+    // Animations advance before the frame reads the model, so it shows the frame due now.
+    this.imageAnimation.beforeFrame(model, performance.now(), true);
     const frame = model.consumeGpuFrame({ resync });
     this.needsResync = false;
     const expectedCells = frame.rows * frame.cols;
@@ -621,6 +657,10 @@ export class WebGpuTerminalSurface
       budget,
       device,
     );
+    // Placement pixels are borrowed like the cells: uploaded before any other model call.
+    const imagesChanged = this.updateImages(
+      resync || frame.damage.kind !== "none",
+    );
 
     const cursor = model.cursor();
     const viewportOrigin = model.viewportOriginLine();
@@ -638,6 +678,7 @@ export class WebGpuTerminalSurface
       frame.damage.kind !== "none" ||
       cellsUploaded ||
       glyphsChanged ||
+      imagesChanged ||
       searchChanged ||
       uniformChanged ||
       bindingsChanged ||
@@ -710,6 +751,7 @@ export class WebGpuTerminalSurface
       this.documentSuspended = true;
       this.clearCursorTimer();
       this.clearTextBlinkTimer();
+      this.imageAnimation.suspend();
       this.search.suspend();
       this.selection.suspend();
       return;
@@ -761,6 +803,8 @@ export class WebGpuTerminalSurface
       (this.uniformBuffer?.size ?? 0) +
       (this.glyphMapBuffer?.size ?? 0) +
       (this.searchBuffer?.size ?? 0);
+    const images = this.imageLayer?.stats();
+    const imageBytes = images ? images.textureBytes + images.bufferBytes : 0;
     return {
       frames: this.frameCount,
       viewport: this.binding?.rect() ?? null,
@@ -773,7 +817,7 @@ export class WebGpuTerminalSurface
         this.screen.data.byteLength +
         this.glyphMap.byteSize +
         this.searchScratch.byteLength,
-      gpuBufferBytes: retainedBufferBytes,
+      gpuBufferBytes: retainedBufferBytes + imageBytes,
       // The swapchain belongs to the window canvas; see the runtime's `canvases`.
       canvasColorBytes: 0,
       estimatedSwapchainBytes: 0,
@@ -788,6 +832,8 @@ export class WebGpuTerminalSurface
       uploads: this.uploadCount,
       uploadedBytes: this.uploadedBytes,
       pendingGlyphs: this.glyphMap.pending,
+      imageTextures: images?.textures ?? 0,
+      imageBytes,
       fit: this.fitQueue.diagnostics(),
     };
   }
@@ -908,14 +954,35 @@ export class WebGpuTerminalSurface
     const cell = row * this.options.model.cols + column;
     if (cell === this.hoveredCell) return;
     this.hoveredCell = cell;
-    this.hoveredLink = this.options.model.hyperlinkAtViewportCell(row, column);
+    const model = this.options.model;
+    if (model.linkAtViewportCell) {
+      const link = model.linkAtViewportCell(row, column);
+      this.hoveredLink = link?.uri ?? null;
+      this.setHoveredLinkCells(
+        link
+          ? linkCellRange(link.spans, model.cols, model.rows, row, column)
+          : null,
+      );
+    } else {
+      this.hoveredLink = model.hyperlinkAtViewportCell(row, column);
+    }
     this.root.style.cursor = this.hoveredLink ? "pointer" : "text";
   }
 
-  private clearHoveredLink(): void {
+  private clearHoveredLink(redraw = true): void {
     this.hoveredCell = -1;
     this.hoveredLink = null;
     this.root.style.cursor = "text";
+    if (this.hoveredLinkCells === null) return;
+    this.hoveredLinkCells = null;
+    if (redraw) this.runtime.schedule(this);
+  }
+
+  private setHoveredLinkCells(cells: LinkCellRange | null): void {
+    if (linkRangesEqual(cells, this.hoveredLinkCells)) return;
+    this.hoveredLinkCells = cells;
+    this.hoveredLinkOrigin = this.options.model.viewportOriginLine();
+    this.runtime.schedule(this);
   }
 
   private initializeGpuResources(resources: WebGpuSharedResources): void {
@@ -984,6 +1051,10 @@ export class WebGpuTerminalSurface
   }
 
   private releaseGpuResources(): void {
+    this.imageLayer?.release();
+    this.imageLayer = null;
+    this.imagesStale = false;
+    this.imageAnimation.reset();
     this.cellsBuffer?.destroy();
     this.uniformBuffer?.destroy();
     this.glyphMapBuffer?.destroy();
@@ -1164,9 +1235,16 @@ export class WebGpuTerminalSurface
       this.gridResizeCount += 1;
       this.selection.reconcile();
     }
-    if (changed) {
+    if (changed) this.forceFullRedraw = true;
+    // A new ratio can change the cell's device size without changing the grid.
+    if (
+      changed ||
+      pixelWidth !== this.reportedPixelWidth ||
+      pixelHeight !== this.reportedPixelHeight
+    ) {
+      this.reportedPixelWidth = pixelWidth;
+      this.reportedPixelHeight = pixelHeight;
       this.options.model.setPixelSize(pixelWidth, pixelHeight);
-      this.forceFullRedraw = true;
     }
     this.updateScrollbar();
     if (scheduleRender && changed) this.runtime.schedule(this);
@@ -1306,6 +1384,43 @@ export class WebGpuTerminalSurface
     return dirty !== null || result.resolved > 0;
   }
 
+  /**
+   * Reads the frame's Kitty placements when the frame changed (placement changes come with full
+   * damage) or the image layer just became available, and uploads what they need. True when the
+   * pane must redraw for them.
+   */
+  private updateImages(damaged: boolean): boolean {
+    const model = this.options.model;
+    if (!model.imagePlacements || (!damaged && !this.imagesStale)) return false;
+    const placements = model.imagePlacements();
+    this.imagesStale = false;
+    const layer =
+      this.imageLayer ??
+      (placements.length > 0 ? this.createImageLayer() : null);
+    const changed =
+      layer?.update(
+        placements,
+        this.imageBackgroundLimit,
+        this.metrics.deviceCellWidth,
+        this.metrics.deviceCellHeight,
+      ) ?? false;
+    this.imageAnimation.afterFrame(placements.length > 0);
+    return changed;
+  }
+
+  private createImageLayer(): WebGpuImageLayer | null {
+    if (!this.uniformBuffer) return null;
+    const support = this.runtime.imageSupport(this);
+    if (support === "pending") {
+      // The runtime schedules this pane when the pipelines are ready; it reads them then.
+      this.imagesStale = true;
+      return null;
+    }
+    if (!support) return null;
+    this.imageLayer = support.createLayer(this.uniformBuffer);
+    return this.imageLayer;
+  }
+
   /** Uploads the highlight mask only when it changes; frees it when empty. */
   private updateSearchMask(device: GPUDevice): boolean {
     const revision = this.search.maskRevision;
@@ -1400,6 +1515,9 @@ export class WebGpuTerminalSurface
       this.cursorEnabled && this.cursorVisible && this.nativeCursorVisible;
     const bounds = this.selection.normalizedBounds();
     const theme = this.theme;
+    // The view scrolled under the pointer: the link's cells are elsewhere now.
+    if (this.hoveredLinkCells && viewportOriginLine !== this.hoveredLinkOrigin)
+      this.clearHoveredLink(false);
     const state: ScreenUniformState = {
       cols: frame.cols,
       rows: frame.rows,
@@ -1430,6 +1548,7 @@ export class WebGpuTerminalSurface
         this.metrics.scale,
       ),
       contrast: this.contrast,
+      link: this.hoveredLinkCells,
     };
     const shiftY = this.gridShift(state, cursor);
     if (__TERAX_BENCH__ && this.nativeCursorVisible) {

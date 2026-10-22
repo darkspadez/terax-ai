@@ -7,7 +7,7 @@
  * All coordinates are integer device pixels; nothing is filtered.
  */
 
-export const SCREEN_UNIFORM_BYTES = 192;
+export const SCREEN_UNIFORM_BYTES = 208;
 
 /** Byte offsets of `Screen` fields; the TypeScript packer mirrors this layout. */
 export const SCREEN_OFFSET = {
@@ -35,6 +35,8 @@ export const SCREEN_OFFSET = {
   decoration: 144,
   contrast: 160,
   gamma: 176,
+  /** Inclusive viewport cell index range of the hovered link (start > end: none). */
+  linkCells: 192,
 } as const;
 
 export const SCREEN_FLAG_TEXT_BLINK_VISIBLE = 1;
@@ -51,8 +53,16 @@ export const SCREEN_FLAG_SELECTION_RECTANGULAR = 8;
  * - A glyph that overhangs to the left is clipped where the neighbour's background differs,
  *   so it cannot paint over a selection or a coloured cell.
  * - Cell-exact shapes (box drawing, shades) keep their coverage as drawn, without contrast.
+ * - `shade` modes (Kitty images, Ghostty's layering): 0 draws the whole pane opaque; 1 draws the
+ *   cells over images placed under the backgrounds, leaving out the slack and every cell that shows
+ *   the default background (Ghostty draws those transparent); 2 draws only the cursor and the
+ *   decorations, over images placed between backgrounds and text (Ghostty draws both with the
+ *   text). What a mode leaves out comes back transparent; their entry points (loaded with the
+ *   images) discard it, so they need no blending and the opaque pass has no `discard`.
+ * - The hovered link (`link_cells`) is underlined like a single underline in the foreground
+ *   colour, on cells without an underline of their own; it is a uniform, not cell data.
  */
-const COMMON = /* wgsl */ `
+export const SCREEN_STRUCT = /* wgsl */ `
 struct Screen {
   viewport_size: vec2f,
   cell_size: vec2u,
@@ -71,8 +81,12 @@ struct Screen {
   decoration: vec4u,
   contrast: vec4f,
   gamma: vec4f,
+  link_cells: vec2i,
 }
+`;
 
+const COMMON = /* wgsl */ `
+${SCREEN_STRUCT}
 @group(0) @binding(0) var<uniform> screen: Screen;
 @group(0) @binding(1) var<storage, read> cells: array<vec4u>;
 @group(0) @binding(2) var<storage, read> glyph_map: array<u32>;
@@ -154,18 +168,23 @@ fn vertex_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
   return output;
 }
 
-fn decoration_color(
-  record: vec4u,
-  background: vec3f,
-  local: vec2u,
-  span_width: u32,
-) -> vec3f {
+fn link_contains(index: u32) -> bool {
+  let cell = i32(index);
+  return cell >= screen.link_cells.x && cell <= screen.link_cells.y;
+}
+
+fn decoration_at(record: vec4u, local: vec2u, span_width: u32, linked: bool) -> vec4f {
   let attrs = attrs_of(record);
-  let underline_style = attrs & 7u;
+  var underline_style = attrs & 7u;
   let strike = (attrs & 8u) != 0u;
   let overline = (attrs & 16u) != 0u;
-  let foreground = unpack4x8unorm(record.y).rgb;
-  let underline_color = unpack4x8unorm(record.w).rgb;
+  let foreground = vec4f(unpack4x8unorm(record.y).rgb, 1.0);
+  var underline_color = vec4f(unpack4x8unorm(record.w).rgb, 1.0);
+  if (linked && underline_style == 0u) {
+    underline_style = 1u;
+    underline_color = foreground;
+  }
+  let none = vec4f(0.0);
   let baseline = screen.decoration.x;
   let thickness = screen.decoration.y;
   let strike_y = screen.decoration.z;
@@ -173,35 +192,40 @@ fn decoration_color(
 
   if (overline && y >= thickness && y < 2u * thickness) { return foreground; }
   if (strike && y >= strike_y && y < strike_y + thickness) { return foreground; }
-  if (underline_style == 0u) { return background; }
+  if (underline_style == 0u) { return none; }
 
   if (underline_style == 1u) {
     let line_top = baseline + 2u * thickness;
     if (y >= line_top && y < line_top + thickness) { return underline_color; }
-    return background;
+    return none;
   }
 
   let band_top = baseline;
   let height = 3u * thickness;
-  if (y < band_top || y >= band_top + height) { return background; }
+  if (y < band_top || y >= band_top + height) { return none; }
   let unit_y = (f32(y - band_top) + 0.5) / f32(height);
   let unit_x = (f32(local.x) + 0.5) / f32(max(span_width, 1u));
-  if (underline_style == 2u && unit_y > 0.28 && unit_y < 0.72) { return background; }
+  if (underline_style == 2u && unit_y > 0.28 && unit_y < 0.72) { return none; }
   if (underline_style == 3u) {
     let wave = 0.5 + sin(unit_x * 12.5663706) * 0.27;
-    if (abs(unit_y - wave) > 0.18) { return background; }
+    if (abs(unit_y - wave) > 0.18) { return none; }
   }
-  if (underline_style == 4u && fract(unit_x * 4.0) > 0.42) { return background; }
-  if (underline_style == 5u && fract(unit_x * 2.0) > 0.68) { return background; }
+  if (underline_style == 4u && fract(unit_x * 4.0) > 0.42) { return none; }
+  if (underline_style == 5u && fract(unit_x * 2.0) > 0.68) { return none; }
   return underline_color;
 }
 
-@fragment
-fn fragment_main(@builtin(position) position: vec4f) -> @location(0) vec4f {
+fn is_default_background(background: vec3f) -> bool {
+  return pack4x8unorm(vec4f(background, 1.0)) ==
+    pack4x8unorm(vec4f(screen.theme_background.rgb, 1.0));
+}
+
+fn shade(position: vec4f, mode: u32) -> vec4f {
   let local_position = position.xy - vec2f(screen.origin) + vec2f(0.0, f32(screen.shift_y));
   let pixel = vec2u(local_position);
   let cell = pixel / screen.cell_size;
   if (cell.x >= screen.dims.x || cell.y >= screen.dims.y) {
+    if (mode != 0u) { return vec4f(0.0); }
     return vec4f(screen.theme_background.rgb, 1.0);
   }
   let index = cell.y * screen.dims.x + cell.x;
@@ -222,7 +246,15 @@ fn fragment_main(@builtin(position) position: vec4f) -> @location(0) vec4f {
     local.x = local.x + screen.cell_size.x;
     span_width = 2u * screen.cell_size.x;
   }
-  return vec4f(decoration_color(record, background, local, span_width), 1.0);
+  let decoration = decoration_at(record, local, span_width, link_contains(index));
+  if (decoration.a > 0.0) { return decoration; }
+  if (mode == 2u || (mode == 1u && is_default_background(background))) { return vec4f(0.0); }
+  return vec4f(background, 1.0);
+}
+
+@fragment
+fn fragment_main(@builtin(position) position: vec4f) -> @location(0) vec4f {
+  return shade(position, 0u);
 }
 `;
 

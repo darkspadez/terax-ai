@@ -225,6 +225,7 @@ describe("shader uniform layout", () => {
         decoration: SCREEN_OFFSET.decoration,
         contrast: SCREEN_OFFSET.contrast,
         gamma: SCREEN_OFFSET.gamma,
+        link_cells: SCREEN_OFFSET.linkCells,
       });
     },
   );

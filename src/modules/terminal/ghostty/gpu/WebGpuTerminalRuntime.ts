@@ -18,8 +18,9 @@ import {
   gcPressureOptionsFromStorage,
   type GcPressureStats,
 } from "./GcPressure";
-import { BACKGROUND_SHADER, GLYPH_SHADER } from "./shaders";
+import { BACKGROUND_SHADER, GLYPH_SHADER, SCREEN_STRUCT } from "./shaders";
 import type { TerminalFontMetrics } from "./terminalVisuals";
+import type { WebGpuImageSupport } from "./WebGpuImageLayer";
 import {
   findTerminalArea,
   type PaneBinding,
@@ -79,6 +80,15 @@ export interface WebGpuRuntimeSurface extends WindowCanvasPane {
   handleDeviceLoss(): void;
   isFocused(): boolean;
 }
+
+/** Kitty image support for one device generation; loaded on first use. */
+type ImageSupportEntry = {
+  readonly generation: number;
+  support: WebGpuImageSupport | null;
+  failed: boolean;
+  /** Panes that asked while it loaded; scheduled once it is ready. */
+  readonly waiting: Set<WebGpuRuntimeSurface>;
+};
 
 type AtlasEntry = {
   readonly key: string;
@@ -211,6 +221,7 @@ export class WebGpuTerminalRuntime {
   private glyphPipeline: GPURenderPipeline | null = null;
   private bindGroupLayout: GPUBindGroupLayout | null = null;
   private emptyStorage: GPUBuffer | null = null;
+  private imageSupportEntry: ImageSupportEntry | null = null;
   private animationFrame: number | null = null;
   private frameTimer: ReturnType<typeof setTimeout> | null = null;
   private frameTimerDueAt = 0;
@@ -290,6 +301,7 @@ export class WebGpuTerminalRuntime {
 
   unregister(surface: WebGpuRuntimeSurface): void {
     this.surfaces.delete(surface);
+    this.imageSupportEntry?.waiting.delete(surface);
     this.dirtySurfaces.delete(surface);
     this.renderSurfaces.delete(surface);
     const target = this.paneWindows.get(surface);
@@ -432,6 +444,53 @@ export class WebGpuTerminalRuntime {
         this.scheduleAtlasReap();
       },
     };
+  }
+
+  /**
+   * Kitty image pipelines for the current device. Nothing is loaded or compiled until a pane
+   * shows an image: the first call starts that and returns "pending", and the panes that asked
+   * are scheduled when it is ready. Null when it failed (images are then not drawn).
+   */
+  imageSupport(
+    surface: WebGpuRuntimeSurface,
+  ): WebGpuImageSupport | "pending" | null {
+    const resources = this.resources();
+    let entry = this.imageSupportEntry;
+    if (entry?.generation !== resources.generation) {
+      const loading: ImageSupportEntry = {
+        generation: resources.generation,
+        support: null,
+        failed: false,
+        waiting: new Set(),
+      };
+      entry = loading;
+      this.imageSupportEntry = loading;
+      void import("./WebGpuImageLayer")
+        .then((module) =>
+          module.createWebGpuImageSupport(
+            resources.device,
+            resources.format,
+            resources.bindGroupLayout,
+            { screenStruct: SCREEN_STRUCT, background: BACKGROUND_SHADER },
+          ),
+        )
+        .then(
+          (support) => {
+            if (this.disposed || this.imageSupportEntry !== loading) return;
+            loading.support = support;
+            for (const waiting of loading.waiting) this.schedule(waiting);
+            loading.waiting.clear();
+          },
+          () => {
+            loading.failed = true;
+            loading.waiting.clear();
+          },
+        );
+    }
+    if (entry.support) return entry.support;
+    if (entry.failed) return null;
+    entry.waiting.add(surface);
+    return "pending";
   }
 
   resources(): WebGpuSharedResources {
@@ -1184,6 +1243,7 @@ export class WebGpuTerminalRuntime {
     this.glyphPipeline = null;
     this.bindGroupLayout = null;
     this.emptyStorage = null;
+    this.imageSupportEntry = null;
   }
 
   private assertHealthy(): void {
