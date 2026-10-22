@@ -39,6 +39,7 @@ import {
   type GraphRow,
   type GraphState,
 } from "./lib/graph";
+import { nextHistoryPage } from "./lib/historyPaging";
 import {
   commitWebUrl,
   hostLabel,
@@ -335,15 +336,17 @@ export function GitHistoryPane({
   const loadMore = useCallback(async () => {
     if (inflightMoreRef.current || endReached) return;
     if (loadStatus !== "idle") return;
-    const last = commits[commits.length - 1];
-    if (!last) return;
+    const page = nextHistoryPage(commits);
+    if (!page) return;
+    const requestId = requestIdRef.current;
     inflightMoreRef.current = true;
     setLoadStatus("more");
     try {
       const entries = await native.gitLog(repoRoot, {
         limit: PAGE_SIZE,
-        beforeSha: last.sha,
+        ...page,
       });
+      if (requestId !== requestIdRef.current) return;
       setCommits((prev) => {
         const seen = new Set(prev.map((c) => c.sha));
         const merged = [...prev];
@@ -353,6 +356,7 @@ export function GitHistoryPane({
       if (entries.length < PAGE_SIZE) setEndReached(true);
       setLoadStatus("idle");
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       setError(normalizeError(err));
       setLoadStatus("error");
     } finally {
