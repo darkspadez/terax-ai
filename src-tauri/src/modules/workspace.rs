@@ -752,6 +752,29 @@ mod tests {
     }
 
     #[test]
+    fn wsl_drvfs_rejects_multi_character_and_non_alpha_drives() {
+        assert_eq!(wsl_drvfs_to_windows("/mnt/ab/Users/x"), None);
+        assert_eq!(wsl_drvfs_to_windows("/mnt/1/Users/x"), None);
+        assert_eq!(wsl_drvfs_to_windows("/mnt//Users/x"), None);
+    }
+
+    #[test]
+    fn wsl_drvfs_normalizes_backslash_input_and_uppercases_drives() {
+        assert_eq!(
+            wsl_drvfs_to_windows("\\mnt\\c\\Users\\vinicios"),
+            Some(PathBuf::from(r"C:\Users\vinicios"))
+        );
+        assert_eq!(wsl_drvfs_to_windows("/mnt/z/"), Some(PathBuf::from(r"Z:\")));
+    }
+
+    #[test]
+    fn distro_validator_bounds_name_length_and_allows_spaces() {
+        assert!(is_safe_distro_name("Debian GNU"));
+        assert!(is_safe_distro_name(&"a".repeat(255)));
+        assert!(!is_safe_distro_name(&"a".repeat(256)));
+    }
+
+    #[test]
     fn normalize_wsl_value_uses_last_nonempty_line() {
         assert_eq!(
             normalize_wsl_value("banner\n  /bin/zsh \n".into(), "/bin/sh"),
