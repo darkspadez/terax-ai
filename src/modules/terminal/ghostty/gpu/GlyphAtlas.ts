@@ -5,7 +5,7 @@ import {
   hasPrivateUseCodepoint,
   isPrivateUseCodepoint,
 } from "./GlyphFontGate";
-import { GlyphRasterizer } from "./GlyphRasterizer";
+import { GLYPH_STYLE_TWO_CELLS, GlyphRasterizer } from "./GlyphRasterizer";
 import { SkylineAtlasAllocator } from "./SkylineAtlasAllocator";
 import type { TerminalFontMetrics } from "./terminalVisuals";
 
@@ -157,18 +157,25 @@ export class GlyphAtlas {
    * `ATLAS_FULL` means even the largest atlas is exhausted; the caller flushes
    * between frames and tries again. `GLYPH_DEFERRED` means the glyph's font
    * is still loading; nothing is cached and the caller retries later.
+   * `style` is `GLYPH_STYLE_*` bits; with `GLYPH_STYLE_TWO_CELLS` a symbol may
+   * be laid out across two cells and is a separate glyph.
    */
   resolve(text: string, style: number): number {
     this.assertActive();
     const codepoint = text.codePointAt(0) ?? 0;
     const single = text.length === (codepoint > 0xffff ? 2 : 1);
-    // Procedural glyphs and icons ignore bold and italic, so all four styles
-    // share one.
-    const styleless = single
-      ? isBuiltinGlyph(codepoint) || isPrivateUseCodepoint(codepoint)
-      : hasPrivateUseCodepoint(text);
-    const keyStyle = styleless ? 0 : style & 3;
-    const simpleKey = codepoint * 4 + keyStyle;
+    // Procedural glyphs fill exactly one cell in any style; icons ignore bold
+    // and italic, so all four styles share one.
+    const builtin = single && isBuiltinGlyph(codepoint);
+    const styleless =
+      builtin ||
+      (single
+        ? isPrivateUseCodepoint(codepoint)
+        : hasPrivateUseCodepoint(text));
+    const keyStyle = builtin
+      ? 0
+      : (styleless ? 0 : style & 3) | (style & GLYPH_STYLE_TWO_CELLS);
+    const simpleKey = codepoint * 8 + keyStyle;
     const complexKey = single ? "" : `${keyStyle}\u0000${text}`;
     const cached = single
       ? this.simple.get(simpleKey)

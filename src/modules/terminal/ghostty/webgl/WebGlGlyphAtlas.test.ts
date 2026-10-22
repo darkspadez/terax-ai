@@ -142,10 +142,48 @@ describe("WebGlGlyphAtlas procedural glyphs", () => {
   });
 });
 
+describe("WebGlGlyphAtlas constraints", () => {
+  it("fits a symbol to the cells it may use and keys each layout", () => {
+    const fillText = vi.fn();
+    const setTransform = vi.fn();
+    const gl = createWebGlHarness(vi.fn(), vi.fn(), fillText, setTransform);
+    const atlas = new WebGlGlyphAtlas(gl, METRICS, 1);
+    const inferred = atlas.glyph(0x2192, null, 0);
+    const one = atlas.glyph(0x2192, null, 0, 1);
+    const two = atlas.glyph(0x2192, null, 0, 2);
+    expect(atlas.glyph(0x2192, null, 0, 2)).toBe(two);
+    expect(atlas.glyph(0x2192, null, 0)).toBe(inferred);
+    expect(atlas.glyphCount).toBe(3);
+    expect(fillText).toHaveBeenCalledTimes(3);
+    // Squeezed into one 8 pixel cell, or left at 16 pixels across two.
+    expect(one.width).toBe(8 + 4);
+    expect(inferred.width).toBe(one.width);
+    expect(two.width).toBe(16 + 4);
+    // Half size: the 16 x 12 ink becomes 8 x 6, centred where the font put
+    // it (top at 5), drawn 2 pixels into a bitmap that starts at row 3.
+    expect(setTransform).toHaveBeenCalledWith(0.5, 0, 0, 0.5, 2, 7);
+    expect(setTransform).toHaveBeenLastCalledWith(1, 0, 0, 1, 0, 0);
+    atlas.dispose();
+  });
+
+  it("draws branch drawing procedurally whatever the style or cells", () => {
+    const fillText = vi.fn();
+    const gl = createWebGlHarness(vi.fn(), vi.fn(), fillText);
+    const atlas = new WebGlGlyphAtlas(gl, METRICS, 1);
+    const node = atlas.glyph(0xf5ee, null, 0);
+    expect(atlas.glyph(0xf5ee, null, CellFlags.BOLD, 2)).toBe(node);
+    expect(node.width).toBe(METRICS.deviceCellWidth);
+    expect(node.originOffsetX).toBe(0);
+    expect(fillText).not.toHaveBeenCalled();
+    atlas.dispose();
+  });
+});
+
 function createWebGlHarness(
   texSubImage2D: ReturnType<typeof vi.fn>,
   pixelStorei: ReturnType<typeof vi.fn>,
   fillText: ReturnType<typeof vi.fn> = vi.fn(),
+  setTransform: ReturnType<typeof vi.fn> = vi.fn(),
 ): WebGL2RenderingContext {
   const pixels = new Uint8ClampedArray(12 * 16 * 4);
   for (let offset = 0; offset < pixels.length; offset += 4) {
@@ -160,11 +198,13 @@ function createWebGlHarness(
       height: 0,
       getContext: vi.fn(() => ({
         clearRect: vi.fn(),
+        setTransform,
         fillText,
         getImageData: vi.fn(() => ({ data: pixels })),
-        measureText: vi.fn(() => ({
+        // Arrows are drawn two cells wide, as a fallback font might.
+        measureText: vi.fn((text: string) => ({
           actualBoundingBoxLeft: 0,
-          actualBoundingBoxRight: 8,
+          actualBoundingBoxRight: text === "→" ? 16 : 8,
           actualBoundingBoxAscent: 10,
           actualBoundingBoxDescent: 2,
         })),

@@ -4,25 +4,24 @@
  */
 
 import { CellFlags } from "@terax/ghostty-core/protocol";
-import {
-  BuiltinGlyphRenderer,
-  builtinLineThickness,
-  isBuiltinGlyph,
-} from "../gpu/BuiltinGlyphs";
+import { isBuiltinGlyph } from "../gpu/BuiltinGlyphs";
 import {
   documentGlyphFontGate,
   type GlyphFontGate,
   hasPrivateUseCodepoint,
   isPrivateUseCodepoint,
 } from "../gpu/GlyphFontGate";
-import { hasIntrinsicColor } from "../gpu/glyphColor";
+import {
+  GLYPH_STYLE_BOLD,
+  GLYPH_STYLE_ITALIC,
+  GlyphRasterizer,
+  type RasterizedGlyph,
+} from "../gpu/GlyphRasterizer";
 import { SkylineAtlasAllocator } from "../gpu/SkylineAtlasAllocator";
-import { fontCss, type TerminalFontMetrics } from "../gpu/terminalVisuals";
+import type { TerminalFontMetrics } from "../gpu/terminalVisuals";
 
 const ATLAS_SIZE = 1_024;
 const COLOR_ATLAS_SIZE = 512;
-const RASTER_SIZE = 256;
-const GLYPH_PADDING = 2;
 
 export type WebGlGlyphEntry = {
   readonly originOffsetX: number;
@@ -60,9 +59,10 @@ const NULL_GLYPH: WebGlGlyphEntry = {
  * one byte of coverage and receives its color in the fragment shader, keeping
  * one cache entry across all ANSI and true-color variants. Native emoji use a
  * bounded RGBA atlas that is allocated only when an intrinsic-color glyph is
- * encountered. Box drawing, blocks, braille and powerline separators are drawn
- * procedurally at exactly the cell size (`BuiltinGlyphs.ts`) and share the
- * coverage atlas, so borders join without gaps and ignore bold and italic.
+ * encountered. Glyphs come from the WebGPU path's `GlyphRasterizer`, so both
+ * renderers draw the same pixels: procedural box drawing, blocks and braille
+ * fill exactly their cell and ignore bold and italic, and icons, symbols and
+ * emoji are fitted to their cells.
  */
 export class WebGlGlyphAtlas {
   private readonly coverageAllocator = new SkylineAtlasAllocator(
@@ -79,10 +79,8 @@ export class WebGlGlyphAtlas {
     Map<string, WebGlGlyphEntry>
   >();
   private coverage = new Uint8Array(ATLAS_SIZE * ATLAS_SIZE);
-  private builtin: BuiltinGlyphRenderer | null = null;
   private colorPixels: Uint8Array | null = null;
-  private readonly rasterCanvas = document.createElement("canvas");
-  private readonly rasterContext: CanvasRenderingContext2D;
+  private readonly rasterizer: GlyphRasterizer;
   private readonly coverageTexture: WebGLTexture;
   private readonly colorTexture: WebGLTexture;
   private coverageDirty: DirtyRectangle | null = null;
@@ -92,29 +90,17 @@ export class WebGlGlyphAtlas {
   private generationValue = 1;
   private deferredValue = false;
   private disposed = false;
-  private readonly fonts: string[];
 
   constructor(
     private readonly gl: WebGL2RenderingContext,
-    private readonly metrics: TerminalFontMetrics,
-    private readonly scale: number,
-    private readonly fontGate: GlyphFontGate = documentGlyphFontGate(),
+    metrics: TerminalFontMetrics,
+    scale: number,
+    fontGate: GlyphFontGate = documentGlyphFontGate(),
   ) {
-    const font = { ...metrics.font, size: metrics.font.size * scale };
-    this.fonts = [0, 1, 2, 3].map((style) =>
-      fontCss(
-        font,
-        (style & CellFlags.BOLD) !== 0,
-        (style & CellFlags.ITALIC) !== 0,
-      ),
+    this.rasterizer = new GlyphRasterizer(
+      metrics.scale === scale ? metrics : { ...metrics, scale },
+      fontGate,
     );
-    this.rasterCanvas.width = RASTER_SIZE;
-    this.rasterCanvas.height = RASTER_SIZE;
-    const context = this.rasterCanvas.getContext("2d", {
-      willReadFrequently: true,
-    });
-    if (!context) throw new Error("Glyph rasterization is unavailable");
-    this.rasterContext = context;
 
     const coverageTexture = gl.createTexture();
     const colorTexture = gl.createTexture();
@@ -170,10 +156,9 @@ export class WebGlGlyphAtlas {
 
   get cpuByteSize(): number {
     return (
-      (this.builtin?.byteSize ?? 0) +
+      this.rasterizer.cpuBytes +
       this.coverage.byteLength +
-      (this.colorPixels?.byteLength ?? 0) +
-      (this.disposed ? 0 : RASTER_SIZE * RASTER_SIZE * 4)
+      (this.colorPixels?.byteLength ?? 0)
     );
   }
 
@@ -197,51 +182,56 @@ export class WebGlGlyphAtlas {
     return this.uploadedBytesValue;
   }
 
+  /**
+   * The atlas entry for a cell's glyph. `cells` is how many cells the glyph
+   * may use (`constraintCells`: two for a wide character or a symbol with a
+   * blank cell after it); left out, it follows from the text.
+   */
   glyph(
     codepoint: number,
     grapheme: string | null,
     flags: number,
+    cells?: 1 | 2,
   ): WebGlGlyphEntry {
     this.assertLive();
     if (codepoint === 0 || codepoint === 32) return NULL_GLYPH;
-    if (grapheme === null && isBuiltinGlyph(codepoint)) {
-      const key = codepoint * 4;
-      const cached = this.simpleGlyphs.get(key);
-      if (cached) return cached;
-      const entry = this.rasterizeBuiltin(codepoint);
-      if (entry) {
-        this.simpleGlyphs.set(key, entry);
-        return entry;
-      }
-    }
-    // Icons ignore bold and italic, like procedural glyphs: no synthesized
-    // weight or slant on a symbol.
-    const icon =
-      grapheme === null
+    // Procedural glyphs and icons ignore bold and italic (no synthesized
+    // weight or slant on a symbol), and procedural glyphs fill one cell.
+    const builtin = grapheme === null && isBuiltinGlyph(codepoint);
+    const styleless =
+      builtin ||
+      (grapheme === null
         ? isPrivateUseCodepoint(codepoint)
-        : hasPrivateUseCodepoint(grapheme);
-    const style = icon ? 0 : flags & (CellFlags.BOLD | CellFlags.ITALIC);
+        : hasPrivateUseCodepoint(grapheme));
+    const style = styleless
+      ? 0
+      : ((flags & CellFlags.BOLD) !== 0 ? GLYPH_STYLE_BOLD : 0) |
+        ((flags & CellFlags.ITALIC) !== 0 ? GLYPH_STYLE_ITALIC : 0);
+    // Bits 0-1 style, 2-3 the cell count: inferred (0), one or two.
+    const variant = builtin ? 0 : style | ((cells ?? 0) << 2);
     if (grapheme === null) {
-      const key = codepoint * 4 + style;
+      const key = codepoint * 16 + variant;
       const cached = this.simpleGlyphs.get(key);
       if (cached) return cached;
-      const text = String.fromCodePoint(codepoint);
-      if (!this.fontReady(text, style)) return NULL_GLYPH;
-      const entry = this.rasterize(text, style);
-      this.simpleGlyphs.set(key, entry);
-      return entry;
+      const entry = this.rasterize(
+        String.fromCodePoint(codepoint),
+        style,
+        cells,
+      );
+      if (entry) this.simpleGlyphs.set(key, entry);
+      return entry ?? NULL_GLYPH;
     }
 
-    let styledGlyphs = this.complexGlyphs.get(style);
-    const cached = styledGlyphs?.get(grapheme);
+    const cached = this.complexGlyphs.get(variant)?.get(grapheme);
     if (cached) return cached;
-    if (!this.fontReady(grapheme, style)) return NULL_GLYPH;
-    const entry = this.rasterize(grapheme, style);
-    if (!styledGlyphs) {
-      styledGlyphs = new Map();
-      this.complexGlyphs.set(style, styledGlyphs);
+    const entry = this.rasterize(grapheme, style, cells);
+    if (!entry) return NULL_GLYPH;
+    let glyphs = this.complexGlyphs.get(variant);
+    if (!glyphs) {
+      glyphs = new Map();
+      this.complexGlyphs.set(variant, glyphs);
     }
-    styledGlyphs.set(grapheme, entry);
+    glyphs.set(grapheme, entry);
     return entry;
   }
 
@@ -314,9 +304,7 @@ export class WebGlGlyphAtlas {
     this.complexGlyphs.clear();
     this.coverage = new Uint8Array(0);
     this.colorPixels = null;
-    this.builtin = null;
-    this.rasterCanvas.width = 1;
-    this.rasterCanvas.height = 1;
+    this.rasterizer.dispose();
     this.coverageDirty = null;
     this.colorDirty = null;
   }
@@ -332,150 +320,71 @@ export class WebGlGlyphAtlas {
     return deferred;
   }
 
-  private fontReady(text: string, style: number): boolean {
-    if (this.fontGate.ready(this.fonts[style], text)) return true;
-    this.deferredValue = true;
-    return false;
-  }
-
-  private rasterize(text: string, style: number): WebGlGlyphEntry {
-    const context = this.rasterContext;
-    context.clearRect(0, 0, RASTER_SIZE, RASTER_SIZE);
-    context.font = this.fonts[style];
-    context.textAlign = "left";
-    context.textBaseline = "alphabetic";
-    context.fillStyle = "white";
-
-    const measurement = context.measureText(text);
-    const left = Math.max(0, Math.ceil(measurement.actualBoundingBoxLeft || 0));
-    const right = Math.ceil(
-      measurement.actualBoundingBoxRight || this.metrics.deviceCellWidth,
-    );
-    const ascent = Math.ceil(
-      measurement.actualBoundingBoxAscent || this.metrics.deviceBaseline,
-    );
-    const descent = Math.ceil(
-      measurement.actualBoundingBoxDescent ||
-        this.metrics.deviceCellHeight - this.metrics.deviceBaseline,
-    );
-    const width = Math.min(
-      RASTER_SIZE,
-      Math.max(1, left + right + GLYPH_PADDING * 2),
-    );
-    const height = Math.min(
-      RASTER_SIZE,
-      Math.max(1, ascent + descent + GLYPH_PADDING * 2),
-    );
-    context.fillText(text, GLYPH_PADDING + left, GLYPH_PADDING + ascent);
-
-    const rgba = context.getImageData(0, 0, width, height).data;
-    const intrinsicColor = hasIntrinsicColor(rgba);
-    if (intrinsicColor) this.ensureColorAtlas();
-    const allocator = intrinsicColor
-      ? this.colorAllocator
-      : this.coverageAllocator;
-    let region = allocator.allocate(width, height);
+  /**
+   * Rasterizes and stores a glyph, or returns null (caching nothing) while its
+   * font loads.
+   */
+  private rasterize(
+    text: string,
+    style: number,
+    cells: 1 | 2 | undefined,
+  ): WebGlGlyphEntry | null {
+    const glyph = this.rasterizer.rasterize(text, style, cells);
+    if (!glyph) {
+      this.deferredValue = true;
+      return null;
+    }
+    const color = glyph.intrinsicColor;
+    if (color) this.ensureColorAtlas();
+    const allocator = color ? this.colorAllocator : this.coverageAllocator;
+    let region = allocator.allocate(glyph.width, glyph.height);
     if (!region) {
       this.reset();
-      if (intrinsicColor) this.ensureColorAtlas();
-      region = allocator.allocate(width, height);
+      if (color) this.ensureColorAtlas();
+      region = allocator.allocate(glyph.width, glyph.height);
     }
     if (!region) {
-      const size = intrinsicColor ? COLOR_ATLAS_SIZE : ATLAS_SIZE;
+      const size = color ? COLOR_ATLAS_SIZE : ATLAS_SIZE;
       throw new Error(`Glyph exceeds the ${size}px atlas budget`);
     }
+    if (color) this.storeColor(glyph, region.x, region.y);
+    else this.storeCoverage(glyph, region.x, region.y);
 
-    if (intrinsicColor) {
-      const colorPixels = this.colorPixels as Uint8Array;
-      for (let row = 0; row < height; row += 1) {
-        const source = row * width * 4;
-        const target = ((region.y + row) * COLOR_ATLAS_SIZE + region.x) * 4;
-        colorPixels.set(rgba.subarray(source, source + width * 4), target);
-      }
-      this.colorDirty = mergeDirty(
-        this.colorDirty,
-        region.x,
-        region.y,
-        width,
-        height,
-      );
-    } else {
-      for (let row = 0; row < height; row += 1) {
-        let source = row * width * 4 + 3;
-        let target = (region.y + row) * ATLAS_SIZE + region.x;
-        for (let column = 0; column < width; column += 1) {
-          this.coverage[target] = rgba[source];
-          source += 4;
-          target += 1;
-        }
-      }
-      this.coverageDirty = mergeDirty(
-        this.coverageDirty,
-        region.x,
-        region.y,
-        width,
-        height,
-      );
-    }
-
-    const atlasSize = intrinsicColor ? COLOR_ATLAS_SIZE : ATLAS_SIZE;
-
+    const atlasSize = color ? COLOR_ATLAS_SIZE : ATLAS_SIZE;
     return {
-      originOffsetX: -left - GLYPH_PADDING,
-      originOffsetY: this.metrics.deviceBaseline - ascent - GLYPH_PADDING,
-      width,
-      height,
+      originOffsetX: glyph.bearingX,
+      originOffsetY: glyph.bearingY,
+      width: glyph.width,
+      height: glyph.height,
       uvMinX: region.x / atlasSize,
       uvMinY: region.y / atlasSize,
-      uvMaxX: (region.x + width) / atlasSize,
-      uvMaxY: (region.y + height) / atlasSize,
-      intrinsicColor,
+      uvMaxX: (region.x + glyph.width) / atlasSize,
+      uvMaxY: (region.y + glyph.height) / atlasSize,
+      intrinsicColor: color,
     };
   }
 
-  /** A procedurally drawn glyph that fills its whole cell, or null. */
-  private rasterizeBuiltin(codepoint: number): WebGlGlyphEntry | null {
-    this.builtin ??= new BuiltinGlyphRenderer({
-      width: this.metrics.deviceCellWidth,
-      height: this.metrics.deviceCellHeight,
-      thickness: builtinLineThickness(this.metrics.font.size * this.scale),
-    });
-    const renderer = this.builtin;
-    const mask = renderer.render(codepoint);
-    if (!mask) return null;
-    const { width, height } = renderer.spec;
-    let region = this.coverageAllocator.allocate(width, height);
-    if (!region) {
-      this.reset();
-      region = this.coverageAllocator.allocate(width, height);
-    }
-    if (!region) {
-      throw new Error(`Glyph exceeds the ${ATLAS_SIZE}px atlas budget`);
-    }
+  private storeCoverage(glyph: RasterizedGlyph, x: number, y: number): void {
+    const { width, height, pixels } = glyph;
     for (let row = 0; row < height; row += 1) {
       this.coverage.set(
-        mask.subarray(row * width, (row + 1) * width),
-        (region.y + row) * ATLAS_SIZE + region.x,
+        pixels.subarray(row * width, (row + 1) * width),
+        (y + row) * ATLAS_SIZE + x,
       );
     }
-    this.coverageDirty = mergeDirty(
-      this.coverageDirty,
-      region.x,
-      region.y,
-      width,
-      height,
-    );
-    return {
-      originOffsetX: 0,
-      originOffsetY: 0,
-      width,
-      height,
-      uvMinX: region.x / ATLAS_SIZE,
-      uvMinY: region.y / ATLAS_SIZE,
-      uvMaxX: (region.x + width) / ATLAS_SIZE,
-      uvMaxY: (region.y + height) / ATLAS_SIZE,
-      intrinsicColor: false,
-    };
+    this.coverageDirty = mergeDirty(this.coverageDirty, x, y, width, height);
+  }
+
+  private storeColor(glyph: RasterizedGlyph, x: number, y: number): void {
+    const { width, height, pixels } = glyph;
+    const colorPixels = this.colorPixels as Uint8Array;
+    for (let row = 0; row < height; row += 1) {
+      colorPixels.set(
+        pixels.subarray(row * width * 4, (row + 1) * width * 4),
+        ((y + row) * COLOR_ATLAS_SIZE + x) * 4,
+      );
+    }
+    this.colorDirty = mergeDirty(this.colorDirty, x, y, width, height);
   }
 
   private ensureColorAtlas(): void {

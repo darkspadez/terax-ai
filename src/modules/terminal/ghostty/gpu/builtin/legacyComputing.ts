@@ -5,15 +5,15 @@
  * diagonal fills and quarter circles. Geometry follows Ghostty's sprite font
  * (`draw/symbols_for_legacy_computing.zig`, `geometric_shapes.zig`, MIT).
  */
-import { SHADE_MEDIUM, fillBlock, fillFractions } from "./blockElements";
+import { fillBlock, fillFractions, SHADE_MEDIUM } from "./blockElements";
 import {
-  LINE_HEAVY,
-  LINE_LIGHT,
   diagonalUpperLeftToLowerRight,
   diagonalUpperRightToLowerLeft,
   drawLines,
+  LINE_HEAVY,
+  LINE_LIGHT,
 } from "./boxDrawing";
-import type { SpriteMask } from "./SpriteMask";
+import { circleRing, type SpriteMask } from "./SpriteMask";
 import type { SpriteSpec } from "./spriteSpec";
 
 export function isGeometricShape(codepoint: number): boolean {
@@ -220,15 +220,15 @@ const CORNER_DIAGONALS: readonly Corners[] = [
   TL | TR | BL | BR,
 ];
 
-type Anchor = readonly [horizontal: 0 | 0.5 | 1, vertical: 0 | 0.5 | 1];
+export type Anchor = readonly [horizontal: 0 | 0.5 | 1, vertical: 0 | 0.5 | 1];
 const UL: Anchor = [0, 0];
-const UC: Anchor = [0.5, 0];
+export const UC: Anchor = [0.5, 0];
 const UR: Anchor = [1, 0];
-const ML: Anchor = [0, 0.5];
+export const ML: Anchor = [0, 0.5];
 const MC: Anchor = [0.5, 0.5];
-const MR: Anchor = [1, 0.5];
+export const MR: Anchor = [1, 0.5];
 const LL: Anchor = [0, 1];
-const LC: Anchor = [0.5, 1];
+export const LC: Anchor = [0.5, 1];
 const LR: Anchor = [1, 1];
 
 /** Segment chains for U+1FBD0..U+1FBDF. */
@@ -251,7 +251,8 @@ const CELL_DIAGONALS: ReadonlyArray<readonly Anchor[]> = [
   [UL, MR, LL],
 ];
 
-function circle(
+/** A circle of the cell's smaller half-size centred on `anchor`, clipped. */
+export function circle(
   mask: SpriteMask,
   spec: SpriteSpec,
   anchor: Anchor,
@@ -264,16 +265,6 @@ function circle(
   const outer = circleRing(x, y, radius);
   if (filled) mask.fill(outer);
   else mask.fill(outer, [circleRing(x, y, radius - thickness)]);
-}
-
-function circleRing(x: number, y: number, radius: number): number[] {
-  const count = Math.max(48, Math.ceil(radius) * 8);
-  const ring: number[] = [];
-  for (let index = 0; index < count; index += 1) {
-    const angle = (index / count) * Math.PI * 2;
-    ring.push(x + radius * Math.cos(angle), y + radius * Math.sin(angle));
-  }
-  return ring;
 }
 
 export function drawLegacyComputing(

@@ -7,6 +7,7 @@
   "include": [
     "lib",
     "symbols-font",
+    "nerd-font-constraints",
     "pty-smoke/run.ts",
     "ipc-profile/run.ts",
     "renderer-profile/lab_report.ts",

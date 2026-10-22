@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  assign,
-  cmapCodepoints,
-  privateUse,
-  runs,
-  unicodeRange,
-} from "./build.ts";
+import { cmapCodepoints, runs, unicodeRange } from "../lib/fonts.ts";
+import { assign, privateUse } from "./build.ts";
 
 const u16 = (value: number) => [(value >> 8) & 0xff, value & 0xff];
 const u32 = (value: number) => [...u16(value >>> 16), ...u16(value & 0xffff)];

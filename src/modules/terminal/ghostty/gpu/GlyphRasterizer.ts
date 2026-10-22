@@ -9,14 +9,30 @@ import {
   hasPrivateUseCodepoint,
 } from "./GlyphFontGate";
 import { hasIntrinsicColor } from "./glyphColor";
+import {
+  type ConstraintMetrics,
+  cellConstraintMetrics,
+  constrainGlyph,
+  type GlyphConstraint,
+  glyphConstraint,
+  isEmojiPresentation,
+} from "./glyphConstraint";
 import { fontCss, type TerminalFontMetrics } from "./terminalVisuals";
 
 const RASTER_SIZE = 256;
 const GLYPH_PADDING = 2;
 const CLEAR_MARGIN = 8;
+/** Ink smaller than this has no shape worth constraining (as Ghostty). */
+const MIN_INK = 0.25;
 
 export const GLYPH_STYLE_BOLD = 1;
 export const GLYPH_STYLE_ITALIC = 2;
+/**
+ * The glyph may use two cells (Ghostty's constraint width 2): a wide
+ * character, or a symbol with a blank cell after it. Without it the count
+ * follows from the text: emoji take two cells, everything else one.
+ */
+export const GLYPH_STYLE_TWO_CELLS = 4;
 
 export type RasterizedGlyph = {
   readonly width: number;
@@ -39,14 +55,134 @@ export type RasterizedGlyph = {
 };
 
 /**
+ * A glyph's ink around its pen origin, as `TextMetrics.actualBoundingBox*`
+ * reports it (0 when unknown), in device pixels.
+ */
+export type InkBounds = {
+  readonly left: number;
+  readonly right: number;
+  readonly ascent: number;
+  readonly descent: number;
+};
+
+/** How a glyph is drawn into its bitmap and where the bitmap sits. */
+export type GlyphPlacement = {
+  /** Bitmap size, and its top-left relative to the cell's top-left. */
+  readonly width: number;
+  readonly height: number;
+  readonly bearingX: number;
+  readonly bearingY: number;
+  /** Pen origin in the bitmap, and the scale the glyph is drawn at. */
+  readonly originX: number;
+  readonly originY: number;
+  readonly scaleX: number;
+  readonly scaleY: number;
+};
+
+type CellGeometry = Pick<
+  TerminalFontMetrics,
+  "deviceCellWidth" | "deviceCellHeight" | "deviceBaseline"
+>;
+
+/**
+ * Where a glyph with `ink` is drawn. Without a constraint it keeps the font's
+ * size and sits on the cell's baseline at the cell's left edge; with one it is
+ * scaled and moved to the box `constrainGlyph` gives for `cells` cells.
+ * `pixelAligned` snaps that box to whole pixels, as Ghostty does for bitmap
+ * (colour emoji) glyphs, which blur when resampled off the pixel grid.
+ */
+export function placeGlyph(
+  ink: InkBounds,
+  cell: CellGeometry,
+  constraint: GlyphConstraint | null,
+  metrics: ConstraintMetrics | null,
+  cells: number,
+  pixelAligned: boolean,
+): GlyphPlacement {
+  const inkWidth = ink.left + ink.right;
+  const inkHeight = ink.ascent + ink.descent;
+  if (
+    !constraint ||
+    !metrics ||
+    !(inkWidth >= MIN_INK && inkHeight >= MIN_INK)
+  ) {
+    return naturalPlacement(ink, cell);
+  }
+  const box = constrainGlyph(
+    constraint,
+    {
+      width: inkWidth,
+      height: inkHeight,
+      x: -ink.left,
+      y: cell.deviceCellHeight - cell.deviceBaseline - ink.descent,
+    },
+    metrics,
+    cells,
+  );
+  // Cell coordinates, y down.
+  let left = box.x;
+  let right = box.x + box.width;
+  let bottom = cell.deviceCellHeight - box.y;
+  let top = bottom - box.height;
+  if (pixelAligned) {
+    left = Math.round(left);
+    right = Math.max(left + 1, Math.round(right));
+    top = Math.round(top);
+    bottom = Math.max(top + 1, Math.round(bottom));
+  }
+  const scaleX = (right - left) / inkWidth;
+  const scaleY = (bottom - top) / inkHeight;
+  const bearingX = Math.floor(left) - GLYPH_PADDING;
+  const bearingY = Math.floor(top) - GLYPH_PADDING;
+  return {
+    width: clampSize(Math.ceil(right) + GLYPH_PADDING - bearingX),
+    height: clampSize(Math.ceil(bottom) + GLYPH_PADDING - bearingY),
+    bearingX,
+    bearingY,
+    originX: left + ink.left * scaleX - bearingX,
+    originY: top + ink.ascent * scaleY - bearingY,
+    scaleX,
+    scaleY,
+  };
+}
+
+function naturalPlacement(ink: InkBounds, cell: CellGeometry): GlyphPlacement {
+  const left = Math.max(0, Math.ceil(ink.left));
+  const right = Math.ceil(ink.right || cell.deviceCellWidth);
+  const ascent = Math.ceil(ink.ascent || cell.deviceBaseline);
+  const descent = Math.ceil(
+    ink.descent || cell.deviceCellHeight - cell.deviceBaseline,
+  );
+  return {
+    width: clampSize(left + right + GLYPH_PADDING * 2),
+    height: clampSize(ascent + descent + GLYPH_PADDING * 2),
+    bearingX: -left - GLYPH_PADDING,
+    bearingY: cell.deviceBaseline - ascent - GLYPH_PADDING,
+    originX: GLYPH_PADDING + left,
+    originY: GLYPH_PADDING + ascent,
+    scaleX: 1,
+    scaleY: 1,
+  };
+}
+
+function clampSize(size: number): number {
+  return Math.min(RASTER_SIZE, Math.max(1, size));
+}
+
+/**
  * Rasterizes single glyphs with the 2D canvas at `font.size * scale`. The
  * canvas is allocated lazily, sized once, and released on `dispose` so an idle
  * atlas holds no bitmap. Only the area the previous glyph touched is cleared,
  * and `context.font` is assigned only when the style changes.
  *
- * Box drawing, blocks, braille and powerline separators skip the font: they are
- * drawn at exactly the cell size with no bearing (see `BuiltinGlyphs.ts`), so
- * neighbouring cells join without gaps, and bold or italic never alters them.
+ * Box drawing, blocks, braille, powerline separators, branch drawing and legacy
+ * computing shapes skip the font: they are drawn at exactly the cell size with
+ * no bearing (see `BuiltinGlyphs.ts`), so neighbouring cells join without
+ * gaps, and bold or italic never alters them.
+ *
+ * Icons, symbols and emoji are constrained as Ghostty constrains them
+ * (`glyphConstraint.ts`): fitted and aligned to their cell, or two cells, so
+ * a wide fallback glyph never spills into its neighbours.
  */
 export class GlyphRasterizer {
   private canvas: HTMLCanvasElement | null = null;
@@ -57,6 +193,7 @@ export class GlyphRasterizer {
   private dirtyHeight = RASTER_SIZE;
   private readonly coverage = new Uint8Array(RASTER_SIZE * RASTER_SIZE);
   private builtin: BuiltinGlyphRenderer | null = null;
+  private constraintMetricsValue: ConstraintMetrics | null = null;
 
   constructor(
     private readonly metrics: TerminalFontMetrics,
@@ -85,8 +222,14 @@ export class GlyphRasterizer {
   /**
    * Null while the font for an icon is still loading (`GlyphFontGate`): the
    * caller keeps nothing and retries once the gate reports the load settled.
+   * `cells` is how many cells the glyph may use when the caller knows (see
+   * `constraintCells`); otherwise `GLYPH_STYLE_TWO_CELLS` or the text decide.
    */
-  rasterize(text: string, style: number): RasterizedGlyph | null {
+  rasterize(
+    text: string,
+    style: number,
+    cells?: 1 | 2,
+  ): RasterizedGlyph | null {
     const builtin = this.rasterizeBuiltin(text);
     if (builtin) return builtin;
     // Icons ignore bold and italic, like procedural glyphs: no synthesized
@@ -96,38 +239,49 @@ export class GlyphRasterizer {
       : style & (GLYPH_STYLE_BOLD | GLYPH_STYLE_ITALIC);
     if (!this.fontGate.ready(this.fonts[fontStyle], text)) return null;
     const context = this.ensureContext();
-    if (fontStyle !== this.activeStyle) {
-      context.font = this.fonts[fontStyle];
-      this.activeStyle = fontStyle;
-    }
-    context.clearRect(0, 0, this.dirtyWidth, this.dirtyHeight);
 
-    const { deviceCellWidth, deviceCellHeight, deviceBaseline } = this.metrics;
+    const codepoint = text.codePointAt(0) ?? 0;
+    const emoji = isEmojiPresentation(text);
+    const span =
+      cells ?? ((style & GLYPH_STYLE_TWO_CELLS) !== 0 || emoji ? 2 : 1);
+    const constraint = glyphConstraint(codepoint, emoji);
+    const constraintMetrics = constraint
+      ? this.constraintMetrics(context)
+      : null;
+    this.selectFont(context, fontStyle);
     const measurement = context.measureText(text);
-    const left = Math.max(0, Math.ceil(measurement.actualBoundingBoxLeft || 0));
-    const right = Math.ceil(
-      measurement.actualBoundingBoxRight || deviceCellWidth,
+    const ink: InkBounds = {
+      left: measurement.actualBoundingBoxLeft || 0,
+      right: measurement.actualBoundingBoxRight || 0,
+      ascent: measurement.actualBoundingBoxAscent || 0,
+      descent: measurement.actualBoundingBoxDescent || 0,
+    };
+    let placement = placeGlyph(
+      ink,
+      this.metrics,
+      constraint,
+      constraintMetrics,
+      span,
+      emoji,
     );
-    const ascent = Math.ceil(
-      measurement.actualBoundingBoxAscent || deviceBaseline,
-    );
-    const descent = Math.ceil(
-      measurement.actualBoundingBoxDescent || deviceCellHeight - deviceBaseline,
-    );
-    const width = Math.min(
-      RASTER_SIZE,
-      Math.max(1, left + right + GLYPH_PADDING * 2),
-    );
-    const height = Math.min(
-      RASTER_SIZE,
-      Math.max(1, ascent + descent + GLYPH_PADDING * 2),
-    );
-    context.fillText(text, GLYPH_PADDING + left, GLYPH_PADDING + ascent);
-    this.dirtyWidth = Math.min(RASTER_SIZE, width + CLEAR_MARGIN);
-    this.dirtyHeight = Math.min(RASTER_SIZE, height + CLEAR_MARGIN);
-
-    const rgba = context.getImageData(0, 0, width, height).data;
+    let rgba = this.draw(context, text, placement);
     const intrinsicColor = hasIntrinsicColor(rgba);
+    if (intrinsicColor !== emoji) {
+      // The font chose the other presentation (a colour glyph for text, or a
+      // monochrome one for an emoji), which takes the other constraint.
+      const actual = glyphConstraint(codepoint, intrinsicColor);
+      placement = placeGlyph(
+        ink,
+        this.metrics,
+        actual,
+        actual ? this.constraintMetrics(context) : null,
+        span,
+        intrinsicColor,
+      );
+      rgba = this.draw(context, text, placement);
+    }
+
+    const { width, height } = placement;
     let pixels: Uint8Array;
     if (intrinsicColor) {
       pixels = new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength);
@@ -141,8 +295,8 @@ export class GlyphRasterizer {
     return {
       width,
       height,
-      bearingX: -left - GLYPH_PADDING,
-      bearingY: deviceBaseline - ascent - GLYPH_PADDING,
+      bearingX: placement.bearingX,
+      bearingY: placement.bearingY,
       intrinsicColor,
       exact: false,
       pixels,
@@ -166,6 +320,54 @@ export class GlyphRasterizer {
       exact: true,
       pixels,
     };
+  }
+
+  /** Clears what the last glyph touched, draws `text` and reads it back. */
+  private draw(
+    context: CanvasRenderingContext2D,
+    text: string,
+    placement: GlyphPlacement,
+  ): Uint8ClampedArray {
+    context.clearRect(0, 0, this.dirtyWidth, this.dirtyHeight);
+    const { originX, originY, scaleX, scaleY, width, height } = placement;
+    if (scaleX === 1 && scaleY === 1) {
+      context.fillText(text, originX, originY);
+    } else {
+      context.setTransform(scaleX, 0, 0, scaleY, originX, originY);
+      context.fillText(text, 0, 0);
+      context.setTransform(1, 0, 0, 1, 0, 0);
+    }
+    this.dirtyWidth = Math.min(RASTER_SIZE, width + CLEAR_MARGIN);
+    this.dirtyHeight = Math.min(RASTER_SIZE, height + CLEAR_MARGIN);
+    return context.getImageData(0, 0, width, height).data;
+  }
+
+  /**
+   * The cell as the font's face, with the capital height the icon height
+   * derives from. Measured once, with the regular font.
+   */
+  private constraintMetrics(
+    context: CanvasRenderingContext2D,
+  ): ConstraintMetrics {
+    if (this.constraintMetricsValue) return this.constraintMetricsValue;
+    const previous = this.activeStyle;
+    this.selectFont(context, 0);
+    const { deviceCellWidth, deviceCellHeight, deviceBaseline } = this.metrics;
+    const capHeight =
+      context.measureText("H").actualBoundingBoxAscent || 0.75 * deviceBaseline;
+    if (previous >= 0) this.selectFont(context, previous);
+    this.constraintMetricsValue = cellConstraintMetrics(
+      deviceCellWidth,
+      deviceCellHeight,
+      capHeight,
+    );
+    return this.constraintMetricsValue;
+  }
+
+  private selectFont(context: CanvasRenderingContext2D, style: number): void {
+    if (style === this.activeStyle) return;
+    context.font = this.fonts[style];
+    this.activeStyle = style;
   }
 
   dispose(): void {

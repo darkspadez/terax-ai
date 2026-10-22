@@ -3,11 +3,21 @@ import { GlyphFontGate } from "./GlyphFontGate";
 import {
   GLYPH_STYLE_BOLD,
   GLYPH_STYLE_ITALIC,
+  GLYPH_STYLE_TWO_CELLS,
   GlyphRasterizer,
+  type InkBounds,
+  placeGlyph,
   type RasterizedGlyph,
 } from "./GlyphRasterizer";
+import {
+  cellConstraintMetrics,
+  EMOJI_CONSTRAINT,
+  SYMBOL_CONSTRAINT,
+} from "./glyphConstraint";
+import { nerdFontConstraint } from "./nerdFontConstraints";
 import { deriveFontMetrics } from "./terminalVisuals";
 
+/** 13 x 26 device pixel cells, baseline 19 pixels down. */
 const METRICS = deriveFontMetrics(
   {
     family: '"JetBrains Mono", monospace',
@@ -20,11 +30,40 @@ const METRICS = deriveFontMetrics(
   { advance: 12.6, ascent: 16, descent: 5 },
 );
 
-function stub(color = false) {
+const CAP_HEIGHT = 15;
+const CONSTRAINT_METRICS = cellConstraintMetrics(
+  METRICS.deviceCellWidth,
+  METRICS.deviceCellHeight,
+  CAP_HEIGHT,
+);
+
+const TEXT_INK: InkBounds = { left: 1, right: 9, ascent: 12, descent: 4 };
+
+type StubOptions = {
+  /** Texts the fake font draws in colour. */
+  readonly color?: boolean | ((text: string) => boolean);
+  /** Ink bounds per text; capital H measures the cap height. */
+  readonly ink?: (text: string) => InkBounds | undefined;
+};
+
+function stub(options: StubOptions = {}) {
   const fonts: string[] = [];
   const clears: number[][] = [];
+  const transforms: number[][] = [];
+  const draws: Array<{
+    text: string;
+    x: number;
+    y: number;
+    transform: number[];
+  }> = [];
   let font = "";
+  let transform = [1, 0, 0, 1, 0, 0];
+  let current = "";
   const texts: string[] = [];
+  const colored = (text: string) =>
+    typeof options.color === "function"
+      ? options.color(text)
+      : (options.color ?? false);
   const context = {
     textAlign: "",
     textBaseline: "",
@@ -37,15 +76,31 @@ function stub(color = false) {
       font = value;
     },
     clearRect: (...args: number[]) => clears.push(args),
-    fillText: (text: string) => texts.push(text),
-    measureText: () => ({
-      actualBoundingBoxLeft: 1,
-      actualBoundingBoxRight: 9,
-      actualBoundingBoxAscent: 12,
-      actualBoundingBoxDescent: 4,
-    }),
+    setTransform: (...args: number[]) => {
+      transforms.push(args);
+      transform = args;
+    },
+    fillText: (text: string, x: number, y: number) => {
+      texts.push(text);
+      draws.push({ text, x, y, transform });
+      current = text;
+    },
+    measureText: (text: string) => {
+      const ink =
+        options.ink?.(text) ??
+        (text === "H"
+          ? { left: 0, right: 9, ascent: CAP_HEIGHT, descent: 0 }
+          : TEXT_INK);
+      return {
+        actualBoundingBoxLeft: ink.left,
+        actualBoundingBoxRight: ink.right,
+        actualBoundingBoxAscent: ink.ascent,
+        actualBoundingBoxDescent: ink.descent,
+      };
+    },
     getImageData: (_x: number, _y: number, width: number, height: number) => {
       const data = new Uint8ClampedArray(width * height * 4);
+      const color = colored(current);
       for (let index = 0; index < data.length; index += 4) {
         data[index] = color ? 30 : 255;
         data[index + 1] = 255;
@@ -62,7 +117,14 @@ function stub(color = false) {
       return { width: 0, height: 0, getContext: () => context };
     },
   });
-  return { fonts, clears, created: () => created, texts };
+  return {
+    fonts,
+    clears,
+    created: () => created,
+    texts,
+    transforms,
+    draws,
+  };
 }
 
 function drawn(glyph: RasterizedGlyph | null): RasterizedGlyph {
@@ -110,7 +172,7 @@ describe("GlyphRasterizer", () => {
   });
 
   it("returns RGBA for intrinsic-colour glyphs", () => {
-    stub(true);
+    stub({ color: true });
     const glyph = drawn(new GlyphRasterizer(METRICS).rasterize("x", 0));
     expect(glyph.intrinsicColor).toBe(true);
     expect(glyph.pixels).toHaveLength(glyph.width * glyph.height * 4);
@@ -238,5 +300,232 @@ describe("GlyphRasterizer", () => {
     drawn(rasterizer.rasterize("a", GLYPH_STYLE_BOLD));
     drawn(rasterizer.rasterize("\u2500", 0));
     expect(fonts.loader.check).not.toHaveBeenCalled();
+  });
+});
+
+describe("placeGlyph", () => {
+  it("keeps unconstrained text at its font size on the cell's baseline", () => {
+    expect(placeGlyph(TEXT_INK, METRICS, null, null, 1, false)).toEqual({
+      width: 1 + 9 + 4,
+      height: 12 + 4 + 4,
+      bearingX: -1 - 2,
+      bearingY: METRICS.deviceBaseline - 12 - 2,
+      originX: 2 + 1,
+      originY: 2 + 12,
+      scaleX: 1,
+      scaleY: 1,
+    });
+  });
+
+  it("shrinks a symbol twice the cell's width into one cell, or keeps it for two", () => {
+    const ink = { left: 0, right: 26, ascent: 13, descent: 0 };
+    // Half size, flush left, centred on where the font put it vertically.
+    expect(
+      placeGlyph(ink, METRICS, SYMBOL_CONSTRAINT, CONSTRAINT_METRICS, 1, false),
+    ).toEqual({
+      width: 17,
+      height: 11,
+      bearingX: -2,
+      bearingY: 7,
+      originX: 2,
+      originY: 8.75,
+      scaleX: 0.5,
+      scaleY: 0.5,
+    });
+    expect(
+      placeGlyph(ink, METRICS, SYMBOL_CONSTRAINT, CONSTRAINT_METRICS, 2, false),
+    ).toEqual({
+      width: 30,
+      height: 17,
+      bearingX: -2,
+      bearingY: 4,
+      originX: 2,
+      originY: 15,
+      scaleX: 1,
+      scaleY: 1,
+    });
+  });
+
+  it("fits a colour emoji to two whole cells, centred on whole pixels", () => {
+    const ink = { left: 0, right: 24, ascent: 20, descent: 4 };
+    const placement = placeGlyph(
+      ink,
+      METRICS,
+      EMOJI_CONSTRAINT,
+      CONSTRAINT_METRICS,
+      2,
+      true,
+    );
+    // Covers 26 x 26 (two 13 pixel cells less 2.5% each side, rounded).
+    expect(placement.scaleX).toBeCloseTo(26 / 24, 9);
+    expect(placement.scaleY).toBeCloseTo(26 / 24, 9);
+    const left =
+      placement.bearingX + placement.originX - ink.left * placement.scaleX;
+    const top =
+      placement.bearingY + placement.originY - ink.ascent * placement.scaleY;
+    expect(left).toBeCloseTo(0, 9);
+    expect(top).toBeCloseTo(0, 9);
+    expect(placement.bearingX + placement.width).toBe(26 + 2);
+    // Unaligned, the same emoji keeps its fractional, centred box.
+    const smooth = placeGlyph(
+      ink,
+      METRICS,
+      EMOJI_CONSTRAINT,
+      CONSTRAINT_METRICS,
+      2,
+      false,
+    );
+    expect(smooth.scaleX).toBeCloseTo(25.35 / 24, 9);
+    expect(smooth.bearingX + smooth.originX).toBeCloseTo(0.325, 9);
+  });
+
+  it("leaves ink too small to shape where the font put it", () => {
+    const space = { left: 0, right: 0, ascent: 0, descent: 0 };
+    expect(
+      placeGlyph(
+        space,
+        METRICS,
+        SYMBOL_CONSTRAINT,
+        CONSTRAINT_METRICS,
+        1,
+        false,
+      ),
+    ).toEqual(placeGlyph(space, METRICS, null, null, 1, false));
+  });
+});
+
+describe("GlyphRasterizer constraints", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const COG = "\uf013";
+  const wideInk = (text: string) =>
+    text === COG || text === "→" || text === "😀"
+      ? { left: 0, right: 24, ascent: 20, descent: 4 }
+      : undefined;
+
+  it("draws a Nerd Font icon scaled into its cell, then resets the transform", () => {
+    const s = stub({ ink: wideInk });
+    const glyph = drawn(new GlyphRasterizer(METRICS).rasterize(COG, 0));
+    const constraint = nerdFontConstraint(0xf013);
+    const placement = placeGlyph(
+      { left: 0, right: 24, ascent: 20, descent: 4 },
+      METRICS,
+      constraint,
+      CONSTRAINT_METRICS,
+      1,
+      false,
+    );
+    expect(placement.scaleX).toBeLessThan(1);
+    expect(glyph).toMatchObject({
+      width: placement.width,
+      height: placement.height,
+      bearingX: placement.bearingX,
+      bearingY: placement.bearingY,
+      intrinsicColor: false,
+      exact: false,
+    });
+    expect(s.draws).toEqual([
+      {
+        text: COG,
+        x: 0,
+        y: 0,
+        transform: [
+          placement.scaleX,
+          0,
+          0,
+          placement.scaleY,
+          placement.originX,
+          placement.originY,
+        ],
+      },
+    ]);
+    expect(s.transforms[s.transforms.length - 1]).toEqual([1, 0, 0, 1, 0, 0]);
+    // The scaled ink fits the cell: no spill into the neighbours.
+    const inkLeft = glyph.bearingX + placement.originX;
+    expect(inkLeft).toBeGreaterThanOrEqual(0);
+    expect(inkLeft + 24 * placement.scaleX).toBeLessThanOrEqual(
+      METRICS.deviceCellWidth + 1e-9,
+    );
+  });
+
+  it("fits a colour emoji to two cells", () => {
+    const s = stub({ ink: wideInk, color: (text) => text === "😀" });
+    const glyph = drawn(new GlyphRasterizer(METRICS).rasterize("😀", 0));
+    expect(glyph.intrinsicColor).toBe(true);
+    expect(glyph.pixels).toHaveLength(glyph.width * glyph.height * 4);
+    const placement = placeGlyph(
+      { left: 0, right: 24, ascent: 20, descent: 4 },
+      METRICS,
+      EMOJI_CONSTRAINT,
+      CONSTRAINT_METRICS,
+      2,
+      true,
+    );
+    expect(glyph.bearingX).toBe(placement.bearingX);
+    expect(glyph.width).toBe(placement.width);
+    // Predicted from the text: drawn once.
+    expect(s.texts).toEqual(["😀"]);
+  });
+
+  it("gives a symbol two cells when the cell count says so", () => {
+    const s = stub({ ink: wideInk });
+    const rasterizer = new GlyphRasterizer(METRICS);
+    const one = drawn(rasterizer.rasterize("→", 0));
+    expect(one.width).toBe(17);
+    const two = drawn(rasterizer.rasterize("→", GLYPH_STYLE_TWO_CELLS));
+    expect(two.width).toBe(24 + 4);
+    const explicit = drawn(rasterizer.rasterize("→", 0, 2));
+    expect(explicit.width).toBe(two.width);
+    // An explicit count wins over the style bit.
+    expect(
+      drawn(rasterizer.rasterize("→", GLYPH_STYLE_TWO_CELLS, 1)).width,
+    ).toBe(one.width);
+    // Only the one-cell layouts needed scaling.
+    expect(s.draws.map((draw) => draw.transform[0] !== 1)).toEqual([
+      true,
+      false,
+      false,
+      true,
+    ]);
+  });
+
+  it("redraws text the font drew in colour as an emoji in its cell", () => {
+    const s = stub({ color: (text) => text === "x" });
+    const glyph = drawn(new GlyphRasterizer(METRICS).rasterize("x", 0));
+    expect(s.texts).toEqual(["x", "x"]);
+    expect(glyph.intrinsicColor).toBe(true);
+    const placement = placeGlyph(
+      TEXT_INK,
+      METRICS,
+      EMOJI_CONSTRAINT,
+      CONSTRAINT_METRICS,
+      1,
+      true,
+    );
+    expect(glyph).toMatchObject({
+      width: placement.width,
+      height: placement.height,
+      bearingX: placement.bearingX,
+      bearingY: placement.bearingY,
+    });
+  });
+
+  it("measures the cap height once, with the regular font, and keeps the style", () => {
+    const s = stub({ ink: wideInk });
+    const rasterizer = new GlyphRasterizer(METRICS);
+    rasterizer.rasterize("→", GLYPH_STYLE_BOLD);
+    rasterizer.rasterize("⇒", GLYPH_STYLE_BOLD);
+    // Regular for H, bold for the arrows; no switching back and forth.
+    expect(s.fonts).toHaveLength(2);
+    expect(s.fonts[1]).toMatch(/^700 /);
+    expect(s.texts).toEqual(["→", "⇒"]);
+  });
+
+  it("never transforms plain text", () => {
+    const s = stub();
+    const rasterizer = new GlyphRasterizer(METRICS);
+    rasterizer.rasterize("a", 0);
+    rasterizer.rasterize("水", GLYPH_STYLE_ITALIC);
+    expect(s.transforms).toEqual([]);
   });
 });
