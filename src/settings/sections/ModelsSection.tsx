@@ -87,7 +87,7 @@ import {
   Mic01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { invoke } from "@tauri-apps/api/core";
+import { type PingState, pingEndpoint } from "./endpointPing";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useMemo, useState } from "react";
 import { ProviderIcon } from "../components/ProviderIcon";
@@ -866,9 +866,7 @@ function LocalProviderCard({
   const [modelDraft, setModelDraft] = useState(modelId);
   const [contextDraft, setContextDraft] = useState(String(contextLimit ?? ""));
   const [keyDraft, setKeyDraft] = useState("");
-  const [testStatus, setTestStatus] = useState<
-    "idle" | "testing" | "ok" | "fail"
-  >("idle");
+  const [testStatus, setTestStatus] = useState<PingState>({ status: "idle" });
 
   useEffect(() => setUrlDraft(baseURL), [baseURL]);
   useEffect(() => setModelDraft(modelId), [modelId]);
@@ -878,13 +876,8 @@ function LocalProviderCard({
     provider.id === "openai-compatible" || provider.id === "openrouter";
 
   const test = async () => {
-    setTestStatus("testing");
-    try {
-      const status = await invoke<number>("lm_ping", { baseUrl: urlDraft });
-      setTestStatus(status > 0 ? "ok" : "fail");
-    } catch {
-      setTestStatus("fail");
-    }
+    setTestStatus({ status: "testing" });
+    setTestStatus(await pingEndpoint(urlDraft));
   };
 
   return (
@@ -1045,7 +1038,7 @@ function LocalProviderCard({
           </FieldRow>
         ) : null}
 
-        <StatusLine status={testStatus} />
+        <StatusLine state={testStatus} />
 
         {!modelId.trim() && meta.modelHint ? (
           <p className="text-[10.5px] leading-relaxed text-muted-foreground">
@@ -1080,9 +1073,7 @@ function CustomEndpointCard({
     String(endpoint.contextLimit ?? ""),
   );
   const [keyDraft, setKeyDraft] = useState("");
-  const [testStatus, setTestStatus] = useState<
-    "idle" | "testing" | "ok" | "fail"
-  >("idle");
+  const [testStatus, setTestStatus] = useState<PingState>({ status: "idle" });
 
   useEffect(() => setNameDraft(endpoint.name), [endpoint.name]);
   useEffect(() => setUrlDraft(endpoint.baseURL), [endpoint.baseURL]);
@@ -1095,13 +1086,8 @@ function CustomEndpointCard({
   const configured = !!endpoint.baseURL.trim() && !!endpoint.modelId.trim();
 
   const test = async () => {
-    setTestStatus("testing");
-    try {
-      const status = await invoke<number>("lm_ping", { baseUrl: urlDraft });
-      setTestStatus(status > 0 ? "ok" : "fail");
-    } catch {
-      setTestStatus("fail");
-    }
+    setTestStatus({ status: "testing" });
+    setTestStatus(await pingEndpoint(urlDraft));
   };
 
   return (
@@ -1279,7 +1265,7 @@ function CustomEndpointCard({
             )}
           </FieldRow>
 
-          <StatusLine status={testStatus} />
+          <StatusLine state={testStatus} />
         </div>
       )}
     </div>
@@ -1303,11 +1289,8 @@ function FieldRow({
   );
 }
 
-function StatusLine({
-  status,
-}: {
-  status: "idle" | "testing" | "ok" | "fail";
-}) {
+function StatusLine({ state }: { state: PingState }) {
+  const { status, error } = state;
   if (status === "idle") return null;
   if (status === "testing") {
     return (
@@ -1323,8 +1306,13 @@ function StatusLine({
     );
   }
   return (
-    <span className="text-[10.5px] text-destructive/80">
-      Could not reach the server.
+    <span
+      className="line-clamp-3 text-[10.5px] wrap-break-word text-destructive/80 select-text"
+      title={error}
+    >
+      {error
+        ? `Could not reach the server: ${error}`
+        : "Could not reach the server."}
     </span>
   );
 }
