@@ -20,6 +20,10 @@ Cloud providers are defined in `src/modules/ai/config.ts`:
 
 Model metadata (context limits, costs, reasoning behavior) lives in the model registry in `config.ts`. `resolveModel` maps a model id to its provider and defaults.
 
+Custom endpoints also use `createOpenAICompatible` and `localProxyFetch`; cloud providers use the webview's own fetch. Anthropic refuses the CORS preflight of a browser origin unless the client sends `anthropic-dangerous-direct-browser-access: true`, so its branch always does. Cloud providers stay on the webview's fetch because the native proxy refuses non-public addresses, which fake-IP proxy tools (198.18.0.0/15) hand out for every host, and does not read the macOS system proxy. The cost is that an error reply without CORS headers (OpenAI's 401 for a bad key) reads as a network failure; `formatAiError` (`lib/errors.ts`) says so instead of showing the bare `Load failed` / `Failed to fetch`. A custom endpoint on `opencode.ai` over HTTPS (OpenCode Go/Zen) also gets the `x-opencode-session` header the gateway requires, with one random key per app run (`lib/opencodeSession.ts`). Custom endpoints and local servers move `<think>...</think>` out of the answer into reasoning (`extractReasoningMiddleware`). Streams that alternate `reasoning_content` and `content` (MiniMax) produce several reasoning and text parts per step; the chat shows each run of them between step starts and tool calls as one reasoning block and one text (`mergeInterleavedReasoning` in `lib/reasoningDisplay.ts`, display only).
+
+A selectable model id is a catalog id, a local server's placeholder (`ollama-local`, resolved to its configured model id) or a custom endpoint's `compat-<endpointId>`. Every surface builds it with `buildConfiguredLanguageModel`: the chat from its transport getters, everything else (sub-agents, commit messages) with `liveModelConfig()` (`store/modelConfig.ts`), which carries the endpoints and their keys, so no caller can leave out what a custom endpoint needs. `modelConfigProblem` (`lib/modelTarget.ts`, free of the AI SDK) makes the same checks without building, to gate an action. Persisted ids (default model, favorites, recents) survive a restart when `isResolvableModelId` accepts them: a catalog id, or an endpoint that still exists and is complete. The legacy single endpoint is migrated under the fixed id `legacy`, and an empty saved endpoint list is never migrated again. In Settings, the Model ID of a custom endpoint or local server can be picked from the server's `GET <base>/models` list (Browse, `lib/endpointModels.ts`, through the native proxy with the endpoint's key).
+
 ### Adding a new provider
 
 1. Add a `ProviderInfo` entry to `PROVIDERS` in `src/modules/ai/config.ts`.
@@ -79,6 +83,10 @@ Tool definitions live under `src/modules/ai/tools/`:
 - In plan mode, mutating tools queue edits for batch review instead of applying them immediately. Apply (`planStore.applyAll`) writes the edits queued when it was pressed, re-checks each path against the deny-list (canonicalized) at write time, skips edits rejected meanwhile, and leaves edits queued during the writes for the next review.
 
 Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalResponses`.
+
+A tool call needs a result before any later request: one without it fails every following prompt with `MissingToolResultsError`. So only the newest message's approvals can be answered (`pendingApprovalIds` in `lib/toolApprovals.ts`): older cards render as denied rows, their diff tabs close, and the diff-tab responder ignores them. Every user message (composer, Continue, managed-agent review) goes through `sendUserMessage` in `store/chatRuntime.ts`, which first replaces the messages holding unanswered approvals (waiting, or approved but never run) with copies where those calls are denied, so the model is told they did not run and the settled state is what gets persisted.
+
+In plan mode, an edit that Apply could not write (a write error, or a path the deny-list refuses at write time) stays in the review list with its error until it is applied or rejected; written edits leave the list.
 
 ## Edit diffs
 

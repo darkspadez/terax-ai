@@ -9,10 +9,9 @@ import {
   DEFAULT_AUTOCOMPLETE_MODEL,
   DEFAULT_MODEL_ID,
   DEFAULT_STT_PROVIDER,
-  isKnownModelId,
+  isResolvableModelId,
   LMSTUDIO_DEFAULT_BASE_URL,
   MLX_DEFAULT_BASE_URL,
-  type ModelId,
   migrateLegacyCompatEndpoint,
   OLLAMA_DEFAULT_BASE_URL,
   OPENAI_COMPATIBLE_DEFAULT_BASE_URL,
@@ -133,7 +132,8 @@ export type Preferences = {
   backgroundOpacity: number;
   backgroundBlur: number;
   windowVibrancy: boolean;
-  defaultModelId: ModelId;
+  /** A catalog model id or a custom endpoint's `compat-<id>`. */
+  defaultModelId: string;
   editorTheme: EditorThemePref;
   editorFontSize: number;
   customInstructions: string;
@@ -485,6 +485,18 @@ export async function loadPreferences(): Promise<Preferences> {
   const entries = await store.entries();
   const map = new Map<string, unknown>(entries);
   const get = <T>(k: string): T | undefined => map.get(k) as T | undefined;
+  // An empty saved list means the user removed every endpoint; only a list
+  // never saved is migrated from the legacy single endpoint.
+  const customEndpoints =
+    get<CustomEndpoint[]>(KEY_CUSTOM_ENDPOINTS) ??
+    migrateLegacyCompatEndpoint(
+      get<string>(KEY_OPENAI_COMPAT_BASE_URL) ?? "",
+      get<string>(KEY_OPENAI_COMPAT_MODEL_ID) ?? "",
+      get<number>(KEY_OPENAI_COMPAT_CONTEXT_LIMIT) ?? 128_000,
+    );
+  // Ids of deleted or unfinished endpoints are dropped; the rest, custom
+  // endpoints included, survive a restart.
+  const usable = (id: string) => isResolvableModelId(id, customEndpoints);
   return {
     theme: get<ThemePref>(KEY_THEME) ?? DEFAULT_PREFERENCES.theme,
     themeId: get<string>(KEY_THEME_ID) ?? DEFAULT_PREFERENCES.themeId,
@@ -499,9 +511,9 @@ export async function loadPreferences(): Promise<Preferences> {
     backgroundBlur: clampBlur(
       get<number>(KEY_BG_BLUR) ?? DEFAULT_PREFERENCES.backgroundBlur,
     ),
-    defaultModelId: ((): ModelId => {
+    defaultModelId: ((): string => {
       const stored = get<string>(KEY_DEFAULT_MODEL);
-      return stored && isKnownModelId(stored)
+      return stored && usable(stored)
         ? stored
         : DEFAULT_PREFERENCES.defaultModelId;
     })(),
@@ -554,16 +566,7 @@ export async function loadPreferences(): Promise<Preferences> {
     openaiCompatibleContextLimit:
       get<number>(KEY_OPENAI_COMPAT_CONTEXT_LIMIT) ??
       DEFAULT_PREFERENCES.openaiCompatibleContextLimit,
-    customEndpoints: (() => {
-      const stored = get<CustomEndpoint[]>(KEY_CUSTOM_ENDPOINTS);
-      if (stored && stored.length > 0) return stored;
-      return migrateLegacyCompatEndpoint(
-        get<string>(KEY_OPENAI_COMPAT_BASE_URL) ?? "",
-        get<string>(KEY_OPENAI_COMPAT_MODEL_ID) ?? "",
-        get<number>(KEY_OPENAI_COMPAT_CONTEXT_LIMIT) ?? 128_000,
-        crypto.randomUUID().slice(0, 8),
-      );
-    })(),
+    customEndpoints,
     openrouterModelId:
       get<string>(KEY_OPENROUTER_MODEL_ID) ??
       DEFAULT_PREFERENCES.openrouterModelId,
@@ -576,10 +579,10 @@ export async function loadPreferences(): Promise<Preferences> {
       DEFAULT_PREFERENCES.whispercppBaseURL,
     favoriteModelIds: (
       get<string[]>(KEY_FAVORITE_MODELS) ?? DEFAULT_PREFERENCES.favoriteModelIds
-    ).filter(isKnownModelId),
+    ).filter(usable),
     recentModelIds: (
       get<string[]>(KEY_RECENT_MODELS) ?? DEFAULT_PREFERENCES.recentModelIds
-    ).filter(isKnownModelId),
+    ).filter(usable),
     vimMode: get<boolean>(KEY_VIM_MODE) ?? DEFAULT_PREFERENCES.vimMode,
     editorWordWrap:
       get<boolean>(KEY_EDITOR_WORD_WRAP) ?? DEFAULT_PREFERENCES.editorWordWrap,
@@ -749,7 +752,7 @@ export async function setBackgroundBlur(value: number): Promise<void> {
   await writePref(KEY_BG_BLUR, clampBlur(value));
 }
 
-export async function setDefaultModel(value: ModelId): Promise<void> {
+export async function setDefaultModel(value: string): Promise<void> {
   await writePref(KEY_DEFAULT_MODEL, value);
 }
 

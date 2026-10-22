@@ -5,6 +5,7 @@ import { usePresence } from "@/lib/usePresence";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { useComposer } from "../lib/composer";
+import { composerKeyAction } from "../lib/composerKeys";
 import { SLASH_COMMANDS } from "../lib/slashCommands";
 import { useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
@@ -218,42 +219,36 @@ export function AiComposerInput() {
               onClick={updateTrigger}
               onSelect={updateTrigger}
               onKeyDown={(e) => {
-                if (pickerOpen) {
-                  const items = fileTrigger ? filteredFiles : filteredItems;
-                  if (e.key === "ArrowDown") {
-                    e.preventDefault();
-                    setActiveIndex((i) =>
-                      Math.min(i + 1, Math.max(0, items.length - 1)),
-                    );
-                    return;
+                const items = fileTrigger ? filteredFiles : filteredItems;
+                const action = composerKeyAction(
+                  {
+                    key: e.key,
+                    shiftKey: e.shiftKey,
+                    isComposing: e.nativeEvent.isComposing,
+                    keyCode: e.keyCode,
+                  },
+                  { open: pickerOpen, items: items.length },
+                );
+                if (!action) return;
+                e.preventDefault();
+                if (action === "picker-next") {
+                  setActiveIndex((i) =>
+                    Math.min(i + 1, Math.max(0, items.length - 1)),
+                  );
+                } else if (action === "picker-prev") {
+                  setActiveIndex((i) => Math.max(0, i - 1));
+                } else if (action === "picker-pick") {
+                  pickActive();
+                } else if (action === "picker-dismiss") {
+                  if (fileTrigger) {
+                    const before = c.value.slice(0, fileTrigger.start);
+                    const after = c.value.slice(fileTrigger.end);
+                    c.setValue(`${before}${after}`);
+                    setFileTrigger(null);
+                  } else {
+                    setTrigger(null);
                   }
-                  if (e.key === "ArrowUp") {
-                    e.preventDefault();
-                    setActiveIndex((i) => Math.max(0, i - 1));
-                    return;
-                  }
-                  if (e.key === "Tab" || e.key === "Enter") {
-                    if (items.length > 0) {
-                      e.preventDefault();
-                      pickActive();
-                      return;
-                    }
-                  }
-                  if (e.key === "Escape") {
-                    e.preventDefault();
-                    if (fileTrigger) {
-                      const before = c.value.slice(0, fileTrigger.start);
-                      const after = c.value.slice(fileTrigger.end);
-                      c.setValue(`${before}${after}`);
-                      setFileTrigger(null);
-                    } else {
-                      setTrigger(null);
-                    }
-                    return;
-                  }
-                }
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
+                } else {
                   c.submit();
                 }
               }}

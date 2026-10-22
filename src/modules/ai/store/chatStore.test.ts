@@ -50,7 +50,6 @@ vi.mock("@/modules/ai/lib/modelPrefs", () => modelPrefs);
 
 import {
   chats,
-  getActiveProviderKey,
   getChat,
   seedMessages,
   touchChat,
@@ -324,20 +323,6 @@ describe("agent meta and key resolution", () => {
     const meta = useChatStore.getState().agentMeta;
     expect(meta.status).toBe("idle");
     expect(meta.tokens.inputTokens).toBe(0);
-  });
-
-  it("getActiveProviderKey reads the provider key for static models", () => {
-    expect(getActiveProviderKey()).toBe("sk-x");
-    useChatStore.setState({ selectedModelId: "claude-sonnet-5" });
-    expect(getActiveProviderKey()).toBeNull();
-  });
-
-  it("getActiveProviderKey prefers endpoint keys for compat models", () => {
-    useChatStore.setState({
-      selectedModelId: "compat-ab12cd34",
-      customEndpointKeys: { ab12cd34: "endpoint-key" },
-    });
-    expect(getActiveProviderKey()).toBe("endpoint-key");
   });
 
   it("getChat resolves by id or falls back to the active session", () => {

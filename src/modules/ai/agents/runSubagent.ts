@@ -1,7 +1,7 @@
 import { generateText, isStepCount } from "ai";
-import { getModel, type ModelId } from "../config";
-import { buildLanguageModel } from "../lib/agent";
+import { buildConfiguredLanguageModel } from "../lib/agent";
 import type { ProviderKeys } from "../lib/keyring";
+import type { LocalProviderConfig } from "../lib/modelTarget";
 import type { ToolContext } from "../tools/context";
 import { buildFsTools } from "../tools/fs";
 import { buildSearchTools } from "../tools/search";
@@ -14,9 +14,11 @@ type Args = {
   type: SubagentType;
   prompt: string;
   keys: ProviderKeys;
+  /** The chat's model id: a catalog model, a local server or an endpoint. */
   modelId: string;
+  /** What that id resolves against (local servers, custom endpoints). */
+  config: LocalProviderConfig;
   toolContext: ToolContext;
-  lmstudioBaseURL?: string;
   onStep?: (label: string) => void;
 };
 
@@ -31,8 +33,8 @@ export async function runSubagent({
   prompt,
   keys,
   modelId,
+  config,
   toolContext,
-  lmstudioBaseURL,
   onStep,
 }: Args): Promise<RunResult> {
   const def = SUBAGENTS[type];
@@ -47,12 +49,7 @@ export async function runSubagent({
     if (t in readOnly) tools[t] = readOnly[t];
   }
 
-  const model = await buildLanguageModel(
-    getModel(modelId as ModelId).provider,
-    keys,
-    getModel(modelId as ModelId).id,
-    { lmstudioBaseURL },
-  );
+  const model = await buildConfiguredLanguageModel(modelId, keys, config);
 
   const start = Date.now();
   const result = await generateText({

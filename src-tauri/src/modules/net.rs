@@ -143,6 +143,22 @@ fn sanitize_headers(headers: Option<HashMap<String, String>>) -> Result<HeaderMa
     Ok(map)
 }
 
+/// reqwest's own message ("error sending request for url (...)") hides why a
+/// request failed; its sources name the cause (DNS, refused, TLS certificate).
+fn error_chain(error: &dyn std::error::Error) -> String {
+    let mut message = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        let text = cause.to_string();
+        if !message.contains(&text) {
+            message.push_str(": ");
+            message.push_str(&text);
+        }
+        source = cause.source();
+    }
+    message
+}
+
 #[tauri::command]
 pub async fn lm_ping(base_url: String) -> Result<u16, String> {
     let trimmed = base_url.trim().trim_end_matches('/');
@@ -163,7 +179,7 @@ pub async fn lm_ping(base_url: String) -> Result<u16, String> {
         .send()
         .await
         .map(|r| r.status().as_u16())
-        .map_err(|e| e.to_string())
+        .map_err(|e| error_chain(&e))
 }
 
 // AI HTTP proxy — bypasses webview CORS / Mixed-Content / PNA so local-network
@@ -267,7 +283,7 @@ pub async fn ai_http_stream(
             let safe_ips = classify_and_collect_safe_ips(&host, allow_private).await?;
             let client = client_for(Profile::Stream, &host, &safe_ips, allow_private)?;
             let request = build_request(&client, &method, parsed, headers, body)?;
-            let response = request.send().await.map_err(|e| e.to_string())?;
+            let response = request.send().await.map_err(|e| error_chain(&e))?;
             let metadata = serde_json::to_vec(&StreamHeaders {
                 status: response.status().as_u16(),
                 headers: header_map_to_strings(response.headers()),
@@ -397,6 +413,46 @@ pub async fn ai_http_ack(
 mod tests {
     use super::*;
     use std::net::Ipv4Addr;
+
+    #[derive(Debug)]
+    struct Layer(&'static str, Option<Box<Layer>>);
+
+    impl std::fmt::Display for Layer {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(self.0)
+        }
+    }
+
+    impl std::error::Error for Layer {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            self.1.as_deref().map(|e| e as _)
+        }
+    }
+
+    #[test]
+    fn error_chain_names_the_cause() {
+        let error = Layer(
+            "error sending request for url (https://llm.internal/v1/models)",
+            Some(Box::new(Layer(
+                "client error (Connect)",
+                Some(Box::new(Layer(
+                    "invalid peer certificate: UnknownIssuer",
+                    None,
+                ))),
+            ))),
+        );
+        assert_eq!(
+            error_chain(&error),
+            "error sending request for url (https://llm.internal/v1/models): \
+             client error (Connect): invalid peer certificate: UnknownIssuer"
+        );
+        // A layer that repeats its source's text is not shown twice.
+        let repeated = Layer(
+            "dns: no addresses",
+            Some(Box::new(Layer("no addresses", None))),
+        );
+        assert_eq!(error_chain(&repeated), "dns: no addresses");
+    }
 
     #[test]
     fn metadata_ips_classified_as_blocked() {

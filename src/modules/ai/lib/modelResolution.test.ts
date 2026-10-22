@@ -15,7 +15,14 @@ const anthropic = vi.hoisted(() => {
 vi.mock("@ai-sdk/anthropic", () => anthropic);
 
 const openaiCompatible = vi.hoisted(() => {
-  const createOpenAICompatible = vi.fn(() => vi.fn(() => "model-compat"));
+  // A stand-in language model naming the model id it was built for.
+  const createOpenAICompatible = vi.fn(() =>
+    vi.fn((modelId: string) => ({
+      specificationVersion: "v3",
+      provider: "compat",
+      modelId,
+    })),
+  );
   return { createOpenAICompatible };
 });
 
@@ -71,7 +78,10 @@ describe("buildConfiguredLanguageModel", () => {
       lmstudioModelId: "qwen3-32b",
     });
 
-    expect(model).toBe("model-compat");
+    // Built for the configured model and wrapped, so <think> tags become reasoning.
+    const provider = openaiCompatible.createOpenAICompatible.mock.results[0]?.value;
+    expect(model).toMatchObject({ modelId: "qwen3-32b" });
+    expect(model).not.toBe(provider?.mock.results[0]?.value);
     expect(openaiCompatible.createOpenAICompatible).toHaveBeenCalledWith(
       expect.objectContaining({
         baseURL: "http://127.0.0.1:1234/v1",
@@ -97,7 +107,7 @@ describe("buildConfiguredLanguageModel", () => {
     const model = await buildConfiguredLanguageModel("compat-e1", keys, {
       customEndpoints: compatEndpoint({}),
     });
-    expect(model).toBe("model-compat");
+    expect(model).toMatchObject({ modelId: "relay-model" });
     expect(openaiCompatible.createOpenAICompatible).toHaveBeenLastCalledWith(
       expect.objectContaining({ baseURL: "http://localhost:4000/v1" }),
     );

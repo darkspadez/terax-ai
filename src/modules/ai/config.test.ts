@@ -5,6 +5,8 @@ import {
   estimateCost,
   getModelContextLimit,
   isCompatModelId,
+  isResolvableModelId,
+  LEGACY_COMPAT_ENDPOINT_ID,
   migrateLegacyCompatEndpoint,
   modelKeepsReasoning,
   modelSupportsTemperature,
@@ -12,6 +14,7 @@ import {
   MODELS,
   MODEL_CONTEXT_LIMITS,
   MODEL_PRICING,
+  resolveContextLimit,
   resolveModel,
   type CustomEndpoint,
 } from "./config";
@@ -154,25 +157,62 @@ describe("model sampling capabilities", () => {
 });
 
 describe("migrateLegacyCompatEndpoint", () => {
-  it("migrates a fully configured legacy endpoint", () => {
-    const out = migrateLegacyCompatEndpoint(
-      "https://api.example.com/v1",
-      "llama-3.3-70b",
-      32_000,
-      "fixedid1",
-    );
+  it("migrates a fully configured legacy endpoint under a stable id", () => {
+    const migrate = () =>
+      migrateLegacyCompatEndpoint(
+        "https://api.example.com/v1",
+        "llama-3.3-70b",
+        32_000,
+      );
+    const out = migrate();
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({
-      id: "fixedid1",
+      id: LEGACY_COMPAT_ENDPOINT_ID,
       baseURL: "https://api.example.com/v1",
       modelId: "llama-3.3-70b",
       contextLimit: 32_000,
     });
+    // Derived again on every load: a model id pointing at it must survive.
+    expect(migrate()[0].id).toBe(out[0].id);
   });
 
   it("skips migration when base URL or model id is missing", () => {
-    expect(migrateLegacyCompatEndpoint("", "m", 1, "x")).toEqual([]);
-    expect(migrateLegacyCompatEndpoint("u", "  ", 1, "x")).toEqual([]);
+    expect(migrateLegacyCompatEndpoint("", "m", 1)).toEqual([]);
+    expect(migrateLegacyCompatEndpoint("u", "  ", 1)).toEqual([]);
+  });
+});
+
+describe("resolveContextLimit", () => {
+  it("takes a custom endpoint's limit from its settings", () => {
+    const id = compatModelIdForEndpoint(endpoint.id);
+    expect(resolveContextLimit(id, [endpoint], 32_000)).toBe(64_000);
+    expect(resolveContextLimit(id, [], 32_000)).toBe(128_000);
+    expect(resolveContextLimit("openai-compatible-custom", [], 32_000)).toBe(
+      32_000,
+    );
+    expect(resolveContextLimit("gpt-5.4-mini", [endpoint])).toBe(
+      MODEL_CONTEXT_LIMITS["gpt-5.4-mini"],
+    );
+  });
+});
+
+describe("isResolvableModelId", () => {
+  it("accepts catalog ids and rejects unknown ones", () => {
+    expect(isResolvableModelId("gpt-5.4-mini", [])).toBe(true);
+    expect(isResolvableModelId("nope-not-real", [endpoint])).toBe(false);
+    expect(isResolvableModelId("", [endpoint])).toBe(false);
+  });
+
+  it("accepts a compat id only while its endpoint exists and is complete", () => {
+    const id = compatModelIdForEndpoint(endpoint.id);
+    expect(isResolvableModelId(id, [endpoint])).toBe(true);
+    expect(isResolvableModelId(id, [])).toBe(false);
+    expect(isResolvableModelId(id, [{ ...endpoint, baseURL: "  " }])).toBe(
+      false,
+    );
+    expect(isResolvableModelId(id, [{ ...endpoint, modelId: "" }])).toBe(
+      false,
+    );
   });
 });
 

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { runSubagent } from "../agents/runSubagent";
 import { SUBAGENTS, type SubagentType } from "../agents/registry";
 import { useChatStore } from "../store/chatStore";
+import { liveModelConfig } from "../store/modelConfig";
 import type { ToolContext } from "./context";
 
 const TYPE_KEYS = Object.keys(SUBAGENTS) as [SubagentType, ...SubagentType[]];
@@ -37,6 +38,7 @@ Auto-executes (no approval) — subagents are read-only by design.`,
             prompt,
             keys: apiKeys,
             modelId: selectedModelId,
+            config: liveModelConfig(),
             toolContext: ctx,
             onStep: (label) => patchAgentMeta({ step: label }),
           });

@@ -15,6 +15,9 @@ export type QueuedEdit = {
   isNewFile: boolean;
   /** Human-readable description, used for create_directory. */
   description?: string;
+  /** Why the last Apply could not write it; it stays queued until it is
+   *  applied or rejected. */
+  error?: string;
 };
 
 type PlanState = {
@@ -26,8 +29,9 @@ type PlanState = {
   enqueue: (q: QueuedEdit) => void;
   removeOne: (id: string) => void;
   clear: () => void;
-  /** Apply the edits queued when called, in order, and drain only those;
-   * edits queued meanwhile stay for the next apply. Returns per-edit results. */
+  /** Apply the edits queued when called, in order, and drain the ones
+   * written; a failed edit stays with its error, and edits queued meanwhile
+   * stay for the next apply. Returns per-edit results. */
   applyAll: () => Promise<{ id: string; ok: boolean; error?: string }[]>;
 };
 
@@ -76,7 +80,24 @@ export const usePlanStore = create<PlanState>((set, get) => ({
       }
     }
     // Edits the agent queued during the writes were not reviewed: keep them.
-    set((s) => ({ queue: s.queue.filter((q) => !processed.has(q.id)) }));
+    set((s) => ({ queue: settleApplied(s.queue, processed, results) }));
     return results;
   },
 }));
+
+/** The queue after an Apply: written edits leave it, failed ones stay with
+ *  their error (a later Apply clears it), the rest are untouched. */
+function settleApplied(
+  queue: QueuedEdit[],
+  processed: ReadonlySet<string>,
+  results: readonly { id: string; ok: boolean; error?: string }[],
+): QueuedEdit[] {
+  const failed = new Map(
+    results.filter((r) => !r.ok).map((r) => [r.id, r.error ?? "Write failed"]),
+  );
+  return queue.flatMap((q) => {
+    if (!processed.has(q.id)) return [q];
+    const error = failed.get(q.id);
+    return error === undefined ? [] : [{ ...q, error }];
+  });
+}

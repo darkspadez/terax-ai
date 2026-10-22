@@ -27,15 +27,16 @@ import {
   DEFAULT_MODEL_ID,
   getAutocompleteEligibleModels,
   getCompatModelInfo,
-  getModel,
   getProvider,
   isCompatModelId,
+  isCompleteEndpoint,
   MODELS,
-  type ModelId,
+  type ModelInfo,
   PROVIDERS,
   type ProviderId,
   type ProviderInfo,
   providerNeedsKey,
+  resolveModel,
   STT_PROVIDER_LABELS,
   type SttProvider,
   WHISPERCPP_DEFAULT_BASE_URL,
@@ -86,9 +87,10 @@ import {
   Mic01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { invoke } from "@tauri-apps/api/core";
+import { type PingState, pingEndpoint } from "./endpointPing";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useMemo, useState } from "react";
+import { ModelBrowseButton } from "../components/ModelBrowseButton";
 import { ProviderIcon } from "../components/ProviderIcon";
 import { ProviderKeyCard } from "../components/ProviderKeyCard";
 import { SectionHeader } from "../components/SectionHeader";
@@ -231,7 +233,9 @@ export function ModelsSection() {
     // Drop the now-dead model id from favorites/recents before touching the
     // selection, so the recents push from a selection reset can't race it.
     const deadModelId = compatModelIdForEndpoint(id);
-    const { favoriteModelIds, recentModelIds } = usePreferencesStore.getState();
+    const { favoriteModelIds, recentModelIds, defaultModelId } =
+      usePreferencesStore.getState();
+    if (defaultModelId === deadModelId) await setDefaultModel(DEFAULT_MODEL_ID);
     if (favoriteModelIds.includes(deadModelId)) {
       await setFavoriteModelIds(
         favoriteModelIds.filter((m) => m !== deadModelId),
@@ -304,11 +308,14 @@ export function ModelsSection() {
 
   const isConfigured = (id: ProviderId): boolean => {
     if (id === "openrouter") return !!keys?.[id] && !!openrouterModelId.trim();
+    // Configured per endpoint (the legacy single endpoint is migrated into
+    // the list), never through this provider's own fields.
+    if (id === "openai-compatible") {
+      return customEndpoints.some(isCompleteEndpoint);
+    }
     if (!isLocalProvider(id)) return !!keys?.[id];
     const cfg = localConfig(id);
     if (!cfg) return false;
-    if (id === "openai-compatible")
-      return !!cfg.baseURL.trim() && !!cfg.modelId.trim();
     return !!cfg.modelId.trim();
   };
 
@@ -532,7 +539,7 @@ function DefaultsBlock({
   keys,
   customEndpoints,
 }: {
-  defaultModel: ModelId;
+  defaultModel: string;
   configuredIds: Set<ProviderId>;
   keys: KeysMap;
   customEndpoints: readonly CustomEndpoint[];
@@ -545,6 +552,7 @@ function DefaultsBlock({
           <DefaultModelPicker
             defaultModel={defaultModel}
             configuredIds={configuredIds}
+            customEndpoints={customEndpoints}
           />
         </FieldRow>
         <AutocompleteRow
@@ -560,12 +568,22 @@ function DefaultsBlock({
 function DefaultModelPicker({
   defaultModel,
   configuredIds,
+  customEndpoints,
 }: {
-  defaultModel: ModelId;
+  defaultModel: string;
   configuredIds: Set<ProviderId>;
+  customEndpoints: readonly CustomEndpoint[];
 }) {
-  const m = getModel(defaultModel);
+  const m = resolveModel(defaultModel, customEndpoints);
   const hasAny = configuredIds.size > 0;
+  const modelsOf = (p: ProviderInfo): readonly ModelInfo[] =>
+    p.id === "openai-compatible"
+      ? customEndpoints
+          .filter(isCompleteEndpoint)
+          .map((e) =>
+            getCompatModelInfo(compatModelIdForEndpoint(e.id), customEndpoints),
+          )
+      : MODELS.filter((x) => x.provider === p.id);
 
   return (
     <DropdownMenu>
@@ -597,7 +615,7 @@ function DefaultModelPicker({
       >
         <div className="max-h-72 overflow-y-auto overscroll-contain pr-1">
           {PROVIDERS.filter((p) => configuredIds.has(p.id)).map((p) => {
-            const models = MODELS.filter((x) => x.provider === p.id);
+            const models = modelsOf(p);
             if (models.length === 0) return null;
             return (
               <div key={p.id} className="px-1 pt-1.5 first:pt-1">
@@ -608,7 +626,7 @@ function DefaultModelPicker({
                 {models.map((mod) => (
                   <DropdownMenuItem
                     key={mod.id}
-                    onSelect={() => void setDefaultModel(mod.id as ModelId)}
+                    onSelect={() => void setDefaultModel(mod.id)}
                     className={cn(
                       "flex items-start gap-2 text-[12px]",
                       mod.id === defaultModel && "bg-accent/50",
@@ -849,9 +867,7 @@ function LocalProviderCard({
   const [modelDraft, setModelDraft] = useState(modelId);
   const [contextDraft, setContextDraft] = useState(String(contextLimit ?? ""));
   const [keyDraft, setKeyDraft] = useState("");
-  const [testStatus, setTestStatus] = useState<
-    "idle" | "testing" | "ok" | "fail"
-  >("idle");
+  const [testStatus, setTestStatus] = useState<PingState>({ status: "idle" });
 
   useEffect(() => setUrlDraft(baseURL), [baseURL]);
   useEffect(() => setModelDraft(modelId), [modelId]);
@@ -861,13 +877,8 @@ function LocalProviderCard({
     provider.id === "openai-compatible" || provider.id === "openrouter";
 
   const test = async () => {
-    setTestStatus("testing");
-    try {
-      const status = await invoke<number>("lm_ping", { baseUrl: urlDraft });
-      setTestStatus(status > 0 ? "ok" : "fail");
-    } catch {
-      setTestStatus("fail");
-    }
+    setTestStatus({ status: "testing" });
+    setTestStatus(await pingEndpoint(urlDraft));
   };
 
   return (
@@ -944,17 +955,29 @@ function LocalProviderCard({
         )}
 
         <FieldRow label="Model ID">
-          <Input
-            value={modelDraft}
-            onChange={(e) => setModelDraft(e.target.value)}
-            onBlur={() => {
-              const v = modelDraft.trim();
-              if (v !== modelId) void setModelId(v);
-            }}
-            placeholder={meta.modelPlaceholder}
-            spellCheck={false}
-            className="h-8 font-mono text-[11.5px]"
-          />
+          <div className="flex flex-1 gap-1.5">
+            <Input
+              value={modelDraft}
+              onChange={(e) => setModelDraft(e.target.value)}
+              onBlur={() => {
+                const v = modelDraft.trim();
+                if (v !== modelId) void setModelId(v);
+              }}
+              placeholder={meta.modelPlaceholder}
+              spellCheck={false}
+              className="h-8 font-mono text-[11.5px]"
+            />
+            {noBaseURL ? null : (
+              <ModelBrowseButton
+                baseURL={urlDraft}
+                apiKey={compatKey}
+                onSelect={(id) => {
+                  setModelDraft(id);
+                  if (id !== modelId) void setModelId(id);
+                }}
+              />
+            )}
+          </div>
         </FieldRow>
 
         {setContextLimit ? (
@@ -1028,7 +1051,7 @@ function LocalProviderCard({
           </FieldRow>
         ) : null}
 
-        <StatusLine status={testStatus} />
+        <StatusLine state={testStatus} />
 
         {!modelId.trim() && meta.modelHint ? (
           <p className="text-[10.5px] leading-relaxed text-muted-foreground">
@@ -1063,9 +1086,7 @@ function CustomEndpointCard({
     String(endpoint.contextLimit ?? ""),
   );
   const [keyDraft, setKeyDraft] = useState("");
-  const [testStatus, setTestStatus] = useState<
-    "idle" | "testing" | "ok" | "fail"
-  >("idle");
+  const [testStatus, setTestStatus] = useState<PingState>({ status: "idle" });
 
   useEffect(() => setNameDraft(endpoint.name), [endpoint.name]);
   useEffect(() => setUrlDraft(endpoint.baseURL), [endpoint.baseURL]);
@@ -1078,13 +1099,8 @@ function CustomEndpointCard({
   const configured = !!endpoint.baseURL.trim() && !!endpoint.modelId.trim();
 
   const test = async () => {
-    setTestStatus("testing");
-    try {
-      const status = await invoke<number>("lm_ping", { baseUrl: urlDraft });
-      setTestStatus(status > 0 ? "ok" : "fail");
-    } catch {
-      setTestStatus("fail");
-    }
+    setTestStatus({ status: "testing" });
+    setTestStatus(await pingEndpoint(urlDraft));
   };
 
   return (
@@ -1181,17 +1197,27 @@ function CustomEndpointCard({
           </FieldRow>
 
           <FieldRow label="Model ID">
-            <Input
-              value={modelDraft}
-              onChange={(e) => setModelDraft(e.target.value)}
-              onBlur={() => {
-                const v = modelDraft.trim();
-                if (v !== endpoint.modelId) void onUpdate({ modelId: v });
-              }}
-              placeholder="gpt-4o, qwen3-max, glm-4.6, …"
-              spellCheck={false}
-              className="h-8 font-mono text-[11.5px]"
-            />
+            <div className="flex flex-1 gap-1.5">
+              <Input
+                value={modelDraft}
+                onChange={(e) => setModelDraft(e.target.value)}
+                onBlur={() => {
+                  const v = modelDraft.trim();
+                  if (v !== endpoint.modelId) void onUpdate({ modelId: v });
+                }}
+                placeholder="gpt-4o, qwen3-max, glm-4.6, …"
+                spellCheck={false}
+                className="h-8 font-mono text-[11.5px]"
+              />
+              <ModelBrowseButton
+                baseURL={urlDraft}
+                apiKey={endpointKey}
+                onSelect={(id) => {
+                  setModelDraft(id);
+                  if (id !== endpoint.modelId) void onUpdate({ modelId: id });
+                }}
+              />
+            </div>
           </FieldRow>
 
           <FieldRow label="Context">
@@ -1262,7 +1288,7 @@ function CustomEndpointCard({
             )}
           </FieldRow>
 
-          <StatusLine status={testStatus} />
+          <StatusLine state={testStatus} />
         </div>
       )}
     </div>
@@ -1286,11 +1312,8 @@ function FieldRow({
   );
 }
 
-function StatusLine({
-  status,
-}: {
-  status: "idle" | "testing" | "ok" | "fail";
-}) {
+function StatusLine({ state }: { state: PingState }) {
+  const { status, error } = state;
   if (status === "idle") return null;
   if (status === "testing") {
     return (
@@ -1306,8 +1329,13 @@ function StatusLine({
     );
   }
   return (
-    <span className="text-[10.5px] text-destructive/80">
-      Could not reach the server.
+    <span
+      className="line-clamp-3 text-[10.5px] wrap-break-word text-destructive/80 select-text"
+      title={error}
+    >
+      {error
+        ? `Could not reach the server: ${error}`
+        : "Could not reach the server."}
     </span>
   );
 }

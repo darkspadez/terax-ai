@@ -10,9 +10,11 @@ const aiSdkReact = vi.hoisted(() => {
   class Chat {
     id: string;
     transport: unknown;
+    messages: unknown[];
     constructor(opts: { id: string; messages?: unknown[]; transport: unknown }) {
       this.id = opts.id;
       this.transport = opts.transport;
+      this.messages = opts.messages ?? [];
       constructed.push(opts);
     }
     async sendMessage(msg: unknown) {
@@ -63,7 +65,6 @@ const chatStore = vi.hoisted(() => {
     seeds: new Map<string, unknown[]>(),
     touched: [] as string[],
     sessionActive: "session-1" as string | null,
-    keySet: true,
     modelId: "gpt-test",
   };
   const useChatStore = {
@@ -82,7 +83,6 @@ const chatStore = vi.hoisted(() => {
       state.chatsMap.set(id, chat);
       state.touched.push(id);
     }),
-    getActiveProviderKey: vi.fn(() => (state.keySet ? "sk-live" : null)),
   };
 });
 
@@ -93,9 +93,6 @@ vi.mock("./chatStore", () => ({
     return chatStore.touchChat;
   },
   useChatStore: chatStore.useChatStore,
-  get getActiveProviderKey() {
-    return chatStore.getActiveProviderKey;
-  },
 }));
 
 import { getOrCreateChat, sendMessage } from "./chatRuntime";
@@ -109,7 +106,6 @@ describe("chat runtime", () => {
     chatStore.state.seeds.clear();
     chatStore.state.touched.length = 0;
     chatStore.state.sessionActive = "session-1";
-    chatStore.state.keySet = true;
     configMock.providerNeedsKey.mockReturnValue(true);
   });
 
@@ -120,26 +116,11 @@ describe("chat runtime", () => {
     expect(aiSdkReact.constructed).toEqual([]);
   });
 
-  it("refuses to send when the provider needs a key and none exists", async () => {
-    chatStore.state.keySet = false;
-
-    await expect(sendMessage("hi")).resolves.toBe(false);
-    expect(aiSdkReact.sent).toEqual([]);
-  });
-
   it("sends through a chat bound to the active session", async () => {
     await expect(sendMessage("do the thing")).resolves.toBe(true);
 
     expect(aiSdkReact.constructed[0].id).toBe("session-1");
     expect(aiSdkReact.sent).toEqual([{ text: "do the thing" }]);
-  });
-
-  it("sends without a key for providers that are keyless", async () => {
-    configMock.providerNeedsKey.mockReturnValue(false);
-    chatStore.state.keySet = false;
-
-    await expect(sendMessage("hi")).resolves.toBe(true);
-    expect(aiSdkReact.sent).toHaveLength(1);
   });
 
   it("reuses an existing chat instead of constructing another", () => {

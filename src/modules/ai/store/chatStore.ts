@@ -1,14 +1,7 @@
 import type { Chat, UIMessage } from "@ai-sdk/react";
 import { toast } from "sonner";
 import { create } from "zustand";
-import {
-  DEFAULT_MODEL_ID,
-  endpointIdFromCompatModel,
-  getModel,
-  isCompatModelId,
-  type ModelId,
-  type ProviderId,
-} from "../config";
+import { DEFAULT_MODEL_ID, type ProviderId } from "../config";
 import { useTodosStore } from "./todoStore";
 import type { AgentUsage } from "../lib/agent";
 import { EMPTY_PROVIDER_KEYS, type ProviderKeys, type CustomEndpointKeys } from "../lib/keyring";
@@ -174,16 +167,21 @@ export function touchChat(id: string, c: Chat<UIMessage>) {
   if (chats.has(id)) chats.delete(id);
   chats.set(id, c);
   if (chats.size <= CHATS_LRU_CAP) return;
-  // The touched and the active chat are kept even when they are the oldest;
-  // eviction moves on to the next oldest instead of stopping.
+  // The touched and the active chat are kept even when they are the oldest,
+  // and so is a background chat still answering (stopping it would cut its
+  // reply off); eviction moves on to the next oldest instead of stopping.
   const activeId = useChatStore.getState().activeSessionId;
-  for (const key of chats.keys()) {
+  for (const [key, chat] of chats) {
     if (chats.size <= CHATS_LRU_CAP) break;
-    if (key === id || key === activeId) continue;
+    if (key === id || key === activeId || isRunning(chat)) continue;
     flushPersistEntry(key);
-    void chats.get(key)?.stop();
+    void chat.stop();
     chats.delete(key);
   }
+}
+
+function isRunning(chat: Chat<UIMessage>): boolean {
+  return chat.status === "submitted" || chat.status === "streaming";
 }
 // Initial messages for a session, populated at hydration time and consumed
 // when the matching Chat is constructed.
@@ -469,15 +467,6 @@ export const useChatStore = create<StoreState>((set, get) => ({
     void saveSessionsList(next);
   },
 }));
-
-export function getActiveProviderKey(): string | null {
-  const { selectedModelId, apiKeys, customEndpointKeys } = useChatStore.getState();
-  if (isCompatModelId(selectedModelId)) {
-    const eid = endpointIdFromCompatModel(selectedModelId);
-    return customEndpointKeys[eid] ?? null;
-  }
-  return apiKeys[getModel(selectedModelId as ModelId).provider] ?? null;
-}
 
 export function getChat(sessionId?: string): Chat<UIMessage> | undefined {
   if (sessionId) return chats.get(sessionId);

@@ -109,6 +109,7 @@ const WRITE_DENY_PREFIXES = [
   "/library/keychains/",
   "/library/launchagents/",
   "/library/launchdaemons/",
+  "/applications/",
   "/private/etc/",
   "/private/var/db/",
   "/usr/bin/",
@@ -124,6 +125,24 @@ const WRITE_DENY_PREFIXES = [
   "/program files/",
   "/program files (x86)/",
   "/programdata/",
+];
+
+/** A user's home root on the comparison surface (macOS, Windows after the
+ *  drive strip, Linux, Fedora Atomic's /var/home, root). */
+const HOME_ROOT_RE = /^\/(?:users\/[^/]+|home\/[^/]+|var\/home\/[^/]+|root)\//;
+
+/**
+ * Write-only refusals relative to the home root: login, shell-startup and
+ * autostart files, and git's config, all of which run code as the user later,
+ * outside any approval. Matched only directly under the home root, so a
+ * dotfiles repo in a workspace (`~/code/dotfiles/.zshrc`) stays writable.
+ */
+const HOME_WRITE_DENY: readonly RegExp[] = [
+  /^\.(?:zshrc|zshenv|zprofile|zlogin|zlogout|bashrc|bash_profile|bash_login|bash_logout|profile|xprofile|xinitrc|xsessionrc|pam_environment|gitconfig)$/,
+  /^\.config\/(?:fish|autostart|systemd\/user|environment\.d)(?:\/|$)/,
+  /^library\/launchagents(?:\/|$)/,
+  /^(?:onedrive[^/]*\/)?documents\/(?:windows)?powershell(?:\/|$)/,
+  /^appdata\/roaming\/microsoft\/windows\/start menu\/programs\/startup(?:\/|$)/,
 ];
 
 export type SafetyResult = { ok: true } | { ok: false; reason: string };
@@ -243,6 +262,14 @@ export function checkWritable(path: string): SafetyResult {
         reason: `Refused: writes under "${prefix.replace(/\/$/, "")}" are not allowed.`,
       };
     }
+  }
+  const home = HOME_ROOT_RE.exec(cmpForPrefix);
+  const rel = home ? cmpForPrefix.slice(home[0].length) : null;
+  if (rel !== null && HOME_WRITE_DENY.some((re) => re.test(rel))) {
+    return {
+      ok: false,
+      reason: `Refused: "~/${rel}" can run code later as the user (login, shell start, git), so it is not writable.`,
+    };
   }
   return { ok: true };
 }

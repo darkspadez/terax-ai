@@ -38,6 +38,7 @@ type Props = {
   panelOpen: boolean;
   keysLoaded: boolean;
   onConnect: () => void;
+  onClose: () => void;
 };
 
 export function WorkspaceInputBar({
@@ -50,6 +51,7 @@ export function WorkspaceInputBar({
   panelOpen,
   keysLoaded,
   onConnect,
+  onClose,
 }: Props) {
   const c = useComposer();
   const { os, shell } = useSystemInfo();
@@ -126,7 +128,7 @@ export function WorkspaceInputBar({
 
   const content =
     !hasComposer && !isBlockTab ? (
-      <AiInputBarConnect onAdd={onConnect} />
+      <AiInputBarConnect onAdd={onConnect} onClose={onClose} />
     ) : (
       <div className="shrink-0 border-t border-border/60 bg-foreground/[0.02] px-3 py-2">
         <div className="flex flex-col gap-2 rounded-lg px-1 py-1">

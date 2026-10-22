@@ -104,7 +104,7 @@ describe("plan mode store", () => {
     expect(results).toEqual([{ id: "q-1", ok: true }]);
   });
 
-  it("captures a failed edit in its result and still drains the rest", async () => {
+  it("captures a failed edit in its result, keeps it with its error and drains the rest", async () => {
     usePlanStore.getState().enqueue(edit({ id: "q-1", path: "/repo/blocked" }));
     usePlanStore.getState().enqueue(edit({ id: "q-2", path: "/repo/fine" }));
     native.writeFile.mockImplementation((path: string) =>
@@ -118,7 +118,10 @@ describe("plan mode store", () => {
     expect(results[0]).toMatchObject({ id: "q-1", ok: false });
     expect(String(results[0].error)).toContain("denied");
     expect(results[1]).toEqual({ id: "q-2", ok: true });
-    expect(usePlanStore.getState().queue).toEqual([]);
+    // The failed edit stays in the panel with its error; the written one leaves.
+    expect(usePlanStore.getState().queue).toEqual([
+      expect.objectContaining({ id: "q-1", error: results[0].error }),
+    ]);
   });
 
   it("refuses denied paths at the mutation boundary without touching disk", async () => {
@@ -133,7 +136,13 @@ describe("plan mode store", () => {
     expect(results[0].error).toMatch(/^Refused/);
     expect(native.writeFile).not.toHaveBeenCalled();
     expect(native.createDir).not.toHaveBeenCalled();
-    expect(usePlanStore.getState().queue).toEqual([]);
+    // Refused edits stay visible with the refusal rather than vanishing.
+    expect(
+      usePlanStore.getState().queue.map((q) => [q.id, q.error?.startsWith("Refused")]),
+    ).toEqual([
+      ["q-1", true],
+      ["q-2", true],
+    ]);
   });
 
   it("refuses a path that became a link to a secret after it was queued", async () => {
