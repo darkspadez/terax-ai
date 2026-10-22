@@ -172,6 +172,7 @@ pub async fn fs_write_file(
     index: tauri::State<'_, FileIndexState>,
 ) -> Result<u64, String> {
     let index = index.inner().clone();
+    let watcher = app.clone();
     let (path, mtime) = blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
         let target = resolve_path(&path, &workspace);
@@ -183,6 +184,7 @@ pub async fn fs_write_file(
         if !existed {
             note_changed(&index, &real);
         }
+        super::watch::note_written(&watcher, &real);
         let mtime = fs::metadata(&real).map(|m| mtime_millis(&m)).unwrap_or(0);
         Ok((path, mtime))
     })

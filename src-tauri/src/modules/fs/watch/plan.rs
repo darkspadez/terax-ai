@@ -291,6 +291,14 @@ struct DirWatch {
     poll: bool,
 }
 
+/// A repository whose Source Control view is on screen. Any activity in a watched directory
+/// inside its work tree or in its git directory (index, HEAD, ORIG_HEAD, FETCH_HEAD and the
+/// lock files git writes at the top level) can change what `git status` says.
+struct RepoWatch {
+    spellings: Spellings,
+    git_dir: String,
+}
+
 /// Refcounted directories (explorer expansion and open editors can ask for the
 /// same one) and the files whose own changes are reported, each keyed by its canonical path
 /// and registered under the spelling the frontend used.
@@ -298,6 +306,7 @@ struct DirWatch {
 pub struct WatchSet {
     dirs: HashMap<String, DirWatch>,
     files: HashMap<String, HashMap<String, FileWatch>>,
+    repos: HashMap<String, RepoWatch>,
 }
 
 impl WatchSet {
@@ -457,7 +466,7 @@ impl WatchSet {
 
     #[cfg(test)]
     pub fn is_empty(&self) -> bool {
-        self.dirs.is_empty() && self.files.is_empty()
+        self.dirs.is_empty() && self.files.is_empty() && self.repos.is_empty()
     }
 
     pub fn snapshot(&self) -> DirSet {
@@ -507,6 +516,55 @@ impl WatchSet {
         in_dir
             .iter()
             .any(|(file, watch)| current.get(file).is_some_and(|now| *now != watch.stamp))
+    }
+
+    /// Registers a repository by its canonical work tree root. The git directory's own watch is
+    /// registered separately, as a directory, so the backends see it.
+    pub fn add_repo(&mut self, root: String, spelling: String, git_dir: String) {
+        self.repos
+            .entry(root)
+            .or_insert_with(|| RepoWatch {
+                spellings: Spellings::default(),
+                git_dir,
+            })
+            .spellings
+            .add(spelling);
+    }
+
+    pub fn remove_repo(&mut self, root: &str, spelling: &str) {
+        let Some(repo) = self.repos.get_mut(root) else {
+            return;
+        };
+        if repo.spellings.remove(spelling) && repo.spellings.is_empty() {
+            self.repos.remove(root);
+        }
+    }
+
+    /// The git directory of `root` while it is registered under `spelling`.
+    pub fn repo_git_dir(&self, root: &str, spelling: &str) -> Option<String> {
+        self.repos
+            .get(root)
+            .filter(|repo| repo.spellings.0.contains_key(spelling))
+            .map(|repo| repo.git_dir.clone())
+    }
+
+    /// The repositories, by every spelling they were registered under, that any of `paths`
+    /// (canonical directories that saw activity, or files written) lies in.
+    pub fn repos_touched<'a>(&self, paths: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+        if self.repos.is_empty() {
+            return Vec::new();
+        }
+        let mut hit: Vec<String> = Vec::new();
+        for path in paths {
+            for (root, repo) in &self.repos {
+                if is_within(path, root) || is_within(path, &repo.git_dir) {
+                    hit.extend(repo.spellings.iter().cloned());
+                }
+            }
+        }
+        hit.sort_unstable();
+        hit.dedup();
+        hit
     }
 
     /// The fewest directories that cover everything watched. FSEvents streams
@@ -1219,6 +1277,41 @@ mod tests {
         set.record_listing("/w/a", None);
         assert!(!set.listing_moved("/w/a", Some(3)));
         assert!(!set.listing_moved("/w/zzz", Some(3)));
+    }
+
+    #[test]
+    fn activity_in_a_work_tree_or_its_git_dir_reaches_the_repository_view() {
+        let mut set = WatchSet::default();
+        set.add_repo("/w/repo".into(), "/w/repo".into(), "/w/repo/.git".into());
+        // A linked worktree's git dir lives in the main repository.
+        set.add_repo(
+            "/w/feature".into(),
+            "/link/feature".into(),
+            "/w/repo/.git/worktrees/feature".into(),
+        );
+        set.add_repo(
+            "/w/feature".into(),
+            "/w/feature".into(),
+            "/w/repo/.git/worktrees/feature".into(),
+        );
+
+        assert_eq!(set.repos_touched(["/w/repo/src"]), vec!["/w/repo"]);
+        assert_eq!(set.repos_touched(["/w/repo/.git"]), vec!["/w/repo"]);
+        assert_eq!(
+            set.repos_touched(["/w/repo/.git/worktrees/feature", "/w/feature/a.ts"]),
+            vec!["/link/feature", "/w/feature", "/w/repo"],
+            "the main repository's view also covers its git dir"
+        );
+        assert!(set
+            .repos_touched(["/w/repository", "/w", "/elsewhere"])
+            .is_empty());
+
+        set.remove_repo("/w/feature", "/link/feature");
+        assert_eq!(set.repos_touched(["/w/feature"]), vec!["/w/feature"]);
+        set.remove_repo("/w/feature", "/w/feature");
+        set.remove_repo("/w/repo", "/w/repo");
+        assert!(set.repos_touched(["/w/repo/src"]).is_empty());
+        assert!(set.is_empty());
     }
 
     #[test]

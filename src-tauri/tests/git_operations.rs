@@ -736,3 +736,47 @@ fn list_branches_keeps_current_branch_local_and_surfaces_worktrees() {
     assert!(!feature[0].is_head);
     assert!(feature[0].worktree_path.is_some());
 }
+
+/// Source Control refreshes when the git dir changes, so its own reads must leave the git dir
+/// alone or every refresh would trigger the next one.
+#[test]
+fn reading_status_leaves_the_git_dir_alone() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("a.txt", "a\n");
+    fx.write_file("b.txt", "b\n");
+    fx.run_git(&["add", "."]);
+    fx.run_git(&["commit", "-q", "-m", "seed"]);
+    // Same content, newer mtime: the index's stat data is stale, which a plain `git status`
+    // repairs by rewriting the index.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    fx.write_file("a.txt", "a\n");
+    fx.write_file("b.txt", "changed\n");
+
+    let git_dir = fx.repo_path.join(".git");
+    let snapshot = || {
+        let mut entries: Vec<(String, u64, Option<std::time::SystemTime>)> =
+            std::fs::read_dir(&git_dir)
+                .unwrap()
+                .map(|entry| {
+                    let entry = entry.unwrap();
+                    let meta = entry.metadata().unwrap();
+                    (
+                        entry.file_name().to_string_lossy().into_owned(),
+                        meta.len(),
+                        meta.modified().ok(),
+                    )
+                })
+                .collect();
+        entries.sort();
+        entries
+    };
+    let before = snapshot();
+    let snap = operations::panel_snapshot(&fx.registry, &fx.repo_str(), &fx.workspace)
+        .expect("panel snapshot");
+    assert_eq!(snap.status.expect("status").changed_files.len(), 1);
+    operations::status(&fx.registry, &fx.repo_str(), &fx.workspace).expect("status");
+    assert_eq!(snapshot(), before);
+}

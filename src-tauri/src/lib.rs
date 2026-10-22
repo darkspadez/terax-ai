@@ -312,6 +312,8 @@ pub fn run() {
             modules::quick_terminal::quick_terminal_set_hotkey,
             fs::watch::fs_watch_add,
             fs::watch::fs_watch_remove,
+            fs::watch::git_watch_add,
+            fs::watch::git_watch_remove,
             lsp::lsp_detect,
             lsp::lsp_host_pid,
             lsp::lsp_resolve_root,

@@ -14,7 +14,8 @@ mod macos;
 mod portable;
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::time::{Duration, Instant};
@@ -111,7 +112,7 @@ pub struct FsWatchState {
 #[derive(Default)]
 struct WatchOwners(HashMap<String, Held>);
 
-/// Directories as (key, spelling) and files as (directory key, key, spelling).
+/// Directories and repositories as (key, spelling), files as (directory key, key, spelling).
 type HeldDir = (String, String);
 type HeldFile = (String, String, String);
 
@@ -119,10 +120,11 @@ type HeldFile = (String, String, String);
 struct Held {
     dirs: HashMap<HeldDir, usize>,
     files: HashMap<HeldFile, usize>,
+    repos: HashMap<HeldDir, usize>,
 }
 
 impl WatchOwners {
-    fn add(&mut self, owner: &str, dirs: &[HeldDir], files: &[HeldFile]) {
+    fn add(&mut self, owner: &str, dirs: &[HeldDir], files: &[HeldFile], repos: &[HeldDir]) {
         let held = self.0.entry(owner.to_owned()).or_default();
         for dir in dirs {
             *held.dirs.entry(dir.clone()).or_default() += 1;
@@ -130,9 +132,12 @@ impl WatchOwners {
         for file in files {
             *held.files.entry(file.clone()).or_default() += 1;
         }
+        for repo in repos {
+            *held.repos.entry(repo.clone()).or_default() += 1;
+        }
     }
 
-    fn remove(&mut self, owner: &str, dirs: &[HeldDir], files: &[HeldFile]) {
+    fn remove(&mut self, owner: &str, dirs: &[HeldDir], files: &[HeldFile], repos: &[HeldDir]) {
         let Some(held) = self.0.get_mut(owner) else {
             return;
         };
@@ -150,7 +155,10 @@ impl WatchOwners {
         for file in files {
             release(&mut held.files, file);
         }
-        if held.dirs.is_empty() && held.files.is_empty() {
+        for repo in repos {
+            release(&mut held.repos, repo);
+        }
+        if held.dirs.is_empty() && held.files.is_empty() && held.repos.is_empty() {
             self.0.remove(owner);
         }
     }
@@ -163,6 +171,14 @@ impl WatchOwners {
 #[derive(Clone, serde::Serialize)]
 struct ChangedPayload {
     paths: Vec<String>,
+}
+
+/// `git:changed`: something in these repositories (spelled as Source Control registered them)
+/// may have changed what `git status` reports.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitChangedPayload {
+    repo_roots: Vec<String>,
 }
 
 fn start(app: &AppHandle) -> Result<Running, String> {
@@ -295,7 +311,11 @@ fn drain_loop(
 
         // A burst that panics is lost, not the watcher.
         crate::modules::panics::isolate("fs watch burst", || {
-            let Changes { touched, report } = resolve_changes(pending, &shared);
+            let Changes {
+                touched,
+                report,
+                repos,
+            } = resolve_changes(pending, &shared);
             // The file list cache hears about every touched directory, whether or not the
             // frontend does: an edited ignore file changes the list without changing a name.
             for path in &touched {
@@ -303,6 +323,9 @@ fn drain_loop(
             }
             if !report.is_empty() {
                 let _ = app.emit("fs:changed", ChangedPayload { paths: report });
+            }
+            if !repos.is_empty() {
+                let _ = app.emit("git:changed", GitChangedPayload { repo_roots: repos });
             }
         });
     }
@@ -315,6 +338,9 @@ struct Changes {
     /// What the frontend is told: the touched directories whose listing moved, plus registered
     /// files inside them whose stamp moved.
     report: Vec<String>,
+    /// Watched repositories with a touched directory in their work tree or git directory. An
+    /// edit in place moves no listing but does change `git status`, so this uses `touched`.
+    repos: Vec<String>,
 }
 
 /// Watched directories that changed, plus registered files inside them whose
@@ -341,7 +367,12 @@ fn resolve_changes(pending: Pending, shared: &Shared) -> Changes {
         }
         report.extend(set.changed_files_in(dir, &stamp_of));
     }
-    Changes { touched, report }
+    let repos = set.repos_touched(touched.iter().map(String::as_str));
+    Changes {
+        touched,
+        report,
+        repos,
+    }
 }
 
 /// Each requested directory with its canonical path. Canonical keys keep add/remove symmetric
@@ -399,7 +430,7 @@ impl FsWatchState {
     /// Gives back every watch `owner` (a window) still holds.
     pub fn release_window(&self, app: &AppHandle, owner: &str) {
         let held = self.owners().take(owner);
-        if held.dirs.is_empty() && held.files.is_empty() {
+        if held.dirs.is_empty() && held.files.is_empty() && held.repos.is_empty() {
             return;
         }
         let _ = self.with_running(app, false, |running| {
@@ -413,6 +444,11 @@ impl FsWatchState {
                 for ((dir, key, spelling), count) in &held.files {
                     for _ in 0..*count {
                         set.remove_file(dir, key, spelling);
+                    }
+                }
+                for ((root, spelling), count) in &held.repos {
+                    for _ in 0..*count {
+                        moved |= release_repo(set, root, spelling);
                     }
                 }
                 moved
@@ -528,7 +564,7 @@ pub async fn fs_watch_add(
             })?;
         app.state::<FsWatchState>()
             .owners()
-            .add(&owner, &held_dirs, &held_files);
+            .add(&owner, &held_dirs, &held_files, &[]);
         Ok(())
     })
     .await
@@ -572,10 +608,194 @@ pub async fn fs_watch_remove(
             })?;
         app.state::<FsWatchState>()
             .owners()
-            .remove(&owner, &dirs, &files);
+            .remove(&owner, &dirs, &files, &[]);
         Ok(())
     })
     .await
+}
+
+/// Files at the top of a git directory that the operations which change `git status` rewrite.
+/// A rewrite keeps the listing, so the share poller only notices them as registered files;
+/// native backends already report the directory.
+const GIT_STATE_FILES: &[&str] = &["HEAD", "index", "ORIG_HEAD", "FETCH_HEAD", "COMMIT_EDITMSG"];
+
+/// The git directory of the work tree at `root`: `.git` itself, or where a `.git` file (a
+/// linked worktree, a submodule) points.
+fn git_dir_of(root: &Path, workspace: &WorkspaceEnv) -> Option<PathBuf> {
+    let dot_git = root.join(".git");
+    if dot_git.is_dir() {
+        return std::fs::canonicalize(dot_git).ok();
+    }
+    let mut text = String::new();
+    std::fs::File::open(&dot_git)
+        .ok()?
+        .take(4096)
+        .read_to_string(&mut text)
+        .ok()?;
+    let target = text.lines().next()?.strip_prefix("gitdir:")?.trim();
+    // A WSL repository names its git dir as a Linux path.
+    let path = if target.starts_with('/') || Path::new(target).is_absolute() {
+        resolve_path(target, workspace)
+    } else {
+        root.join(target)
+    };
+    std::fs::canonicalize(path).ok().filter(|dir| dir.is_dir())
+}
+
+/// What `git_watch_add` registers for one repository.
+struct RepoWatchPlan {
+    root: String,
+    spelling: String,
+    git_dir: PathBuf,
+    git_dir_key: String,
+    /// On the WSL share, which cannot notify: polled instead.
+    poll: bool,
+    listing: Option<u64>,
+    files: Vec<(String, Option<FileStamp>)>,
+}
+
+fn plan_repo_watch(
+    registry: &WorkspaceRegistry,
+    workspace: &WorkspaceEnv,
+    repo_root: String,
+) -> Option<RepoWatchPlan> {
+    let root = std::fs::canonicalize(resolve_path(&repo_root, workspace)).ok()?;
+    if !root.is_dir() || !registry.is_authorized(&root) {
+        return None;
+    }
+    let git_dir = git_dir_of(&root, workspace)?;
+    let git_dir_key = to_canon(&git_dir);
+    let files = GIT_STATE_FILES
+        .iter()
+        .map(|name| {
+            let key = format!("{}/{name}", git_dir_key.trim_end_matches('/'));
+            let stamp = FileStamp::of(Path::new(&key));
+            (key, stamp)
+        })
+        .collect();
+    Some(RepoWatchPlan {
+        root: to_canon(&root),
+        spelling: repo_root,
+        poll: plan::is_wsl_share(&git_dir_key),
+        listing: plan::listing_signature(&git_dir),
+        git_dir,
+        git_dir_key,
+        files,
+    })
+}
+
+/// Registers the repository, its git directory and the state files in it. True when the set
+/// of watched directories moved.
+fn register_repo(set: &mut WatchSet, plan: RepoWatchPlan) -> bool {
+    let RepoWatchPlan {
+        root,
+        spelling,
+        git_dir,
+        git_dir_key,
+        poll,
+        listing,
+        files,
+    } = plan;
+    set.add_repo(root, spelling, git_dir_key.clone());
+    let moved = set.add_dir(git_dir_key.clone(), git_dir_key.clone(), git_dir, poll);
+    if moved {
+        set.record_listing(&git_dir_key, listing);
+    }
+    for (key, stamp) in files {
+        set.add_file(git_dir_key.clone(), key.clone(), key, stamp);
+    }
+    moved
+}
+
+/// Undoes one `register_repo` of `root` under `spelling`. True when the set of watched
+/// directories moved.
+fn release_repo(set: &mut WatchSet, root: &str, spelling: &str) -> bool {
+    let Some(git_dir) = set.repo_git_dir(root, spelling) else {
+        return false;
+    };
+    set.remove_repo(root, spelling);
+    for name in GIT_STATE_FILES {
+        let key = format!("{}/{name}", git_dir.trim_end_matches('/'));
+        set.remove_file(&git_dir, &key, &key);
+    }
+    set.remove_dir(&git_dir, &git_dir)
+}
+
+/// Watches a repository while a Source Control view of it is on screen: activity in its git
+/// directory, or in any watched directory of its work tree, emits `git:changed`. Nothing is
+/// watched for a repository nobody is looking at.
+#[tauri::command]
+pub async fn git_watch_add(
+    app: AppHandle,
+    webview: tauri::Webview,
+    repo_root: String,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<(), String> {
+    let owner = webview.label().to_owned();
+    blocking(move || {
+        let workspace = WorkspaceEnv::from_option(workspace);
+        let Some(plan) = plan_repo_watch(&app.state::<WorkspaceRegistry>(), &workspace, repo_root)
+        else {
+            return Ok(());
+        };
+        let held = (plan.root.clone(), plan.spelling.clone());
+        app.state::<FsWatchState>()
+            .with_running(&app, true, |running| {
+                running.apply(|set| register_repo(set, plan));
+            })?;
+        app.state::<FsWatchState>()
+            .owners()
+            .add(&owner, &[], &[], &[held]);
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_watch_remove(
+    app: AppHandle,
+    webview: tauri::Webview,
+    repo_root: String,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<(), String> {
+    let owner = webview.label().to_owned();
+    blocking(move || {
+        let workspace = WorkspaceEnv::from_option(workspace);
+        let held = (removal_dir_key(&workspace, &repo_root), repo_root);
+        app.state::<FsWatchState>()
+            .with_running(&app, false, |running| {
+                running.apply(|set| release_repo(set, &held.0, &held.1));
+            })?;
+        app.state::<FsWatchState>()
+            .owners()
+            .remove(&owner, &[], &[], &[held]);
+        Ok(())
+    })
+    .await
+}
+
+/// Tells Source Control about a file Terax wrote: a save or an AI edit outside every watched
+/// directory changes `git status` without any watcher seeing it. Blocking (canonicalizes).
+pub fn note_written(app: &AppHandle, path: &Path) {
+    let Some(name) = path.file_name() else {
+        return;
+    };
+    let Some(parent) = path.parent().and_then(|p| std::fs::canonicalize(p).ok()) else {
+        return;
+    };
+    let key = to_canon(parent.join(name));
+    let repos = {
+        let state = app.state::<FsWatchState>();
+        let guard = state.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(running) = guard.as_ref() else {
+            return;
+        };
+        let set = running.shared.set.lock().unwrap_or_else(|e| e.into_inner());
+        set.repos_touched([key.as_str()])
+    };
+    if !repos.is_empty() {
+        let _ = app.emit("git:changed", GitChangedPayload { repo_roots: repos });
+    }
 }
 
 #[cfg(test)]
@@ -586,19 +806,27 @@ mod tests {
         let mut owners = WatchOwners::default();
         let dir = |d: &str| (d.to_owned(), d.to_owned());
         let file = |d: &str, f: &str| (d.to_owned(), f.to_owned(), f.to_owned());
-        owners.add("main", &[dir("/a"), dir("/a")], &[file("/a", "/a/x")]);
-        owners.add("w-1", &[dir("/a")], &[]);
-        owners.remove("main", &[dir("/a")], &[]);
+        owners.add(
+            "main",
+            &[dir("/a"), dir("/a")],
+            &[file("/a", "/a/x")],
+            &[dir("/r")],
+        );
+        owners.add("w-1", &[dir("/a")], &[], &[]);
+        owners.remove("main", &[dir("/a")], &[], &[]);
         // Removing what the window never added changes nothing.
-        owners.remove("main", &[dir("/b")], &[file("/b", "/b/y")]);
+        owners.remove("main", &[dir("/b")], &[file("/b", "/b/y")], &[dir("/s")]);
         let held = owners.take("main");
         assert_eq!(held.dirs, HashMap::from([(dir("/a"), 1)]));
         assert_eq!(held.files, HashMap::from([(file("/a", "/a/x"), 1)]));
+        assert_eq!(held.repos, HashMap::from([(dir("/r"), 1)]));
         assert_eq!(owners.take("main"), Held::default());
         // Another window's watches stay its own.
         assert_eq!(owners.take("w-1").dirs, HashMap::from([(dir("/a"), 1)]));
-        owners.add("w-2", &[dir("/c")], &[]);
-        owners.remove("w-2", &[dir("/c")], &[]);
+        owners.add("w-2", &[dir("/c")], &[], &[dir("/r")]);
+        owners.remove("w-2", &[dir("/c")], &[], &[]);
+        assert!(!owners.0.is_empty(), "the repository is still held");
+        owners.remove("w-2", &[], &[], &[dir("/r")]);
         assert!(owners.0.is_empty());
     }
 
@@ -848,5 +1076,167 @@ mod tests {
         std::fs::remove_dir_all(real.join("src")).unwrap();
         assert_eq!(removal_dir_key(&WorkspaceEnv::Local, &link_src), dir_key);
         assert!(shared.set.lock().unwrap().remove_dir(&dir_key, &link_src));
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .expect("git on PATH");
+        assert!(out.status.success(), "git {args:?} failed");
+    }
+
+    /// A repository with one commit, authorized, and its canonical root.
+    fn repo_fixture() -> (tempfile::TempDir, PathBuf, WorkspaceRegistry) {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(tmp.path()).unwrap().join("repo");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        git(&root, &["init", "-q"]);
+        git(&root, &["config", "user.email", "test@terax.local"]);
+        git(&root, &["config", "user.name", "Terax Test"]);
+        git(&root, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(root.join("src/a.ts"), "one").unwrap();
+        git(&root, &["add", "."]);
+        git(&root, &["commit", "-q", "-m", "seed"]);
+        let registry = WorkspaceRegistry::default();
+        registry.authorize(tmp.path()).unwrap();
+        (tmp, root, registry)
+    }
+
+    fn repo_burst(dirs: Vec<String>) -> Pending {
+        let mut pending = Pending::default();
+        pending.merge(Batch {
+            dirs,
+            subtrees: Vec::new(),
+        });
+        pending
+    }
+
+    #[test]
+    fn git_dir_of_follows_a_linked_worktree_and_a_relative_gitdir_file() {
+        let (tmp, root, _) = repo_fixture();
+        assert_eq!(
+            git_dir_of(&root, &WorkspaceEnv::Local),
+            Some(root.join(".git"))
+        );
+
+        let linked = tmp.path().join("linked");
+        git(
+            &root,
+            &["worktree", "add", "-q", linked.to_str().unwrap(), "-b", "f"],
+        );
+        let linked = std::fs::canonicalize(&linked).unwrap();
+        assert_eq!(
+            git_dir_of(&linked, &WorkspaceEnv::Local),
+            Some(root.join(".git/worktrees/linked"))
+        );
+
+        let sub = root.join("sub");
+        std::fs::create_dir_all(root.join(".git/modules/sub")).unwrap();
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join(".git"), "gitdir: ../.git/modules/sub\n").unwrap();
+        assert_eq!(
+            git_dir_of(&sub, &WorkspaceEnv::Local),
+            Some(root.join(".git/modules/sub"))
+        );
+
+        assert_eq!(git_dir_of(&root.join("src"), &WorkspaceEnv::Local), None);
+    }
+
+    #[test]
+    fn a_repository_outside_the_workspace_is_not_watched() {
+        let (_tmp, root, _) = repo_fixture();
+        let registry = WorkspaceRegistry::default();
+        let spelling = root.to_string_lossy().into_owned();
+        assert!(plan_repo_watch(&registry, &WorkspaceEnv::Local, spelling).is_none());
+    }
+
+    #[test]
+    fn git_operations_and_work_tree_edits_reach_the_repository_view() {
+        let (_tmp, root, registry) = repo_fixture();
+        let spelling = root.to_string_lossy().into_owned();
+        let src = to_canon(root.join("src"));
+        let shared = Shared::new();
+        let git_dir_key = {
+            let plan = plan_repo_watch(&registry, &WorkspaceEnv::Local, spelling.clone())
+                .expect("an authorized repository");
+            assert_eq!(plan.root, to_canon(&root));
+            assert!(!plan.poll);
+            let key = plan.git_dir_key.clone();
+            let mut set = shared.set.lock().unwrap();
+            assert!(register_repo(&mut set, plan), "the git dir is watched");
+            // The explorer watches a folder of the work tree.
+            set.add_dir(src.clone(), src.clone(), root.join("src"), false);
+            set.record_listing(&src, plan::listing_signature(&root.join("src")));
+            key
+        };
+
+        // An edit in place moves no listing, so the explorer hears nothing, but the status did
+        // change.
+        std::fs::write(root.join("src/a.ts"), "two, a different length").unwrap();
+        let changes = resolve_changes(repo_burst(vec![src.clone()]), &shared);
+        assert!(changes.report.is_empty());
+        assert_eq!(changes.repos, vec![spelling.clone()]);
+
+        // Staging rewrites the index inside the git dir.
+        git(&root, &["add", "src/a.ts"]);
+        let changes = resolve_changes(repo_burst(vec![git_dir_key.clone()]), &shared);
+        assert_eq!(changes.repos, vec![spelling.clone()]);
+        assert!(changes.report.contains(&format!("{git_dir_key}/index")));
+
+        // Activity outside the repository is not its business.
+        let other = root.parent().unwrap().join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        let other_key = to_canon(&other);
+        shared.set.lock().unwrap().add_dir(
+            other_key.clone(),
+            other_key.clone(),
+            other.clone(),
+            false,
+        );
+        std::fs::write(other.join("x"), "").unwrap();
+        let changes = resolve_changes(repo_burst(vec![other_key.clone()]), &shared);
+        assert_eq!(changes.report, vec![other_key.clone()]);
+        assert!(changes.repos.is_empty());
+
+        let mut set = shared.set.lock().unwrap();
+        set.remove_dir(&other_key, &other_key);
+        set.remove_dir(&src, &src);
+        assert!(release_repo(&mut set, &to_canon(&root), &spelling));
+        assert!(
+            set.is_empty(),
+            "releasing the repository gives everything back"
+        );
+        assert!(!release_repo(&mut set, &to_canon(&root), &spelling));
+    }
+
+    /// The WSL share cannot notify, and staging rewrites `index` in place, which moves no
+    /// listing: the registered state files are what the poller sees.
+    #[test]
+    fn the_poller_sees_git_state_files_move_in_a_polled_git_dir() {
+        let (_tmp, root, registry) = repo_fixture();
+        let spelling = root.to_string_lossy().into_owned();
+        let shared = Shared::new();
+        let git_dir_key = {
+            let mut plan = plan_repo_watch(&registry, &WorkspaceEnv::Local, spelling.clone())
+                .expect("an authorized repository");
+            plan.poll = true;
+            let key = plan.git_dir_key.clone();
+            register_repo(&mut shared.set.lock().unwrap(), plan);
+            key
+        };
+        let (tx, rx) = mpsc::channel::<Batch>();
+        assert!(poll_once(&tx, &shared));
+        assert!(rx.try_recv().is_err(), "nothing moved yet");
+
+        std::fs::write(root.join("src/b.ts"), "new").unwrap();
+        git(&root, &["add", "src/b.ts"]);
+        assert!(poll_once(&tx, &shared));
+        let batch = rx.try_recv().expect("the rewritten index is a tick");
+        assert_eq!(batch.dirs, vec![git_dir_key]);
+        let mut pending = Pending::default();
+        pending.merge(batch);
+        assert_eq!(resolve_changes(pending, &shared).repos, vec![spelling]);
     }
 }
