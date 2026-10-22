@@ -24,7 +24,7 @@ import type { TerminalSearchController } from "@/modules/terminal/search/Termina
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { loadFeatureFamilies, useFontFeatureStack } from "../lib/fontFeatures";
-import { openPty, type PtySession } from "../lib/pty-bridge";
+import { authorizePtyCwd, openPty, type PtySession } from "../lib/pty-bridge";
 import {
   DROPPED_PATH_MIMES,
   droppedPathItems,
@@ -38,6 +38,7 @@ import {
   writeTerminalClipboard,
   writeTerminalClipboardContent,
 } from "../lib/terminalClipboard";
+import { TerminalCwdReports } from "../lib/terminalCwdReports";
 import { useTerminalFontOffsets } from "../lib/terminalFontOffsets";
 import { openTerminalLink } from "../lib/terminalLinkOpen";
 import { requestTerminalPrompt } from "../lib/terminalPrompts";
@@ -97,7 +98,9 @@ type GhosttySession = {
   readonly leafId: number;
   readonly backend: GhosttyBackend;
   initialCwd: string | undefined;
+  /** The folder the shell was last seen in: a report the backend checked. */
   lastCwd: string | null;
+  cwdReports: TerminalCwdReports;
   model: GhosttyTerminalModelApi | null;
   surface: GhosttySurface | null;
   surfaceOptions: GhosttySurfaceBaseOptions | null;
@@ -650,6 +653,7 @@ async function respawnGhosttySession(
   session.pty = null;
   session.shellExited = false;
   session.lastCwd = null;
+  session.cwdReports.reset();
   session.initialCwd = cwd ?? session.initialCwd;
   session.startupError = null;
   session.rendererError = null;
@@ -752,6 +756,17 @@ function ensureSession(
     backend,
     initialCwd,
     lastCwd: null,
+    cwdReports: new TerminalCwdReports(
+      (cwd) =>
+        session.pty && !session.disposed
+          ? authorizePtyCwd(session.pty.id, cwd)
+          : Promise.resolve(false),
+      (cwd) => {
+        if (session.disposed) return;
+        session.lastCwd = cwd;
+        session.callbacks.onCwd?.(cwd);
+      },
+    ),
     model: null,
     surface: null,
     surfaceOptions: null,
@@ -872,11 +887,8 @@ async function initializeSessionGeneration(
       },
       pointerTarget: () => session.surface?.eventTarget() ?? null,
     }),
-    onCwd: (cwd) => {
-      if (session.lastCwd === cwd) return;
-      session.lastCwd = cwd;
-      session.callbacks.onCwd?.(cwd);
-    },
+    // Taken once the backend has seen the shell there (`TerminalCwdReports`).
+    onCwd: (cwd) => session.cwdReports.report(cwd),
     onClipboard: (text) => {
       programClipboard.enqueue(text);
     },

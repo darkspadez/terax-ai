@@ -208,3 +208,16 @@ export async function openPty(
     },
   };
 }
+
+/**
+ * Asks the backend to authorize the folder terminal `id` reported (OSC 7).
+ * True when the page may take it as the terminal's folder: on Linux and macOS
+ * only where the shell or its foreground job really is (`pty_authorize_cwd`).
+ */
+export function authorizePtyCwd(id: number, path: string): Promise<boolean> {
+  return invoke<boolean>("pty_authorize_cwd", {
+    id,
+    path,
+    workspace: currentWorkspaceEnv(),
+  }).catch(() => false);
+}

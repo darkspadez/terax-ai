@@ -1,4 +1,5 @@
 mod agent_detect;
+mod cwd;
 mod da_filter;
 mod foreground;
 mod gate;
@@ -24,7 +25,9 @@ use portable_pty::PtySize;
 use tauri::Manager;
 
 use crate::modules::control::ControlState;
-use crate::modules::workspace::{user_spawn_cwd_or_home, WorkspaceEnv, WorkspaceRegistry};
+use crate::modules::workspace::{
+    resolve_path, user_spawn_cwd_or_home, WorkspaceEnv, WorkspaceRegistry,
+};
 use hub::{Command, Hub};
 pub use presentation::PresentationClass;
 pub use protocol::stream_protocol;
@@ -365,6 +368,48 @@ pub fn pty_has_foreground_job(state: tauri::State<PtyState>, id: u32) -> Result<
     }
 }
 
+/// A terminal reported its working directory (OSC 7): authorizes that folder as a workspace root
+/// and answers whether the page may take it as the terminal's folder. The report is terminal
+/// output, which any program can print, so on Linux and macOS it counts only when the OS says the
+/// shell, or the leader of the job in front of it, is working there (`cwd`); otherwise nothing is
+/// authorized and the answer is false. Windows cannot read another process's folder cheaply:
+/// there the report is authorized as before and always taken. Only the window that opened the
+/// terminal may ask.
+#[tauri::command]
+pub async fn pty_authorize_cwd(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+    state: tauri::State<'_, PtyState>,
+    id: u32,
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<bool, String> {
+    let session = unpoisoned(state.sessions.read())
+        .get(&id)
+        .filter(|session| *session.owner == *webview.label())
+        .cloned()
+        .ok_or_else(|| "no session".to_string())?;
+    #[cfg(unix)]
+    let processes = {
+        let leader = unpoisoned(session.master.lock())
+            .as_ref()
+            .and_then(|master| master.process_group_leader());
+        cwd::reporting_processes(session.shell_pid, leader)
+    };
+    drop(session);
+    // Canonicalizing the folder touches the disk (a network volume, wsl.exe for WSL).
+    crate::modules::fs::blocking(move || {
+        let reported = resolve_path(&path, &WorkspaceEnv::from_option(workspace));
+        let registry = app.state::<WorkspaceRegistry>();
+        #[cfg(unix)]
+        let taken = cwd::authorize_reported(&registry, &reported, &processes);
+        #[cfg(windows)]
+        let taken = cwd::authorize_reported(&registry, &reported);
+        Ok(taken)
+    })
+    .await
+}
+
 // A fresh webview load orphans the previous frontend's sessions in this still
 // running process; reap them on boot before any new tab spawns. Only the
 // calling window's: another window's shells keep running.
@@ -488,10 +533,17 @@ mod tests {
     use super::session::{spawn_with, Host};
     use super::*;
     use portable_pty::CommandBuilder;
+    use std::path::Path;
     use std::time::{Duration, Instant};
 
     fn open(state: &Arc<PtyState>, id: u32, owner: &str) -> Arc<Session> {
+        open_running(state, id, owner, "sleep 30")
+    }
+
+    /// A terminal whose shell runs `script` with `/bin/sh -c`.
+    fn open_running(state: &Arc<PtyState>, id: u32, owner: &str, script: &str) -> Arc<Session> {
         let reaper = state.clone();
+        let script = script.to_owned();
         let session = spawn_with(
             Host {
                 id,
@@ -509,7 +561,7 @@ mod tests {
             || {
                 let mut command = CommandBuilder::new("/bin/sh");
                 command.arg("-c");
-                command.arg("sleep 30");
+                command.arg(script);
                 Ok(command)
             },
         )
@@ -523,6 +575,48 @@ mod tests {
         while !condition() {
             assert!(Instant::now() < deadline, "timed out waiting for {what}");
             std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// What `pty_authorize_cwd` decides for terminal `session` and a reported folder.
+    fn authorize_reported(session: &Session, registry: &WorkspaceRegistry, folder: &Path) -> bool {
+        let leader = unpoisoned(session.master.lock())
+            .as_ref()
+            .and_then(|master| master.process_group_leader());
+        let processes = cwd::reporting_processes(session.shell_pid, leader);
+        cwd::authorize_reported(registry, folder, &processes)
+    }
+
+    #[test]
+    fn a_terminal_folder_is_authorized_where_its_shell_or_foreground_job_is() {
+        let root = tempfile::tempdir().unwrap();
+        let (shell_dir, job_dir) = (root.path().join("shell"), root.path().join("job"));
+        for dir in [&shell_dir, &job_dir] {
+            std::fs::create_dir(dir).unwrap();
+        }
+        let state = Arc::new(PtyState::default());
+        // With job control, the subshell is the terminal's foreground job, in a folder of its
+        // own, as a nested shell started from the user's shell is.
+        let session = open_running(
+            &state,
+            1,
+            "main",
+            &format!(
+                "cd '{}' && set -m && (cd '{}' && exec sleep 30)",
+                shell_dir.display(),
+                job_dir.display()
+            ),
+        );
+        let registry = WorkspaceRegistry::default();
+        wait_for("the job to take the terminal", || {
+            authorize_reported(&session, &registry, &job_dir)
+        });
+        assert!(authorize_reported(&session, &registry, &shell_dir));
+        assert!(!authorize_reported(&session, &registry, root.path()));
+        assert!(!authorize_reported(&session, &registry, Path::new("/")));
+        assert!(!registry.is_authorized(&std::fs::canonicalize(root.path()).unwrap()));
+        if let Some(session) = state.take(1) {
+            reap(1, session, "test cleanup");
         }
     }
 

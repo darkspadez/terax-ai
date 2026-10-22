@@ -36,6 +36,7 @@ Long-lived interactive terminal sessions.
 - `pty_resize` - resize the PTY
 - `pty_close` / `pty_close_all` - destroy one or all sessions
 - `pty_has_foreground_process` / `pty_has_foreground_job` - detect whether a command is running
+- `pty_authorize_cwd` - authorize the folder a terminal reported (OSC 7) and say whether the page may take it; on Linux and macOS only where the shell or its foreground job really is
 - `pty_shell_name` / `pty_list_shells` - shell detection and enumeration
 - `pty_diagnostics` - native queue counters for the opt-in terminal diagnostics (`window.__teraxTermSnapshot()`)
 

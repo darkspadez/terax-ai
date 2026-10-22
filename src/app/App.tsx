@@ -137,7 +137,6 @@ import {
 import { UpdaterDialog } from "@/modules/updater";
 import {
   authorizeFileFolder,
-  authorizeRoot,
   currentWorkspaceEnv,
   useWorkspaceEnvStore,
   workspaceScopeKey,
@@ -1273,12 +1272,10 @@ export default function App() {
     [updateTab],
   );
 
+  // Only folders the backend has checked and authorized arrive here
+  // (`TerminalCwdReports`), so the explorer can list them at once.
   const handleTerminalCwd = useCallback(
-    (leafId: number, cwd: string) => {
-      // First, so the explorer's listing of the new folder waits for it.
-      if (cwd) void authorizeRoot(cwd);
-      setLeafCwd(leafId, cwd);
-    },
+    (leafId: number, cwd: string) => setLeafCwd(leafId, cwd),
     [setLeafCwd],
   );
 

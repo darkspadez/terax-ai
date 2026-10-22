@@ -52,7 +52,9 @@ A missing path outside reads as outside, so a refusal never says whether somethi
 
 The page authorizes only what the user chose (`src/modules/workspace/authorize.ts`): a file opened from the explorer, its search, the content search, a terminal link, LSP navigation or the New File dialog (its real folder); a folder expanded in the explorer; files dropped or pasted into the explorer (their folders, as host paths); the roots, terminal folders and open files of the spaces a window restores. It never authorizes a path a terminal program or an AI reply named on its own, so the AI tools (`read_file`, `list_directory`, `grep`, `glob`, writes) are refused outside the authorized folders, and `terax open` from a terminal already requires an authorized file. Path completion in the block input lists only authorized folders.
 
-Two limits remain. `workspace_authorize` is itself a command the page can call, so the registry contains what the app's own flows do, not a fully compromised page. And a terminal's cwd reported by OSC 7 is authorized as a root, which keeps the explorer and Source Control following `cd` anywhere, but is terminal output: a program that prints an OSC 7 sequence can authorize a folder.
+A terminal's folder is authorized as a root, which keeps the explorer and Source Control following `cd` anywhere. The folder comes from OSC 7, which is terminal output: `cat` of a crafted file can print one naming any folder, even `/`. So the page hands each report to `pty_authorize_cwd` with the terminal's id (only the window that opened the terminal may ask), and on Linux and macOS the backend authorizes it only when its real path is exactly the folder the OS reports for the shell (`/proc/<pid>/cwd`; `proc_pidinfo` with `PROC_PIDVNODEPATHINFO`) or for the leader of the terminal's foreground process group (a nested local shell, such as `bash` started from zsh, reports its own folder), both canonical and checked to still be the folder the process is in (a deleted folder never matches). The report follows the `cd`, so the shell is already there; one that a fast second `cd` overtook authorizes nothing, and the next report is checked. A report that does not match changes nothing in the page either (`TerminalCwdReports`): not the tab's folder, the explorer or Source Control, the folder a restart or a new tab starts in, or the terminal folders a restored window authorizes, since each of those would authorize it later. One check runs at a time per terminal and a burst keeps its latest report. A remote shell's report (over `ssh`) names no local process's folder, so the tab keeps the local folder `ssh` runs in. Windows cannot read another process's folder cheaply, so there (a WSL pane included) the report is authorized and taken as before.
+
+One limit remains: `workspace_authorize` is itself a command the page can call, so the registry contains what the app's own flows do, not a fully compromised page.
 
 This is the allow side of the file-system boundary. Any new command that takes a path must pass it through one of these gates.
 
@@ -115,7 +117,7 @@ Hover and completion docs come from the language server, which takes them from c
 
 The terminal parses OSC sequences from the PTY byte stream:
 
-- **OSC 7** updates the tab cwd.
+- **OSC 7** updates the tab cwd, only between commands and, on Linux and macOS, only once the backend has matched it to the folder the shell or its foreground job is in (see the registry above).
 - **OSC 133 A/B/C/D** marks prompt/command boundaries.
 - **OSC 777** is used by the agent detector to signal coding-agent state transitions.
 
@@ -125,7 +127,7 @@ The agent detector (`src-tauri/src/modules/pty/agent_detect.rs`) is armed by `OS
 
 - The deny-list in `security.ts` applies on both read and write. Never bypass it.
 - New file-system-touching commands must pass every path the page sends through a registry gate (`authorized_existing`, `authorized_write_target`, `authorized_new`, `authorized_entry`).
-- The page authorizes a path only for what the user chose, never for a path a terminal program or an AI reply named.
+- The page authorizes a path only for what the user chose, never for a path a terminal program or an AI reply named. A terminal's reported folder is authorized only by `pty_authorize_cwd`, which on Linux and macOS requires the OS to confirm the shell or its foreground job is there.
 - The asset protocol's configured scope stays empty; files are granted at runtime (`asset_scope.rs`), never with `**`.
 - New network-facing commands must go through the `net.rs` proxy or reimplement the same classification and DNS pinning.
 - New plugin APIs must be added to `src-tauri/capabilities/default.json`.
