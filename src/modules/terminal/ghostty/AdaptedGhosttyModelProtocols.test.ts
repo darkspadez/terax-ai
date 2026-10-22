@@ -95,6 +95,30 @@ describe.each(["ghostty-vt", "ghostty-vt-scalar"])(
       }
     });
 
+    it("resizes images with the cells, without waiting for output", () => {
+      const { model, write } = create();
+      try {
+        // Two columns by one row: the image follows the cell size.
+        write(`\x1b_Gi=3,a=T,f=24,s=1,v=1,c=2,r=1,q=2;${red}\x1b\\`);
+        model.consumeGpuFrame();
+        expect(model.imagePlacements()).toMatchObject([
+          { width: 20, height: 20 },
+        ]);
+        expect(model.consumeGpuFrame().damage.kind).toBe("none");
+
+        model.setPixelSize(1600, 960); // display scale doubled, same grid
+        expect(model.consumeGpuFrame().damage.kind).toBe("full");
+        expect(model.imagePlacements()).toMatchObject([
+          { width: 40, height: 40 },
+        ]);
+
+        model.setPixelSize(1600, 960); // unchanged: nothing to redraw
+        expect(model.consumeGpuFrame().damage.kind).toBe("none");
+      } finally {
+        model.dispose();
+      }
+    });
+
     it("redraws everything when only image placements change (cell arrays)", () => {
       const { model, write } = create("ghostty-webgl");
       try {

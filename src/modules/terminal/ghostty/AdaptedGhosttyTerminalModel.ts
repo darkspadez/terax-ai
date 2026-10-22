@@ -1,7 +1,3 @@
-import {
-  detectTerminalLinks,
-  type TerminalTextLink,
-} from "@/modules/terminal/ghostty/core/terminalLinks";
 import type {
   PackedTerminalViewport,
   TerminalCursor,
@@ -10,6 +6,10 @@ import type {
   TerminalModes,
   TerminalRowRange,
 } from "@/modules/terminal/backend/contracts";
+import {
+  detectTerminalLinks,
+  type TerminalTextLink,
+} from "@/modules/terminal/ghostty/core/terminalLinks";
 import type {
   TeraxGhostty,
   TeraxGhosttyGpuRenderState,
@@ -24,12 +24,12 @@ import type {
 } from "@terax/ghostty-core/protocol";
 import { CellFlags } from "@terax/ghostty-core/protocol";
 import { PromptPresentationGate } from "./core/PromptPresentationGate";
-import { ResizePromptHold } from "./core/ResizePromptHold";
 import {
   CELL_STRIDE,
   type Rgb,
   type TerminalCellReader,
 } from "./core/packedCells";
+import { ResizePromptHold } from "./core/ResizePromptHold";
 import { SynchronizedOutputPresentationGate } from "./core/SynchronizedOutputPresentationGate";
 import {
   MIN_SCROLLBACK_BYTES,
@@ -71,7 +71,11 @@ function viewportSpans(
   cols: number,
 ): GhosttyViewportLink["spans"] {
   const spans: { row: number; startColumn: number; endColumn: number }[] = [];
-  for (let row = Math.floor(start / cols); row <= Math.floor(end / cols); row++) {
+  for (
+    let row = Math.floor(start / cols);
+    row <= Math.floor(end / cols);
+    row++
+  ) {
     spans.push({
       row,
       startColumn: row === Math.floor(start / cols) ? start % cols : 0,
@@ -373,10 +377,21 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
     this.assertLive();
     if (widthPx <= 0 || heightPx <= 0) return;
     this.terminal.setPixelSize(widthPx, heightPx);
-    this.cellPixels = {
+    const cellPixels = {
       width: Math.max(1, Math.floor(widthPx / this.colsValue)),
       height: Math.max(1, Math.floor(heightPx / this.rowsValue)),
     };
+    if (
+      cellPixels.width !== this.cellPixels.width ||
+      cellPixels.height !== this.cellPixels.height
+    ) {
+      // Image placements are sized in pixels when the core renders, so a new
+      // cell size (a display-scale or font change that keeps the grid) must
+      // reach the next frame even without new output.
+      this.invalidateRenderState();
+      this.damageNeedsResolution = true;
+    }
+    this.cellPixels = cellPixels;
     // A new cell size is reported to programs using mode 2048.
     this.drainReplies();
   }
@@ -841,7 +856,10 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
     return this.readBufferLine(line).cells;
   }
 
-  readCellLines(firstLine: number, lastLine: number): readonly (readonly string[])[] {
+  readCellLines(
+    firstLine: number,
+    lastLine: number,
+  ): readonly (readonly string[])[] {
     this.assertLive();
     const lines = this.readBufferLines(firstLine, lastLine);
     const result: (readonly string[])[] = [];
