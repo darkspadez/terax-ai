@@ -270,6 +270,7 @@ describe("built startup graph", () => {
       "codemirror",
       "iconEngine",
       "mathPlugin",
+      "MermaidDiagram",
     ]) {
       const file = chunks.find((f) => chunkName(f) === stem);
       expect(file, `${stem} chunk should be emitted`).toBeDefined();

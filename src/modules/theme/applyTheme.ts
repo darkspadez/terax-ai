@@ -61,9 +61,19 @@ const ALL_VARS: readonly string[] = [
 
 let lastApplied: string | null = null;
 
+/**
+ * The variant `applyTheme` paints for `mode`: a theme without that variant
+ * falls back to its dark one, then its light one.
+ */
+export function variantMode(theme: Theme, mode: ThemeMode): ThemeMode {
+  if (theme.variants[mode]) return mode;
+  if (theme.variants.dark) return "dark";
+  return theme.variants.light ? "light" : mode;
+}
+
 export function applyTheme(theme: Theme, mode: ThemeMode): void {
   const root = document.documentElement;
-  const variant = theme.variants[mode] ?? theme.variants.dark ?? theme.variants.light;
+  const variant = theme.variants[variantMode(theme, mode)];
   if (!variant) {
     clearTheme();
     return;

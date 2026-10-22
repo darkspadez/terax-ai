@@ -130,3 +130,15 @@ describe("theme application", () => {
     expect(written.get("--foreground")).toBe("#ffffff");
   });
 });
+
+describe("variantMode", () => {
+  it("names the variant applyTheme paints, falling back as it does", async () => {
+    const { variantMode } = await loadModule();
+    const both = theme({ light: variant({}), dark: variant({}) });
+    expect(variantMode(both, "light")).toBe("light");
+    expect(variantMode(both, "dark")).toBe("dark");
+    expect(variantMode(theme({ dark: variant({}) }), "light")).toBe("dark");
+    expect(variantMode(theme({ light: variant({}) }), "dark")).toBe("light");
+    expect(variantMode(theme({}), "light")).toBe("light");
+  });
+});
