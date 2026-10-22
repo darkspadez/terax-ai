@@ -38,10 +38,10 @@ export const ADAPTED_GHOSTTY_COMMIT =
 export const ADAPTED_RESTTY_COMMIT =
   "7700b14a7643ba9240818209ef1e0aa90d83ad77";
 export const ADAPTED_GHOSTTY_WASM_SHA256 =
-  "d1f340dd853a20890da36c2f2a219163b5f90c1fdc2f8ced198fbfb64cc985f9";
+  "3f3bbaafe49f63dd9e41aa66052be15e3663a9aac282ff7bc475e901c49a3ee5";
 
 export const ADAPTED_GHOSTTY_SCALAR_WASM_SHA256 =
-  "4551745880269c49ad90a119f0f6415273e0a46deb47ca420c41680a74697d1d";
+  "bc82a8ba50c4ef9fef97011d81816da33a573eccad7668d0ff7a74b4baf70c25";
 
 let wasmSimdAvailable: boolean | undefined;
 
@@ -130,6 +130,8 @@ const requiredExports = [
   "restty_reset_palette",
   "restty_mode",
   "restty_mode_bits",
+  "restty_kitty_keyboard_flags",
+  "restty_modify_other_keys",
   "restty_set_cursor_options",
   "restty_encode_key",
   "restty_key_output_ptr",
@@ -1285,6 +1287,18 @@ export class TeraxGhosttyTerminal {
   modeBits(): number {
     this.assertLive();
     return this.exports.restty_mode_bits(this.handle);
+  }
+
+  /** The Kitty keyboard flags in force on the active screen. */
+  kittyKeyboardFlags(): number {
+    this.assertLive();
+    return this.exports.restty_kitty_keyboard_flags(this.handle);
+  }
+
+  /** A program set xterm's modifyOtherKeys to level 2. */
+  modifyOtherKeys(): boolean {
+    this.assertLive();
+    return this.exports.restty_modify_other_keys(this.handle) !== 0;
   }
 
   setCursorOptions(

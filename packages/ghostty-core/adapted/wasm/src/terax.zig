@@ -2839,6 +2839,12 @@ pub export fn restty_kitty_keyboard_flags(handle: ?*Restty) u32 {
     return h.term.screens.active.kitty_keyboard.current().int();
 }
 
+/// 1 while a program has xterm's modifyOtherKeys at level 2 (`CSI > 4 ; 2 m`).
+pub export fn restty_modify_other_keys(handle: ?*Restty) u32 {
+    const h = handle orelse return 0;
+    return @intFromBool(h.term.flags.modify_other_keys_2);
+}
+
 pub export fn restty_set_default_colors(handle: ?*Restty, fg: u32, bg: u32, cursor: u32) u32 {
     const h = handle orelse return @intFromEnum(ErrorCode.invalid_handle);
     if (fg != 0xFFFF_FFFF) {

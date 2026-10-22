@@ -216,6 +216,11 @@ export interface GhosttyTerminalModelApi extends TerminalModel {
   setSelection?(selection: TerminalBufferSelection | null): void;
   trackedSelection?(): TerminalBufferSelection | null;
   encodeKey(event: KeyEvent): Uint8Array;
+  /**
+   * The program asked for keys legacy encoding cannot tell apart: Kitty
+   * keyboard flags, or xterm's modifyOtherKeys at level 2.
+   */
+  enhancedKeyboard?(): boolean;
   mode(mode: number, isAnsi?: boolean): boolean;
   setReplySink(sink: ((bytes: Uint8Array) => void) | null): void;
   enableSemanticMarkers?(enabled: boolean): void;

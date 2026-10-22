@@ -373,7 +373,19 @@ export class GhosttyInputController {
       !event.metaKey
     ) {
       consume(event);
-      this.emitText("\x1b\r", "keydown");
+      // A program in Kitty or modifyOtherKeys mode reads Shift+Enter in its
+      // own encoding (CSI 13;2u). Elsewhere ESC CR stands for it: agents and
+      // line editors read it as "insert a newline", where Ghostty's legacy
+      // CSI 27;2;13~ would type junk into a plain shell.
+      if (!this.options.model.enhancedKeyboard?.()) {
+        this.emitText("\x1b\r", "keydown");
+        return;
+      }
+      const encoded = this.encodeKeyDown(event, Key.ENTER);
+      if (encoded.byteLength > 0) {
+        this.options.model.scrollToBottom();
+        this.options.onData(encoded);
+      }
       return;
     }
 

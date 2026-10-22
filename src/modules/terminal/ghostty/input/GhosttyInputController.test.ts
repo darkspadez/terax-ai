@@ -632,6 +632,22 @@ describe.each(["ghostty-vt.wasm", "ghostty-vt-scalar.wasm"])(
       },
     );
 
+    // crynta/terax-ai#1288: Kitty programs read Shift+Enter, not Alt+Enter.
+    it("encodes Shift+Enter in the program's keyboard mode", () => {
+      const { input, sent, write, dispose } = setup();
+      const shiftEnter = () =>
+        input.dispatchEvent(
+          keyboardEvent({ key: "Enter", code: "Enter", shiftKey: true }),
+        );
+      shiftEnter();
+      write("\x1b[>1u");
+      shiftEnter();
+      write("\x1b[<u\x1b[>4;2m");
+      shiftEnter();
+      expect(sent).toEqual(["\x1b\r", "\x1b[13;2u", "\x1b[27;2;13~"]);
+      dispose();
+    });
+
     it("reports the unshifted key with Shift under report-all", () => {
       const { input, sent, write, dispose } = setup();
       write("\x1b[>15u");
