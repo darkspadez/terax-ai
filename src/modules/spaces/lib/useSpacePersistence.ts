@@ -23,6 +23,14 @@ type Params = Snapshot & {
 
 type LastWrite = { json: string; activeTabIndex: number };
 
+/** The mounted persistence's flush, for quitting (`flushSpaces`). */
+let flushLatest: (() => Promise<void>) | null = null;
+
+/** Writes the window's spaces now instead of after the debounce. */
+export function flushSpaces(): Promise<void> {
+  return flushLatest?.() ?? Promise.resolve();
+}
+
 export function useSpacePersistence({
   tabs,
   activeId,
@@ -47,9 +55,10 @@ export function useSpacePersistence({
     }
   }
 
-  const flush = useCallback((snap: Snapshot) => {
+  const flush = useCallback((snap: Snapshot): Promise<void> => {
+    const writes: Promise<unknown>[] = [];
     // Assigns new panes their scrollback keys before the tabs are serialized.
-    void terminalScrollback.persist(persistedTerminalLeafIds(snap.tabs));
+    writes.push(terminalScrollback.persist(persistedTerminalLeafIds(snap.tabs)));
     const groups = new Map<string, Tab[]>();
     for (const t of snap.tabs) {
       const arr = groups.get(t.spaceId);
@@ -76,8 +85,9 @@ export function useSpacePersistence({
         continue;
       }
       last.current.set(spaceId, { json, activeTabIndex });
-      void saveState(spaceId, { tabs: serialized, activeTabIndex });
+      writes.push(saveState(spaceId, { tabs: serialized, activeTabIndex }));
     }
+    return Promise.allSettled(writes).then(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -86,7 +96,7 @@ export function useSpacePersistence({
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => {
       timer.current = null;
-      flush(snap);
+      void flush(snap);
     }, DEBOUNCE_MS);
     return () => {
       if (timer.current) clearTimeout(timer.current);
@@ -102,10 +112,12 @@ export function useSpacePersistence({
 
   useEffect(() => {
     if (!enabled) return;
+    const flushNow = () => flush(latest.current);
+    flushLatest = flushNow;
     const onHidden = () => {
-      if (document.visibilityState === "hidden") flush(latest.current);
+      if (document.visibilityState === "hidden") void flushNow();
     };
-    const onLeave = () => flush(latest.current);
+    const onLeave = () => void flushNow();
     document.addEventListener("visibilitychange", onHidden);
     window.addEventListener("blur", onLeave);
     window.addEventListener("beforeunload", onLeave);
@@ -113,7 +125,8 @@ export function useSpacePersistence({
       document.removeEventListener("visibilitychange", onHidden);
       window.removeEventListener("blur", onLeave);
       window.removeEventListener("beforeunload", onLeave);
-      flush(latest.current);
+      if (flushLatest === flushNow) flushLatest = null;
+      void flushNow();
     };
   }, [enabled, flush]);
 }

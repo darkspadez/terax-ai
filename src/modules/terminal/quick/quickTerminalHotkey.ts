@@ -41,8 +41,9 @@ export async function applyQuickTerminalHotkey(
 }
 
 /**
- * Keeps the quick terminal hotkey registered as the preference says. Main
- * window only: the registration is process-wide.
+ * Keeps the quick terminal hotkey registered as the preference says. Every
+ * app window applies it; the registration is process-wide, and the native
+ * side leaves an unchanged hotkey as it is.
  */
 export function useQuickTerminalHotkey(): void {
   const hydrated = usePreferencesStore((state) => state.hydrated);

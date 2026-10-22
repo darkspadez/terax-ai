@@ -4,13 +4,13 @@ pub mod modules;
 use modules::app_menu;
 use modules::{
     agent, control, fs, git, history, lsp, net, primary_selection, pty, secrets, shell, vibrancy,
-    workspace,
+    windows, workspace,
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 #[cfg(target_os = "macos")]
-use tauri::{PhysicalPosition, WindowEvent};
+use tauri::PhysicalPosition;
+use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_window_state::StateFlags;
 
 /// Drained on first read so HMR / re-mounts can't replay the launch dir.
@@ -117,11 +117,14 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
     // A normal-level child stays above Terax but recedes with the app on macOS.
     // Never combine the macOS parent with always_on_top; that breaks WebView
     // compositing and can hide Settings behind the main window (#33, #957).
-    let builder = if let Some(main) = app.get_webview_window("main") {
-        builder.parent(&main).map_err(|e| e.to_string())?
+    // It opens over the window in front, and closes with it.
+    let parent = windows::target_window(&app);
+    let builder = if let Some(parent) = &parent {
+        builder.parent(parent).map_err(|e| e.to_string())?
     } else {
         builder
     };
+    windows::set_settings_parent(&app, parent.as_ref().map(|w| w.label().to_owned()));
 
     #[cfg(target_os = "macos")]
     let builder = builder
@@ -144,7 +147,7 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
     }
 
     #[cfg(target_os = "macos")]
-    if let Some(main) = app.get_webview_window("main") {
+    if let Some(main) = parent {
         if let (Ok(main_pos), Ok(main_size), Ok(settings_size)) = (
             main.outer_position(),
             main.outer_size(),
@@ -229,6 +232,10 @@ pub fn run() {
                 if let Some(state) = webview.try_state::<pty::PtyState>() {
                     state.reset_webview(webview.label());
                 }
+                if let Some(state) = webview.try_state::<fs::watch::FsWatchState>() {
+                    state.release_window(webview.app_handle(), webview.label());
+                }
+                windows::on_page_load(webview.app_handle(), webview.label());
             }
         })
         .setup(move |_app| {
@@ -239,18 +246,8 @@ pub fn run() {
             if let Err(error) = control::start(_app.handle().clone(), control_for_setup.clone()) {
                 log::warn!("could not start Terax control server: {error}");
             }
-            #[cfg(target_os = "macos")]
-            if let Some(main) = _app.get_webview_window("main") {
-                let handle = _app.handle().clone();
-                main.on_window_event(move |event| {
-                    // CloseRequested can be cancelled by the frontend guard.
-                    if matches!(event, WindowEvent::Destroyed) {
-                        if let Some(settings) = handle.get_webview_window("settings") {
-                            let _ = settings.destroy();
-                        }
-                    }
-                });
-            }
+            // After `main` exists, before any page runs.
+            windows::restore(_app.handle());
             Ok(())
         })
         .manage(pty::PtyState::default())
@@ -263,6 +260,7 @@ pub fn run() {
         .manage(secrets::SecretsState::default())
         .manage(primary_selection::PrimarySelection::default())
         .manage(modules::quick_terminal::QuickTerminalState::default())
+        .manage(windows::WindowsState::default())
         .manage(fs::watch::FsWatchState::default())
         .manage(history::HistoryState::default())
         .manage(lsp::LspState::default())
@@ -384,6 +382,10 @@ pub fn run() {
             vibrancy::window_backdrop_kind,
             vibrancy::window_set_backdrop,
             modules::window_presentation::window_presentation_state,
+            windows::app_window_open,
+            windows::app_window_ready,
+            windows::app_quit,
+            windows::app_quit_ready,
             #[cfg(feature = "bench")]
             modules::bench::bench_config,
             #[cfg(feature = "bench")]
@@ -397,6 +399,11 @@ pub fn run() {
             match event {
                 tauri::RunEvent::WindowEvent {
                     label,
+                    event: tauri::WindowEvent::Focused(true),
+                    ..
+                } => windows::on_focus(app, &label),
+                tauri::RunEvent::WindowEvent {
+                    label,
                     event: tauri::WindowEvent::Destroyed,
                     ..
                 } => {
@@ -406,14 +413,10 @@ pub fn run() {
                     if let Some(state) = app.try_state::<pty::PtyState>() {
                         state.destroy_webview(&label);
                     }
-                    // The quick terminal floats on its own (not a child window),
-                    // so it would keep the app alive after the main window.
-                    if label == "main" {
-                        if let Some(quick) = app.get_webview_window(modules::quick_terminal::LABEL)
-                        {
-                            let _ = quick.destroy();
-                        }
+                    if let Some(state) = app.try_state::<fs::watch::FsWatchState>() {
+                        state.release_window(app, &label);
                     }
+                    windows::on_destroyed(app, &label);
                 }
                 // Servers exit on stdin EOF, but destructors are not guaranteed
                 // on process exit; kill explicitly.
@@ -455,7 +458,10 @@ pub fn run() {
                     if let Some(state) = app.try_state::<LaunchFiles>() {
                         *state.0.lock().expect("LaunchFiles mutex poisoned") = target.files.clone();
                     }
-                    let _ = app.emit("terax:open-file", target.files);
+                    // One window opens them: the one in front.
+                    if let Some(window) = windows::target_window(app) {
+                        let _ = window.emit_to(window.label(), "terax:open-file", target.files);
+                    }
                 }
                 _ => {}
             }

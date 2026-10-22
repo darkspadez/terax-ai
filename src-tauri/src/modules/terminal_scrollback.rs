@@ -1,6 +1,8 @@
 //! Saved terminal scrollback, one file per pane under
-//! `<app data>/terminal-scrollback/<key>.vt`, restored into the pane after a
-//! restart.
+//! `<app data>/terminal-scrollback/<key>.vt` for the main window and
+//! `<app data>/windows/<label>/terminal-scrollback/` for each other window
+//! (`windows.rs`), restored into the pane after a restart. A window's retain
+//! sweep only ever sees its own files.
 //!
 //! The webview owns the format (UTF-8 text with SGR styles) and the keys; this
 //! side only stores bytes. Every write goes to a private temporary file in the
@@ -19,7 +21,7 @@ use std::sync::Arc;
 use tauri::ipc::{Request, Response};
 use tauri::{Manager, State};
 
-use super::ipc_body;
+use super::{ipc_body, windows};
 
 const DIRECTORY: &str = "terminal-scrollback";
 const EXTENSION: &str = ".vt";
@@ -35,6 +37,13 @@ pub struct ScrollbackState {
     gate: Arc<tokio::sync::Mutex<()>>,
 }
 
+impl ScrollbackState {
+    /// Held while a window's scrollback directory is deleted.
+    pub(crate) fn gate(&self) -> Arc<tokio::sync::Mutex<()>> {
+        self.gate.clone()
+    }
+}
+
 fn valid_key(key: &str) -> bool {
     !key.is_empty()
         && key.len() <= 128
@@ -43,7 +52,7 @@ fn valid_key(key: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
 }
 
-fn directory(root: &Path) -> PathBuf {
+pub(crate) fn directory(root: &Path) -> PathBuf {
     root.join(DIRECTORY)
 }
 
@@ -190,8 +199,14 @@ fn retain(root: &Path, keys: &[String]) -> Result<usize, String> {
     Ok(removed)
 }
 
-fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    app.path().app_data_dir().map_err(|e| e.to_string())
+/// The calling window's scrollback lives under this root.
+fn data_dir(app: &tauri::AppHandle, webview: &tauri::Webview) -> Result<PathBuf, String> {
+    let label = webview.label();
+    if !windows::is_app_window(label) || !windows::keeps_state(app, label) {
+        return Err("scrollback is kept for open app windows only".into());
+    }
+    let root = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(windows::data_root(&root, label))
 }
 
 /// Body: the scrollback as UTF-8 bytes; empty deletes it. Header
@@ -199,6 +214,7 @@ fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 #[tauri::command]
 pub async fn terminal_scrollback_save(
     app: tauri::AppHandle,
+    webview: tauri::Webview,
     state: State<'_, ScrollbackState>,
     request: Request<'_>,
 ) -> Result<(), String> {
@@ -211,7 +227,7 @@ pub async fn terminal_scrollback_save(
         .to_owned();
     let bytes = ipc_body::bytes_of(request.body(), MAX_SCROLLBACK_BYTES, MAX_SCROLLBACK_BYTES)?
         .into_owned();
-    let root = data_dir(&app)?;
+    let root = data_dir(&app, &webview)?;
     let guard = state.gate.clone().lock_owned().await;
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
@@ -225,10 +241,11 @@ pub async fn terminal_scrollback_save(
 #[tauri::command]
 pub async fn terminal_scrollback_load(
     app: tauri::AppHandle,
+    webview: tauri::Webview,
     state: State<'_, ScrollbackState>,
     key: String,
 ) -> Result<Response, String> {
-    let root = data_dir(&app)?;
+    let root = data_dir(&app, &webview)?;
     let guard = state.gate.clone().lock_owned().await;
     let bytes = tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;
@@ -243,10 +260,11 @@ pub async fn terminal_scrollback_load(
 #[tauri::command]
 pub async fn terminal_scrollback_retain(
     app: tauri::AppHandle,
+    webview: tauri::Webview,
     state: State<'_, ScrollbackState>,
     keys: Vec<String>,
 ) -> Result<usize, String> {
-    let root = data_dir(&app)?;
+    let root = data_dir(&app, &webview)?;
     let guard = state.gate.clone().lock_owned().await;
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = guard;

@@ -5,7 +5,9 @@ import {
 } from "@/components/ui/resizable";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { openNewWindow, quitApp } from "@/lib/appWindow";
 import { consumeLaunchFiles, getLaunchDir } from "@/lib/launchDir";
+import { toast } from "sonner";
 import { IS_MAC } from "@/lib/platform";
 import { quoteShellArg } from "@/lib/shellQuote";
 import { usePresence } from "@/lib/usePresence";
@@ -633,6 +635,29 @@ export default function App() {
     newPrivateTab(inheritedCwdForNewTab());
   }, [newPrivateTab, inheritedCwdForNewTab]);
 
+  // A new window starts where this window's terminal is.
+  const openWindow = useCallback(() => {
+    openNewWindow(inheritedCwdForNewTab()).catch((error: unknown) =>
+      toast.error("Could not open a window", { description: String(error) }),
+    );
+  }, [inheritedCwdForNewTab]);
+
+  // The macOS menu's New Window lands on the window in front.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void getCurrentWindow()
+      .listen("terax:new-window-requested", openWindow)
+      .then((stop) => {
+        if (disposed) stop();
+        else unlisten = stop;
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [openWindow]);
+
   const openNewBlockTab = useCallback(() => {
     newBlockTab(inheritedCwdForNewTab());
   }, [newBlockTab, inheritedCwdForNewTab]);
@@ -936,6 +961,7 @@ export default function App() {
     () => ({
       "commandPalette.open": () => openCommandPalette("commands"),
       "commandPalette.content": () => openCommandPalette("content"),
+      "window.new": openWindow,
       "tab.new": openNewTab,
       "tab.newBlock": openNewBlockTab,
       "tab.newPrivate": openNewPrivateTab,
@@ -1025,6 +1051,7 @@ export default function App() {
         editorRefs.current.get(activeId)?.triggerCodeComplete(),
     }),
     [
+      openWindow,
       activeId,
       openCommandPalette,
       stepSwitcher,
@@ -1205,7 +1232,8 @@ export default function App() {
         (t) => t.kind === "terminal" && hasLeaf(t.paneTree, leafId),
       );
       if (!tab || tab.kind !== "terminal") return;
-      // Last pane of the last tab: quit instead of respawning a shell.
+      // Last pane of the last tab: close the window (quitting when it is the
+      // last one) instead of respawning a shell.
       if (leafIds(tab.paneTree).length === 1 && all.length === 1) {
         void getCurrentWindow().close();
       } else {
@@ -1348,6 +1376,8 @@ export default function App() {
             explorerRoot,
             home,
             openNewTab,
+            openNewWindow: openWindow,
+            quit: () => void quitApp(),
             openNewBlock: openNewBlockTab,
             openNewPrivate: openNewPrivateTab,
             openNewEditor: () => setNewEditorOpen(true),
@@ -1373,6 +1403,7 @@ export default function App() {
           })
         : [],
     [
+      openWindow,
       commandPaletteOpen,
       tabs,
       activeId,

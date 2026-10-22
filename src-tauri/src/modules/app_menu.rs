@@ -2,11 +2,15 @@ use std::io;
 
 use tauri::{
     menu::{Menu, MenuEvent, MenuId, MenuItem},
-    AppHandle, Manager, Runtime,
+    AppHandle, Runtime,
 };
+
+use super::windows;
 
 const GUARDED_QUIT_MENU_ID: &str = "terax.quit";
 const QUIT_ACCELERATOR: &str = "Command+Q";
+const NEW_WINDOW_MENU_ID: &str = "terax.new-window";
+const NEW_WINDOW_ACCELERATOR: &str = "Command+Shift+N";
 
 fn invalid_default_menu(message: &'static str) -> tauri::Error {
     io::Error::new(io::ErrorKind::InvalidData, message).into()
@@ -49,24 +53,32 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     app_menu.remove_at(quit_index)?;
     app_menu.insert(&guarded_quit, quit_index)?;
 
+    // File > New Window, first in the File menu as in other Mac apps.
+    let file_menu = menu
+        .items()?
+        .into_iter()
+        .filter_map(|item| item.as_submenu().cloned())
+        .find(|submenu| submenu.text().is_ok_and(|text| text == "File"));
+    if let Some(file_menu) = file_menu {
+        let new_window = MenuItem::with_id(
+            app,
+            NEW_WINDOW_MENU_ID,
+            "New Window",
+            true,
+            Some(NEW_WINDOW_ACCELERATOR),
+        )?;
+        file_menu.insert(&new_window, 0)?;
+    }
+
     Ok(menu)
 }
 
-pub fn handle_event<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
-    if !is_guarded_quit(event.id()) {
-        return;
-    }
-
-    let Some(main) = app.get_webview_window("main") else {
-        app.exit(0);
-        return;
-    };
-
-    let _ = main.unminimize();
-    let _ = main.show();
-    let _ = main.set_focus();
-    if let Err(error) = main.close() {
-        log::error!("could not request guarded app quit: {error}");
+pub fn handle_event(app: &AppHandle, event: MenuEvent) {
+    if is_guarded_quit(event.id()) {
+        // Every window confirms running commands and unsaved files first.
+        windows::request_quit(app);
+    } else if event.id() == NEW_WINDOW_MENU_ID {
+        windows::request_new_window(app);
     }
 }
 

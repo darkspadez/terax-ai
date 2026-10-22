@@ -184,7 +184,7 @@ pub async fn pty_open(
     let control_env = if workspace.is_wsl() {
         None
     } else {
-        pane_id.and_then(|pane_id| control.shell_env(pane_id))
+        pane_id.and_then(|pane_id| control.shell_env(webview.label(), pane_id))
     };
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
     let owner: Arc<str> = Arc::from(webview.label());

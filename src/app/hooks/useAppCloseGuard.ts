@@ -4,7 +4,9 @@ import {
   type FlushResult,
   flushSessionWrites,
 } from "@/modules/ai/lib/sessions";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { openAppWindowCount, quitApp } from "@/lib/appWindow";
 import {
   type RefObject,
   useCallback,
@@ -15,6 +17,7 @@ import {
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { Tab } from "@/modules/tabs";
 import { leafHasForegroundProcess, leafIds } from "@/modules/terminal";
+import { flushSpaces } from "@/modules/spaces/lib/useSpacePersistence";
 import { flushTerminalScrollback } from "@/modules/terminal/lib/terminalScrollbackRestore";
 
 async function anyTerminalBusy(tabs: Tab[]): Promise<boolean> {
@@ -59,9 +62,26 @@ export function canOptOutOfAppClosePrompt(blocker: AppCloseBlocker): boolean {
   return blocker.busyTerminal && blocker.dirtyEditors === 0;
 }
 
+/** A close or quit waiting for the user to confirm. */
+export type PendingAppClose = AppCloseBlocker & {
+  /** Terax quits: a quit request, or the last window closing. */
+  quits: boolean;
+  /** The quit request this answers (`windows.rs`); null for a close. */
+  quitRound: number | null;
+};
+
+function answerQuit(round: number, ok: boolean): void {
+  void invoke("app_quit_ready", { round, ok }).catch(() => {});
+}
+
+/**
+ * Guards closing this window and quitting Terax (asked of each window in turn
+ * by `windows.rs`): running commands and unsaved files are confirmed first,
+ * then chat history, scrollback and spaces are saved.
+ */
 export function useAppCloseGuard(tabsRef: RefObject<Tab[]>) {
   const [pendingAppClose, setPendingAppClose] =
-    useState<AppCloseBlocker | null>(null);
+    useState<PendingAppClose | null>(null);
   const forceClose = useRef(false);
   const closing = useRef(false);
   const warned = useRef(false);
@@ -76,15 +96,35 @@ export function useAppCloseGuard(tabsRef: RefObject<Tab[]>) {
       });
     }
   }, []);
+  const blocker = useCallback(async (): Promise<AppCloseBlocker | null> => {
+    // Opting out skips the per-leaf IPC entirely; it never relaxes the
+    // unsaved-changes guard below.
+    const busyTerminal =
+      usePreferencesStore.getState().confirmCloseRunningTerminal &&
+      (await anyTerminalBusy(tabsRef.current));
+    // Count after the await so edits made during the IPC check are seen.
+    const dirtyEditors = tabsRef.current.filter(
+      (t) => t.kind === "editor" && t.dirty,
+    ).length;
+    return dirtyEditors > 0 || busyTerminal
+      ? { dirtyEditors, busyTerminal }
+      : null;
+  }, [tabsRef]);
+  /** Saves chat history, scrollback and spaces; reports the chat flush. */
+  const saveState = useCallback(async () => {
+    flushPersist();
+    const [flush] = await Promise.all([
+      flushSessionWrites({ timeoutMs: CLOSE_FLUSH_TIMEOUT_MS }),
+      flushTerminalScrollback(CLOSE_SCROLLBACK_TIMEOUT_MS),
+      flushSpaces(),
+    ]);
+    return flush;
+  }, []);
   const finishClose = useCallback(async () => {
     if (closing.current) return;
     closing.current = true;
     try {
-      flushPersist();
-      const [flush] = await Promise.all([
-        flushSessionWrites({ timeoutMs: CLOSE_FLUSH_TIMEOUT_MS }),
-        flushTerminalScrollback(CLOSE_SCROLLBACK_TIMEOUT_MS),
-      ]);
+      const flush = await saveState();
       if (closeAfterFlush(flush, warned.current) === "warn") {
         warned.current = true;
         toast.error("Could not save chat history", {
@@ -104,7 +144,33 @@ export function useAppCloseGuard(tabsRef: RefObject<Tab[]>) {
     } finally {
       closing.current = false;
     }
-  }, [closeWindow]);
+  }, [closeWindow, saveState]);
+  const finishQuit = useCallback(
+    async (round: number) => {
+      if (closing.current) return;
+      closing.current = true;
+      try {
+        const flush = await saveState();
+        if (closeAfterFlush(flush, warned.current) === "warn") {
+          warned.current = true;
+          answerQuit(round, false);
+          toast.error("Could not save chat history", {
+            id: "close-save-failed",
+            duration: Number.POSITIVE_INFINITY,
+            description: flush.timedOut
+              ? "Saving is taking too long. The latest messages may be lost."
+              : "The latest messages may be lost.",
+            action: { label: "Quit anyway", onClick: () => void quitApp() },
+          });
+          return;
+        }
+        answerQuit(round, true);
+      } finally {
+        closing.current = false;
+      }
+    },
+    [saveState],
+  );
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -113,17 +179,10 @@ export function useAppCloseGuard(tabsRef: RefObject<Tab[]>) {
       .onCloseRequested(async (event) => {
         if (forceClose.current) return;
         event.preventDefault();
-        // Opting out skips the per-leaf IPC entirely; it never relaxes the
-        // unsaved-changes guard below.
-        const busyTerminal =
-          usePreferencesStore.getState().confirmCloseRunningTerminal &&
-          (await anyTerminalBusy(tabsRef.current));
-        // Count after the await so edits made during the IPC check are seen.
-        const dirtyEditors = tabsRef.current.filter(
-          (t) => t.kind === "editor" && t.dirty,
-        ).length;
-        if (dirtyEditors > 0 || busyTerminal) {
-          setPendingAppClose({ dirtyEditors, busyTerminal });
+        const found = await blocker();
+        if (found) {
+          const quits = (await openAppWindowCount()) <= 1;
+          setPendingAppClose({ ...found, quits, quitRound: null });
         } else {
           void finishClose();
         }
@@ -136,14 +195,52 @@ export function useAppCloseGuard(tabsRef: RefObject<Tab[]>) {
       disposed = true;
       unlisten?.();
     };
-  }, [tabsRef, finishClose]);
+  }, [blocker, finishClose]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    const window = getCurrentWindow();
+    void window
+      .listen<number>("terax:quit-requested", async ({ payload: round }) => {
+        const found = await blocker();
+        if (!found) {
+          void finishQuit(round);
+          return;
+        }
+        // The user answers here, so this window comes forward.
+        await window.unminimize().catch(() => {});
+        await window.show().catch(() => {});
+        await window.setFocus().catch(() => {});
+        setPendingAppClose({ ...found, quits: true, quitRound: round });
+      })
+      .then((un) => {
+        if (disposed) {
+          un();
+          return;
+        }
+        unlisten = un;
+        // Only now can this window be asked before quitting.
+        void invoke("app_window_ready").catch(() => {});
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [blocker, finishQuit]);
 
   const confirmAppClose = useCallback(() => {
+    const round = pendingAppClose?.quitRound ?? null;
     setPendingAppClose(null);
-    void finishClose();
-  }, [finishClose]);
+    if (round === null) void finishClose();
+    else void finishQuit(round);
+  }, [pendingAppClose, finishClose, finishQuit]);
 
-  const cancelAppClose = useCallback(() => setPendingAppClose(null), []);
+  const cancelAppClose = useCallback(() => {
+    const round = pendingAppClose?.quitRound ?? null;
+    if (round !== null) answerQuit(round, false);
+    setPendingAppClose(null);
+  }, [pendingAppClose]);
 
   return { pendingAppClose, confirmAppClose, cancelAppClose };
 }

@@ -100,12 +100,19 @@ describe("session persistence", () => {
     await expect(mod.loadAll()).resolves.toEqual({
       sessions: [],
       activeId: null,
+      activeElsewhere: new Set(),
     });
     const sessions = [{ id: "s-1", title: "T", createdAt: 1, updatedAt: 2 }];
     storage.data.set("sessions", sessions);
     storage.data.set("activeId", "s-1");
+    // Another window's open chat.
+    storage.data.set("activeId:w-a", "s-2");
     storage.files.set("s-1", message("retained on disk"));
-    await expect(mod.loadAll()).resolves.toEqual({ sessions, activeId: "s-1" });
+    await expect(mod.loadAll()).resolves.toEqual({
+      sessions,
+      activeId: "s-1",
+      activeElsewhere: new Set(["s-2"]),
+    });
     expect(storage.entries).not.toHaveBeenCalled();
     expect(calls("ai_session_save")).toHaveLength(0);
     expect(calls("ai_session_load")).toHaveLength(0);

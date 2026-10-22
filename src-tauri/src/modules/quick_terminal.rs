@@ -102,18 +102,24 @@ pub fn quick_terminal_set_hotkey(
         .hotkey
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let accelerator = accelerator
+        .map(|a| a.trim().to_owned())
+        .filter(|a| !a.is_empty());
+    let parsed = accelerator.as_deref().map(str::parse::<Shortcut>);
+    // Every app window applies the preference when it opens: the hotkey
+    // already registered stays as it is.
+    if let (Some(Ok(shortcut)), Some(registered)) = (&parsed, current.as_ref()) {
+        if shortcut == registered {
+            return Ok(());
+        }
+    }
     if let Some(previous) = current.take() {
         let _ = app.global_shortcut().unregister(previous);
     }
-    let Some(accelerator) = accelerator
-        .map(|a| a.trim().to_owned())
-        .filter(|a| !a.is_empty())
-    else {
+    let (Some(accelerator), Some(parsed)) = (accelerator, parsed) else {
         return Ok(());
     };
-    let shortcut: Shortcut = accelerator
-        .parse()
-        .map_err(|e| format!("invalid hotkey {accelerator:?}: {e}"))?;
+    let shortcut: Shortcut = parsed.map_err(|e| format!("invalid hotkey {accelerator:?}: {e}"))?;
     app.global_shortcut()
         .on_shortcut(shortcut, |app, _shortcut, event| {
             if event.state() == ShortcutState::Pressed {

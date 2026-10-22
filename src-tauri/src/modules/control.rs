@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -16,7 +16,7 @@ use terax_control_protocol::{
     METHOD_PING, PROTOCOL_VERSION, SERVER_RESPONSE_ID,
 };
 
-use crate::modules::{fs, workspace};
+use crate::modules::{fs, windows, workspace};
 
 const CONTROL_EVENT: &str = "terax:control-request";
 const FRONTEND_TIMEOUT: Duration = Duration::from_secs(5);
@@ -26,6 +26,8 @@ const MAX_CONNECTIONS: usize = 32;
 const LISTENER_STACK_BYTES: usize = 256 * 1024;
 const REQUEST_STACK_BYTES: usize = 512 * 1024;
 const STALE_LAUNCHER_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+/// Pane ids handed out at once; the oldest is dropped beyond this.
+const MAX_PANE_IDS: usize = 16 * 1024;
 
 #[derive(Clone)]
 struct RuntimeInfo {
@@ -36,9 +38,53 @@ struct RuntimeInfo {
     launcher_dir: Option<PathBuf>,
 }
 
+/// The pane ids shells see (`TERAX_PANE_ID`) are app-wide: every window
+/// numbers its panes from 1, so each id maps back to a window and its pane.
+#[derive(Default)]
+struct PaneIds {
+    last: u32,
+    panes: BTreeMap<u32, (String, u32)>,
+}
+
+impl PaneIds {
+    fn assign(&mut self, window: &str, pane: u32) -> u32 {
+        // A pane whose shell restarts keeps its id.
+        if let Some((&id, _)) = self
+            .panes
+            .iter()
+            .find(|(_, (owner, known))| owner == window && *known == pane)
+        {
+            return id;
+        }
+        loop {
+            self.last = self.last.wrapping_add(1).max(1);
+            if !self.panes.contains_key(&self.last) {
+                break;
+            }
+        }
+        if self.panes.len() >= MAX_PANE_IDS {
+            self.panes.pop_first();
+        }
+        self.panes.insert(self.last, (window.to_owned(), pane));
+        self.last
+    }
+
+    fn resolve(&self, id: u32) -> Option<(&str, u32)> {
+        self.panes
+            .get(&id)
+            .map(|(window, pane)| (window.as_str(), *pane))
+    }
+
+    fn forget_window(&mut self, window: &str) {
+        self.panes.retain(|_, (owner, _)| owner != window);
+    }
+}
+
 struct ControlCore {
     runtime: OnceLock<RuntimeInfo>,
-    frontend_ready: AtomicBool,
+    /// Windows whose page handles control requests.
+    ready: Mutex<HashSet<String>>,
+    panes: Mutex<PaneIds>,
     shutting_down: AtomicBool,
     active_connections: AtomicUsize,
     pending: Mutex<HashMap<String, SyncSender<FrontendResponse>>>,
@@ -51,7 +97,8 @@ impl Default for ControlState {
     fn default() -> Self {
         Self(Arc::new(ControlCore {
             runtime: OnceLock::new(),
-            frontend_ready: AtomicBool::new(false),
+            ready: Mutex::new(HashSet::new()),
+            panes: Mutex::new(PaneIds::default()),
             shutting_down: AtomicBool::new(false),
             active_connections: AtomicUsize::new(0),
             pending: Mutex::new(HashMap::new()),
@@ -69,7 +116,9 @@ pub struct ShellControlEnv {
 }
 
 impl ControlState {
-    pub fn shell_env(&self, pane_id: u32) -> Option<ShellControlEnv> {
+    /// The credentials for the shell of `window`'s pane `pane`, under an
+    /// app-wide pane id.
+    pub fn shell_env(&self, window: &str, pane: u32) -> Option<ShellControlEnv> {
         if self.0.shutting_down.load(Ordering::Acquire) {
             return None;
         }
@@ -77,6 +126,12 @@ impl ControlState {
         if self.0.shutting_down.load(Ordering::Acquire) {
             return None;
         }
+        let pane_id = self
+            .0
+            .panes
+            .lock()
+            .expect("control panes poisoned")
+            .assign(window, pane);
         Some(ShellControlEnv {
             address: runtime.address.clone(),
             token: runtime.token.clone(),
@@ -86,9 +141,23 @@ impl ControlState {
         })
     }
 
+    /// A closed window's panes and readiness go.
+    pub fn forget_window(&self, window: &str) {
+        self.0
+            .ready
+            .lock()
+            .expect("control ready poisoned")
+            .remove(window);
+        self.0
+            .panes
+            .lock()
+            .expect("control panes poisoned")
+            .forget_window(window);
+    }
+
     pub fn shutdown(&self) {
         self.0.shutting_down.store(true, Ordering::Release);
-        self.0.frontend_ready.store(false, Ordering::Release);
+        self.0.ready.lock().expect("control ready poisoned").clear();
         if let Some(runtime) = self.0.runtime.get() {
             remove_own_descriptor(&runtime.descriptor_path, &runtime.token);
             if let Some(dir) = &runtime.launcher_dir {
@@ -436,13 +505,43 @@ fn forward_to_frontend(
     app: &tauri::AppHandle,
     state: &ControlState,
 ) -> ControlResponse {
-    if !state.0.frontend_ready.load(Ordering::Acquire) {
+    // A shell's request goes to its own window, with its pane as that window
+    // knows it; anything else to the window in front.
+    let mut caller = request.caller;
+    let resolved = caller.pane_id.and_then(|id| {
+        state
+            .0
+            .panes
+            .lock()
+            .expect("control panes poisoned")
+            .resolve(id)
+            .map(|(window, pane)| (window.to_owned(), pane))
+    });
+    let target = match resolved {
+        Some((window, pane)) => {
+            caller.pane_id = Some(pane);
+            Some(window)
+        }
+        None => {
+            caller.pane_id = None;
+            windows::target_window(app).map(|window| window.label().to_owned())
+        }
+    };
+    let ready = target.filter(|label| {
+        state
+            .0
+            .ready
+            .lock()
+            .expect("control ready poisoned")
+            .contains(label)
+    });
+    let Some(target) = ready else {
         return ControlResponse::failure(
             request.id,
             "frontend_not_ready",
             "Terax is still restoring its workspace; try again shortly",
         );
-    }
+    };
 
     let id = request.id.clone();
     let (sender, receiver) = mpsc::sync_channel(1);
@@ -465,9 +564,9 @@ fn forward_to_frontend(
         id: id.clone(),
         method: request.method,
         params: request.params,
-        caller: request.caller,
+        caller,
     };
-    if let Err(error) = app.emit_to("main", CONTROL_EVENT, frontend_request) {
+    if let Err(error) = app.emit_to(target.as_str(), CONTROL_EVENT, frontend_request) {
         state
             .0
             .pending
@@ -512,8 +611,17 @@ fn forward_to_frontend(
 }
 
 #[tauri::command]
-pub fn control_frontend_ready(state: tauri::State<'_, ControlState>, ready: bool) {
-    state.0.frontend_ready.store(ready, Ordering::Release);
+pub fn control_frontend_ready(
+    window: tauri::Window,
+    state: tauri::State<'_, ControlState>,
+    ready: bool,
+) {
+    let mut windows = state.0.ready.lock().expect("control ready poisoned");
+    if ready && windows::is_app_window(window.label()) {
+        windows.insert(window.label().to_owned());
+    } else {
+        windows.remove(window.label());
+    }
 }
 
 #[tauri::command]
@@ -880,9 +988,37 @@ mod tests {
                 launcher_dir: None,
             })
             .is_ok());
-        assert!(state.shell_env(7).is_some());
+        assert!(state.shell_env("main", 7).is_some());
         state.shutdown();
-        assert!(state.shell_env(7).is_none());
+        assert!(state.shell_env("main", 7).is_none());
+    }
+
+    #[test]
+    fn shell_pane_ids_are_app_wide_and_map_back_to_their_window() {
+        let mut ids = PaneIds::default();
+        let main = ids.assign("main", 1);
+        let other = ids.assign("w-a", 1);
+        assert_ne!(main, other);
+        assert_eq!(ids.resolve(main), Some(("main", 1)));
+        assert_eq!(ids.resolve(other), Some(("w-a", 1)));
+        // A restarted shell keeps its pane's id.
+        assert_eq!(ids.assign("w-a", 1), other);
+        ids.forget_window("w-a");
+        assert_eq!(ids.resolve(other), None);
+        assert_eq!(ids.resolve(main), Some(("main", 1)));
+        assert_eq!(ids.resolve(0), None);
+    }
+
+    #[test]
+    fn pane_ids_stay_bounded() {
+        let mut ids = PaneIds::default();
+        for pane in 0..(MAX_PANE_IDS as u32 + 10) {
+            ids.assign("main", pane);
+        }
+        assert_eq!(ids.panes.len(), MAX_PANE_IDS);
+        // The oldest went.
+        assert!(ids.resolve(1).is_none());
+        assert!(ids.resolve(MAX_PANE_IDS as u32 + 10).is_some());
     }
 
     #[test]

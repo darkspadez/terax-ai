@@ -2,6 +2,7 @@ import type { CloseManyPending } from "@/app/hooks/tabCloseGuards";
 import {
   type AppCloseBlocker,
   canOptOutOfAppClosePrompt,
+  type PendingAppClose,
 } from "@/app/hooks/useAppCloseGuard";
 import {
   AlertDialog,
@@ -34,23 +35,25 @@ type Props = {
   closeManyConfirming: boolean;
   onCancelCloseMany: () => void;
   onConfirmCloseMany: () => void;
-  pendingAppClose: AppCloseBlocker | null;
+  pendingAppClose: PendingAppClose | null;
   onCancelAppClose: () => void;
   onConfirmAppClose: () => void;
 };
 
-function appCloseMessage(blocker: AppCloseBlocker): string {
+/** The warning; `quits` when Terax quits rather than one window closing. */
+export function appCloseMessage(blocker: AppCloseBlocker, quits = true): string {
+  const doing = quits ? "Quitting" : "Closing this window";
   const dirty =
     blocker.dirtyEditors === 1
       ? "1 file has unsaved changes"
       : `${blocker.dirtyEditors} files have unsaved changes`;
   if (blocker.dirtyEditors > 0 && blocker.busyTerminal) {
-    return `A process is still running and ${dirty}. Quitting will terminate it and discard the changes.`;
+    return `A process is still running and ${dirty}. ${doing} will terminate it and discard the changes.`;
   }
   if (blocker.dirtyEditors > 0) {
-    return `${dirty.charAt(0).toUpperCase()}${dirty.slice(1)}. Quitting will discard them.`;
+    return `${dirty.charAt(0).toUpperCase()}${dirty.slice(1)}. ${doing} will discard them.`;
   }
-  return "A process is still running in a terminal. Quitting will terminate it.";
+  return `A process is still running in a terminal. ${doing} will terminate it.`;
 }
 
 function OptOutRow({
@@ -288,9 +291,15 @@ export function CloseDialogs({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Quit Terax?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {pendingAppClose?.quits === false
+                ? "Close Window?"
+                : "Quit Terax?"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              {pendingAppClose ? appCloseMessage(pendingAppClose) : ""}
+              {pendingAppClose
+                ? appCloseMessage(pendingAppClose, pendingAppClose.quits)
+                : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {appCloseCanOptOut ? (
@@ -304,7 +313,9 @@ export function CloseDialogs({
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction onClick={() => void confirmAppClose()}>
-              Quit Anyway
+              {pendingAppClose?.quits === false
+                ? "Close Anyway"
+                : "Quit Anyway"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -2,6 +2,7 @@ import type { SearchTarget } from "@/modules/header";
 import { MAX_PANES_PER_TAB, type Tab } from "@/modules/tabs";
 import { leafIds } from "@/modules/terminal";
 import {
+  AppWindowIcon,
   Cancel01Icon,
   DashboardSquare01Icon,
   FileEditIcon,
@@ -11,6 +12,7 @@ import {
   KeyboardIcon,
   LayoutTwoColumnIcon,
   LayoutTwoRowIcon,
+  Logout01Icon,
   PaintBoardIcon,
   Search01Icon,
   Settings01Icon,
@@ -40,6 +42,8 @@ export type CommandPaletteActionContext = {
   explorerRoot: string | null;
   home: string | null;
   openNewTab: () => void;
+  openNewWindow: () => void;
+  quit: () => void;
   openNewBlock: () => void;
   openNewPrivate: () => void;
   openNewEditor: () => void;
@@ -93,6 +97,23 @@ export function createCommandItems(
       icon: Settings01Icon,
       shortcutId: "settings.open",
       run: ctx.openSettings,
+    },
+    {
+      id: "window.new",
+      title: "New window",
+      group: "General",
+      keywords: ["window", "workspace", "second window"],
+      icon: AppWindowIcon,
+      shortcutId: "window.new",
+      run: ctx.openNewWindow,
+    },
+    {
+      id: "app.quit",
+      title: "Quit Terax",
+      group: "General",
+      keywords: ["exit", "close all windows"],
+      icon: Logout01Icon,
+      run: ctx.quit,
     },
     {
       id: "theme.pick",

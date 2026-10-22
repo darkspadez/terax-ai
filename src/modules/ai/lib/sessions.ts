@@ -1,4 +1,5 @@
 import type { UIMessage } from "@ai-sdk/react";
+import { activeChatKey } from "@/lib/appWindow";
 import { invoke } from "@tauri-apps/api/core";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { toast } from "sonner";
@@ -12,7 +13,9 @@ export type SessionMeta = {
 
 const STORE_PATH = "terax-ai-sessions.json";
 const KEY_SESSIONS = "sessions";
-const KEY_ACTIVE = "activeId";
+/** Each window has its own active chat; the history list is shared. */
+const KEY_ACTIVE = activeChatKey();
+const ACTIVE_PREFIX = "activeId";
 const LEGACY_PREFIX = "messages:";
 /** A pre-migration copy older than this, with nothing left to migrate, goes. */
 const LEFTOVER_BACKUP_MAX_AGE_SECS = 7 * 24 * 60 * 60;
@@ -26,6 +29,8 @@ const decoder = new TextDecoder();
 export type LoadedSessions = {
   sessions: SessionMeta[];
   activeId: string | null;
+  /** The chats other windows have open. */
+  activeElsewhere: Set<string>;
 };
 
 export type FlushResult = {
@@ -218,11 +223,37 @@ function write(id: string, op: WriteOp): Promise<void> {
 
 export async function loadAll(): Promise<LoadedSessions> {
   await migrateMessages();
-  const [sessions, activeId] = await Promise.all([
+  // Key names only: values can be large, so only the ones needed are read.
+  const otherWindows = (await store.keys()).filter(
+    (key) =>
+      key !== KEY_ACTIVE &&
+      (key === ACTIVE_PREFIX || key.startsWith(`${ACTIVE_PREFIX}:`)),
+  );
+  const [sessions, activeId, ...elsewhere] = await Promise.all([
     store.get<SessionMeta[]>(KEY_SESSIONS),
     store.get<string>(KEY_ACTIVE),
+    ...otherWindows.map((key) => store.get<string>(key)),
   ]);
-  return { sessions: sessions ?? [], activeId: activeId ?? null };
+  return {
+    sessions: Array.isArray(sessions) ? sessions : [],
+    activeId: typeof activeId === "string" ? activeId : null,
+    activeElsewhere: new Set(
+      elsewhere.filter((id): id is string => typeof id === "string"),
+    ),
+  };
+}
+
+/**
+ * Calls `onChange` with the history list whenever any window changes it, so
+ * every window shows the same list and writes it back whole without undoing
+ * another window's change.
+ */
+export function onSessionsChanged(
+  onChange: (sessions: SessionMeta[]) => void,
+): Promise<() => void> {
+  return store.onKeyChange<SessionMeta[]>(KEY_SESSIONS, (value) => {
+    if (Array.isArray(value)) onChange(value);
+  });
 }
 
 /**

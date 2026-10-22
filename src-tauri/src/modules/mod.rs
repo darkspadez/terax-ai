@@ -22,4 +22,5 @@ pub mod shell;
 pub mod terminal_scrollback;
 pub mod vibrancy;
 pub mod window_presentation;
+pub mod windows;
 pub mod workspace;

@@ -10,7 +10,12 @@ const sessions = vi.hoisted(() => ({
       _options?: { durable?: boolean },
     ) => {},
   ),
-  loadAll: vi.fn(async () => ({ sessions: [], activeId: null })),
+  loadAll: vi.fn(async () => ({
+    sessions: [],
+    activeId: null,
+    activeElsewhere: new Set<string>(),
+  })),
+  onSessionsChanged: vi.fn(async () => () => {}),
   loadMessages: vi.fn(),
   saveSessionsList: vi.fn(async () => {}),
   saveActiveId: vi.fn(async () => {}),

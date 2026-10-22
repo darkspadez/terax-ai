@@ -13,6 +13,7 @@ mod macos;
 #[cfg(not(target_os = "macos"))]
 mod portable;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, RwLock};
@@ -84,6 +85,57 @@ struct Running {
 #[derive(Default)]
 pub struct FsWatchState {
     inner: Mutex<Option<Running>>,
+    owners: Mutex<WatchOwners>,
+}
+
+/// The watches each window holds, so a window that closes or reloads gives
+/// back what it never removed.
+#[derive(Default)]
+struct WatchOwners(HashMap<String, Held>);
+
+#[derive(Default, Debug, PartialEq)]
+struct Held {
+    dirs: HashMap<String, usize>,
+    files: HashMap<(String, String), usize>,
+}
+
+impl WatchOwners {
+    fn add(&mut self, owner: &str, dirs: &[String], files: &[(String, String)]) {
+        let held = self.0.entry(owner.to_owned()).or_default();
+        for dir in dirs {
+            *held.dirs.entry(dir.clone()).or_default() += 1;
+        }
+        for file in files {
+            *held.files.entry(file.clone()).or_default() += 1;
+        }
+    }
+
+    fn remove(&mut self, owner: &str, dirs: &[String], files: &[(String, String)]) {
+        let Some(held) = self.0.get_mut(owner) else {
+            return;
+        };
+        fn release<K: std::hash::Hash + Eq>(counts: &mut HashMap<K, usize>, key: &K) {
+            if let Some(count) = counts.get_mut(key) {
+                *count -= 1;
+                if *count == 0 {
+                    counts.remove(key);
+                }
+            }
+        }
+        for dir in dirs {
+            release(&mut held.dirs, dir);
+        }
+        for file in files {
+            release(&mut held.files, file);
+        }
+        if held.dirs.is_empty() && held.files.is_empty() {
+            self.0.remove(owner);
+        }
+    }
+
+    fn take(&mut self, owner: &str) -> Held {
+        self.0.remove(owner).unwrap_or_default()
+    }
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -224,6 +276,34 @@ fn canonical_file(workspace: &WorkspaceEnv, raw: &str) -> Option<(String, String
 }
 
 impl FsWatchState {
+    fn owners(&self) -> std::sync::MutexGuard<'_, WatchOwners> {
+        self.owners.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Gives back every watch `owner` (a window) still holds.
+    pub fn release_window(&self, app: &AppHandle, owner: &str) {
+        let held = self.owners().take(owner);
+        if held.dirs.is_empty() && held.files.is_empty() {
+            return;
+        }
+        let _ = self.with_running(app, false, |running| {
+            running.apply(|set| {
+                let mut moved = false;
+                for (dir, count) in &held.dirs {
+                    for _ in 0..*count {
+                        moved |= set.remove_dir(dir);
+                    }
+                }
+                for ((dir, key), count) in &held.files {
+                    for _ in 0..*count {
+                        set.remove_file(dir, key);
+                    }
+                }
+                moved
+            });
+        });
+    }
+
     fn with_running<T>(
         &self,
         app: &AppHandle,
@@ -257,10 +337,12 @@ impl Running {
 #[tauri::command]
 pub async fn fs_watch_add(
     app: AppHandle,
+    webview: tauri::Webview,
     paths: Vec<String>,
     files: Option<Vec<String>>,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<(), String> {
+    let owner = webview.label().to_owned();
     blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
         let dirs = prepare_dirs(&app.state::<WorkspaceRegistry>(), &workspace, paths);
@@ -276,6 +358,11 @@ pub async fn fs_watch_add(
         if dirs.is_empty() && files.is_empty() {
             return Ok(());
         }
+        let held_dirs: Vec<String> = dirs.iter().map(to_canon).collect();
+        let held_files: Vec<(String, String)> = files
+            .iter()
+            .map(|(dir, key, _)| (dir.clone(), key.clone()))
+            .collect();
         // Taken before the OS watch starts (inside `apply`), so a change after it differs.
         let baselines: Vec<Option<u64>> = dirs
             .iter()
@@ -298,6 +385,9 @@ pub async fn fs_watch_add(
                     moved
                 });
             })?;
+        app.state::<FsWatchState>()
+            .owners()
+            .add(&owner, &held_dirs, &held_files);
         Ok(())
     })
     .await
@@ -306,10 +396,12 @@ pub async fn fs_watch_add(
 #[tauri::command]
 pub async fn fs_watch_remove(
     app: AppHandle,
+    webview: tauri::Webview,
     paths: Vec<String>,
     files: Option<Vec<String>>,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<(), String> {
+    let owner = webview.label().to_owned();
     blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
         // A removed/renamed dir no longer canonicalizes; fall back so the
@@ -340,6 +432,9 @@ pub async fn fs_watch_remove(
                     moved
                 });
             })?;
+        app.state::<FsWatchState>()
+            .owners()
+            .remove(&owner, &dirs, &files);
         Ok(())
     })
     .await
@@ -347,6 +442,28 @@ pub async fn fs_watch_remove(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_window_gives_back_the_watches_it_still_holds() {
+        let mut owners = WatchOwners::default();
+        let dir = |d: &str| d.to_owned();
+        let file = |d: &str, f: &str| (d.to_owned(), f.to_owned());
+        owners.add("main", &[dir("/a"), dir("/a")], &[file("/a", "/a/x")]);
+        owners.add("w-1", &[dir("/a")], &[]);
+        owners.remove("main", &[dir("/a")], &[]);
+        // Removing what the window never added changes nothing.
+        owners.remove("main", &[dir("/b")], &[file("/b", "/b/y")]);
+        let held = owners.take("main");
+        assert_eq!(held.dirs, HashMap::from([(dir("/a"), 1)]));
+        assert_eq!(held.files, HashMap::from([(file("/a", "/a/x"), 1)]));
+        assert_eq!(owners.take("main"), Held::default());
+        // Another window's watches stay its own.
+        assert_eq!(owners.take("w-1").dirs, HashMap::from([(dir("/a"), 1)]));
+        owners.add("w-2", &[dir("/c")], &[]);
+        owners.remove("w-2", &[dir("/c")], &[]);
+        assert!(owners.0.is_empty());
+    }
+
     use super::*;
 
     fn shared_watching(dir: &std::path::Path) -> Shared {

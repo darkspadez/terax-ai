@@ -18,6 +18,7 @@ import {
   loadAll,
   loadMessages,
   newSessionId,
+  onSessionsChanged,
   saveActiveId,
   saveMessages,
   saveSessionsList,
@@ -144,6 +145,8 @@ type StoreState = {
   sessions: SessionMeta[];
   activeSessionId: string | null;
   hydrateSessions: () => Promise<void>;
+  /** The shared history list as another window changed it. */
+  adoptSessionsList: (list: SessionMeta[]) => void;
   newSession: () => string;
   switchSession: (id: string) => void;
   deleteSession: (id: string) => void;
@@ -303,13 +306,16 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   hydrateSessions: async () => {
     if (get().sessionsHydrated) return;
-    const { sessions } = await loadAll();
+    const { sessions, activeElsewhere } = await loadAll();
     if (get().sessionsHydrated) return;
 
     // Reuse the most recent untitled "New chat" session if one exists from
     // the previous run — no point stacking empty placeholder sessions every
-    // launch. Otherwise prepend a fresh one.
-    const reusable = sessions[0]?.title === "New chat" ? sessions[0] : null;
+    // launch — unless another window has it open. Otherwise prepend a fresh one.
+    const reusable =
+      sessions[0]?.title === "New chat" && !activeElsewhere?.has(sessions[0].id)
+        ? sessions[0]
+        : null;
     let nextSessions: SessionMeta[];
     let freshId: string;
     if (reusable) {
@@ -333,6 +339,24 @@ export const useChatStore = create<StoreState>((set, get) => ({
       activeSessionId: freshId,
       sessionsHydrated: true,
     });
+    // Other windows add, rename and delete chats in the shared list.
+    void onSessionsChanged((list) => get().adoptSessionsList(list)).catch(
+      () => {},
+    );
+  },
+
+  adoptSessionsList: (list) => {
+    const state = get();
+    if (JSON.stringify(list) === JSON.stringify(state.sessions)) return;
+    const active = state.activeSessionId;
+    if (active === null || list.some((s) => s.id === active)) {
+      set({ sessions: list });
+      return;
+    }
+    // Another window deleted the chat open here.
+    set({ sessions: list });
+    if (list.length > 0) get().switchSession(list[0].id);
+    else get().newSession();
   },
 
   newSession: () => {
