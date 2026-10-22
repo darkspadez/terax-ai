@@ -9,7 +9,7 @@ const host = process.env.TAURI_DEV_HOST;
 const rootDir = import.meta.dirname;
 
 // The app-lab driver (`TERAX_BENCH=1`) may only be built for the lab's own identifier
-// (scripts/app-lab/run.py sets TERAX_BENCH_IDENTIFIER): a stray `TERAX_BENCH=1 bun run build` or
+// (scripts/app-lab/run.ts sets TERAX_BENCH_IDENTIFIER): a stray `TERAX_BENCH=1 bun run build` or
 // `tauri build` would otherwise ship the driver under the product identifier. The Rust side
 // refuses to start a bench binary under it too (modules/bench.rs); this fails the build early.
 if (process.env.TERAX_BENCH === "1") {
@@ -22,7 +22,7 @@ if (process.env.TERAX_BENCH === "1") {
   if (!identifier || identifier === product) {
     throw new Error(
       `TERAX_BENCH=1 builds the app-lab driver and needs its own TERAX_BENCH_IDENTIFIER ` +
-        `(not the product identifier ${product}); run scripts/app-lab/run.py instead`,
+        `(not the product identifier ${product}); run scripts/app-lab/run.ts instead`,
     );
   }
 }

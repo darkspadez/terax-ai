@@ -6,7 +6,7 @@
 //! (stepped live resizes, order out/front, miniaturize). Nothing here exists in a normal build.
 //!
 //! Safety: a bench binary refuses to start under the product identifier, so it can never run
-//! against the profile of an installed Terax. The orchestrator (`scripts/app-lab/run.py`)
+//! against the profile of an installed Terax. The orchestrator (`scripts/app-lab/run.ts`)
 //! gives every run its own identifier and `HOME`.
 
 use serde::{Deserialize, Serialize};
@@ -31,12 +31,12 @@ fn guard_environment(identifier: &str, isolated: Option<&str>) -> Result<(), Str
     if identifier == PRODUCT_IDENTIFIER {
         return Err(format!(
             "bench build refuses to run under the product identifier {PRODUCT_IDENTIFIER}; \
-             launch it through scripts/app-lab/run.py (isolated identifier and HOME)"
+             launch it through scripts/app-lab/run.ts (isolated identifier and HOME)"
         ));
     }
     if isolated != Some("1") {
         return Err(
-            "bench build requires TERAX_BENCH_ISOLATED=1 (set by scripts/app-lab/run.py together \
+            "bench build requires TERAX_BENCH_ISOLATED=1 (set by scripts/app-lab/run.ts together \
              with an isolated HOME)"
                 .to_string(),
         );

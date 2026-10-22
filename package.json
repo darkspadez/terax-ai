@@ -22,7 +22,7 @@
     "bench:ghostty": "vitest bench src/modules/terminal/ghostty/AdaptedGhostty.bench.ts --run --reporter=verbose",
     "profile:ghostty": "bun scripts/ghostty-profile.mjs",
     "soak:ghostty": "vitest run --config scripts/ghostty-soak.config.ts",
-    "check-types": "tsc --noEmit",
+    "check-types": "tsc --noEmit && tsc --noEmit -p scripts/tsconfig.json",
     "lint": "biome lint ./src",
     "lint:fix": "biome lint --write ./src",
     "format": "biome format --write ./src",
@@ -32,13 +32,13 @@
     "check:dist": "bun scripts/dist-graph.mjs",
     "size": "size-limit",
     "knip": "knip",
-    "profile:renderer:macos": "python3 scripts/renderer-profile/run.py",
-    "profile:renderer:occlusion": "python3 scripts/renderer-profile/run.py --workload occlusion",
-    "profile:renderer:move": "python3 scripts/renderer-profile/run.py --workload move",
-    "profile:renderer:agents": "python3 scripts/renderer-profile/run.py --workload agents",
-    "profile:renderer:idle": "python3 scripts/renderer-profile/run.py --workload idle",
-    "profile:app": "python3 scripts/app-lab/run.py",
-    "test:ipc:macos": "python3 scripts/ipc-profile/run.py"
+    "profile:renderer:macos": "bun scripts/renderer-profile/run.ts",
+    "profile:renderer:occlusion": "bun scripts/renderer-profile/run.ts --workload occlusion",
+    "profile:renderer:move": "bun scripts/renderer-profile/run.ts --workload move",
+    "profile:renderer:agents": "bun scripts/renderer-profile/run.ts --workload agents",
+    "profile:renderer:idle": "bun scripts/renderer-profile/run.ts --workload idle",
+    "profile:app": "bun scripts/app-lab/run.ts",
+    "test:ipc:macos": "bun scripts/ipc-profile/run.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.82",
@@ -126,6 +126,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "@webgpu/types": "^0.1.74",
+    "harfbuzzjs": "^1.6.3",
     "knip": "^6.42.0",
     "oxc-transform-react": "^0.154.0",
     "react-compiler-healthcheck": "^1.0.0",
@@ -138,7 +139,8 @@
     "typescript": "~7.0.2",
     "vite": "^8.3.4",
     "vite-plugin-inspect": "^12.1.0",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "wawoff2": "^2.0.1"
   },
   "trustedDependencies": [
     "esbuild",

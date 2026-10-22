@@ -2,7 +2,7 @@
 # Runs the standard renderer-lab suite sequentially (one window at a time, never in parallel)
 # and writes one report per run:
 #
-#   suite.sh REPORT_PREFIX [BASELINE_PREFIX] [-- run.py arguments...]
+#   suite.sh REPORT_PREFIX [BASELINE_PREFIX] [-- run.ts arguments...]
 #
 #   REPORT_PREFIX    reports are written to REPORT_PREFIX-<name>.json (repeats: -<name>-r2.json ...)
 #   BASELINE_PREFIX  optional; each run is compared with the BASELINE_PREFIX-<name>[-rN].json
@@ -26,7 +26,7 @@
 set -u
 shopt -s nullglob
 here="$(cd "$(dirname "$0")" && pwd)"
-prefix="${1:?usage: suite.sh REPORT_PREFIX [BASELINE_PREFIX] [-- run.py args...]}"
+prefix="${1:?usage: suite.sh REPORT_PREFIX [BASELINE_PREFIX] [-- run.ts args...]}"
 shift
 baseline=""
 if [ $# -gt 0 ] && [ "$1" != "--" ]; then
@@ -51,9 +51,9 @@ run() {
     [ "$n" -gt 1 ] && out="$prefix-$name-r$n.json"
     echo "=== $name run $n/$times $(date +%T) load $(sysctl -n vm.loadavg)"
     if [ ${#compare[@]} -gt 0 ]; then
-      python3 "$here/run.py" --report "$out" "$@" --compare "${compare[@]}" ${extra[@]+"${extra[@]}"} || status=$?
+      bun "$here/run.ts" --report "$out" "$@" --compare "${compare[@]}" ${extra[@]+"${extra[@]}"} || status=$?
     else
-      python3 "$here/run.py" --report "$out" "$@" ${extra[@]+"${extra[@]}"} || status=$?
+      bun "$here/run.ts" --report "$out" "$@" ${extra[@]+"${extra[@]}"} || status=$?
     fi
   done
 }

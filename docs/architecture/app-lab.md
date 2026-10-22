@@ -15,14 +15,14 @@ builds the normal frontend and fails if any `bench` chunk or marker string is em
 
 ```sh
 # one scenario against this checkout (builds the bench app first; release, private target dir)
-python3 scripts/app-lab/run.py --scenario tabs --target-dir /tmp/app-lab-target --report tabs.json
+bun scripts/app-lab/run.ts --scenario tabs --target-dir /tmp/app-lab-target --report tabs.json
 
 # measure a pristine revision instead of the working tree (HEAD or any rev, plus the overlay)
 scripts/app-lab/export-tree.sh /tmp/app-lab-src HEAD
-python3 scripts/app-lab/run.py --scenario tabs --source /tmp/app-lab-src --target-dir /tmp/app-lab-target
+bun scripts/app-lab/run.ts --scenario tabs --source /tmp/app-lab-src --target-dir /tmp/app-lab-target
 
-python3 scripts/app-lab/run.py --compare base.json [base2.json ...] --candidate cand.json
-python3 scripts/app-lab/app_report.py report1.json report2.json    # one comparable line per report
+bun scripts/app-lab/run.ts --compare base.json [base2.json ...] --candidate cand.json
+bun scripts/app-lab/app_report.ts report1.json report2.json    # one comparable line per report
 ```
 
 Build time on an M4 (10 cores): cold release build including every dependency 2 min 14 s;
@@ -68,7 +68,7 @@ change often (`WebGpuTerminalSurface.ts`, `CanvasBackingStore.ts`, `useGhosttyTe
 ```sh
 scripts/app-lab/export-tree.sh /tmp/app-lab-exp HEAD
 (cd /tmp/app-lab-exp && patch -p1 < scripts/app-lab/experiments/tab-switch-toggles.patch)
-python3 scripts/app-lab/run.py --scenario tabs --variant saps --source /tmp/app-lab-exp \
+bun scripts/app-lab/run.ts --scenario tabs --variant saps --source /tmp/app-lab-exp \
     --target-dir /tmp/app-lab-target-exp --toggle fixed-backing=2560x1700
 ```
 

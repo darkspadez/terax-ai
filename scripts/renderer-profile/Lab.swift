@@ -4,7 +4,7 @@ import WebKit
 
 // Native host for the isolated renderer lab.
 //
-// Channels to the orchestrator (run.py):
+// Channels to the orchestrator (run.ts):
 //   stdout  one JSON object per line. Page events ("phase"), native events ("native") and
 //           sync events (page events with a "sync" id) are all emitted here.
 //   stdin   "ack <id>" releases a pending sync request; EOF terminates the host. Only read when

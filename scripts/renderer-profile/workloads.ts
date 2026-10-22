@@ -2,7 +2,7 @@
 //
 // Timeline model: the page owns the workload. Whenever the orchestrator must sample the host
 // and WebKit helpers, the page awaits `sync()`, which prints the event (with page and native
-// state) and resumes only after run.py has finished sampling. Window actions (order out, cover,
+// state) and resumes only after run.ts has finished sampling. Window actions (order out, cover,
 // miniaturize, move) are requested from the native host through `native()`.
 //
 // Output is fed through the same GhosttyTerminalModelApi.write() the default workload uses; no

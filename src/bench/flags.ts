@@ -1,6 +1,6 @@
 /**
  * Experiment toggles for the app lab. They are plain `localStorage` entries named
- * `terax:bench:<name>` that scripts/app-lab/run.py sets through the scenario, and they only
+ * `terax:bench:<name>` that scripts/app-lab/run.ts sets through the scenario, and they only
  * exist in builds made with TERAX_BENCH=1: callers guard with `__TERAX_BENCH__`, which is a
  * literal `false` in a normal build, so neither the lookup nor the branch it guards is shipped.
  */
