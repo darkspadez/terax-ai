@@ -20,6 +20,8 @@ Cloud providers are defined in `src/modules/ai/config.ts`:
 
 Model metadata (context limits, costs, reasoning behavior) lives in the model registry in `config.ts`. `resolveModel` maps a model id to its provider and defaults.
 
+A selectable model id is a catalog id, a local server's placeholder (`ollama-local`, resolved to its configured model id) or a custom endpoint's `compat-<endpointId>`. Every surface builds it with `buildConfiguredLanguageModel`: the chat from its transport getters, everything else (sub-agents, commit messages) with `liveModelConfig()` (`store/modelConfig.ts`), which carries the endpoints and their keys, so no caller can leave out what a custom endpoint needs. `modelConfigProblem` (`lib/modelTarget.ts`, free of the AI SDK) makes the same checks without building, to gate an action. Persisted ids (default model, favorites, recents) survive a restart when `isResolvableModelId` accepts them: a catalog id, or an endpoint that still exists and is complete. The legacy single endpoint is migrated under the fixed id `legacy`, and an empty saved endpoint list is never migrated again.
+
 ### Adding a new provider
 
 1. Add a `ProviderInfo` entry to `PROVIDERS` in `src/modules/ai/config.ts`.

@@ -3,7 +3,6 @@ import {
   type ChatTransport,
   lastAssistantMessageIsCompleteWithApprovalResponses,
 } from "ai";
-import { getModel, providerNeedsKey, type ModelId } from "../config";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { BUILTIN_AGENTS } from "../lib/agents";
 import { useAgentsStore } from "./agentsStore";
@@ -13,7 +12,6 @@ import { createContextAwareTransport } from "../lib/transport";
 import type { ToolContext } from "../tools/tools";
 import {
   chats,
-  getActiveProviderKey,
   seedMessages,
   touchChat,
   useChatStore,
@@ -143,15 +141,12 @@ export function sendUserMessage(
   return chat.sendMessage(message);
 }
 
+/** Sends `text` in the active session. A model that cannot run (a missing
+ *  key or endpoint) fails the request, which the chat shows like any other
+ *  error, instead of dropping the message unseen. */
 export async function sendMessage(text: string): Promise<boolean> {
-  const state = useChatStore.getState();
-  const sessionId = state.activeSessionId;
+  const sessionId = useChatStore.getState().activeSessionId;
   if (!sessionId) return false;
-  if (
-    providerNeedsKey(getModel(state.selectedModelId as ModelId).provider) &&
-    !getActiveProviderKey()
-  )
-    return false;
   await sendUserMessage(getOrCreateChat(sessionId), { text });
   return true;
 }

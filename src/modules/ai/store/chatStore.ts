@@ -1,14 +1,7 @@
 import type { Chat, UIMessage } from "@ai-sdk/react";
 import { toast } from "sonner";
 import { create } from "zustand";
-import {
-  DEFAULT_MODEL_ID,
-  endpointIdFromCompatModel,
-  getModel,
-  isCompatModelId,
-  type ModelId,
-  type ProviderId,
-} from "../config";
+import { DEFAULT_MODEL_ID, type ProviderId } from "../config";
 import { useTodosStore } from "./todoStore";
 import type { AgentUsage } from "../lib/agent";
 import { EMPTY_PROVIDER_KEYS, type ProviderKeys, type CustomEndpointKeys } from "../lib/keyring";
@@ -466,15 +459,6 @@ export const useChatStore = create<StoreState>((set, get) => ({
     void saveSessionsList(next);
   },
 }));
-
-export function getActiveProviderKey(): string | null {
-  const { selectedModelId, apiKeys, customEndpointKeys } = useChatStore.getState();
-  if (isCompatModelId(selectedModelId)) {
-    const eid = endpointIdFromCompatModel(selectedModelId);
-    return customEndpointKeys[eid] ?? null;
-  }
-  return apiKeys[getModel(selectedModelId as ModelId).provider] ?? null;
-}
 
 export function getChat(sessionId?: string): Chat<UIMessage> | undefined {
   if (sessionId) return chats.get(sessionId);

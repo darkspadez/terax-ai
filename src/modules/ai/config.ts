@@ -144,17 +144,34 @@ export function endpointIdFromCompatModel(modelId: string): string {
     : "";
 }
 
-/** One-shot migration of the legacy single OpenAI-compatible config into the
+/** The migrated legacy endpoint is derived again on every load until the list
+ *  is first saved, so its id must not change: the default model, favorites
+ *  and recents refer to it by `compat-<id>`. */
+export const LEGACY_COMPAT_ENDPOINT_ID = "legacy";
+
+/** Migration of the legacy single OpenAI-compatible config into the
  *  named-endpoint list. Returns one endpoint when the old base URL + model id
- *  were both set, else empty. `id` is supplied by the caller to stay pure. */
+ *  were both set, else empty. */
 export function migrateLegacyCompatEndpoint(
   baseURL: string,
   modelId: string,
   contextLimit: number,
-  id: string,
 ): CustomEndpoint[] {
   if (!baseURL.trim() || !modelId.trim()) return [];
-  return [{ id, name: "Custom endpoint", baseURL, modelId, contextLimit }];
+  return [
+    {
+      id: LEGACY_COMPAT_ENDPOINT_ID,
+      name: "Custom endpoint",
+      baseURL,
+      modelId,
+      contextLimit,
+    },
+  ];
+}
+
+/** An endpoint the app can build a model for. */
+export function isCompleteEndpoint(e: CustomEndpoint): boolean {
+  return e.baseURL.trim() !== "" && e.modelId.trim() !== "";
 }
 
 export function getProvider(id: ProviderId): ProviderInfo {
@@ -669,8 +686,21 @@ export function getModel(id: ModelId): ModelInfo {
   return m;
 }
 
-export function isKnownModelId(id: string): id is ModelId {
+function isKnownModelId(id: string): id is ModelId {
   return MODELS.some((x) => x.id === id);
+}
+
+/** True when a persisted model id still names something usable: a catalog
+ *  model, or a `compat-` id whose endpoint exists and is complete (the same
+ *  test the pickers use). `resolveModel` cannot tell, since it returns a
+ *  placeholder for a missing endpoint. */
+export function isResolvableModelId(
+  id: string,
+  endpoints: readonly CustomEndpoint[],
+): boolean {
+  if (!isCompatModelId(id)) return isKnownModelId(id);
+  const ep = endpoints.find((e) => e.id === endpointIdFromCompatModel(id));
+  return ep !== undefined && isCompleteEndpoint(ep);
 }
 
 const FREEFORM_PROVIDERS: ReadonlySet<ProviderId> = new Set([
@@ -775,6 +805,22 @@ export function getModelContextLimit(
   if (modelId === "openai-compatible-custom" && compatOverride)
     return compatOverride;
   return MODEL_CONTEXT_LIMITS[modelId] ?? 128_000;
+}
+
+/** Context window of any selectable id: a custom endpoint's own setting, the
+ *  legacy single endpoint's, or the catalog's. */
+export function resolveContextLimit(
+  modelId: string,
+  endpoints: readonly CustomEndpoint[],
+  legacyCompatLimit?: number,
+): number {
+  return getModelContextLimit(
+    modelId,
+    isCompatModelId(modelId)
+      ? endpoints.find((e) => e.id === endpointIdFromCompatModel(modelId))
+          ?.contextLimit
+      : legacyCompatLimit,
+  );
 }
 
 export type ModelPricing = {

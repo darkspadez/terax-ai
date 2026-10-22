@@ -9,10 +9,25 @@ vi.mock("../store/chatStore", () => ({
   useChatStore: {
     getState: () => ({
       apiKeys: {},
-      selectedModelId: "model",
+      selectedModelId: "compat-ep1",
       patchAgentMeta: vi.fn(),
     }),
   },
+}));
+const modelConfig = vi.hoisted(() => ({
+  customEndpoints: [
+    {
+      id: "ep1",
+      name: "Box",
+      baseURL: "https://llm.example/v1",
+      modelId: "m",
+      contextLimit: 128_000,
+    },
+  ],
+  customEndpointKeys: { ep1: "sk-ep" },
+}));
+vi.mock("../store/modelConfig", () => ({
+  liveModelConfig: () => modelConfig,
 }));
 
 import { buildSubagentTools } from "./subagent";
@@ -68,6 +83,18 @@ describe("run_subagent", () => {
       stepCount: 4,
       durationMs: 1200,
     });
+  });
+
+  it("runs the subagent on the chat's model with the live model config", async () => {
+    runSubagentMock.mockResolvedValue({
+      summary: "done",
+      stepCount: 1,
+      durationMs: 1,
+    });
+    await run({ type: "explore", prompt: "look" });
+    expect(runSubagentMock).toHaveBeenCalledWith(
+      expect.objectContaining({ modelId: "compat-ep1", config: modelConfig }),
+    );
   });
 
   it("returns an error result instead of throwing when the subagent fails", async () => {

@@ -9,7 +9,8 @@ vi.mock("@/modules/workspace", () => ({
 }));
 
 import { SUPERSEDED_APPROVAL_REASON } from "../lib/toolApprovals";
-import { sendUserMessage } from "./chatRuntime";
+import { getOrCreateChat, sendMessage, sendUserMessage } from "./chatRuntime";
+import { useChatStore } from "./chatStore";
 
 function recordingChat(messages: UIMessage[]) {
   const sent: UIMessage[][] = [];
@@ -64,5 +65,21 @@ describe("sendUserMessage", () => {
     expect(chat.messages[1]).not.toBe(waiting);
     expect(chat.messages[1].parts[0]).toMatchObject({ state: "output-denied" });
     expect(waiting.parts[0]).toMatchObject({ state: "approval-requested" });
+  });
+});
+
+describe("sendMessage", () => {
+  it("sends Continue when the selected model is a custom endpoint", async () => {
+    useChatStore.setState({
+      activeSessionId: "continue-session",
+      selectedModelId: "compat-ab12cd34",
+    });
+    await expect(sendMessage("Continue from where you stopped.")).resolves.toBe(
+      true,
+    );
+    expect(getOrCreateChat("continue-session").messages[0]).toMatchObject({
+      role: "user",
+      parts: [{ type: "text", text: "Continue from where you stopped." }],
+    });
   });
 });

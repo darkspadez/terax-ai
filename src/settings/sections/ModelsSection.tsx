@@ -27,15 +27,16 @@ import {
   DEFAULT_MODEL_ID,
   getAutocompleteEligibleModels,
   getCompatModelInfo,
-  getModel,
   getProvider,
   isCompatModelId,
+  isCompleteEndpoint,
   MODELS,
-  type ModelId,
+  type ModelInfo,
   PROVIDERS,
   type ProviderId,
   type ProviderInfo,
   providerNeedsKey,
+  resolveModel,
   STT_PROVIDER_LABELS,
   type SttProvider,
   WHISPERCPP_DEFAULT_BASE_URL,
@@ -231,7 +232,9 @@ export function ModelsSection() {
     // Drop the now-dead model id from favorites/recents before touching the
     // selection, so the recents push from a selection reset can't race it.
     const deadModelId = compatModelIdForEndpoint(id);
-    const { favoriteModelIds, recentModelIds } = usePreferencesStore.getState();
+    const { favoriteModelIds, recentModelIds, defaultModelId } =
+      usePreferencesStore.getState();
+    if (defaultModelId === deadModelId) await setDefaultModel(DEFAULT_MODEL_ID);
     if (favoriteModelIds.includes(deadModelId)) {
       await setFavoriteModelIds(
         favoriteModelIds.filter((m) => m !== deadModelId),
@@ -304,11 +307,14 @@ export function ModelsSection() {
 
   const isConfigured = (id: ProviderId): boolean => {
     if (id === "openrouter") return !!keys?.[id] && !!openrouterModelId.trim();
+    // Configured per endpoint (the legacy single endpoint is migrated into
+    // the list), never through this provider's own fields.
+    if (id === "openai-compatible") {
+      return customEndpoints.some(isCompleteEndpoint);
+    }
     if (!isLocalProvider(id)) return !!keys?.[id];
     const cfg = localConfig(id);
     if (!cfg) return false;
-    if (id === "openai-compatible")
-      return !!cfg.baseURL.trim() && !!cfg.modelId.trim();
     return !!cfg.modelId.trim();
   };
 
@@ -532,7 +538,7 @@ function DefaultsBlock({
   keys,
   customEndpoints,
 }: {
-  defaultModel: ModelId;
+  defaultModel: string;
   configuredIds: Set<ProviderId>;
   keys: KeysMap;
   customEndpoints: readonly CustomEndpoint[];
@@ -545,6 +551,7 @@ function DefaultsBlock({
           <DefaultModelPicker
             defaultModel={defaultModel}
             configuredIds={configuredIds}
+            customEndpoints={customEndpoints}
           />
         </FieldRow>
         <AutocompleteRow
@@ -560,12 +567,22 @@ function DefaultsBlock({
 function DefaultModelPicker({
   defaultModel,
   configuredIds,
+  customEndpoints,
 }: {
-  defaultModel: ModelId;
+  defaultModel: string;
   configuredIds: Set<ProviderId>;
+  customEndpoints: readonly CustomEndpoint[];
 }) {
-  const m = getModel(defaultModel);
+  const m = resolveModel(defaultModel, customEndpoints);
   const hasAny = configuredIds.size > 0;
+  const modelsOf = (p: ProviderInfo): readonly ModelInfo[] =>
+    p.id === "openai-compatible"
+      ? customEndpoints
+          .filter(isCompleteEndpoint)
+          .map((e) =>
+            getCompatModelInfo(compatModelIdForEndpoint(e.id), customEndpoints),
+          )
+      : MODELS.filter((x) => x.provider === p.id);
 
   return (
     <DropdownMenu>
@@ -597,7 +614,7 @@ function DefaultModelPicker({
       >
         <div className="max-h-72 overflow-y-auto overscroll-contain pr-1">
           {PROVIDERS.filter((p) => configuredIds.has(p.id)).map((p) => {
-            const models = MODELS.filter((x) => x.provider === p.id);
+            const models = modelsOf(p);
             if (models.length === 0) return null;
             return (
               <div key={p.id} className="px-1 pt-1.5 first:pt-1">
@@ -608,7 +625,7 @@ function DefaultModelPicker({
                 {models.map((mod) => (
                   <DropdownMenuItem
                     key={mod.id}
-                    onSelect={() => void setDefaultModel(mod.id as ModelId)}
+                    onSelect={() => void setDefaultModel(mod.id)}
                     className={cn(
                       "flex items-start gap-2 text-[12px]",
                       mod.id === defaultModel && "bg-accent/50",
