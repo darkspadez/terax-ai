@@ -35,6 +35,7 @@ import {
   HashtagIcon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
+import { mergeInterleavedReasoning } from "../lib/reasoningDisplay";
 import { SLASH_COMMANDS, TERAX_CMD_RE } from "../lib/slashCommands";
 import { Spinner } from "@/components/ui/spinner";
 import { useChatStore } from "../store/chatStore";
@@ -353,20 +354,22 @@ const RenderedMessage = memo(function RenderedMessage({
         },
       }
     : undefined;
+  // Hooks must run unconditionally (Rules of Hooks) even though user messages
+  // render without groups; grouping is cheap so this stays out of the way.
+  const parts = useMemo(
+    () => mergeInterleavedReasoning(message.parts as AnyPart[]),
+    [message.parts],
+  );
+  const groups = useMemo(() => buildPartGroups(parts), [parts]);
   // Index of the trailing text part — only that one is "live" mid-stream.
   // Earlier text parts (separated by tool calls) are already finalized.
   let lastTextIdx = -1;
-  for (let i = message.parts.length - 1; i >= 0; i -= 1) {
-    if (message.parts[i]?.type === "text") {
+  for (let i = parts.length - 1; i >= 0; i -= 1) {
+    if (parts[i]?.type === "text") {
       lastTextIdx = i;
       break;
     }
   }
-  // Hooks must run unconditionally (Rules of Hooks) even though user messages
-  // render without groups; grouping is cheap so this stays out of the way.
-  const groups = useMemo(() => buildPartGroups(message.parts as AnyPart[]), [
-    message.parts,
-  ]);
 
   if (message.role === "user") {
     const rawText = message.parts
@@ -457,7 +460,7 @@ function partKey(p: AnyPart, idx: number): string {
   return `i-${idx}`;
 }
 
-function buildPartGroups(parts: AnyPart[]): Group[] {
+function buildPartGroups(parts: readonly AnyPart[]): Group[] {
   const out: Group[] = [];
   let run: { parts: AnyPart[]; startIdx: number } | null = null;
   const flushRun = () => {

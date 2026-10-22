@@ -272,4 +272,39 @@ describe("buildLanguageModel", () => {
     expect(other.url).toBe("https://llm.example.com/v1/chat/completions");
     expect(other.headers).not.toHaveProperty("x-opencode-session");
   });
+
+  it("moves <think> reasoning out of a custom endpoint's answer", async () => {
+    proxy.reply.body = JSON.stringify({
+      id: "c2",
+      object: "chat.completion",
+      created: 0,
+      model: "MiniMax-M2.7",
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content: "<think>plan the reply</think>Hello!",
+          },
+          finish_reason: "stop",
+        },
+      ],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    });
+    const endpoint = {
+      id: "minimax1",
+      name: "MiniMax",
+      baseURL: "https://api.minimax.io/v1",
+      modelId: "MiniMax-M2.7",
+      contextLimit: 200_000,
+    };
+    const model = await buildConfiguredLanguageModel(
+      compatModelIdForEndpoint(endpoint.id),
+      EMPTY_PROVIDER_KEYS,
+      { customEndpoints: [endpoint] },
+    );
+    const result = await generateText({ model, prompt: "hi" });
+    expect(result.text).toBe("Hello!");
+    expect(result.reasoningText).toBe("plan the reply");
+  });
 });

@@ -1,8 +1,10 @@
 import {
   convertToModelMessages,
+  extractReasoningMiddleware,
   isStepCount,
   pruneMessages,
   streamText,
+  wrapLanguageModel,
   type LanguageModel,
   type UIMessage,
 } from "ai";
@@ -69,6 +71,19 @@ function ellipsize(s: string, max: number): string {
 }
 
 const modelCache = new Map<string, LanguageModel>();
+
+type ProviderModel = Parameters<typeof wrapLanguageModel>[0]["model"];
+
+/** Self-hosted and custom OpenAI-compatible servers often return thinking
+ *  inside `content` as <think>...</think> (local reasoning models, MiniMax
+ *  without reasoning_split); it belongs in the reasoning block, not the
+ *  answer. */
+function separateThinkTags(model: ProviderModel): LanguageModel {
+  return wrapLanguageModel({
+    model,
+    middleware: extractReasoningMiddleware({ tagName: "think" }),
+  });
+}
 
 export async function buildLanguageModel(
   provider: ProviderId,
@@ -169,44 +184,52 @@ export async function buildLanguageModel(
       }
       const { createOpenAICompatible } =
         await import("@ai-sdk/openai-compatible");
-      built = createOpenAICompatible({
-        name: "openai-compatible",
-        baseURL: compatURL,
-        apiKey: epKey || key || undefined,
-        // OpenCode Go/Zen refuses requests without a session header.
-        headers: opencodeSessionHeaders(compatURL),
-        fetch: localProxyFetch,
-      })(resolvedModelId);
+      built = separateThinkTags(
+        createOpenAICompatible({
+          name: "openai-compatible",
+          baseURL: compatURL,
+          apiKey: epKey || key || undefined,
+          // OpenCode Go/Zen refuses requests without a session header.
+          headers: opencodeSessionHeaders(compatURL),
+          fetch: localProxyFetch,
+        })(resolvedModelId),
+      );
       break;
     }
     case "lmstudio": {
       const { createOpenAICompatible } =
         await import("@ai-sdk/openai-compatible");
-      built = createOpenAICompatible({
-        name: "lmstudio",
-        baseURL: lmstudioURL,
-        fetch: localProxyFetch,
-      })(resolvedModelId);
+      built = separateThinkTags(
+        createOpenAICompatible({
+          name: "lmstudio",
+          baseURL: lmstudioURL,
+          fetch: localProxyFetch,
+        })(resolvedModelId),
+      );
       break;
     }
     case "mlx": {
       const { createOpenAICompatible } =
         await import("@ai-sdk/openai-compatible");
-      built = createOpenAICompatible({
-        name: "mlx",
-        baseURL: mlxURL,
-        fetch: localProxyFetch,
-      })(resolvedModelId);
+      built = separateThinkTags(
+        createOpenAICompatible({
+          name: "mlx",
+          baseURL: mlxURL,
+          fetch: localProxyFetch,
+        })(resolvedModelId),
+      );
       break;
     }
     case "ollama": {
       const { createOpenAICompatible } =
         await import("@ai-sdk/openai-compatible");
-      built = createOpenAICompatible({
-        name: "ollama",
-        baseURL: ollamaURL,
-        fetch: localProxyFetch,
-      })(resolvedModelId);
+      built = separateThinkTags(
+        createOpenAICompatible({
+          name: "ollama",
+          baseURL: ollamaURL,
+          fetch: localProxyFetch,
+        })(resolvedModelId),
+      );
       break;
     }
     default: {
