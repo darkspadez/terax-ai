@@ -1,5 +1,6 @@
 import type { TerminalOptionAsAlt } from "@/modules/settings/terminalBehavior";
 import {
+  isInputMethodKeyDown,
   terminalClipboardAction,
   terminalReadlineSequence,
   type TerminalPlatform,
@@ -345,14 +346,7 @@ export class GhosttyInputController {
         return;
       }
     }
-    if (
-      event.defaultPrevented ||
-      this.composing ||
-      event.isComposing ||
-      event.keyCode === 229 ||
-      event.key === "Dead" ||
-      event.key === "Process"
-    )
+    if (event.defaultPrevented || isInputMethodKeyDown(event, this.composing))
       return;
 
     const clipboard = terminalClipboardAction(event, {

@@ -722,6 +722,22 @@ describe.each(["ghostty-vt.wasm", "ghostty-vt-scalar.wasm"])(
       dispose();
     });
 
+    // crynta/terax-ai#1009, #1215, #956.
+    it("delivers Option+Arrow and Option+Backspace that WKWebView stamped 229", () => {
+      const { input, sent, dispose } = setup({ isMac: true });
+      for (const code of ["ArrowLeft", "ArrowRight", "Backspace"]) {
+        input.dispatchEvent(
+          keyboardEvent({ key: code, code, altKey: true, keyCode: 229 }),
+        );
+      }
+      // A character key stamped 229 still waits for the IME's text.
+      const pending = keyboardEvent({ key: "a", code: "KeyA", keyCode: 229 });
+      input.dispatchEvent(pending);
+      expect(pending.defaultPrevented).toBe(false);
+      expect(sent).toEqual(["\x1bb", "\x1bf", "\x17"]);
+      dispose();
+    });
+
     // crynta/terax-ai#1288: Kitty programs read Shift+Enter, not Alt+Enter.
     it("encodes Shift+Enter in the program's keyboard mode", () => {
       const { input, sent, write, dispose } = setup();

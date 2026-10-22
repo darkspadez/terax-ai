@@ -5,6 +5,40 @@ export type TerminalKeyEvent = Pick<
 
 export type PlatformOpts = { isMac: boolean };
 
+/**
+ * Keys that never compose text. WKWebView can stamp keyCode 229 (the IME's
+ * "process" code) on Option+key events with no input method composing, and
+ * an Option+Arrow or Option+Backspace taken for IME input was swallowed.
+ */
+const NON_COMPOSING_KEYS = new Set([
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "ArrowDown",
+  "Backspace",
+  "Delete",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+]);
+
+/**
+ * A keydown that belongs to an input method or dead key, which the terminal
+ * leaves to the webview (its text arrives as input or composition events).
+ * While a composition runs (`composing`, or `isComposing`) every key does;
+ * otherwise keyCode 229 marks the keystroke that may start one, never a
+ * navigation or deletion key.
+ */
+export function isInputMethodKeyDown(
+  event: Pick<KeyboardEvent, "isComposing" | "keyCode" | "key">,
+  composing: boolean,
+): boolean {
+  if (composing || event.isComposing) return true;
+  if (event.key === "Dead" || event.key === "Process") return true;
+  return event.keyCode === 229 && !NON_COMPOSING_KEYS.has(event.key);
+}
+
 export function terminalWordNavigationSequence(event: TerminalKeyEvent): string | null {
   if (!event.altKey || event.ctrlKey || event.metaKey) return null;
   if (event.key === "ArrowLeft" || event.code === "ArrowLeft") return "\x1bb";

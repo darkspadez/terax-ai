@@ -259,6 +259,10 @@ program cannot turn on Kitty report-events or report-alternates
 queries report what is in force): the inbox ConPTY drops any input CSI with a
 `:` sub-parameter, which those flags put in arrows, releases and shifted keys.
 Num Lock is reported only with keypad keys.
+Keydowns an input method owns (during a composition, dead keys, keyCode 229
+on character keys) are left to the webview, whose input and composition
+events carry the text (`isInputMethodKeyDown`); arrows, Home, End, Page keys,
+Backspace and Delete stamped 229 (WKWebView's Option keys) are still keys.
 Terminal text uses the configured font, an installed Nerd Font when detected,
 or bundled JetBrains Mono: the official variable fonts, upright and italic, with
 every glyph, weight (100-800) and OpenType feature, split by Unicode range into

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isInputMethodKeyDown,
   terminalClipboardAction,
   terminalDeleteSequence,
   terminalLineNavigationSequence,
@@ -285,5 +286,41 @@ describe("terminalClipboardAction", () => {
     expect(
       terminalClipboardAction(key("Ctrl+J", { code: "KeyC" }), opts),
     ).toBeNull();
+  });
+});
+
+// crynta/terax-ai#1009: WKWebView stamps 229 on Option+Arrow/Backspace.
+describe("isInputMethodKeyDown", () => {
+  const key = (key: string, keyCode: number, isComposing = false) => ({
+    key,
+    keyCode,
+    isComposing,
+  });
+
+  it("leaves navigation and deletion keys stamped 229 to the terminal", () => {
+    for (const name of [
+      "ArrowLeft",
+      "ArrowRight",
+      "ArrowUp",
+      "ArrowDown",
+      "Backspace",
+      "Delete",
+      "Home",
+      "End",
+      "PageUp",
+      "PageDown",
+    ]) {
+      expect(isInputMethodKeyDown(key(name, 229), false)).toBe(false);
+    }
+    expect(isInputMethodKeyDown(key("a", 65), false)).toBe(false);
+  });
+
+  it("leaves character keys stamped 229, dead keys and compositions to the IME", () => {
+    expect(isInputMethodKeyDown(key("a", 229), false)).toBe(true);
+    expect(isInputMethodKeyDown(key("Dead", 222), false)).toBe(true);
+    expect(isInputMethodKeyDown(key("Process", 229), false)).toBe(true);
+    // Candidate navigation and preedit editing during a composition.
+    expect(isInputMethodKeyDown(key("ArrowDown", 229, true), false)).toBe(true);
+    expect(isInputMethodKeyDown(key("Backspace", 8), true)).toBe(true);
   });
 });
