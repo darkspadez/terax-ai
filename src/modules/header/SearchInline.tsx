@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { KEY_SEP } from "@/lib/platform";
+import { cn } from "@/lib/utils";
 import type { EditorPaneHandle } from "@/modules/editor";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { getBindingTokens, SHORTCUTS } from "@/modules/shortcuts/shortcuts";
@@ -45,6 +46,9 @@ type Props = {
 export const SearchInline = forwardRef<SearchInlineHandle, Props>(
   function SearchInline({ target, compact }, ref) {
     const [q, setQ] = useState("");
+    // Terminal searches can use a regular expression (smart case).
+    const [regex, setRegex] = useState(false);
+    const terminalTarget = target?.kind === "terminal";
     // In compact mode the field is hidden behind an icon until activated.
     // In normal mode the field is always present.
     const [openInCompact, setOpenInCompact] = useState(false);
@@ -103,12 +107,13 @@ export const SearchInline = forwardRef<SearchInlineHandle, Props>(
     // Target switched (terminal ↔ editor) or removed → drop highlights.
     useEffect(() => clearTarget, [clearTarget]);
 
-    const applyIncremental = (next: string) => {
+    const applyIncremental = (next: string, useRegex = regex) => {
       if (!target) return;
       if (target.kind === "terminal") {
         if (next) {
           target.addon.findNext(next, {
             incremental: true,
+            regex: useRegex,
             decorations: TERM_DECORATIONS,
           });
         } else {
@@ -122,7 +127,7 @@ export const SearchInline = forwardRef<SearchInlineHandle, Props>(
     const findDirection = (forward: boolean) => {
       if (!target || !q) return;
       if (target.kind === "terminal") {
-        const opts = { decorations: TERM_DECORATIONS };
+        const opts = { regex, decorations: TERM_DECORATIONS };
         if (forward) target.addon.findNext(q, opts);
         else target.addon.findPrevious(q, opts);
       } else if (target.kind === "editor") {
@@ -149,7 +154,10 @@ export const SearchInline = forwardRef<SearchInlineHandle, Props>(
               ref={setInputRef}
               value={q}
               placeholder={placeholder}
-              className="h-7 w-full bg-muted/80 pr-7 pl-7 text-[13px]! placeholder:text-muted-foreground/70 focus-visible:ring-0"
+              className={cn(
+                "h-7 w-full bg-muted/80 pl-7 text-[13px]! placeholder:text-muted-foreground/70 focus-visible:ring-0",
+                terminalTarget ? "pr-13" : "pr-7",
+              )}
               onChange={(e) => {
                 const next = e.target.value;
                 setQ(next);
@@ -173,6 +181,28 @@ export const SearchInline = forwardRef<SearchInlineHandle, Props>(
                 }
               }}
             />
+            {terminalTarget && (
+              <button
+                type="button"
+                aria-pressed={regex}
+                title="Regular expression"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  const next = !regex;
+                  setRegex(next);
+                  applyIncremental(q, next);
+                }}
+                className={cn(
+                  "absolute top-1/2 -translate-y-1/2 rounded px-0.5 font-mono text-[10px] leading-4",
+                  q ? "right-6" : "right-1.5",
+                  regex
+                    ? "bg-primary/20 text-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                )}
+              >
+                .*
+              </button>
+            )}
             {q && (
               <button
                 type="button"

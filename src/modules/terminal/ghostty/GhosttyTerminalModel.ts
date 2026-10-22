@@ -217,6 +217,11 @@ export interface GhosttyTerminalModelApi extends TerminalModel {
   ): string;
   bufferCursorLine?(): number;
   readCellLine?(line: number): readonly string[];
+  /** Cells of buffer lines `firstLine..lastLine` in one read (search scans). */
+  readCellLines?(
+    firstLine: number,
+    lastLine: number,
+  ): readonly (readonly string[])[];
   blockSearchActive?(): boolean;
   setBlockSearchMatch?(
     match: { line: number; col: number; len: number } | null,

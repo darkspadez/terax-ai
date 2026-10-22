@@ -1,5 +1,7 @@
-type TerminalSearchOptions = {
+export type TerminalSearchOptions = {
   readonly incremental?: boolean;
+  /** Treat the query as a regular expression (smart case). */
+  readonly regex?: boolean;
   readonly decorations?: {
     readonly matchBackground?: string;
     readonly activeMatchBackground?: string;

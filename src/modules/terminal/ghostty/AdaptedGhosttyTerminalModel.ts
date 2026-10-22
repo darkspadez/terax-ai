@@ -841,6 +841,18 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
     return this.readBufferLine(line).cells;
   }
 
+  readCellLines(firstLine: number, lastLine: number): readonly (readonly string[])[] {
+    this.assertLive();
+    const lines = this.readBufferLines(firstLine, lastLine);
+    const result: (readonly string[])[] = [];
+    for (let line = firstLine; line <= lastLine; line++) {
+      const read = lines.get(line);
+      if (!read) break;
+      result.push(read.cells);
+    }
+    return result;
+  }
+
   bufferCursorLine(): number {
     this.assertLive();
     return this.terminal.bufferCursorLine();
