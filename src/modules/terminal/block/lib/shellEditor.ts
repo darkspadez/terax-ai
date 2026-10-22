@@ -1,5 +1,6 @@
 import "@/modules/terminal/block/block.css";
 
+import { IS_MAC } from "@/lib/platform";
 import { buildTerminalTheme } from "@/styles/terminalTheme";
 import {
   acceptCompletion,
@@ -7,9 +8,7 @@ import {
   type Completion,
   type CompletionContext,
   type CompletionResult,
-  closeCompletion,
   completionStatus,
-  moveCompletionSelection,
   startCompletion,
 } from "@codemirror/autocomplete";
 import {
@@ -36,6 +35,7 @@ import {
 } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
 import { completionIcon } from "./completionIcons";
+import { completionListClaims, completionListKeys } from "./completionKeys";
 import { historyOpen, historyPopover } from "./historyPopover";
 import { inlineSuggestion } from "./inlineSuggest";
 import {
@@ -346,17 +346,6 @@ function baseTheme(fontFamily: string, fontSize: number, fontWeight: string) {
   });
 }
 
-// Arrow keys drive the completion popup when it is open; each command returns
-// false when no completion is active, so the keys fall through (e.g. to the
-// history popover / cursor movement).
-const completionNav = Prec.highest(
-  keymap.of([
-    { key: "ArrowDown", run: moveCompletionSelection(true) },
-    { key: "ArrowUp", run: moveCompletionSelection(false) },
-    { key: "Escape", run: closeCompletion },
-  ]),
-);
-
 export function createShellEditor(opts: ShellEditorOptions): ShellEditorHandle {
   const themeComp = new Compartment();
   const highlightComp = new Compartment();
@@ -424,7 +413,8 @@ export function createShellEditor(opts: ShellEditorOptions): ShellEditorHandle {
         defaultKeymap: false,
         addToOptions: [{ render: (c) => completionIcon(c.type), position: 20 }],
       }),
-      completionNav,
+      completionListKeys,
+      completionListClaims(IS_MAC),
       ...(opts.suggest ? inlineSuggestion(opts.suggest) : []),
       ...(opts.historyList ? historyPopover(opts.historyList) : []),
       placeholder(opts.placeholderText ?? "Run a command"),

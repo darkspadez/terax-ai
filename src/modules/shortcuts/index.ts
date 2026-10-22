@@ -8,6 +8,7 @@ export {
   useGlobalShortcuts,
   type ShortcutHandlers,
 } from "./lib/useGlobalShortcuts";
+export { useMenuShortcuts } from "./lib/useMenuShortcuts";
 export { useShortcutLabel, useShortcutText } from "./lib/useShortcutLabel";
 export { shortcutLabel, shortcutText } from "./lib/shortcutLabel";
 export {

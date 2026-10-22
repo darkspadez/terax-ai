@@ -21,6 +21,7 @@ export {
   focusedTerminalInAlternateScreen,
   navigateFocusedBlocks,
   ptyIdForLeaf,
+  restartSession,
   scrollFocusedTerminal,
   whenSessionReady,
   writeToSession,

@@ -142,6 +142,18 @@ describe("focusClaimsChord", () => {
     ).toBe(false);
   });
 
+  it("lets a box claim several chords", () => {
+    expect(
+      focusClaimsChord(chord({ ctrlKey: true, key: "p" }), "n p y", false),
+    ).toBe(true);
+    expect(
+      focusClaimsChord(chord({ ctrlKey: true, key: "y" }), "n p y", false),
+    ).toBe(true);
+    expect(
+      focusClaimsChord(chord({ ctrlKey: true, key: "g" }), "n p y", false),
+    ).toBe(false);
+  });
+
   it("leaves other chords and unclaimed focus to the global shortcut", () => {
     expect(focusClaimsChord(chord({ ctrlKey: true }), null, false)).toBe(false);
     expect(

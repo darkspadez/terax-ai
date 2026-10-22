@@ -15,6 +15,7 @@ import {
   LayoutTwoRowIcon,
   Logout01Icon,
   PaintBoardIcon,
+  Refresh01Icon,
   Search01Icon,
   Settings01Icon,
   SidebarLeftIcon,
@@ -57,6 +58,7 @@ export type CommandPaletteActionContext = {
   splitPaneRight: () => void;
   splitPaneDown: () => void;
   movePaneToNewTab: () => void;
+  restartTerminal: () => void;
   focusSearch: () => void;
   focusExplorerSearch: () => void;
   toggleSidebar: () => void;
@@ -257,6 +259,16 @@ export function createCommandItems(
       icon: SquareArrowUpRightIcon,
       disabledReason: moveToNewTabDisabled,
       run: ctx.movePaneToNewTab,
+    },
+    {
+      id: "terminal.restart",
+      title: "Restart terminal",
+      group: "Panes",
+      keywords: ["restart", "respawn", "relaunch", "reset", "kill", "shell"],
+      icon: Refresh01Icon,
+      shortcutId: "terminal.restart",
+      disabledReason: activeTerminalTab ? undefined : "No terminal tab",
+      run: ctx.restartTerminal,
     },
     {
       id: "git.graph",

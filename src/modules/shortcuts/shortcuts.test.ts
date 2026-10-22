@@ -406,6 +406,32 @@ describe("default shortcut layout", () => {
   });
 });
 
+// crynta/terax-ai#368: restarting ends what runs in the pane, so no default
+// key, but the user can give it one.
+describe("restart terminal shortcut", () => {
+  it.each(["macos", "windows", "linux"] as const)(
+    "is unbound on %s",
+    (platform) => {
+      expect(
+        defaultShortcuts(platform).find((s) => s.id === "terminal.restart"),
+      ).toMatchObject({ group: "Terminal", defaultBindings: [] });
+    },
+  );
+
+  it("runs on a binding the user gives it", () => {
+    const binding: KeyBinding = {
+      ctrl: true,
+      alt: true,
+      shift: true,
+      key: "k",
+    };
+    expect(matchShortcut(pressed(binding), {})).toBeNull();
+    expect(
+      matchShortcut(pressed(binding), { "terminal.restart": [binding] }),
+    ).toBe("terminal.restart");
+  });
+});
+
 describe("matchBinding with AltGr", () => {
   // Windows reports AltGr as Ctrl+Alt; AltGr+Shift+E types "Ę" in Polish.
   it("leaves AltGr characters to typing", () => {
