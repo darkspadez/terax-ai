@@ -1,28 +1,21 @@
 import type { GhosttyTerminalModelApi } from "@/modules/terminal/ghostty/GhosttyTerminalModel";
 import { readFile } from "node:fs/promises";
 import { TeraxGhostty } from "@terax/ghostty-core/adapted";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { FakeElement, FakeTextArea } from "./fakeTextArea";
-import {
-  GhosttyInputController,
-  terminalMouseModifiers,
-} from "./GhosttyInputController";
+import { AdaptedGhosttyTerminalModel } from "../AdaptedGhosttyTerminalModel";
+import { baseCharacter, GhosttyInputController } from "./GhosttyInputController";
 
-describe("terminalMouseModifiers", () => {
-  it("encodes xterm Shift, Alt, and Control bits", () => {
-    expect(
-      terminalMouseModifiers({ shiftKey: true, altKey: true, ctrlKey: true }),
-    ).toBe(28);
-  });
-
-  it("does not confuse the macOS Command modifier with Alt", () => {
-    const commandOnly = {
-      shiftKey: false,
-      altKey: false,
-      ctrlKey: false,
-      metaKey: true,
-    };
-    expect(terminalMouseModifiers(commandOnly)).toBe(0);
+describe("baseCharacter", () => {
+  it("returns what a key types without Option, by physical position", () => {
+    expect(baseCharacter({ code: "KeyF", shiftKey: false })).toBe("f");
+    expect(baseCharacter({ code: "KeyF", shiftKey: true })).toBe("F");
+    expect(baseCharacter({ code: "Digit2", shiftKey: false })).toBe("2");
+    expect(baseCharacter({ code: "Digit2", shiftKey: true })).toBe("@");
+    expect(baseCharacter({ code: "Period", shiftKey: false })).toBe(".");
+    expect(baseCharacter({ code: "Slash", shiftKey: true })).toBe("?");
+    expect(baseCharacter({ code: "Space", shiftKey: false })).toBe(" ");
+    expect(baseCharacter({ code: "ArrowLeft", shiftKey: false })).toBe("");
   });
 });
 
@@ -409,65 +402,230 @@ describe("GhosttyInputController", () => {
     controller.dispose();
   });
 
-  it("reports the cell that is drawn under the pointer while the grid is shifted up", () => {
-    const input = new FakeTextArea();
-    const pointerTarget = new FakeElement();
-    const onData = vi.fn();
-    let shift = 40;
-    const controller = new GhosttyInputController({
-      model: inputModel((mode) => mode === 1003 || mode === 1006),
-      input: input as unknown as HTMLTextAreaElement,
-      pointerTarget: pointerTarget as unknown as HTMLElement,
-      cellSize: () => ({ width: 10, height: 20 }),
-      gridShiftY: () => shift,
-      onData,
-      onCopy: () => false,
-      isMac: false,
-    });
-    const report = (clientY: number) => {
-      onData.mockClear();
-      pointerTarget.dispatchEvent(
-        mouseEvent("mousemove", { clientX: 15, clientY }),
-      );
-      return new TextDecoder().decode(onData.mock.calls[0][0]);
-    };
-    // 25 px down with the grid moved up 40 px is 65 px into the grid: row 4 (1-based).
-    expect(report(25)).toBe("\x1b[<32;2;4M");
-    shift = 0;
-    expect(report(31)).toBe("\x1b[<32;2;2M");
-    controller.dispose();
-  });
+});
 
-  it("deduplicates identical mouse-motion reports within a cell", () => {
-    const input = new FakeTextArea();
-    const pointerTarget = new FakeElement();
-    const onData = vi.fn();
-    const controller = new GhosttyInputController({
-      model: inputModel((mode) => mode === 1003 || mode === 1006),
-      input: input as unknown as HTMLTextAreaElement,
-      pointerTarget: pointerTarget as unknown as HTMLElement,
-      cellSize: () => ({ width: 10, height: 20 }),
-      onData,
-      onCopy: () => false,
-      isMac: false,
+describe.each(["ghostty-vt.wasm", "ghostty-vt-scalar.wasm"])(
+  "GhosttyInputController with the Ghostty core (%s)",
+  (artifact) => {
+    let core: TeraxGhostty;
+    const decoder = new TextDecoder();
+
+    beforeAll(async () => {
+      const bytes = await readFile(
+        new URL(
+          `../../../../../packages/ghostty-core/adapted/${artifact}`,
+          import.meta.url,
+        ),
+      );
+      core = await TeraxGhostty.loadBytes(Uint8Array.from(bytes).buffer);
     });
 
-    for (let index = 0; index < 2; index += 1) {
-      pointerTarget.dispatchEvent(
-        mouseEvent("mousemove", {
-          clientX: 15,
-          clientY: 25,
-        }),
-      );
+    function setup(
+      options: Partial<
+        ConstructorParameters<typeof GhosttyInputController>[0]
+      > & { devicePixelRatio?: number } = {},
+    ) {
+      const model = new AdaptedGhosttyTerminalModel(core, {
+        backend: "ghostty-webgpu",
+        cols: 80,
+        rows: 24,
+      });
+      const scale = options.devicePixelRatio ?? 1;
+      model.setPixelSize(800 * scale, 480 * scale);
+      const input = new FakeTextArea();
+      const pointerTarget = new FakeElement();
+      const sent: string[] = [];
+      const controller = new GhosttyInputController({
+        model,
+        input: input as unknown as HTMLTextAreaElement,
+        pointerTarget: pointerTarget as unknown as HTMLElement,
+        cellSize: () => ({ width: 10, height: 20 }),
+        onData: (bytes) => sent.push(decoder.decode(bytes)),
+        onCopy: () => false,
+        isMac: false,
+        ...options,
+      });
+      return {
+        model,
+        input,
+        pointerTarget,
+        sent,
+        write: (text: string) => model.write(new TextEncoder().encode(text)),
+        dispose: () => {
+          controller.dispose();
+          model.dispose();
+        },
+        controller,
+      };
     }
 
-    expect(onData).toHaveBeenCalledOnce();
-    expect(new TextDecoder().decode(onData.mock.calls[0][0])).toBe(
-      "\x1b[<32;2;2M",
-    );
-    controller.dispose();
-  });
-});
+    it("reports presses and releases in the program's format", () => {
+      const { pointerTarget, sent, write, dispose } = setup();
+      write("\x1b[?1000h\x1b[?1006h");
+      for (const [button, code] of [
+        [0, 0],
+        [1, 1],
+        [2, 2],
+      ] as const) {
+        pointerTarget.dispatchEvent(
+          mouseEvent("mousedown", { button, clientX: 25, clientY: 65 }),
+        );
+        pointerTarget.dispatchEvent(
+          mouseEvent("mouseup", { button, clientX: 25, clientY: 65 }),
+        );
+        expect(sent.splice(0)).toEqual([
+          `\x1b[<${code};3;4M`,
+          `\x1b[<${code};3;4m`,
+        ]);
+      }
+      // Shift leaves the mouse to selection.
+      pointerTarget.dispatchEvent(
+        mouseEvent("mousedown", { shiftKey: true, clientX: 25, clientY: 65 }),
+      );
+      expect(sent).toEqual([]);
+      dispose();
+    });
+
+    it("reports buttonless motion once per cell where the grid is drawn", () => {
+      let shift = 40;
+      const { pointerTarget, sent, write, dispose } = setup({
+        gridShiftY: () => shift,
+      });
+      write("\x1b[?1003h\x1b[?1006h");
+      const move = (clientY: number) =>
+        pointerTarget.dispatchEvent(
+          mouseEvent("mousemove", { clientX: 15, clientY }),
+        );
+      // 25 px down with the grid moved up 40 px is 65 px into the grid: row 4.
+      move(25);
+      move(26);
+      shift = 0;
+      move(31);
+      expect(sent).toEqual(["\x1b[<35;2;4M", "\x1b[<35;2;2M"]);
+      dispose();
+    });
+
+    it("reports SGR pixels in the terminal's device pixels", () => {
+      const { pointerTarget, sent, write, dispose } = setup({
+        devicePixelRatio: 2,
+      });
+      write("\x1b[?1003h\x1b[?1016h");
+      pointerTarget.dispatchEvent(
+        mouseEvent("mousemove", { clientX: 15, clientY: 25 }),
+      );
+      expect(sent).toEqual(["\x1b[<35;30;50M"]);
+      dispose();
+    });
+
+    it("turns wheel notches and trackpad distance into wheel buttons", () => {
+      const { pointerTarget, sent, write, dispose } = setup({
+        scrollMultiplier: () => 3,
+      });
+      write("\x1b[?1000h\x1b[?1006h");
+      pointerTarget.dispatchEvent(
+        wheelEvent({ deltaMode: 1, deltaY: 1, clientX: 5, clientY: 5 }),
+      );
+      expect(sent.splice(0)).toEqual(Array(3).fill("\x1b[<65;1;1M"));
+      pointerTarget.dispatchEvent(
+        wheelEvent({ deltaMode: 1, deltaX: -1, clientX: 5, clientY: 5 }),
+      );
+      expect(sent.splice(0)).toEqual(Array(3).fill("\x1b[<66;1;1M"));
+      // 20 px is one cell: 8 px scrolls nothing yet, 12 more complete a row.
+      pointerTarget.dispatchEvent(wheelEvent({ deltaY: -8 }));
+      expect(sent).toEqual([]);
+      pointerTarget.dispatchEvent(wheelEvent({ deltaY: -12 }));
+      expect(sent).toEqual(["\x1b[<64;1;1M"]);
+      dispose();
+    });
+
+    it("sends cursor keys for the wheel in full-screen programs that do not track it", () => {
+      const { pointerTarget, sent, write, dispose } = setup();
+      write("\x1b[?1049h\x1b[?1h");
+      pointerTarget.dispatchEvent(wheelEvent({ deltaMode: 1, deltaY: 1 }));
+      expect(sent).toEqual(Array(3).fill("\x1bOB"));
+      dispose();
+    });
+
+    it("scrolls history with the wheel when nothing tracks it", () => {
+      const { model, pointerTarget, sent, write, dispose } = setup();
+      write("line\r\n".repeat(60));
+      const before = model.scrollPosition().offset;
+      pointerTarget.dispatchEvent(wheelEvent({ deltaMode: 1, deltaY: -1 }));
+      // The offset counts lines scrolled up from the bottom.
+      expect(model.scrollPosition().offset).toBe(before + 3);
+      expect(sent).toEqual([]);
+      dispose();
+    });
+
+    it("types Alt with the configured macOS Option key", () => {
+      let setting: "off" | "left" | "right" | "both" = "left";
+      const { input, sent, dispose } = setup({
+        isMac: true,
+        optionAsAlt: () => setting,
+      });
+      const option = (code: "AltLeft" | "AltRight", type: string) =>
+        input.dispatchEvent(
+          keyboardEvent({ key: "Alt", code, altKey: type === "keydown" }, type),
+        );
+      const type = (shiftKey = false) =>
+        input.dispatchEvent(
+          keyboardEvent({ key: "ƒ", code: "KeyF", altKey: true, shiftKey }),
+        );
+      option("AltLeft", "keydown");
+      type();
+      type(true);
+      expect(sent.splice(0)).toEqual(["\x1bf", "\x1bF"]);
+      setting = "right";
+      type();
+      expect(sent.splice(0)).toEqual(["ƒ"]);
+      option("AltLeft", "keyup");
+      option("AltRight", "keydown");
+      type();
+      expect(sent.splice(0)).toEqual(["\x1bf"]);
+      setting = "off";
+      type();
+      expect(sent.splice(0)).toEqual(["ƒ"]);
+      dispose();
+    });
+
+    it("asks before an unbracketed paste with line breaks", async () => {
+      const answers = [false, true];
+      const confirmPaste = vi.fn(async () => answers.shift() ?? false);
+      const { controller, sent, write, dispose } = setup({ confirmPaste });
+      controller.paste("echo safe");
+      expect(sent.splice(0)).toEqual(["echo safe"]);
+      controller.paste("rm -rf ~\n");
+      await Promise.resolve();
+      expect(sent).toEqual([]);
+      controller.paste("echo ok\n");
+      await vi.waitFor(() => expect(sent).toEqual(["echo ok\r"]));
+      write("\x1b[?2004h");
+      controller.paste("bracketed\n");
+      expect(confirmPaste).toHaveBeenCalledTimes(2);
+      expect(sent[1]).toBe("\x1b[200~bracketed\r\x1b[201~");
+      dispose();
+    });
+
+    it("finishes selections and middle-click pastes only when the program does not track the mouse", () => {
+      const onSelectionFinished = vi.fn();
+      const onMiddleClick = vi.fn(() => true);
+      const { pointerTarget, write, dispose } = setup({
+        onSelectionFinished,
+        onMiddleClick,
+      });
+      pointerTarget.dispatchEvent(mouseEvent("pointerup", { button: 0 }));
+      pointerTarget.dispatchEvent(mouseEvent("mousedown", { button: 1 }));
+      expect(onSelectionFinished).toHaveBeenCalledOnce();
+      expect(onMiddleClick).toHaveBeenCalledOnce();
+      write("\x1b[?1000h");
+      pointerTarget.dispatchEvent(mouseEvent("pointerup", { button: 0 }));
+      pointerTarget.dispatchEvent(mouseEvent("mousedown", { button: 1 }));
+      expect(onSelectionFinished).toHaveBeenCalledOnce();
+      expect(onMiddleClick).toHaveBeenCalledOnce();
+      dispose();
+    });
+  },
+);
 
 function inputModel(
   mode: (value: number) => boolean = () => false,
@@ -507,6 +665,16 @@ function keyboardEvent(
     shiftKey: false,
     ...values,
   }) as KeyboardEvent;
+}
+
+function wheelEvent(values: Partial<WheelEvent>): WheelEvent {
+  return Object.assign(mouseEvent("wheel", {}), {
+    deltaMode: 0,
+    deltaX: 0,
+    deltaY: 0,
+    deltaZ: 0,
+    ...values,
+  }) as WheelEvent;
 }
 
 function mouseEvent(type: string, values: Partial<MouseEvent>): MouseEvent {

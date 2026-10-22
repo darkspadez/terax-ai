@@ -67,7 +67,7 @@ describe.each(["ghostty-vt", "ghostty-vt-scalar"])(
         expect(replies).toEqual(["\x1b[?997;2n", "\x1b[?999;2n"]);
         model.setTerminalVersion("terax 9.9.9");
         write("\x1b[>q");
-        expect(replies.at(-1)).toBe("\x1bP>|terax 9.9.9\x1b\\");
+        expect(replies[replies.length - 1]).toBe("\x1bP>|terax 9.9.9\x1b\\");
       } finally {
         model.dispose();
       }

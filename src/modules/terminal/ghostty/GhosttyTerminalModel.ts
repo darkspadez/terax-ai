@@ -224,6 +224,11 @@ export interface GhosttyTerminalModelApi extends TerminalModel {
   encodeMouse?(event: GhosttyMouseEvent): Uint8Array;
   /** Reports the next motion even within the cell last reported. */
   resetMouseMotion?(): void;
+  /**
+   * Size of one cell in the terminal pixels of `setPixelSize` (the units of
+   * `encodeMouse` positions); 1x1 until a pixel size is set.
+   */
+  cellPixelSize?(): { readonly width: number; readonly height: number };
   /** Light or dark, answered to DSR 996 and reported under mode 2031. */
   setColorScheme?(scheme: "dark" | "light"): void;
   /** Whether the terminal can be seen (DSR 998, mode 2033). */

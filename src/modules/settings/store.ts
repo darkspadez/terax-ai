@@ -20,6 +20,12 @@ import {
   normalizeAgentLaunchCommands,
 } from "@/modules/agents/lib/launcher";
 import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
+import {
+  currentPlatform,
+  defaultTerminalBehavior,
+  normalizeTerminalBehavior,
+  type TerminalBehavior,
+} from "./terminalBehavior";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { LazyStore } from "@tauri-apps/plugin-store";
 
@@ -167,6 +173,7 @@ export type Preferences = {
   terminalLetterSpacing: number;
   terminalFontSize: number;
   terminalScrollback: number;
+  terminalBehavior: TerminalBehavior;
   confirmCloseRunningTerminal: boolean;
   lastWslDistro: string | null;
   zoomLevel: number;
@@ -263,6 +270,7 @@ const KEY_TERMINAL_SHELL = "terminalShell";
 const KEY_TERMINAL_LETTER_SPACING = "terminalLetterSpacing";
 const KEY_TERMINAL_FONT_SIZE = "terminalFontSize";
 const KEY_TERMINAL_SCROLLBACK = "terminalScrollback";
+const KEY_TERMINAL_BEHAVIOR = "terminalBehavior";
 const KEY_CONFIRM_CLOSE_RUNNING_TERMINAL = "confirmCloseRunningTerminal";
 const KEY_LAST_WSL_DISTRO = "lastWslDistro";
 const KEY_ZOOM_LEVEL = "zoomLevel";
@@ -358,6 +366,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   terminalLetterSpacing: 0,
   terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT,
   terminalScrollback: TERMINAL_SCROLLBACK_DEFAULT,
+  terminalBehavior: defaultTerminalBehavior(currentPlatform()),
   confirmCloseRunningTerminal: true,
   lastWslDistro: null,
   zoomLevel: 1.0,
@@ -532,6 +541,10 @@ export async function loadPreferences(): Promise<Preferences> {
     terminalScrollback: clampScrollback(
       get<number>(KEY_TERMINAL_SCROLLBACK) ??
         DEFAULT_PREFERENCES.terminalScrollback,
+    ),
+    terminalBehavior: normalizeTerminalBehavior(
+      get<unknown>(KEY_TERMINAL_BEHAVIOR),
+      DEFAULT_PREFERENCES.terminalBehavior,
     ),
     confirmCloseRunningTerminal:
       get<boolean>(KEY_CONFIRM_CLOSE_RUNNING_TERMINAL) ??
@@ -871,6 +884,23 @@ export async function setTerminalScrollback(value: number): Promise<void> {
   await writePref(KEY_TERMINAL_SCROLLBACK, clampScrollback(value));
 }
 
+/** Changes some terminal behaviour switches, keeping the others. */
+export async function setTerminalBehavior(
+  patch: Partial<TerminalBehavior>,
+): Promise<void> {
+  const current = normalizeTerminalBehavior(
+    await store.get<unknown>(KEY_TERMINAL_BEHAVIOR),
+    DEFAULT_PREFERENCES.terminalBehavior,
+  );
+  await writePref(
+    KEY_TERMINAL_BEHAVIOR,
+    normalizeTerminalBehavior(
+      { ...current, ...patch },
+      DEFAULT_PREFERENCES.terminalBehavior,
+    ),
+  );
+}
+
 export async function setConfirmCloseRunningTerminal(
   value: boolean,
 ): Promise<void> {
@@ -1008,6 +1038,7 @@ export async function onPreferencesChange(
     [KEY_TERMINAL_LETTER_SPACING]: "terminalLetterSpacing",
     [KEY_TERMINAL_FONT_SIZE]: "terminalFontSize",
     [KEY_TERMINAL_SCROLLBACK]: "terminalScrollback",
+    [KEY_TERMINAL_BEHAVIOR]: "terminalBehavior",
     [KEY_CONFIRM_CLOSE_RUNNING_TERMINAL]: "confirmCloseRunningTerminal",
     [KEY_LAST_WSL_DISTRO]: "lastWslDistro",
     [KEY_ZOOM_LEVEL]: "zoomLevel",

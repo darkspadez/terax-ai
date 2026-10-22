@@ -50,6 +50,7 @@ import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { useEffect, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
+import { TerminalBehaviorSettings } from "./TerminalBehaviorSettings";
 
 const APPEARANCE: {
   id: ThemePref;
@@ -493,6 +494,7 @@ export function GeneralSection() {
             onCheckedChange={(v) => void setConfirmCloseRunningTerminal(v)}
           />
         </SettingRow>
+        <TerminalBehaviorSettings />
       </div>
 
       <div className="flex flex-col gap-2">

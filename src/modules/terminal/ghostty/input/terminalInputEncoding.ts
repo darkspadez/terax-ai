@@ -22,3 +22,13 @@ export function encodeTerminalSubmission(
       : normalized;
   return `${payload}\r`;
 }
+
+/**
+ * A paste that would run commands: line breaks the shell receives as Enter.
+ * Inside bracketed paste the program gets the text as one paste, and
+ * `encodeTerminalPaste` neutralizes ESC so the bracket cannot be closed early
+ * (Ghostty's `clipboard-paste-protection` with `clipboard-paste-bracketed-safe`).
+ */
+export function isUnsafePaste(text: string, bracketedPaste: boolean): boolean {
+  return !bracketedPaste && /[\r\n]/.test(text);
+}

@@ -130,6 +130,8 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
   private presentationResourcesReleased = false;
   /** The last render update moved, changed or removed image placements. */
   private imagesChanged = false;
+  /** The core's cell size: set with the pixel size, kept across resizes. */
+  private cellPixels = { width: 1, height: 1 };
   private damageNotificationPending = false;
   private damageNeedsResolution = false;
   private modeBitsValue = 0;
@@ -351,8 +353,16 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
     this.assertLive();
     if (widthPx <= 0 || heightPx <= 0) return;
     this.terminal.setPixelSize(widthPx, heightPx);
+    this.cellPixels = {
+      width: Math.max(1, Math.floor(widthPx / this.colsValue)),
+      height: Math.max(1, Math.floor(heightPx / this.rowsValue)),
+    };
     // A new cell size is reported to programs using mode 2048.
     this.drainReplies();
+  }
+
+  cellPixelSize(): { readonly width: number; readonly height: number } {
+    return this.cellPixels;
   }
 
   imagePlacements(): readonly GhosttyImagePlacement[] {

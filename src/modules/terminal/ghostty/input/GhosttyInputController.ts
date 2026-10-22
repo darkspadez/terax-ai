@@ -1,3 +1,4 @@
+import type { TerminalOptionAsAlt } from "@/modules/settings/terminalBehavior";
 import { terminalReadlineSequence } from "@/modules/terminal/lib/keymap";
 import { readTerminalClipboard } from "@/modules/terminal/lib/terminalClipboard";
 import {
@@ -7,12 +8,20 @@ import {
   type KeyEvent,
 } from "@terax/ghostty-core/protocol";
 import type { GhosttyTerminalModelApi } from "../GhosttyTerminalModel";
-import { encodeTerminalPaste } from "./terminalInputEncoding";
+import { encodeTerminalPaste, isUnsafePaste } from "./terminalInputEncoding";
 
 import { TerminalInputProxy } from "@/modules/terminal/ghostty/input/TerminalInputProxy";
 import { TerminalNativeSelection } from "@/modules/terminal/ghostty/input/TerminalNativeSelection";
 
 const DUPLICATE_INPUT_WINDOW_MS = 75;
+
+/** `WheelEvent.deltaMode` values (the constructor is not available everywhere). */
+const DOM_DELTA_PIXEL = 0;
+const DOM_DELTA_LINE = 1;
+const DOM_DELTA_PAGE = 2;
+
+/** `MouseEvent.button` to Ghostty's buttons: left, middle, right, back, forward. */
+const MOUSE_BUTTONS: readonly number[] = [1, 3, 2, 8, 9];
 
 const KEY_MAP: Readonly<Record<string, Key>> = {
   KeyA: Key.A,
@@ -144,7 +153,19 @@ export type GhosttyInputControllerOptions = {
   readonly onPaste?: (text: string) => boolean;
   readonly onText?: (text: string) => boolean;
   readonly onKeyDown?: (event: KeyboardEvent) => boolean;
-  readonly macOptionIsMeta?: boolean;
+  /** macOS: which Option key types Alt (ESC-prefixed) instead of composing. */
+  readonly optionAsAlt?: () => TerminalOptionAsAlt;
+  /** Lines per wheel notch (default 3); pixel deltas scale relative to 3. */
+  readonly scrollMultiplier?: () => number;
+  /**
+   * Asked before a paste that could run commands (see `isUnsafePaste`);
+   * resolves true to paste. Without it every paste goes through.
+   */
+  readonly confirmPaste?: (text: string) => Promise<boolean>;
+  /** A left-button selection gesture ended (copy-on-select). */
+  readonly onSelectionFinished?: () => void;
+  /** Middle click the program does not track; true when handled (a paste). */
+  readonly onMiddleClick?: () => boolean;
   readonly isMac?: boolean;
   /** Selected-placeholder input proxy (a macOS WebKit fix); defaults to `isMac`. */
   readonly inputPlaceholder?: boolean;
@@ -161,8 +182,10 @@ export class GhosttyInputController {
   private lastData = "";
   private lastSource: InputSource | null = null;
   private lastDataAt = 0;
-  private wheelRemainder = 0;
-  private lastMouseMotion: string | null = null;
+  private wheelRemainderX = 0;
+  private wheelRemainderY = 0;
+  /** Option keys held, by side (macOS Option-as-Alt is per side). */
+  private readonly optionKeys = new Set<"AltLeft" | "AltRight">();
   private disposed = false;
 
   constructor(private readonly options: GhosttyInputControllerOptions) {
@@ -194,6 +217,8 @@ export class GhosttyInputController {
     options.pointerTarget.addEventListener("mousedown", this.handleMouseDown);
     options.pointerTarget.addEventListener("mouseup", this.handleMouseUp);
     options.pointerTarget.addEventListener("mousemove", this.handleMouseMove);
+    options.pointerTarget.addEventListener("mouseleave", this.handleMouseLeave);
+    options.pointerTarget.addEventListener("pointerup", this.handlePointerUp);
     options.pointerTarget.addEventListener("wheel", this.handleWheel, {
       passive: false,
     });
@@ -203,11 +228,21 @@ export class GhosttyInputController {
     if (this.disposed || !text) return;
     this.nativeSelection?.reset();
     if (this.options.onPaste?.(text)) return;
-    this.emitText(
-      encodeTerminalPaste(text, this.options.model.modes().bracketedPaste),
-      "paste",
-      false,
-    );
+    const bracketed = this.options.model.modes().bracketedPaste;
+    if (this.options.confirmPaste && isUnsafePaste(text, bracketed)) {
+      void this.options.confirmPaste(text).then((confirmed) => {
+        // Bracketed paste may have changed while the user decided.
+        if (confirmed && !this.disposed) {
+          this.emitText(
+            encodeTerminalPaste(text, this.options.model.modes().bracketedPaste),
+            "paste",
+            false,
+          );
+        }
+      });
+      return;
+    }
+    this.emitText(encodeTerminalPaste(text, bracketed), "paste", false);
   }
 
   dispose(): void {
@@ -228,11 +263,22 @@ export class GhosttyInputController {
     pointerTarget.removeEventListener("mousedown", this.handleMouseDown);
     pointerTarget.removeEventListener("mouseup", this.handleMouseUp);
     pointerTarget.removeEventListener("mousemove", this.handleMouseMove);
+    pointerTarget.removeEventListener("mouseleave", this.handleMouseLeave);
+    pointerTarget.removeEventListener("pointerup", this.handlePointerUp);
     pointerTarget.removeEventListener("wheel", this.handleWheel);
   }
 
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
     this.nativeSelection?.reset();
+    if (event.code === "AltLeft" || event.code === "AltRight") {
+      this.optionKeys.add(event.code);
+    }
+    if (!event.defaultPrevented && !this.composing && this.optionTypesAlt(event)) {
+      if (this.encodeOptionAsAlt(event)) {
+        consume(event);
+        return;
+      }
+    }
     if (
       event.defaultPrevented ||
       this.composing ||
@@ -286,10 +332,8 @@ export class GhosttyInputController {
       !event.metaKey &&
       ((!event.ctrlKey && !event.altKey) ||
         (event.ctrlKey && event.altKey) ||
-        (this.isMac &&
-          event.altKey &&
-          !event.ctrlKey &&
-          this.options.macOptionIsMeta !== true));
+        // Option composes characters on macOS unless it types Alt (above).
+        (this.isMac && event.altKey && !event.ctrlKey));
     if (printable) {
       consume(event);
       this.emitText(
@@ -326,7 +370,49 @@ export class GhosttyInputController {
     return encoded;
   }
 
+  /** macOS Option-as-Alt applies to this key event (side-aware). */
+  private optionTypesAlt(event: KeyboardEvent): boolean {
+    if (!this.isMac || !event.altKey || event.ctrlKey || event.metaKey) return false;
+    const setting = this.options.optionAsAlt?.() ?? "off";
+    if (setting === "off") return false;
+    if (setting === "both") return true;
+    // Without a tracked press (focus arrived with Option held), assume left.
+    const side =
+      this.optionKeys.has("AltRight") && !this.optionKeys.has("AltLeft")
+        ? "right"
+        : "left";
+    return setting === side;
+  }
+
+  /**
+   * Option as Alt: encodes the character the key types without Option (from
+   * its physical position, US layout), with the Alt modifier, so readline and
+   * editors see ESC-prefixed or Kitty-encoded Alt instead of a composed
+   * character such as "ƒ".
+   */
+  private encodeOptionAsAlt(event: KeyboardEvent): boolean {
+    const key = KEY_MAP[event.code];
+    const text = baseCharacter(event);
+    if (key === undefined || !text) return false;
+    const data = {
+      action: event.repeat ? KeyAction.REPEAT : KeyAction.PRESS,
+      key,
+      mods: modifiers(event),
+      utf8: text,
+      unshiftedCodepoint: text.toLowerCase().codePointAt(0) ?? 0,
+    };
+    const encoded = this.options.model.encodeKey(data);
+    if (encoded.byteLength === 0) return false;
+    this.pressedKeys.set(event.code, data);
+    this.options.model.scrollToBottom();
+    this.options.onData(encoded);
+    return true;
+  }
+
   private readonly handleKeyUp = (event: KeyboardEvent): void => {
+    if (event.code === "AltLeft" || event.code === "AltRight") {
+      this.optionKeys.delete(event.code);
+    }
     const pressed = this.pressedKeys.get(event.code);
     if (!pressed) return;
     this.pressedKeys.delete(event.code);
@@ -406,6 +492,7 @@ export class GhosttyInputController {
 
   private readonly handleBlur = (): void => {
     this.pressedKeys.clear();
+    this.optionKeys.clear();
     this.composing = false;
     if (this.options.model.modes().focusReporting) {
       this.emitText("\x1b[O", "keydown", false, false);
@@ -413,144 +500,144 @@ export class GhosttyInputController {
   };
 
   private readonly handleMouseDown = (event: MouseEvent): void => {
-    if (!this.options.model.modes().mouseTracking || event.shiftKey) return;
-    const position = this.mousePosition(event);
-    if (!position) return;
+    if (!this.reportsMouse(event)) {
+      if (event.button === 1 && this.options.onMiddleClick?.()) consume(event);
+      return;
+    }
+    const button = MOUSE_BUTTONS[event.button];
+    if (button === undefined) return;
     this.mouseButtons |= 1 << event.button;
-    this.lastMouseMotion = null;
-    consume(event);
-    this.sendMouse(event.button, position.col, position.row, false, event);
+    if (this.sendMouse("press", button, event)) consume(event);
   };
 
   private readonly handleMouseUp = (event: MouseEvent): void => {
-    if (!this.options.model.modes().mouseTracking || event.shiftKey) return;
-    const position = this.mousePosition(event);
-    if (!position) return;
+    const held = (this.mouseButtons & (1 << event.button)) !== 0;
     this.mouseButtons &= ~(1 << event.button);
-    this.lastMouseMotion = null;
-    consume(event);
-    this.sendMouse(event.button, position.col, position.row, true, event);
+    // A release is reported for a press that was, even if tracking just ended.
+    if (!held && !this.reportsMouse(event)) return;
+    const button = MOUSE_BUTTONS[event.button];
+    if (button === undefined) return;
+    if (this.sendMouse("release", button, event)) consume(event);
+  };
+
+  private readonly handlePointerUp = (event: PointerEvent): void => {
+    if (event.button !== 0 || this.reportsMouse(event)) return;
+    // The selection controller finished the selection on this same event.
+    this.options.onSelectionFinished?.();
   };
 
   private readonly handleMouseMove = (event: MouseEvent): void => {
-    if (event.shiftKey) {
-      this.lastMouseMotion = null;
-      return;
+    if (!this.reportsMouse(event)) return;
+    let button = 0;
+    for (let index = 0; index < MOUSE_BUTTONS.length; index += 1) {
+      if ((this.mouseButtons & (1 << index)) !== 0) {
+        button = MOUSE_BUTTONS[index] ?? 0;
+        break;
+      }
     }
-    const buttonMotion = this.options.model.mode(1002);
-    const anyMotion = this.options.model.mode(1003);
-    if (!anyMotion && (!buttonMotion || this.mouseButtons === 0)) {
-      this.lastMouseMotion = null;
-      return;
-    }
-    const position = this.mousePosition(event);
-    if (!position) return;
-    let button = 32;
-    if ((this.mouseButtons & 1) !== 0) button += 0;
-    else if ((this.mouseButtons & 2) !== 0) button += 1;
-    else if ((this.mouseButtons & 4) !== 0) button += 2;
-    const signature = [
-      button,
-      position.col,
-      position.row,
-      terminalMouseModifiers(event),
-      buttonMotion ? 1 : 0,
-      anyMotion ? 1 : 0,
-      this.options.model.mode(1006) ? 1 : 0,
-    ].join(":");
-    consume(event);
-    if (signature === this.lastMouseMotion) return;
-    this.lastMouseMotion = signature;
-    this.sendMouse(button, position.col, position.row, false, event);
+    // The encoder reports motion only in modes 1002/1003, once per cell.
+    if (this.sendMouse("motion", button, event)) consume(event);
+  };
+
+  private readonly handleMouseLeave = (): void => {
+    this.options.model.resetMouseMotion?.();
   };
 
   private readonly handleWheel = (event: WheelEvent): void => {
-    if (this.options.model.modes().mouseTracking && !event.shiftKey) {
-      const position = this.mousePosition(event);
-      if (!position) return;
+    const cell = this.options.cellSize();
+    if (cell.width <= 0 || cell.height <= 0) return;
+    const multiplier = this.options.scrollMultiplier?.() ?? 3;
+    // Trackpads and most mice report pixels: scroll by distance, scaled by
+    // the multiplier relative to its default of 3 lines per notch.
+    const scale =
+      event.deltaMode === DOM_DELTA_LINE
+        ? multiplier
+        : event.deltaMode === DOM_DELTA_PAGE
+          ? this.options.model.rows
+          : multiplier / 3;
+    const pixel = event.deltaMode === DOM_DELTA_PIXEL;
+    this.wheelRemainderY += pixel
+      ? (event.deltaY / cell.height) * scale
+      : event.deltaY * scale;
+    this.wheelRemainderX += pixel
+      ? (event.deltaX / cell.width) * scale
+      : event.deltaX * scale;
+    const rows = Math.trunc(this.wheelRemainderY);
+    const columns = Math.trunc(this.wheelRemainderX);
+    this.wheelRemainderY -= rows;
+    this.wheelRemainderX -= columns;
+
+    if (this.reportsMouse(event)) {
       consume(event);
-      this.sendMouse(
-        event.deltaY < 0 ? 64 : 65,
-        position.col,
-        position.row,
-        false,
-        event,
-      );
+      for (let step = 0; step < Math.abs(rows); step += 1) {
+        this.sendMouse("press", rows < 0 ? 4 : 5, event);
+      }
+      for (let step = 0; step < Math.abs(columns); step += 1) {
+        this.sendMouse("press", columns < 0 ? 6 : 7, event);
+      }
+      return;
+    }
+
+    const modes = this.options.model.modes();
+    // Alternate scroll (mode 1007, on by default): a full-screen program that
+    // does not track the mouse gets cursor keys, so pagers and editors scroll.
+    if (modes.alternateScreen && this.options.model.mode(1007)) {
+      consume(event);
+      for (let step = 0; step < Math.abs(rows); step += 1) {
+        const bytes = this.options.model.encodeKey({
+          action: KeyAction.PRESS,
+          key: rows < 0 ? Key.UP : Key.DOWN,
+          mods: Mods.NONE,
+        });
+        if (bytes.byteLength > 0) this.options.onData(bytes);
+      }
       return;
     }
 
     if (this.options.model.scrollPosition().history === 0) return;
-    const cellHeight = Math.max(1, this.options.cellSize().height);
-    const delta =
-      event.deltaMode === WheelEvent.DOM_DELTA_LINE
-        ? event.deltaY
-        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-          ? event.deltaY * this.options.model.rows
-          : event.deltaY / cellHeight;
-    this.wheelRemainder += delta;
-    const lines =
-      this.wheelRemainder < 0
-        ? Math.ceil(this.wheelRemainder)
-        : Math.floor(this.wheelRemainder);
-    this.wheelRemainder -= lines;
-    if (lines !== 0) this.options.model.scrollBy(lines);
+    if (rows !== 0) this.options.model.scrollBy(rows);
     consume(event);
   };
 
-  private mousePosition(
-    event: MouseEvent,
-  ): { col: number; row: number } | null {
+  /** Mouse events go to the program: it tracks the mouse and Shift is up. */
+  private reportsMouse(event: MouseEvent): boolean {
+    return this.options.model.modes().mouseTracking && !event.shiftKey;
+  }
+
+  /** Grid-relative position in the terminal pixels the core counts in. */
+  private terminalPosition(event: MouseEvent): { x: number; y: number } | null {
     const rect = this.options.pointerTarget.getBoundingClientRect();
     const cell = this.options.cellSize();
     if (cell.width <= 0 || cell.height <= 0) return null;
+    const pixels = this.options.model.cellPixelSize?.() ?? cell;
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top + (this.options.gridShiftY?.() ?? 0);
     return {
-      col: Math.max(
-        1,
-        Math.min(
-          this.options.model.cols,
-          Math.floor((event.clientX - rect.left) / cell.width) + 1,
-        ),
-      ),
-      row: Math.max(
-        1,
-        Math.min(
-          this.options.model.rows,
-          Math.floor(
-            (event.clientY - rect.top + (this.options.gridShiftY?.() ?? 0)) /
-              cell.height,
-          ) + 1,
-        ),
-      ),
+      x: (x / cell.width) * pixels.width,
+      y: (y / cell.height) * pixels.height,
     };
   }
 
+  /** Encodes and sends one mouse event; false when the program skips it. */
   private sendMouse(
+    action: "press" | "release" | "motion",
     button: number,
-    col: number,
-    row: number,
-    release: boolean,
     event: MouseEvent,
-  ): void {
-    const modifiers = terminalMouseModifiers(event);
-    const encodedButton = button + modifiers;
-    if (this.options.model.mode(1006)) {
-      this.emitText(
-        `\x1b[<${encodedButton};${col};${row}${release ? "m" : "M"}`,
-        "keydown",
-        false,
-        false,
-      );
-      return;
-    }
-    const legacyButton = release ? 3 : encodedButton;
-    this.emitText(
-      `\x1b[M${String.fromCharCode(legacyButton + 32)}${String.fromCharCode(
-        Math.min(255, col + 32),
-      )}${String.fromCharCode(Math.min(255, row + 32))}`,
-      "keydown",
-      false,
-      false,
-    );
+  ): boolean {
+    const encodeMouse = this.options.model.encodeMouse;
+    const position = this.terminalPosition(event);
+    if (!encodeMouse || !position) return false;
+    const bytes = encodeMouse.call(this.options.model, {
+      action,
+      button,
+      mods: modifiers(event),
+      x: position.x,
+      y: position.y,
+      anyButtonPressed: this.mouseButtons !== 0,
+    });
+    if (bytes.byteLength === 0) return false;
+    this.emitBytes(bytes);
+    return true;
   }
 
   private emitText(
@@ -582,6 +669,14 @@ export class GhosttyInputController {
       ? this.encodeKeyDown(keyEvent, KEY_MAP[keyEvent.code])
       : this.encoder.encode(data);
     if (bytes.byteLength > 0) this.options.onData(bytes);
+  }
+
+  /** Program-bound bytes that are not typing (mouse reports). */
+  private emitBytes(bytes: Uint8Array): void {
+    if (this.disposed) return;
+    this.lastData = "";
+    this.lastSource = null;
+    this.options.onData(bytes);
   }
 }
 
@@ -618,24 +713,39 @@ function unshiftedCodepoint(event: KeyboardEvent): number {
     : 0;
 }
 
-export function terminalMouseModifiers(
-  event: Pick<MouseEvent, "altKey" | "ctrlKey" | "shiftKey">,
-): number {
-  let modifiers = 0;
-  if (event.shiftKey) modifiers |= 4;
-  if (event.altKey) modifiers |= 8;
-  if (event.ctrlKey) modifiers |= 16;
-  return modifiers;
+/**
+ * The character a key types without Option, from its physical position on a
+ * US layout (shifted when Shift is held); "" when it types none.
+ */
+export function baseCharacter(
+  event: Pick<KeyboardEvent, "code" | "shiftKey">,
+): string {
+  const { code, shiftKey } = event;
+  if (code.startsWith("Key") && code.length === 4) {
+    const letter = code.charAt(3);
+    return shiftKey ? letter : letter.toLowerCase();
+  }
+  if (code.startsWith("Digit") && code.length === 6) {
+    const digit = code.charCodeAt(5) - 48;
+    return shiftKey ? (")!@#$%^&*("[digit] ?? "") : String(digit);
+  }
+  if (code === "Space") return " ";
+  const pair = UNSHIFTED_SYMBOLS[code];
+  return pair ? pair.charAt(shiftKey ? 1 : 0) : "";
 }
 
-function modifiers(event: KeyboardEvent): Mods {
+function modifiers(
+  event: Pick<MouseEvent, "shiftKey" | "ctrlKey" | "altKey" | "metaKey"> & {
+    readonly getModifierState?: (key: string) => boolean;
+  },
+): Mods {
   let result = Mods.NONE;
   if (event.shiftKey) result |= Mods.SHIFT;
   if (event.ctrlKey) result |= Mods.CTRL;
   if (event.altKey) result |= Mods.ALT;
   if (event.metaKey) result |= Mods.SUPER;
-  if (event.getModifierState("CapsLock")) result |= Mods.CAPSLOCK;
-  if (event.getModifierState("NumLock")) result |= Mods.NUMLOCK;
+  if (event.getModifierState?.("CapsLock")) result |= Mods.CAPSLOCK;
+  if (event.getModifierState?.("NumLock")) result |= Mods.NUMLOCK;
   return result;
 }
 

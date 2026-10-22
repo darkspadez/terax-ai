@@ -19,7 +19,14 @@ export {
   whenSessionReady,
   writeToSession,
 } from "./lib/terminalSessionApi";
+export {
+  selectTerminalTabStatus,
+  type TerminalProgress,
+  type TerminalTabStatus,
+  useTerminalStatusStore,
+} from "./lib/terminalStatus";
 export { isTerminalSurfaceTarget } from "./lib/terminalSurfaceTarget";
+export { TerminalPromptDialog } from "./TerminalPromptDialog";
 export {
   type TerminalPathDropTarget,
   useTerminalFileDrop,

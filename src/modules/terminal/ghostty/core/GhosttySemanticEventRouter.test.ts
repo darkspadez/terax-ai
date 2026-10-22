@@ -54,4 +54,33 @@ describe("GhosttySemanticEventRouter", () => {
     router.handle({ type: "overflow", dropped: 3 });
     expect(onOverflow).toHaveBeenCalledWith(3);
   });
+
+  it("routes progress, pointer shapes, clipboard reads and command boundaries", () => {
+    const onProgress = vi.fn();
+    const onPointerShape = vi.fn();
+    const onClipboardRead = vi.fn();
+    const onCommandStarted = vi.fn();
+    const onCommandFinished = vi.fn();
+    const router = new GhosttySemanticEventRouter({
+      onProgress,
+      onPointerShape,
+      onClipboardRead,
+      onCommandStarted,
+      onCommandFinished,
+    });
+
+    router.handle({ type: "progress", state: "set", progress: 40 });
+    router.handle({ type: "progress", state: "remove", progress: null });
+    router.handle({ type: "pointer-shape", shape: "pointer" });
+    router.handle({ type: "clipboard-read", selection: "c", terminator: "bel" });
+    router.handle({ type: "end-of-input", marker: 3, command: "make" });
+    router.handle({ type: "end-of-input" });
+    router.handle({ type: "end-of-command", exitCode: 2 });
+
+    expect(onProgress.mock.calls).toEqual([[{ state: "set", value: 40 }], [null]]);
+    expect(onPointerShape).toHaveBeenCalledWith("pointer");
+    expect(onClipboardRead).toHaveBeenCalledWith("c", "bel");
+    expect(onCommandStarted.mock.calls).toEqual([["make"], [null]]);
+    expect(onCommandFinished).toHaveBeenCalledWith(2);
+  });
 });

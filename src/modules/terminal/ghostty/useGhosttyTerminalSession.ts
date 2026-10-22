@@ -17,7 +17,13 @@ import type { TerminalSearchController } from "@/modules/terminal/search/Termina
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { openPty, type PtySession } from "../lib/pty-bridge";
-import { writeTerminalClipboard } from "../lib/terminalClipboard";
+import {
+  readPrimarySelection,
+  writePrimarySelection,
+  writeTerminalClipboard,
+} from "../lib/terminalClipboard";
+import { requestTerminalPrompt } from "../lib/terminalPrompts";
+import { useTerminalStatusStore } from "../lib/terminalStatus";
 import { LatestClipboardWrite } from "@/modules/terminal/lib/LatestClipboardWrite";
 import { GhosttySemanticEventRouter } from "./core/GhosttySemanticEventRouter";
 import { getGhosttyCoreRuntime } from "./GhosttyCoreRuntime";
@@ -33,6 +39,11 @@ import { webGpuTerminalRuntimeDiagnostics } from "./gpu/WebGpuTerminalRuntime";
 import { WebGpuTerminalSurface } from "./gpu/WebGpuTerminalSurface";
 import { GhosttyInputController } from "./input/GhosttyInputController";
 import { encodeTerminalSubmission } from "./input/terminalInputEncoding";
+import {
+  colorSchemeFor,
+  terminalIntegrationCallbacks,
+  terminalVersion,
+} from "./terminalIntegration";
 import type {
   WebGlTerminalSurface,
   WebGlTerminalSurfaceOptions,
@@ -99,6 +110,18 @@ type GhosttyStartupTimings = {
 };
 
 const sessions = new Map<number, GhosttySession>();
+
+// Bells rung while the window was in the background clear once it is back in
+// front for the panes on screen.
+if (typeof window !== "undefined") {
+  window.addEventListener("focus", () => {
+    const visible: number[] = [];
+    for (const session of sessions.values()) {
+      if (session.visible) visible.push(session.leafId);
+    }
+    useTerminalStatusStore.getState().acknowledgeBell(visible);
+  });
+}
 const textEncoder = new TextEncoder();
 const oscClipboard = new LatestClipboardWrite(writeTerminalClipboard);
 
@@ -194,6 +217,10 @@ export function useGhosttyTerminalSession({
     session.visible = visible;
     session.focused = focused;
     setLeafPresentation(leafId, visible, focused);
+    session.model?.setVisible?.(visible);
+    if (visible && document.hasFocus()) {
+      useTerminalStatusStore.getState().acknowledgeBell([leafId]);
+    }
     ghosttyBlocks(leafId)?.setVisible(visible);
     const surface = session.surface;
     if (!surface || session.rendererError) return;
@@ -248,6 +275,7 @@ export function useGhosttyTerminalSession({
       rgbToInt(theme.cursor),
       theme.palette.map(rgbToInt),
     );
+    session.model.setColorScheme?.(colorSchemeFor(theme.background));
     session.surface.setTheme(theme);
     if (session.surfaceOptions)
       session.surfaceOptions = { ...session.surfaceOptions, theme };
@@ -408,6 +436,7 @@ export function disposeGhosttySession(leafId: number): boolean {
   void session.pty?.close();
   session.pty = null;
   sessions.delete(leafId);
+  useTerminalStatusStore.getState().clear(leafId);
   return true;
 }
 
@@ -639,6 +668,12 @@ async function initializeSessionGeneration(
   if (!alive()) return;
 
   const semanticEvents = new GhosttySemanticEventRouter({
+    ...terminalIntegrationCallbacks({
+      leafId: session.leafId,
+      userIsLooking: () => session.visible && document.hasFocus(),
+      reply: (bytes) => session.writer.enqueue(bytes),
+      pointerTarget: () => session.surface?.eventTarget() ?? null,
+    }),
     onCwd: (cwd) => {
       if (session.lastCwd === cwd) return;
       session.lastCwd = cwd;
@@ -684,6 +719,13 @@ async function initializeSessionGeneration(
     return;
   }
   mark("modelReadyMs");
+  model.setColorScheme?.(colorSchemeFor(theme.background));
+  model.setVisible?.(session.visible);
+  model.setTerminalVersion?.(await terminalVersion());
+  if (!alive()) {
+    model.dispose();
+    return;
+  }
   session.model = model;
   session.callbacks.onModel?.(model);
   const blockSession = ghosttyBlocks(session.leafId);
@@ -872,6 +914,28 @@ function createGhosttyInput(
     },
     onText: insertPromptText,
     onPaste: insertPromptText,
+    optionAsAlt: () =>
+      usePreferencesStore.getState().terminalBehavior.optionAsAlt,
+    scrollMultiplier: () =>
+      usePreferencesStore.getState().terminalBehavior.scrollMultiplier,
+    confirmPaste: async (text) =>
+      !usePreferencesStore.getState().terminalBehavior.pasteProtection ||
+      (await requestTerminalPrompt({ kind: "paste", text })) === "allow",
+    onSelectionFinished: () => {
+      const mode = usePreferencesStore.getState().terminalBehavior.copyOnSelect;
+      const text = mode === "off" ? null : surface.getSelection();
+      if (!text) return;
+      void writePrimarySelection(text);
+      if (mode === "clipboard") void writeTerminalClipboard(text).catch(() => {});
+    },
+    onMiddleClick: () => {
+      if (!/Linux|X11/.test(navigator.userAgent) || /Android/.test(navigator.userAgent))
+        return false;
+      void readPrimarySelection().then((text) => {
+        if (text) session.input?.paste(text);
+      });
+      return true;
+    },
     getSelection: () => surface.getSelection(),
     onCopy: () => {
       const text = surface.getSelection();

@@ -94,6 +94,7 @@ import {
   type PaneBounds,
   ptyIdForLeaf,
   type TerminalPaneHandle,
+  TerminalPromptDialog,
   useAgentActivityStore,
   useTerminalFileDrop,
   whenSessionReady,
@@ -1660,6 +1661,7 @@ export default function App() {
             onCancelAppClose={cancelAppClose}
             onConfirmAppClose={confirmAppClose}
           />
+          <TerminalPromptDialog />
         </div>
       </TooltipProvider>
     </ThemeProvider>
