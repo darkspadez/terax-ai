@@ -1,9 +1,11 @@
 import { resolveFontFamily } from "@/lib/fonts";
 import { fmtShortcut, MOD_KEY } from "@/lib/platform";
 import { cn } from "@/lib/utils";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useTheme } from "@/modules/theme";
 import { useEffect, useRef } from "react";
 import { runScopeHandlers } from "@codemirror/view";
+import { parseFontFeatures, withFontFeatures } from "../lib/fontFeatures";
 import {
   clearLeafBlockSelection,
   getLeafDraft,
@@ -69,7 +71,12 @@ export default function ShellInput({
     fontWeight,
   } = useTerminalFont();
   const { activeTheme, resolvedMode } = useTheme();
-  const fontFamily = resolveFontFamily(fontFamilyPref);
+  const fontFeatures = usePreferencesStore((s) => s.terminalFontFeatures);
+  // The derived faces carry the features into the editor's DOM text too.
+  const fontFamily = withFontFeatures(
+    resolveFontFamily(fontFamilyPref),
+    parseFontFeatures(fontFeatures).settings ?? "normal",
+  );
   const fontRef = useRef({ fontFamily, fontSize, fontWeight });
   fontRef.current = { fontFamily, fontSize, fontWeight };
 

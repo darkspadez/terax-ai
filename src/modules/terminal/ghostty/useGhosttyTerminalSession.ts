@@ -23,6 +23,11 @@ import type { TerminalSearchController } from "@/modules/terminal/search/Termina
 import { currentWorkspaceEnv } from "@/modules/workspace/env";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  loadFeatureFamilies,
+  parseFontFeatures,
+  withFontFeatures,
+} from "../lib/fontFeatures";
 import { openPty, type PtySession } from "../lib/pty-bridge";
 import {
   DROPPED_PATH_MIMES,
@@ -190,12 +195,18 @@ export function useGhosttyTerminalSession({
   );
   const zoomLevel = usePreferencesStore((state) => state.zoomLevel);
   const lineHeight = usePreferencesStore((state) => state.terminalLineHeight);
+  const fontFeatures = usePreferencesStore(
+    (state) => state.terminalFontFeatures,
+  );
   const fontOffset = useTerminalFontOffsets(
     (state) => state.offsets[leafId] ?? 0,
   );
   const font = useMemo<TerminalFontSpec>(
     () => ({
-      family: resolveFontFamily(fontFamily),
+      family: withFontFeatures(
+        resolveFontFamily(fontFamily),
+        parseFontFeatures(fontFeatures).settings ?? "normal",
+      ),
       size: Math.max(4, Math.round((fontSize + fontOffset) * zoomLevel)),
       lineHeight,
       letterSpacing,
@@ -203,6 +214,7 @@ export function useGhosttyTerminalSession({
     }),
     [
       fontFamily,
+      fontFeatures,
       fontSize,
       fontOffset,
       fontWeight,
@@ -786,6 +798,7 @@ async function initializeSessionGeneration(
   const coreRuntime = getGhosttyCoreRuntime();
   const metricsPromise = (async () => {
     await ensureMonoFontsLoaded();
+    await loadFeatureFamilies(session.font.family);
     await document.fonts.ready;
     const initialFont = session.font;
     let metrics = await measureTerminalFont(initialFont);
@@ -1387,6 +1400,7 @@ async function updateSessionFont(
   if (!session.surface || session.disposed) return;
 
   await ensureMonoFontsLoaded();
+  await loadFeatureFamilies(font.family);
   await document.fonts.ready;
   const metrics = await measureTerminalFont(font);
   if (

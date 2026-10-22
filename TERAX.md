@@ -154,6 +154,13 @@ cell's glyph is the run drawn with that cell's character on its pen origin, cut
 to the cell, so `->` or `!=` joins while each cell keeps its own pixels.
 Runs break at the visible cursor, as in Ghostty, so the text under it reads as
 typed; the rows the break moves between are re-encoded.
+Font features (Settings, "Font features": `zero, ss01, -calt`, Ghostty's
+`font-feature` syntax; `terminal/lib/fontFeatures.ts`) ride on the font faces,
+since canvas text has no `font-feature-settings`: each `@font-face` family of
+the terminal stack is declared again under a derived name through `FontFace`
+with `featureSettings`, and the stack (grid and block editor) names that
+instead. Installed fonts cannot be declared again reliably (`local()` names
+faces differently per platform), so they draw without features.
 Letters, digits and spaces never form runs and keep the ASCII fast path.
 Kitty graphics draw in both renderers in Ghostty's three layers (under cell
 backgrounds, between backgrounds and text, above text; `gpu/imageLayer.ts`,

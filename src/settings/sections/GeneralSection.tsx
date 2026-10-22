@@ -28,6 +28,7 @@ import {
   setTerminalCursorStyle,
   setTerminalCustomShader,
   setTerminalFontFamily,
+  setTerminalFontFeatures,
   setTerminalFontSize,
   setTerminalFontWeight,
   setTerminalLetterSpacing,
@@ -45,6 +46,7 @@ import {
   TERMINAL_MINIMUM_CONTRASTS,
   TERMINAL_SCROLLBACK_PRESETS,
 } from "@/modules/settings/store";
+import { parseFontFeatures } from "@/modules/terminal/lib/fontFeatures";
 import { useTheme } from "@/modules/theme";
 import {
   ComputerIcon,
@@ -138,6 +140,9 @@ export function GeneralSection() {
   const terminalCursorBlink = usePreferencesStore((s) => s.terminalCursorBlink);
   const terminalCursorStyle = usePreferencesStore((s) => s.terminalCursorStyle);
   const terminalFontFamily = usePreferencesStore((s) => s.terminalFontFamily);
+  const terminalFontFeatures = usePreferencesStore(
+    (s) => s.terminalFontFeatures,
+  );
   const terminalFontWeight = usePreferencesStore((s) => s.terminalFontWeight);
   const terminalShell = usePreferencesStore((s) => s.terminalShell);
   const [shells, setShells] = useState<ShellInfo[]>([]);
@@ -403,6 +408,10 @@ export function GeneralSection() {
         <FontFamilyInput
           value={terminalFontFamily}
           onCommit={(v) => void setTerminalFontFamily(v)}
+        />
+        <FontFeaturesInput
+          value={terminalFontFeatures}
+          onCommit={(v) => void setTerminalFontFeatures(v)}
         />
         <SettingRow
           title="Font weight"
@@ -742,6 +751,53 @@ function notificationTestTitle(status: NotificationTestState): string {
     default:
       return "Send a native test notification after two seconds";
   }
+}
+
+function FontFeaturesInput({
+  value,
+  onCommit,
+}: {
+  value: string;
+  onCommit: (v: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(value);
+    setError(null);
+  }, [value]);
+
+  // A list that does not parse stays in the field with its error, unsaved.
+  const commit = () => {
+    const next = draft.trim();
+    const parsed = parseFontFeatures(next);
+    setError(parsed.error);
+    if (parsed.error === null && next !== value) onCommit(next);
+  };
+
+  return (
+    <SettingRow
+      title="Font features"
+      description={
+        error ??
+        "OpenType features as Ghostty's font-feature takes them, e.g. zero, ss01, -calt. Applies to the bundled JetBrains Mono, not to installed fonts."
+      }
+    >
+      <input
+        type="text"
+        value={draft}
+        placeholder="Font defaults"
+        aria-invalid={error !== null}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+        }}
+        className="h-8 w-48 rounded-md border border-border bg-background px-2.5 text-[12px] outline-none focus:border-foreground/40 aria-invalid:border-destructive"
+      />
+    </SettingRow>
+  );
 }
 
 function FontFamilyInput({

@@ -3,6 +3,7 @@ import {
   clampMinimumContrast,
   clampTerminalLineHeight,
   normalizeTerminalCustomShader,
+  normalizeTerminalFontFeatures,
   TERMINAL_CUSTOM_SHADER_MAX_BYTES,
   TERMINAL_LINE_HEIGHT_DEFAULT,
 } from "./store";
@@ -41,4 +42,11 @@ it("keeps a custom shader only with usable source", () => {
   ).toBeNull();
   expect(normalizeTerminalCustomShader("crt.glsl")).toBeNull();
   expect(normalizeTerminalCustomShader(null)).toBeNull();
+});
+
+it("keeps only font feature lists that parse", () => {
+  expect(normalizeTerminalFontFeatures(" zero, -calt ")).toBe("zero, -calt");
+  expect(normalizeTerminalFontFeatures("zero=x")).toBe("");
+  expect(normalizeTerminalFontFeatures(42)).toBe("");
+  expect(normalizeTerminalFontFeatures("zero,".repeat(300))).toBe("");
 });

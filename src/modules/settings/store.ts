@@ -20,6 +20,7 @@ import {
   WHISPERCPP_DEFAULT_BASE_URL,
 } from "@/modules/ai/config";
 import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
+import { parseFontFeatures } from "@/modules/terminal/lib/fontFeatures";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import {
@@ -173,6 +174,11 @@ export type Preferences = {
   terminalLetterSpacing: number;
   /** Cell height as a multiple of the font size. */
   terminalLineHeight: number;
+  /**
+   * OpenType features of the terminal font, as Ghostty's `font-feature`
+   * takes them (`zero, ss01, -calt`); empty for the font's defaults.
+   */
+  terminalFontFeatures: string;
   /** Ghostty's minimum contrast for terminal text (1 is off). */
   terminalMinimumContrast: number;
   /** A Ghostty/Shadertoy shader run over terminal frames (WebGL renderer). */
@@ -277,6 +283,7 @@ const KEY_TERMINAL_FONT_WEIGHT = "terminalFontWeight";
 const KEY_TERMINAL_SHELL = "terminalShell";
 const KEY_TERMINAL_LETTER_SPACING = "terminalLetterSpacing";
 const KEY_TERMINAL_LINE_HEIGHT = "terminalLineHeight";
+const KEY_TERMINAL_FONT_FEATURES = "terminalFontFeatures";
 const KEY_TERMINAL_MINIMUM_CONTRAST = "terminalMinimumContrast";
 const KEY_TERMINAL_CUSTOM_SHADER = "terminalCustomShader";
 const KEY_TERMINAL_LIGATURES = "terminalLigatures";
@@ -305,6 +312,13 @@ export const TERMINAL_LINE_HEIGHT_DEFAULT = 1.2;
 export const TERMINAL_LINE_HEIGHTS = [
   1, 1.1, 1.15, 1.2, 1.25, 1.3, 1.4, 1.5, 1.6, 1.8, 2,
 ] as const;
+
+/** A stored feature list, or "" when it is not one `parseFontFeatures` takes. */
+export function normalizeTerminalFontFeatures(value: unknown): string {
+  if (typeof value !== "string" || value.length > 1024) return "";
+  const trimmed = value.trim();
+  return parseFontFeatures(trimmed).error === null ? trimmed : "";
+}
 
 export function clampTerminalLineHeight(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value)
@@ -426,6 +440,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   terminalShell: "",
   terminalLetterSpacing: 0,
   terminalLineHeight: TERMINAL_LINE_HEIGHT_DEFAULT,
+  terminalFontFeatures: "",
   terminalMinimumContrast: 1,
   terminalCustomShader: null,
   terminalLigatures: true,
@@ -602,6 +617,9 @@ export async function loadPreferences(): Promise<Preferences> {
       DEFAULT_PREFERENCES.terminalLetterSpacing,
     terminalLineHeight: clampTerminalLineHeight(
       get<number>(KEY_TERMINAL_LINE_HEIGHT),
+    ),
+    terminalFontFeatures: normalizeTerminalFontFeatures(
+      get<unknown>(KEY_TERMINAL_FONT_FEATURES),
     ),
     terminalMinimumContrast: clampMinimumContrast(
       get<number>(KEY_TERMINAL_MINIMUM_CONTRAST),
@@ -943,6 +961,14 @@ export async function setTerminalLineHeight(value: number): Promise<void> {
   await writePref(KEY_TERMINAL_LINE_HEIGHT, clampTerminalLineHeight(value));
 }
 
+/** Stores a feature list `parseFontFeatures` accepts; others clear it. */
+export async function setTerminalFontFeatures(value: string): Promise<void> {
+  await writePref(
+    KEY_TERMINAL_FONT_FEATURES,
+    normalizeTerminalFontFeatures(value),
+  );
+}
+
 export async function setTerminalCustomShader(
   value: TerminalCustomShader | null,
 ): Promise<void> {
@@ -1135,6 +1161,7 @@ export async function onPreferencesChange(
     [KEY_TERMINAL_SHELL]: "terminalShell",
     [KEY_TERMINAL_LETTER_SPACING]: "terminalLetterSpacing",
     [KEY_TERMINAL_LINE_HEIGHT]: "terminalLineHeight",
+    [KEY_TERMINAL_FONT_FEATURES]: "terminalFontFeatures",
     [KEY_TERMINAL_MINIMUM_CONTRAST]: "terminalMinimumContrast",
     [KEY_TERMINAL_CUSTOM_SHADER]: "terminalCustomShader",
     [KEY_TERMINAL_LIGATURES]: "terminalLigatures",
