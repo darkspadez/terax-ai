@@ -8,6 +8,7 @@ import {
   WebGlGlyphAtlas,
   type WebGlGlyphEntry,
 } from "@/modules/terminal/ghostty/webgl/WebGlGlyphAtlas";
+import { CellFlags } from "@terax/ghostty-core/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -93,6 +94,10 @@ function setup(
     foregrounds?: ReadonlyMap<number, number>;
     /** Code points by cell index; every other cell is empty. */
     codepoints?: ReadonlyMap<number, number>;
+    /** Cell flags by cell index; none elsewhere. */
+    flags?: ReadonlyMap<number, number>;
+    /** What the model reports for `ligatures()`; the method is absent when unset. */
+    ligatures?: boolean;
   } = {},
 ) {
   const fake = recordingGl();
@@ -158,7 +163,7 @@ function setup(
       renderCells: () => ({
         length: 80 * 24,
         width: () => 1,
-        flags: () => 0,
+        flags: (index: number) => options.flags?.get(index) ?? 0,
         codepoint: (index: number) => options.codepoints?.get(index) ?? 0,
         graphemeLength: () => 0,
         // An explicit background on the first column, so the cell pass draws rectangles.
@@ -172,6 +177,9 @@ function setup(
       }),
       imagePlacements: vi.fn(() => placements.value),
       imageBackgroundZLimit: () => LIMIT,
+      ...(options.ligatures === undefined
+        ? {}
+        : { ligatures: () => options.ligatures }),
     }) as unknown as GhosttyTerminalModelApi;
   const model = createModel();
   const frame = (
@@ -249,6 +257,80 @@ describe("WebGL glyph cells", () => {
     } finally {
       glyph.mockRestore();
       h.renderer.dispose();
+    }
+  });
+});
+
+describe("WebGL ligature runs", () => {
+  const empty: WebGlGlyphEntry = {
+    originOffsetX: 0,
+    originOffsetY: 0,
+    width: 0,
+    height: 0,
+    uvMinX: 0,
+    uvMinY: 0,
+    uvMaxX: 0,
+    uvMaxY: 0,
+    intrinsicColor: false,
+  };
+  /** Row 0: "a->b ===" then a red "-" before a white ">", then a bold "!" before "=". */
+  const text = new Map(
+    [..."a->b ===  -> !="].map((character, column) => [
+      column,
+      character === " " ? 0 : (character.codePointAt(0) ?? 0),
+    ]),
+  );
+
+  function render(ligatures: boolean | undefined) {
+    const glyph = vi
+      .spyOn(WebGlGlyphAtlas.prototype, "glyph")
+      .mockReturnValue(empty);
+    const ligature = vi
+      .spyOn(WebGlGlyphAtlas.prototype, "ligatureGlyph")
+      .mockReturnValue(empty);
+    const h = setup({
+      codepoints: text,
+      foregrounds: new Map([[10, 0xff0000]]),
+      flags: new Map([[13, CellFlags.BOLD]]),
+      ligatures,
+    });
+    try {
+      h.renderer.render(h.frame());
+      return {
+        plain: glyph.mock.calls.map(([codepoint]) =>
+          String.fromCodePoint(codepoint),
+        ),
+        slices: ligature.mock.calls.map(([run, index, flags]) => [
+          run,
+          index,
+          flags,
+        ]),
+      };
+    } finally {
+      glyph.mockRestore();
+      ligature.mockRestore();
+      h.renderer.dispose();
+    }
+  }
+
+  it("asks the atlas for each run cell's slice when the model draws ligatures", () => {
+    expect(render(true)).toEqual({
+      plain: ["a", "b", "-", ">", "!", "="],
+      slices: [
+        ["->", 0, 0],
+        ["->", 1, 0],
+        ["===", 0, 0],
+        ["===", 1, 0],
+        ["===", 2, 0],
+      ],
+    });
+  });
+
+  it("draws every cell on its own when the model's switch is off or absent", () => {
+    for (const ligatures of [false, undefined]) {
+      const { plain, slices } = render(ligatures);
+      expect(slices).toEqual([]);
+      expect(plain.join("")).toBe("a->b===->!=");
     }
   });
 });

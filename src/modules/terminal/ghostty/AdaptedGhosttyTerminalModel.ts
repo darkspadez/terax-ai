@@ -169,6 +169,7 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
   private rowsValue: number;
   private scrollbackLines: number;
   private scrollbackBytesLimit: number;
+  private ligaturesValue = true;
   private disposed = false;
 
   constructor(
@@ -454,6 +455,20 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
     this.invalidateRenderState();
     this.damageNeedsResolution = true;
     this.requestPresentation();
+  }
+
+  setLigatures(enabled: boolean): void {
+    this.assertLive();
+    if (enabled === this.ligaturesValue) return;
+    this.ligaturesValue = enabled;
+    this.terminal.setLigatures(enabled);
+    this.invalidateRenderState();
+    this.pendingDamage = FULL_DAMAGE;
+    this.notifyDamage();
+  }
+
+  ligatures(): boolean {
+    return this.ligaturesValue;
   }
 
   formatTextRange(

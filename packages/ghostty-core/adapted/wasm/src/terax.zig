@@ -1131,6 +1131,10 @@ const Restty = struct {
     gpu_any_dirty: u8 = 0,
     /// Cells drawn as glyph 0 because the viewport alone exceeded the table.
     gpu_glyph_overflow: u32 = 0,
+    /// GPU format: intern ligature runs (`restty_set_ligatures`).
+    ligatures: bool = true,
+    /// The next GPU update re-encodes every row (the ligature switch changed).
+    gpu_rewrite_pending: bool = false,
     /// Scratch for `restty_line_cells_prepare`.
     line_cells: std.ArrayListUnmanaged(u32) = .empty,
     key_output: [max_key_output_bytes]u8 = undefined,
@@ -1254,6 +1258,29 @@ const glyph_style_italic: u32 = 1 << 1;
 /// `constraintCells`). Never set on ASCII, so the ASCII table keeps four styles.
 const glyph_style_two_cells: u32 = 1 << 2;
 const glyph_style_count: usize = 4;
+/// One cell of a ligature run (`ligatureChunkLength`): the glyph's text is the
+/// whole run and bits 4..7 hold the cell's index in it. Run glyphs are never
+/// ASCII table entries (`internLigatureRun`).
+const glyph_style_ligature: u32 = 1 << 3;
+const glyph_style_ligature_index_shift: u5 = 4;
+const ligature_max_cells: usize = 16;
+
+/// ASCII punctuation and symbols, one entry per code point below 128:
+/// !"#$%&'()*+,-./ :;<=>?@ [\]^_` {|}~ (letters, digits and space end a run).
+const ligature_codepoints: [128]bool = blk: {
+    var table = [_]bool{false} ** 128;
+    for (0x21..0x7F) |cp| {
+        const alphanumeric = (cp >= '0' and cp <= '9') or
+            (cp >= 'A' and cp <= 'Z') or
+            (cp >= 'a' and cp <= 'z');
+        table[cp] = !alphanumeric;
+    }
+    break :blk table;
+};
+
+inline fn isLigatureCodepoint(cp: u32) bool {
+    return cp < 128 and ligature_codepoints[cp];
+}
 
 /// Glyph ids are dense from 1. The cap bounds table memory, the JavaScript
 /// id-to-atlas map and the GPU `glyph_map` storage buffer to 64 KiB each. A
@@ -1347,14 +1374,22 @@ const GlyphTable = struct {
         style: u32,
         codepoints: []const u32,
     ) Error!u32 {
-        const words = 3 + codepoints.len;
-        if (self.offsets.items.len >= max_glyphs or
+        try self.reserve(alloc, 1, 3 + codepoints.len);
+        return self.appendAssumeCapacity(style, codepoints);
+    }
+
+    /// Room for `records` more glyphs of `words` stream words in total.
+    fn reserve(self: *GlyphTable, alloc: Allocator, records: usize, words: usize) Error!void {
+        if (self.offsets.items.len + records > max_glyphs or
             self.stream.items.len + words > max_glyph_stream_words)
         {
             return error.TableFull;
         }
-        try self.offsets.ensureUnusedCapacity(alloc, 1);
+        try self.offsets.ensureUnusedCapacity(alloc, records);
         try self.stream.ensureUnusedCapacity(alloc, words);
+    }
+
+    fn appendAssumeCapacity(self: *GlyphTable, style: u32, codepoints: []const u32) u32 {
         const id: u32 = @intCast(self.offsets.items.len + 1);
         self.offsets.appendAssumeCapacity(@intCast(self.stream.items.len));
         self.stream.appendAssumeCapacity(id);
@@ -1399,6 +1434,33 @@ const GlyphTable = struct {
         const id = try self.append(alloc, style, codepoints);
         self.sequences.putAssumeCapacityContext(id, {}, self.context());
         return id;
+    }
+
+    /// A ligature run (`ligatureChunkLength`): one glyph per cell, the run's
+    /// text with `style` and the cell's index, under consecutive ids so the
+    /// run is looked up once. Returns the first cell's id; cell `i` is that
+    /// id plus `i`. Only the first cell's record is in `sequences`.
+    noinline fn internLigatureRun(
+        self: *GlyphTable,
+        alloc: Allocator,
+        style: u32,
+        codepoints: []const u32,
+    ) Error!u32 {
+        const key: SequenceView = .{ .style = style, .codepoints = codepoints };
+        const adapter: SequenceAdapter = .{ .table = self };
+        if (self.sequences.getKeyAdapted(key, adapter)) |id| return id;
+        try self.sequences.ensureUnusedCapacityContext(alloc, 1, self.context());
+        try self.reserve(alloc, codepoints.len, codepoints.len * (3 + codepoints.len));
+        const first = self.appendAssumeCapacity(style, codepoints);
+        for (1..codepoints.len) |index| {
+            const shifted: u32 = @intCast(index);
+            _ = self.appendAssumeCapacity(
+                style | (shifted << glyph_style_ligature_index_shift),
+                codepoints,
+            );
+        }
+        self.sequences.putAssumeCapacityContext(first, {}, self.context());
+        return first;
     }
 };
 
@@ -2657,6 +2719,18 @@ pub export fn restty_set_visible(handle: ?*Restty, visible: u8) u32 {
     return @intFromEnum(ErrorCode.ok);
 }
 
+/// Whether the GPU format interns ligature runs (`ligatureChunkLength`); on by
+/// default. A change re-encodes every row on the next update, which reports
+/// the rows whose records changed.
+pub export fn restty_set_ligatures(handle: ?*Restty, enabled: u8) u32 {
+    const h = handle orelse return @intFromEnum(ErrorCode.invalid_handle);
+    const value = enabled != 0;
+    if (h.ligatures == value) return @intFromEnum(ErrorCode.ok);
+    h.ligatures = value;
+    h.gpu_rewrite_pending = true;
+    return @intFromEnum(ErrorCode.ok);
+}
+
 /// Total Kitty image bytes each screen may hold; older images are evicted to
 /// stay under it. Zero deletes every image and disables the protocol.
 pub export fn restty_set_image_storage_limit(handle: ?*Restty, bytes: u32) u32 {
@@ -3003,6 +3077,59 @@ fn constraintCells(raw_cells: []const ghostty.Cell, x: usize, cols: usize) u2 {
     };
 }
 
+/// Whether a cell may be part of a ligature run, its style aside: one narrow
+/// ASCII punctuation or symbol code point, no grapheme cluster.
+inline fn ligatureCandidate(raw: ghostty.Cell) bool {
+    return raw.content_tag == .codepoint and raw.wide == .narrow and
+        isLigatureCodepoint(raw.codepoint());
+}
+
+/// Cells of a ligature run are drawn alike: same foreground (faint included),
+/// bold, italic and blink, and visible.
+inline fn sameLigatureLook(first: *const GpuStyleCache, other: *const GpuStyleCache) bool {
+    return !other.invisible and
+        first.fg == other.fg and
+        first.glyph_style == other.glyph_style and
+        (first.attrs & GpuAttr.blink) == (other.attrs & GpuAttr.blink);
+}
+
+/// The ligature rule of `ligatureRuns.ts` (which the WebGL renderer applies):
+/// a run is two or more adjacent candidate cells of one row drawn alike, cut
+/// into chunks of at most `ligature_max_cells`. Returns how many cells from
+/// `start` (a visible candidate whose style resolved to `first`) form its
+/// chunk; 1 means the cell is drawn on its own. Each cell of a chunk is
+/// interned as the chunk's text with `glyph_style_ligature` and its index
+/// (`internLigatureRun`), and the rasterizer draws the part of the whole
+/// sequence that falls in that cell, so a font's contextual alternates join
+/// across cells. Not inlined (nor `internLigatureRun`): in the cell loop it
+/// cost plain text about 8% per encoded row.
+noinline fn ligatureChunkLength(
+    raw_cells: []const ghostty.Cell,
+    cell_styles: []const ghostty.Style,
+    start: usize,
+    cols: usize,
+    first: *const GpuStyleCache,
+    palette: anytype,
+    default_fg: ghostty.color.RGB,
+    default_bg: ghostty.color.RGB,
+) usize {
+    const end = @min(cols, start + ligature_max_cells);
+    const style_id = raw_cells[start].style_id;
+    var x = start + 1;
+    while (x < end) : (x += 1) {
+        const raw = raw_cells[x];
+        if (!ligatureCandidate(raw)) break;
+        // One style id is one style within a row; a different one may still
+        // look the same (another background or underline).
+        if (raw.style_id != style_id) {
+            const style: ghostty.Style = if (raw.style_id != 0) cell_styles[x] else .{};
+            const other = resolveGpuStyle(style, &raw, palette, default_fg, default_bg);
+            if (!sameLigatureLook(first, &other)) break;
+        }
+    }
+    return x - start;
+}
+
 const InternOutcome = union(enum) {
     glyph: u32,
     table_full,
@@ -3088,6 +3215,7 @@ fn writeGpuRows(
     var blinking: u32 = if (rewrite_all) 0 else h.gpu_blinking_cells;
     if (rewrite_all) @memset(h.buffers.row_blink[0..rows], 0);
     var sequence: [max_glyph_codepoints]u32 = undefined;
+    var ligature_text: [ligature_max_cells]u32 = undefined;
 
     var r: usize = 0;
     while (r < rows) : (r += 1) {
@@ -3111,6 +3239,11 @@ fn writeGpuRows(
         var cache: GpuStyleCache = .{};
         var scratch: GpuStyleCache = undefined;
         var lead: ?[4]u32 = null;
+        // The ligature chunk being encoded: cells `ligature_start..ligature_end`,
+        // glyphs `ligature_glyph` plus the index (0: drawn as nothing).
+        var ligature_start: usize = 0;
+        var ligature_end: usize = 0;
+        var ligature_glyph: u32 = 0;
 
         var c: usize = 0;
         while (c < cols) : (c += 1) {
@@ -3167,32 +3300,75 @@ fn writeGpuRows(
                     const codepoint: u32 = raw.codepoint();
                     var glyph: u32 = 0;
                     if (codepoint > 32 and !resolved.invisible) {
-                        const glyph_style = if (codepoint >= 0x80 and
-                            constraintCells(raw_cells, c, cols) == 2)
-                            resolved.glyph_style | glyph_style_two_cells
-                        else
-                            resolved.glyph_style;
-                        // Plain ASCII is the overwhelmingly common case: one
-                        // table read, no hashing, no grapheme or placeholder test.
-                        const ascii_hit: u32 = if (codepoint < 128 and !raw.hasGrapheme())
-                            table.ascii[codepoint * glyph_style_count + resolved.glyph_style]
-                        else
-                            0;
-                        if (ascii_hit != 0) {
-                            glyph = ascii_hit;
+                        // Letters, digits and everything beyond ASCII pay one
+                        // bit test here: only punctuation can form a run.
+                        var in_ligature = false;
+                        if (isLigatureCodepoint(codepoint) and h.ligatures) {
+                            if (c >= ligature_end and ligatureCandidate(raw)) {
+                                const length = ligatureChunkLength(
+                                    raw_cells,
+                                    cell_styles,
+                                    c,
+                                    cols,
+                                    resolved,
+                                    palette,
+                                    default_fg,
+                                    default_bg,
+                                );
+                                if (length >= 2) {
+                                    for (0..length) |i| {
+                                        ligature_text[i] = raw_cells[c + i].codepoint();
+                                    }
+                                    ligature_start = c;
+                                    ligature_end = c + length;
+                                    ligature_glyph = table.internLigatureRun(
+                                        h.alloc,
+                                        resolved.glyph_style | glyph_style_ligature,
+                                        ligature_text[0..length],
+                                    ) catch |err| switch (err) {
+                                        error.OutOfMemory => return error.OutOfMemory,
+                                        error.TableFull => overflow: {
+                                            if (!allow_overflow) return .table_full;
+                                            h.gpu_glyph_overflow +|= @intCast(length);
+                                            break :overflow 0;
+                                        },
+                                    };
+                                }
+                            }
+                            in_ligature = c < ligature_end;
+                        }
+                        if (in_ligature) {
+                            if (ligature_glyph != 0) {
+                                glyph = ligature_glyph + @as(u32, @intCast(c - ligature_start));
+                            }
                         } else {
-                            glyph = switch (try internCell(
-                                h,
-                                table,
-                                codepoint,
-                                if (raw.hasGrapheme()) cell_graphemes[c] else &.{},
-                                glyph_style,
-                                &sequence,
-                                allow_overflow,
-                            )) {
-                                .glyph => |id| id,
-                                .table_full => return .table_full,
-                            };
+                            const glyph_style = if (codepoint >= 0x80 and
+                                constraintCells(raw_cells, c, cols) == 2)
+                                resolved.glyph_style | glyph_style_two_cells
+                            else
+                                resolved.glyph_style;
+                            // Plain ASCII is the overwhelmingly common case: one
+                            // table read, no hashing, no grapheme or placeholder test.
+                            const ascii_hit: u32 = if (codepoint < 128 and !raw.hasGrapheme())
+                                table.ascii[codepoint * glyph_style_count + resolved.glyph_style]
+                            else
+                                0;
+                            if (ascii_hit != 0) {
+                                glyph = ascii_hit;
+                            } else {
+                                glyph = switch (try internCell(
+                                    h,
+                                    table,
+                                    codepoint,
+                                    if (raw.hasGrapheme()) cell_graphemes[c] else &.{},
+                                    glyph_style,
+                                    &sequence,
+                                    allow_overflow,
+                                )) {
+                                    .glyph => |id| id,
+                                    .table_full => return .table_full,
+                                };
+                            }
                         }
                     }
 
@@ -3299,6 +3475,9 @@ pub export fn restty_render_update(handle: ?*Restty) u32 {
             invalidate_all = true;
             full_damage = true;
         }
+        // Like a palette change: every row is re-encoded with the new glyphs.
+        if (h.gpu_rewrite_pending) full_damage = true;
+        h.gpu_rewrite_pending = false;
         var allow_overflow = false;
         while (true) {
             if (full_damage) clearLinkTables(h);

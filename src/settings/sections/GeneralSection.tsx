@@ -30,6 +30,7 @@ import {
   setTerminalFontSize,
   setTerminalFontWeight,
   setTerminalLetterSpacing,
+  setTerminalLigatures,
   setTerminalLineHeight,
   setTerminalMinimumContrast,
   setTerminalRenderer,
@@ -121,6 +122,7 @@ export function GeneralSection() {
   const terminalMinimumContrast = usePreferencesStore(
     (s) => s.terminalMinimumContrast,
   );
+  const terminalLigatures = usePreferencesStore((s) => s.terminalLigatures);
   const terminalScrollback = usePreferencesStore((s) => s.terminalScrollback);
   const confirmCloseRunningTerminal = usePreferencesStore(
     (s) => s.confirmCloseRunningTerminal,
@@ -350,6 +352,19 @@ export function GeneralSection() {
               ))}
             </SelectContent>
           </Select>
+        </SettingRow>
+        <SettingRow
+          title="Font ligatures"
+          description={
+            terminalLigatures && terminalLetterSpacing !== 0
+              ? "Not drawn while letter spacing is set."
+              : "Draw sequences such as -> and != as one shape when the font has ligatures, as JetBrains Mono does."
+          }
+        >
+          <Switch
+            checked={terminalLigatures}
+            onCheckedChange={(v) => void setTerminalLigatures(v)}
+          />
         </SettingRow>
         <SettingRow
           title="Integrated terminal shell"

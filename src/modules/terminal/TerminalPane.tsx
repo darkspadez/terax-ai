@@ -13,7 +13,9 @@ import {
 } from "react";
 import type { TerminalBackendKind } from "./backend/contracts";
 import { resolvedTerminalBackend } from "./backend/selection";
+import { getGhosttyCoreRuntime } from "./ghostty/GhosttyCoreRuntime";
 import { ghosttyBlocks } from "./ghostty/ghosttyBlockSessions";
+import { ligaturesApply } from "./ghostty/gpu/ligatureRuns";
 import {
   ghosttyBlockGeometry,
   useGhosttyTerminalSession,
@@ -75,6 +77,13 @@ const GhosttyTerminalPane = memo(
     const minimumContrast = usePreferencesStore(
       (state) => state.terminalMinimumContrast,
     );
+    const ligatures = usePreferencesStore((state) =>
+      ligaturesApply(state.terminalLigatures, state.terminalLetterSpacing),
+    );
+    // Before the session's effects, so its model is created with the choice.
+    useEffect(() => {
+      getGhosttyCoreRuntime().setLigatures(ligatures);
+    }, [ligatures]);
     const session = useGhosttyTerminalSession({
       leafId,
       backend,

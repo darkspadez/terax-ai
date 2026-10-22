@@ -8,7 +8,11 @@ import {
   GlyphAtlas,
 } from "./GlyphAtlas";
 import { GlyphFontGate } from "./GlyphFontGate";
-import { GLYPH_STYLE_TWO_CELLS } from "./GlyphRasterizer";
+import {
+  GLYPH_STYLE_LIGATURE,
+  GLYPH_STYLE_LIGATURE_INDEX_SHIFT,
+  GLYPH_STYLE_TWO_CELLS,
+} from "./GlyphRasterizer";
 import { deriveFontMetrics } from "./terminalVisuals";
 
 const METRICS = deriveFontMetrics(
@@ -262,6 +266,41 @@ describe("GlyphAtlas", () => {
     const size = (index: number) => words[index * GLYPH_ENTRY_WORDS + 1];
     // One cell shrinks the icon to the one-cell icon height; two keep it.
     expect(size(one) >>> 16).toBeLessThan(size(two) >>> 16);
+    atlas.dispose();
+  });
+
+  it("keeps each cell of a ligature run apart, per style, from the plain glyphs", () => {
+    const h = createHarness();
+    const atlas = new GlyphAtlas(h.device, METRICS);
+    const slice = (index: number, style = 0) =>
+      atlas.resolve(
+        "->",
+        style |
+          GLYPH_STYLE_LIGATURE |
+          (index << GLYPH_STYLE_LIGATURE_INDEX_SHIFT),
+      );
+    const first = slice(0);
+    const second = slice(1);
+    const bold = slice(0, 1);
+    const dash = atlas.resolve("-", 0);
+    expect(new Set([first, second, bold, dash]).size).toBe(4);
+    expect(atlas.glyphCount).toBe(4);
+    // Cached: no second drawing for the same cell of the same run.
+    const draws = h.context.fillText.mock.calls.length;
+    expect(slice(1)).toBe(second);
+    expect(slice(0, 1)).toBe(bold);
+    expect(h.context.fillText.mock.calls.length).toBe(draws);
+    // The whole run is drawn for every cell of it.
+    expect(
+      h.context.fillText.mock.calls.filter(([text]) => text === "->"),
+    ).toHaveLength(3);
+    // Another run with the same first character is another glyph.
+    expect(slice(0)).not.toBe(
+      atlas.resolve(
+        "-=",
+        GLYPH_STYLE_LIGATURE | (0 << GLYPH_STYLE_LIGATURE_INDEX_SHIFT),
+      ),
+    );
     atlas.dispose();
   });
 

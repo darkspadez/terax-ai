@@ -1,12 +1,20 @@
 import { readFile } from "node:fs/promises";
 import {
-  GPU_CELL_BYTES,
-  TeraxGhostty,
   decodeGpuCell,
+  GPU_CELL_BYTES,
+  GPU_GLYPH_LIGATURE,
+  GPU_GLYPH_LIGATURE_INDEX_MASK,
+  GPU_GLYPH_LIGATURE_INDEX_SHIFT,
+  TeraxGhostty,
 } from "@terax/ghostty-core/adapted";
 import { beforeAll, describe, expect, it } from "vitest";
 import { AdaptedGhosttyTerminalModel } from "./AdaptedGhosttyTerminalModel";
 import type { GhosttyGpuFrame } from "./GhosttyTerminalModel";
+import {
+  findRowLigatureRuns,
+  ligatureRunIndex,
+  ligatureRunLength,
+} from "./gpu/ligatureRuns";
 
 const encoder = new TextEncoder();
 
@@ -233,6 +241,139 @@ describe.each(["ghostty-vt", "ghostty-vt-scalar"])(
         expect(cursor.damage).toEqual({ kind: "full" });
       } finally {
         model.dispose();
+      }
+    });
+
+    it("switches ligature runs and redraws the rows they change", () => {
+      const { model, write, reader, frame: consume } = create(20, 4);
+      try {
+        expect(model.ligatures()).toBe(true);
+        write("a -> b\r\nplain");
+        const first = consume();
+        // Each cell of the run carries the whole run (the renderer slices it).
+        expect(reader.rowText(first, 0)).toBe("a ->-> b");
+        let notified = 0;
+        const unsubscribe = model.subscribeDamage(() => {
+          notified += 1;
+        });
+        model.setLigatures(false);
+        expect(model.ligatures()).toBe(false);
+        expect(notified).toBe(1);
+        const off = consume();
+        expect(off.fullDamage).toBe(false);
+        expect(off.dirtyRanges).toEqual([{ start: 0, end: 0 }]);
+        expect(off.damage).toEqual({ kind: "full" });
+        expect(reader.rowText(off, 0)).toBe("a -> b");
+        model.setLigatures(false);
+        expect(notified).toBe(1);
+        expect(consume().damage).toEqual({ kind: "none" });
+        // The SoA format has no runs of its own: renderers read the switch.
+        model.renderCells();
+        model.setLigatures(true);
+        expect(model.ligatures()).toBe(true);
+        expect(model.consumeDamage()).toEqual({ kind: "full" });
+        unsubscribe();
+      } finally {
+        model.dispose();
+      }
+    });
+
+    it("forms the same ligature runs from SoA cells (WebGL) as the core does (WebGPU)", () => {
+      const cols = 24;
+      const rows = 12;
+      const gpu = create(cols, rows);
+      const soa = new AdaptedGhosttyTerminalModel(core, {
+        backend: "ghostty-webgl",
+        cols,
+        rows,
+      });
+      const pieces = [
+        "->",
+        "!==",
+        "=>",
+        "::",
+        "a.b",
+        "--",
+        "x",
+        " ",
+        "<=>",
+        "|>",
+        "-\u0301",
+        "\uff1d",
+        "========================",
+        "\x1b[1m",
+        "\x1b[2m",
+        "\x1b[3m",
+        "\x1b[4m",
+        "\x1b[5m",
+        "\x1b[7m",
+        "\x1b[8m",
+        "\x1b[31m",
+        "\x1b[38;2;1;2;3m",
+        "\x1b[44m",
+        "\x1b[0m",
+        "\r\n",
+      ];
+      let seed = 7;
+      const next = () => {
+        seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+        return seed / 2_147_483_648;
+      };
+      try {
+        const glyphs = new Map<number, { text: string; style: number }>();
+        let checked = 0;
+        for (let step = 0; step < 60; step += 1) {
+          let chunk = step === 0 ? "\x1b[?2027h" : "";
+          for (let index = 0; index < 12; index += 1) {
+            chunk += pieces[Math.floor(next() * pieces.length)];
+          }
+          gpu.write(chunk);
+          soa.write(encoder.encode(chunk));
+          const frame = gpu.model.consumeGpuFrame();
+          for (const glyph of frame.newGlyphs) glyphs.set(glyph.id, glyph);
+          const words = new Uint32Array(
+            frame.cells.buffer,
+            frame.cells.byteOffset,
+            frame.cells.byteLength / 4,
+          );
+          const cells = soa.renderCells();
+          const keys = new Float64Array(cols);
+          const runs = new Uint16Array(cols);
+          for (let row = 0; row < rows; row += 1) {
+            findRowLigatureRuns(cells, row, cols, keys, runs);
+            for (let column = 0; column < cols; column += 1) {
+              const id = decodeGpuCell(words, row * cols + column).glyphId;
+              const glyph = glyphs.get(id);
+              const style = glyph?.style ?? 0;
+              const actual =
+                (style & GPU_GLYPH_LIGATURE) === 0
+                  ? null
+                  : [
+                      glyph?.text,
+                      (style >>> GPU_GLYPH_LIGATURE_INDEX_SHIFT) &
+                        GPU_GLYPH_LIGATURE_INDEX_MASK,
+                    ];
+              const run = runs[column];
+              let expected: unknown = null;
+              if (run !== 0) {
+                const start = row * cols + column - ligatureRunIndex(run);
+                let text = "";
+                for (let cell = 0; cell < ligatureRunLength(run); cell += 1) {
+                  text += String.fromCodePoint(cells.codepoint(start + cell));
+                }
+                expected = [text, ligatureRunIndex(run)];
+                checked += 1;
+              }
+              expect(actual, `step ${step} cell ${row},${column}`).toEqual(
+                expected,
+              );
+            }
+          }
+        }
+        expect(checked).toBeGreaterThan(500);
+      } finally {
+        gpu.model.dispose();
+        soa.dispose();
       }
     });
 

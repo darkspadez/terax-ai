@@ -13,6 +13,9 @@ import {
   GPU_GLYPH_BOLD,
   GPU_GLYPH_ID_MASK,
   GPU_GLYPH_ITALIC,
+  GPU_GLYPH_LIGATURE,
+  GPU_GLYPH_LIGATURE_INDEX_MASK,
+  GPU_GLYPH_LIGATURE_INDEX_SHIFT,
   GPU_GLYPH_TWO_CELLS,
   TeraxGhostty,
   type TeraxGhosttyGpuCell,
@@ -22,8 +25,19 @@ import {
   type TeraxGhosttyTerminal,
 } from "@terax/ghostty-core/adapted";
 import { beforeAll, describe, expect, it } from "vitest";
-import { GLYPH_STYLE_TWO_CELLS } from "./gpu/GlyphRasterizer";
+import {
+  GLYPH_STYLE_LIGATURE,
+  GLYPH_STYLE_LIGATURE_INDEX_MASK,
+  GLYPH_STYLE_LIGATURE_INDEX_SHIFT,
+  GLYPH_STYLE_TWO_CELLS,
+} from "./gpu/GlyphRasterizer";
 import { constraintCells } from "./gpu/glyphConstraint";
+import {
+  findLigatureRuns,
+  ligatureKey,
+  ligatureRunIndex,
+  ligatureRunLength,
+} from "./gpu/ligatureRuns";
 
 const MAX_GLYPHS = 16 * 1024;
 const encoder = new TextEncoder();
@@ -197,6 +211,36 @@ function expectedFromSoa(
 }
 
 /**
+ * `findLigatureRuns` over one SoA row, keyed as the WebGL renderer keys it:
+ * the core's ligature runs must agree with it cell for cell.
+ */
+function soaLigatureRuns(
+  state: TeraxGhosttyRenderState,
+  row: number,
+): Uint16Array {
+  const { cols } = state;
+  const keys = new Float64Array(cols);
+  for (let column = 0; column < cols; column += 1) {
+    const index = row * cols + column;
+    const style = state.styleFlags[index];
+    const source =
+      (style & (1 << 4)) !== 0 ? state.backgroundRgba : state.foregroundRgba;
+    const offset = index * 4;
+    keys[column] = ligatureKey(
+      state.codepoints[index],
+      state.widths[index] === 0,
+      state.graphemeLengths[index] > 0,
+      (style & (1 << 5)) !== 0,
+      (source[offset] << 16) | (source[offset + 1] << 8) | source[offset + 2],
+      style & 0xf, // bold, italic, faint, blink
+    );
+  }
+  const runs = new Uint16Array(cols);
+  findLigatureRuns(keys, cols, runs);
+  return runs;
+}
+
+/**
  * Compares every cell of a GPU snapshot against the SoA terminal fed the same
  * bytes. Mismatches are collected (not asserted per cell) so large randomized
  * runs stay fast; the first few are reported on failure.
@@ -207,6 +251,7 @@ function expectRecordsMatchSoa(
   soa: TeraxGhosttyTerminal,
   soaState: TeraxGhosttyRenderState,
   defaults = { fg: rgba(255, 255, 255), bg: rgba(0, 0, 0) },
+  ligatures = true,
 ) {
   const { rows, cols } = snapshot.state;
   expect(soaState.rows).toBe(rows);
@@ -225,8 +270,10 @@ function expectRecordsMatchSoa(
     }
   };
   let blinking = 0;
+  let runCells = 0;
   for (let row = 0; row < rows; row += 1) {
     let lead: TeraxGhosttyGpuCell | null = null;
+    const runs = ligatures ? soaLigatureRuns(soaState, row) : null;
     for (let column = 0; column < cols; column += 1) {
       const index = row * cols + column;
       const expected = expectedFromSoa(soa, soaState, index);
@@ -257,8 +304,31 @@ function expectRecordsMatchSoa(
         lead = null;
         continue;
       }
-      same(harness.map.text(actual.glyphId), expected.text, "text", where);
-      if (expected.text !== null) {
+      const run = runs?.[column] ?? 0;
+      if (run !== 0) {
+        // The core's ligature runs agree with the TypeScript rule.
+        const runIndex = ligatureRunIndex(run);
+        const start = index - runIndex;
+        const text = String.fromCodePoint(
+          ...soaState.codepoints.subarray(
+            start,
+            start + ligatureRunLength(run),
+          ),
+        );
+        same(harness.map.text(actual.glyphId), text, "run text", where);
+        same(
+          harness.map.style(actual.glyphId),
+          expected.glyphStyle |
+            GPU_GLYPH_LIGATURE |
+            (runIndex << GPU_GLYPH_LIGATURE_INDEX_SHIFT),
+          "run glyph style",
+          where,
+        );
+        runCells += 1;
+      } else {
+        same(harness.map.text(actual.glyphId), expected.text, "text", where);
+      }
+      if (expected.text !== null && run === 0) {
         // The core applies Ghostty's cell rule; the WebGL renderer's TypeScript
         // port of it must agree cell for cell.
         const codepoint = soaState.codepoints[index];
@@ -300,6 +370,7 @@ function expectRecordsMatchSoa(
   }
   same(snapshot.state.blinkingCells, blinking, "blinkingCells", "viewport");
   expect(problems.slice(0, 5)).toEqual([]);
+  return { runCells };
 }
 
 describe.each([
@@ -733,6 +804,7 @@ describe.each([
           p.write(prelude);
           const defaults = { fg: rgba(255, 255, 255), bg: rgba(0, 0, 0) };
           let previous: Snapshot | null = null;
+          let runCells = 0;
           for (let step = 0; step < 400; step += 1) {
             if (step > 0 && step % 97 === 0) {
               const cols = 20 + Math.floor(random() * 30);
@@ -743,13 +815,13 @@ describe.each([
             p.write(randomTerminalChunk(random));
             const snapshot = p.harness.update();
             const soaState = p.soa.updateRenderState();
-            expectRecordsMatchSoa(
+            runCells += expectRecordsMatchSoa(
               p.harness,
               snapshot,
               p.soa,
               soaState,
               defaults,
-            );
+            ).runCells;
             if (
               previous &&
               !snapshot.fullDamage &&
@@ -780,11 +852,228 @@ describe.each([
             }
             previous = snapshot;
           }
+          // The pool's punctuation formed runs, across style changes too.
+          expect(runCells).toBeGreaterThan(1_000);
         } finally {
           p.dispose();
         }
       },
     );
+  });
+
+  describe("ligature runs", () => {
+    /** Each cell's glyph as `text@index` for run cells, the text otherwise. */
+    function cells(harness: GpuHarness, snapshot: Snapshot, row: number) {
+      return Array.from({ length: snapshot.state.cols }, (_, column) => {
+        const id = harness.cell(snapshot, row, column).glyphId;
+        if (id === 0) return null;
+        const style = harness.map.style(id);
+        const text = harness.map.text(id);
+        if ((style & GPU_GLYPH_LIGATURE) === 0) return text;
+        const index =
+          (style >>> GPU_GLYPH_LIGATURE_INDEX_SHIFT) &
+          GPU_GLYPH_LIGATURE_INDEX_MASK;
+        return `${text}@${index}`;
+      });
+    }
+
+    it("interns each cell of a punctuation run as the run and its index", () => {
+      const harness = gpu(16, 2);
+      try {
+        harness.write("a->b != c===d");
+        const snapshot = harness.update();
+        expect(cells(harness, snapshot, 0).slice(0, 13)).toEqual([
+          "a",
+          "->@0",
+          "->@1",
+          "b",
+          null,
+          "!=@0",
+          "!=@1",
+          null,
+          "c",
+          "===@0",
+          "===@1",
+          "===@2",
+          "d",
+        ]);
+        const id = (column: number) =>
+          harness.cell(snapshot, 0, column).glyphId;
+        expect(new Set([id(9), id(10), id(11)]).size).toBe(3);
+        // Plain styles keep their bits; the renderer reads the same ones.
+        expect(harness.map.style(id(1))).toBe(GPU_GLYPH_LIGATURE);
+        expect(GPU_GLYPH_LIGATURE).toBe(GLYPH_STYLE_LIGATURE);
+        expect(GPU_GLYPH_LIGATURE_INDEX_SHIFT).toBe(
+          GLYPH_STYLE_LIGATURE_INDEX_SHIFT,
+        );
+        expect(
+          GPU_GLYPH_LIGATURE_INDEX_MASK << GPU_GLYPH_LIGATURE_INDEX_SHIFT,
+        ).toBe(GLYPH_STYLE_LIGATURE_INDEX_MASK);
+        // The same run elsewhere shares its ids.
+        harness.write("\r\n->");
+        const next = harness.update();
+        expect(harness.cell(next, 1, 0).glyphId).toBe(id(1));
+        expect(harness.cell(next, 1, 1).glyphId).toBe(id(2));
+      } finally {
+        harness.terminal.dispose();
+      }
+    });
+
+    it("breaks runs on look, width, clusters, invisibility and row ends", () => {
+      const harness = gpu(8, 10);
+      try {
+        harness.write("\x1b[31m-\x1b[32m>\x1b[0m\r\n"); // two colours
+        harness.write("\x1b[4m-\x1b[24m>\r\n"); // an underline: same look
+        harness.write("-\x1b[1m>\x1b[0m\r\n"); // bold
+        harness.write("-\x1b[2m>\x1b[0m\r\n"); // faint
+        harness.write("-\x1b[5m>\x1b[0m\r\n"); // blink
+        harness.write("-\x1b[8m-\x1b[0m-\r\n"); // an invisible cell
+        harness.write(`\x1b[?2027h-=${ACUTE}-\r\n`); // a grapheme cluster
+        harness.write("-＝-\r\n"); // a wide cell
+        harness.write("abcdef---"); // wraps after two cells
+        const snapshot = harness.update();
+        const row = (index: number) => cells(harness, snapshot, index);
+        expect(row(0).slice(0, 2)).toEqual(["-", ">"]);
+        expect(row(1).slice(0, 2)).toEqual(["->@0", "->@1"]);
+        expect(row(2).slice(0, 2)).toEqual(["-", ">"]);
+        expect(row(3).slice(0, 2)).toEqual(["-", ">"]);
+        expect(row(4).slice(0, 2)).toEqual(["-", ">"]);
+        expect(row(5).slice(0, 3)).toEqual(["-", null, "-"]);
+        expect(row(6).slice(0, 3)).toEqual(["-", `=${ACUTE}`, "-"]);
+        expect(row(7).slice(0, 4)).toEqual(["-", "＝", null, "-"]);
+        expect(row(8)).toEqual(["a", "b", "c", "d", "e", "f", "--@0", "--@1"]);
+        expect(row(9)[0]).toBe("-");
+      } finally {
+        harness.terminal.dispose();
+      }
+    });
+
+    it("cuts long runs into chunks of 16 cells", () => {
+      const harness = gpu(40, 3);
+      try {
+        harness.write(
+          `${"=".repeat(20)}\r\n${"-".repeat(17)}\r\n${"#".repeat(33)}`,
+        );
+        const snapshot = harness.update();
+        const sixteen = "=".repeat(16);
+        expect(cells(harness, snapshot, 0).slice(0, 20)).toEqual([
+          ...Array.from({ length: 16 }, (_, index) => `${sixteen}@${index}`),
+          ...Array.from({ length: 4 }, (_, index) => `====@${index}`),
+        ]);
+        const row1 = cells(harness, snapshot, 1);
+        expect(row1[15]).toBe(`${"-".repeat(16)}@15`);
+        expect(row1[16]).toBe("-"); // a last piece of one cell is drawn alone
+        const row2 = cells(harness, snapshot, 2);
+        expect(row2[16]).toBe(`${"#".repeat(16)}@0`);
+        expect(row2[32]).toBe("#");
+      } finally {
+        harness.terminal.dispose();
+      }
+    });
+
+    it("switches per terminal, re-encoding only the rows that change", () => {
+      const harness = gpu(12, 4);
+      try {
+        harness.write("a -> b\r\nplain\r\nx => y");
+        harness.update();
+        harness.terminal.setLigatures(false);
+        const off = harness.update();
+        expect(off.fullDamage).toBe(false);
+        expect(dirtyRowIndexes(off)).toEqual([0, 2]);
+        expect(cells(harness, off, 0).slice(2, 4)).toEqual(["-", ">"]);
+        expect(cells(harness, off, 2).slice(2, 4)).toEqual(["=", ">"]);
+        // Unchanged switch: nothing to re-encode.
+        harness.terminal.setLigatures(false);
+        expect(harness.update().anyDirty).toBe(false);
+        harness.write("\r\n->");
+        const plain = harness.update();
+        expect(cells(harness, plain, 3).slice(0, 2)).toEqual(["-", ">"]);
+        harness.terminal.setLigatures(true);
+        const on = harness.update();
+        expect(dirtyRowIndexes(on)).toEqual([0, 2, 3]);
+        expect(cells(harness, on, 0).slice(2, 4)).toEqual(["->@0", "->@1"]);
+        expect(cells(harness, on, 3).slice(0, 2)).toEqual(["->@0", "->@1"]);
+      } finally {
+        harness.terminal.dispose();
+      }
+    });
+
+    it("interns a run whole or not at all when the table overflows", () => {
+      const harness = gpu(200, 100);
+      try {
+        // Distinct 16-cell runs, one space apart, fill the table and the
+        // viewport alone exceeds it.
+        const punctuation = "!#$%&*+-./:;<=>?@^|~";
+        let text = "\x1b[H";
+        for (let row = 0; row < 100; row += 1) {
+          for (let run = 0; run < 11; run += 1) {
+            let value = row * 11 + run;
+            let chunk = "";
+            for (let cell = 0; cell < 16; cell += 1) {
+              chunk += punctuation[value % punctuation.length];
+              value = Math.floor(value / punctuation.length);
+            }
+            text += `${chunk} `;
+          }
+          if (row < 99) text += "\r\n";
+        }
+        harness.write(text);
+        const snapshot = harness.update();
+        const { glyphCount, glyphOverflow } = snapshot.state;
+        expect(glyphOverflow).toBeGreaterThan(0);
+        expect(glyphOverflow % 16).toBe(0);
+        let drawn = 0;
+        let empty = 0;
+        for (let row = 0; row < 100; row += 1) {
+          for (let start = 0; start < 11 * 17; start += 17) {
+            const ids = Array.from(
+              { length: 16 },
+              (_, cell) => harness.cell(snapshot, row, start + cell).glyphId,
+            );
+            if (ids[0] === 0) {
+              expect(ids.every((id) => id === 0)).toBe(true);
+              empty += 16;
+              continue;
+            }
+            expect(ids).toEqual(ids.map((_, cell) => ids[0] + cell));
+            expect(ids[15]).toBeLessThanOrEqual(glyphCount);
+            expect(harness.text(snapshot, row, start + 15)?.length).toBe(16);
+            drawn += 16;
+          }
+        }
+        expect(empty).toBe(glyphOverflow);
+        expect(drawn).toBeGreaterThan(0);
+      } finally {
+        harness.terminal.dispose();
+      }
+    });
+
+    it("agrees with the structure-of-arrays rule with the switch off", () => {
+      const p = pair(30, 4);
+      try {
+        p.harness.terminal.setLigatures(false);
+        p.write("a->b \x1b[1m!==\x1b[0m c::d ////////");
+        const snapshot = p.harness.update();
+        const soaState = p.soa.updateRenderState();
+        expect(
+          expectRecordsMatchSoa(
+            p.harness,
+            snapshot,
+            p.soa,
+            soaState,
+            undefined,
+            false,
+          ).runCells,
+        ).toBe(0);
+        expect(
+          Array.from(p.harness.map.glyphs.values()).every(
+            (glyph) => (glyph.style & GPU_GLYPH_LIGATURE) === 0,
+          ),
+        ).toBe(true);
+      } finally {
+        p.dispose();
+      }
+    });
   });
 
   describe("exact dirty rows", () => {
@@ -1403,6 +1692,18 @@ const TEXT_POOL = [
   "hello",
   "agent",
   "x",
+  "->",
+  "!==",
+  "=>",
+  "::",
+  "/*",
+  "a.b",
+  "#",
+  "||",
+  "-",
+  "--------------------",
+  "=\u0301=",
+  "\uff1d=",
   " ",
   "  ",
   "日本語",

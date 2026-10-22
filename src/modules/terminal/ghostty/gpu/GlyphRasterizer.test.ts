@@ -3,9 +3,12 @@ import { GlyphFontGate } from "./GlyphFontGate";
 import {
   GLYPH_STYLE_BOLD,
   GLYPH_STYLE_ITALIC,
+  GLYPH_STYLE_LIGATURE,
+  GLYPH_STYLE_LIGATURE_INDEX_SHIFT,
   GLYPH_STYLE_TWO_CELLS,
   GlyphRasterizer,
   type InkBounds,
+  ligatureSlicePlacement,
   placeGlyph,
   type RasterizedGlyph,
 } from "./GlyphRasterizer";
@@ -16,6 +19,9 @@ import {
 } from "./glyphConstraint";
 import { nerdFontConstraint } from "./nerdFontConstraints";
 import { deriveFontMetrics } from "./terminalVisuals";
+
+/** The font's advance at 14px times 1.5: cells are a little wider (13). */
+const ADVANCE = 12.6;
 
 /** 13 x 26 device pixel cells, baseline 19 pixels down. */
 const METRICS = deriveFontMetrics(
@@ -48,6 +54,7 @@ type StubOptions = {
 
 function stub(options: StubOptions = {}) {
   const fonts: string[] = [];
+  const measured: string[] = [];
   const clears: number[][] = [];
   const transforms: number[][] = [];
   const draws: Array<{
@@ -86,12 +93,14 @@ function stub(options: StubOptions = {}) {
       current = text;
     },
     measureText: (text: string) => {
+      measured.push(text);
       const ink =
         options.ink?.(text) ??
         (text === "H"
           ? { left: 0, right: 9, ascent: CAP_HEIGHT, descent: 0 }
           : TEXT_INK);
       return {
+        width: text.length * ADVANCE,
         actualBoundingBoxLeft: ink.left,
         actualBoundingBoxRight: ink.right,
         actualBoundingBoxAscent: ink.ascent,
@@ -119,6 +128,7 @@ function stub(options: StubOptions = {}) {
   });
   return {
     fonts,
+    measured,
     clears,
     created: () => created,
     texts,
@@ -300,6 +310,135 @@ describe("GlyphRasterizer", () => {
     drawn(rasterizer.rasterize("a", GLYPH_STYLE_BOLD));
     drawn(rasterizer.rasterize("\u2500", 0));
     expect(fonts.loader.check).not.toHaveBeenCalled();
+  });
+});
+
+describe("GlyphRasterizer ligature runs", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const cell = (index: number, style = 0) =>
+    style | GLYPH_STYLE_LIGATURE | (index << GLYPH_STYLE_LIGATURE_INDEX_SHIFT);
+  /** The run's ink: from just left of its start to the end of its last advance. */
+  const runInk = (text: string): InkBounds | undefined =>
+    text.length > 1
+      ? { left: 0.5, right: text.length * ADVANCE - 1, ascent: 8, descent: 0 }
+      : undefined;
+
+  it("draws a cell as its slice of the whole run, the cell's character on its pen", () => {
+    const s = stub({ ink: runInk });
+    const rasterizer = new GlyphRasterizer(METRICS);
+    const first = drawn(rasterizer.rasterize("->", cell(0)));
+    const second = drawn(rasterizer.rasterize("->", cell(1)));
+    expect(s.texts).toEqual(["->", "->"]);
+    expect(s.draws.map((draw) => draw.x)).toEqual([3, -ADVANCE]);
+    expect(s.draws.every((draw) => draw.y === 2 + 8)).toBe(true);
+    // The first cell keeps the ink left of the run; the cells meet at 13.
+    expect([first.bearingX, first.bearingX + first.width]).toEqual([-3, 13]);
+    expect([second.bearingX, second.width]).toEqual([0, 15]);
+    expect(second.bearingY).toBe(METRICS.deviceBaseline - 8 - 2);
+    expect(first.exact).toBe(false);
+    expect(first.intrinsicColor).toBe(false);
+    // The run is measured once for all of its cells.
+    expect(s.measured).toEqual(["->", "-"]);
+  });
+
+  it("draws runs in their bold and italic fonts", () => {
+    const s = stub({ ink: runInk });
+    const rasterizer = new GlyphRasterizer(METRICS);
+    rasterizer.rasterize("!=", cell(1, GLYPH_STYLE_BOLD | GLYPH_STYLE_ITALIC));
+    expect(s.fonts[s.fonts.length - 1]).toMatch(/^italic 700 /);
+  });
+
+  it("clears the part of the run drawn past the slice before the next glyph", () => {
+    const s = stub({ ink: runInk });
+    const rasterizer = new GlyphRasterizer(METRICS);
+    rasterizer.rasterize("=".repeat(16), cell(0));
+    rasterizer.rasterize("a", 0);
+    // The run's ink ends at 3 + 16 * 12.6 - 1 = 203.6 pixels, far beyond
+    // the 16-pixel slice; the clear margin is 8.
+    expect(s.clears[1][2]).toBe(204 + 8);
+    rasterizer.rasterize("b", 0);
+    expect(s.clears[2][2]).toBeLessThan(40);
+  });
+
+  it("draws the cell's own character with letter spacing or for text that is not a run", () => {
+    const s = stub({ ink: runInk });
+    const spaced = deriveFontMetrics(
+      { ...METRICS.font, letterSpacing: 1 },
+      1.5,
+      { advance: ADVANCE, ascent: 16, descent: 5 },
+    );
+    const plain = drawn(new GlyphRasterizer(METRICS).rasterize("-", 0));
+    const glyph = drawn(new GlyphRasterizer(spaced).rasterize("->", cell(1)));
+    const rasterizer = new GlyphRasterizer(METRICS);
+    rasterizer.rasterize("-a", cell(1));
+    rasterizer.rasterize("=".repeat(17), cell(0));
+    expect(s.texts).toEqual(["-", ">", "a", "="]);
+    expect(glyph.bearingX).toBe(plain.bearingX);
+  });
+
+  it("never waits for a font: runs are ASCII", () => {
+    stub({ ink: runInk });
+    const fonts = loadingFonts();
+    const rasterizer = new GlyphRasterizer(
+      METRICS,
+      new GlyphFontGate(fonts.loader),
+    );
+    drawn(rasterizer.rasterize("::", cell(1, GLYPH_STYLE_BOLD)));
+    expect(fonts.loader.check).not.toHaveBeenCalled();
+  });
+});
+
+describe("ligatureSlicePlacement", () => {
+  const pens = [0, ADVANCE, 2 * ADVANCE];
+  const ink: InkBounds = { left: 1.5, right: 40, ascent: 12, descent: 4 };
+  const slices = pens.map((_, index) =>
+    ligatureSlicePlacement(ink, pens, METRICS, index),
+  );
+  const width = METRICS.deviceCellWidth;
+
+  it("puts each character on its own cell's pen origin, off the font's advance", () => {
+    expect(width).toBe(13);
+    slices.forEach((slice, index) => {
+      // Bitmap x of the run's start, plus the character's pen, is cell x 0.
+      expect(slice.bearingX + slice.originX + pens[index]).toBe(0);
+      expect([slice.scaleX, slice.scaleY]).toEqual([1, 1]);
+    });
+  });
+
+  it("tiles the run: slices meet at cell edges without overlapping", () => {
+    const spans = slices.map((slice, index) => [
+      index * width + slice.bearingX,
+      index * width + slice.bearingX + slice.width,
+    ]);
+    expect(spans[0][1]).toBe(width);
+    expect(spans[1]).toEqual([width, 2 * width]);
+    expect(spans[2][0]).toBe(2 * width);
+  });
+
+  it("keeps the ink that leaves the run on the first and last cells", () => {
+    // Left of the run: floor(-1.5) and the padding.
+    expect(slices[0].bearingX).toBe(-2 - 2);
+    // Right of the run: 40 - 25.2 = 14.8 pixels into a 13-pixel cell.
+    expect(slices[2].bearingX + slices[2].width).toBe(15 + 2);
+    const inside = ligatureSlicePlacement(
+      { ...ink, left: -1, right: 30 },
+      pens,
+      METRICS,
+      2,
+    );
+    expect(inside.width).toBe(width + 2);
+    expect(
+      ligatureSlicePlacement({ ...ink, left: -1 }, pens, METRICS, 0).bearingX,
+    ).toBe(-2);
+  });
+
+  it("spans the run's ink vertically, as a glyph drawn alone does", () => {
+    for (const slice of slices) {
+      expect(slice.height).toBe(12 + 4 + 4);
+      expect(slice.bearingY).toBe(METRICS.deviceBaseline - 12 - 2);
+      expect(slice.originY).toBe(2 + 12);
+    }
   });
 });
 

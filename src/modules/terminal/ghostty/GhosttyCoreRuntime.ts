@@ -63,6 +63,7 @@ export class GhosttyCoreRuntime {
   private lastError: string | null = null;
   private idleReleaseTimer: ReturnType<typeof setTimeout> | null = null;
   private scrollbackBudgetBytes: number;
+  private ligatures = true;
   private disposed = false;
 
   constructor(
@@ -111,6 +112,7 @@ export class GhosttyCoreRuntime {
           this.scheduleIdleRelease();
         },
       });
+      model.setLigatures(this.ligatures);
       this.models.set(options.leafId, model);
       this.rebalanceScrollback();
       return model;
@@ -143,6 +145,15 @@ export class GhosttyCoreRuntime {
     }
     this.scrollbackBudgetBytes = Math.floor(bytes);
     this.rebalanceScrollback();
+  }
+
+  /**
+   * Whether every model, live and future, draws ligature runs
+   * (`GhosttyTerminalModelApi.setLigatures`).
+   */
+  setLigatures(enabled: boolean): void {
+    this.ligatures = enabled;
+    for (const model of this.models.values()) model.setLigatures(enabled);
   }
 
   dispose(): void {

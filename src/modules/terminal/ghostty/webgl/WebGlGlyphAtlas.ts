@@ -14,6 +14,8 @@ import {
 import {
   GLYPH_STYLE_BOLD,
   GLYPH_STYLE_ITALIC,
+  GLYPH_STYLE_LIGATURE,
+  GLYPH_STYLE_LIGATURE_INDEX_SHIFT,
   GlyphRasterizer,
   type RasterizedGlyph,
 } from "../gpu/GlyphRasterizer";
@@ -22,6 +24,8 @@ import type { TerminalFontMetrics } from "../gpu/terminalVisuals";
 
 const ATLAS_SIZE = 1_024;
 const COLOR_ATLAS_SIZE = 512;
+/** Glyph variant bit of a ligature slice; the cell's index follows it. */
+const LIGATURE_VARIANT = 1 << 4;
 
 export type WebGlGlyphEntry = {
   readonly originOffsetX: number;
@@ -203,11 +207,9 @@ export class WebGlGlyphAtlas {
       (grapheme === null
         ? isPrivateUseCodepoint(codepoint)
         : hasPrivateUseCodepoint(grapheme));
-    const style = styleless
-      ? 0
-      : ((flags & CellFlags.BOLD) !== 0 ? GLYPH_STYLE_BOLD : 0) |
-        ((flags & CellFlags.ITALIC) !== 0 ? GLYPH_STYLE_ITALIC : 0);
-    // Bits 0-1 style, 2-3 the cell count: inferred (0), one or two.
+    const style = styleless ? 0 : fontStyle(flags);
+    // Bits 0-1 style, 2-3 the cell count: inferred (0), one or two. Ligature
+    // slices add `LIGATURE_VARIANT` and their index (`ligatureGlyph`).
     const variant = builtin ? 0 : style | ((cells ?? 0) << 2);
     if (grapheme === null) {
       const key = codepoint * 16 + variant;
@@ -222,16 +224,42 @@ export class WebGlGlyphAtlas {
       return entry ?? NULL_GLYPH;
     }
 
-    const cached = this.complexGlyphs.get(variant)?.get(grapheme);
+    return this.complexGlyph(variant, grapheme, style, cells);
+  }
+
+  /**
+   * The slice of ligature run `text` (`ligatureRuns.ts`) that falls in the
+   * run's cell `index`, for a cell with `flags`.
+   */
+  ligatureGlyph(text: string, index: number, flags: number): WebGlGlyphEntry {
+    this.assertLive();
+    const style = fontStyle(flags);
+    return this.complexGlyph(
+      style | LIGATURE_VARIANT | (index << 5),
+      text,
+      style |
+        GLYPH_STYLE_LIGATURE |
+        (index << GLYPH_STYLE_LIGATURE_INDEX_SHIFT),
+      1,
+    );
+  }
+
+  private complexGlyph(
+    variant: number,
+    text: string,
+    style: number,
+    cells: 1 | 2 | undefined,
+  ): WebGlGlyphEntry {
+    const cached = this.complexGlyphs.get(variant)?.get(text);
     if (cached) return cached;
-    const entry = this.rasterize(grapheme, style, cells);
+    const entry = this.rasterize(text, style, cells);
     if (!entry) return NULL_GLYPH;
     let glyphs = this.complexGlyphs.get(variant);
     if (!glyphs) {
       glyphs = new Map();
       this.complexGlyphs.set(variant, glyphs);
     }
-    glyphs.set(grapheme, entry);
+    glyphs.set(text, entry);
     return entry;
   }
 
@@ -454,6 +482,13 @@ export class WebGlGlyphAtlas {
 }
 
 export { hasIntrinsicColor } from "../gpu/glyphColor";
+
+function fontStyle(flags: number): number {
+  return (
+    ((flags & CellFlags.BOLD) !== 0 ? GLYPH_STYLE_BOLD : 0) |
+    ((flags & CellFlags.ITALIC) !== 0 ? GLYPH_STYLE_ITALIC : 0)
+  );
+}
 
 function mergeDirty(
   current: DirtyRectangle | null,

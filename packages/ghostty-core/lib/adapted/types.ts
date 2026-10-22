@@ -365,6 +365,7 @@ export type TeraxGhosttyWasmExports = WebAssembly.Exports & {
   readonly restty_set_xtversion: (handle: number, ptr: number, len: number) => number;
   readonly restty_set_visible: (handle: number, visible: number) => number;
   readonly restty_set_image_storage_limit: (handle: number, bytes: number) => number;
+  readonly restty_set_ligatures: (handle: number, enabled: number) => number;
   readonly restty_encode_mouse: (
     handle: number,
     action: number,

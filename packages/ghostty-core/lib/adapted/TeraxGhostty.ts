@@ -34,10 +34,10 @@ export const ADAPTED_GHOSTTY_COMMIT =
 export const ADAPTED_RESTTY_COMMIT =
   "7700b14a7643ba9240818209ef1e0aa90d83ad77";
 export const ADAPTED_GHOSTTY_WASM_SHA256 =
-  "e41ef491a4ce5c4e5f75af82f0b824fe18db9fc113b06fdc2a426ad804130ac8";
+  "caa9854865ad0aa41387556dcbe993908cce073010be9e5cd72d30181067871a";
 
 export const ADAPTED_GHOSTTY_SCALAR_WASM_SHA256 =
-  "7e427f3a680cb185b6ae459ee3df82f12b30879873344e75a9feb370d2d1ab4d";
+  "44c99aa8b648e326b5b76dec51342fd532c1e2eb89c2748bf325c6567519d5be";
 
 let wasmSimdAvailable: boolean | undefined;
 
@@ -163,6 +163,7 @@ const requiredExports = [
   "restty_link_count",
   "restty_link_buffer_len",
   "restty_set_render_format",
+  "restty_set_ligatures",
   "restty_render_format",
   "restty_gpu_cell_stride",
   "restty_gpu_cells_ptr",
@@ -922,6 +923,19 @@ export class TeraxGhosttyTerminal {
     checkResult(
       this.exports.restty_set_visible(this.handle, visible ? 1 : 0),
       "set visibility",
+    );
+  }
+
+  /**
+   * Whether the GPU format interns ligature runs (`GPU_GLYPH_LIGATURE`); on by
+   * default. A change re-encodes every row on the next GPU update, which
+   * reports the rows whose records changed.
+   */
+  setLigatures(enabled: boolean): void {
+    this.assertLive();
+    checkResult(
+      this.exports.restty_set_ligatures(this.handle, enabled ? 1 : 0),
+      "set ligatures",
     );
   }
 

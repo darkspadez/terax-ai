@@ -712,6 +712,32 @@ describe("GhosttyCoreRuntime", () => {
     model.dispose();
   });
 
+  it("applies the ligature switch to live models and to models created later", async () => {
+    const runtime = new GhosttyCoreRuntime(() =>
+      TeraxGhostty.loadBytes(wasmBytes.slice(0)),
+    );
+    try {
+      const live = await runtime.createModel({ leafId: 30, cols: 8, rows: 2 });
+      expect(live.ligatures?.()).toBe(true);
+      live.consumeDamage();
+      runtime.setLigatures(false);
+      expect(live.ligatures?.()).toBe(false);
+      expect(live.consumeDamage()).toEqual({ kind: "full" });
+      const later = await runtime.createModel({ leafId: 31, cols: 8, rows: 2 });
+      expect(later.ligatures?.()).toBe(false);
+      later.write(new TextEncoder().encode("->"));
+      const frame = later.consumeGpuFrame();
+      expect(frame.newGlyphs.map((glyph) => glyph.text)).toEqual(["-", ">"]);
+      runtime.setLigatures(true);
+      expect([live.ligatures?.(), later.ligatures?.()]).toEqual([true, true]);
+      expect(
+        later.consumeGpuFrame().newGlyphs.map((glyph) => glyph.text),
+      ).toEqual(["->", "->"]);
+    } finally {
+      runtime.dispose();
+    }
+  });
+
   it("rejects duplicate leaves and unbounded dimensions", async () => {
     const runtime = new GhosttyCoreRuntime(() =>
       TeraxGhostty.loadBytes(wasmBytes.slice(0)),

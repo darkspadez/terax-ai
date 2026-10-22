@@ -179,6 +179,38 @@ describe("WebGlGlyphAtlas constraints", () => {
   });
 });
 
+describe("WebGlGlyphAtlas ligature runs", () => {
+  it("keys each cell of a run by run, index and style, apart from plain glyphs", () => {
+    const fillText = vi.fn();
+    const gl = createWebGlHarness(vi.fn(), vi.fn(), fillText);
+    const atlas = new WebGlGlyphAtlas(gl, METRICS, 1);
+    const first = atlas.ligatureGlyph("->", 0, 0);
+    const second = atlas.ligatureGlyph("->", 1, 0);
+    const bold = atlas.ligatureGlyph("->", 0, CellFlags.BOLD);
+    const other = atlas.ligatureGlyph("-=", 0, 0);
+    const dash = atlas.glyph(0x2d, null, 0);
+    expect(new Set([first, second, bold, other, dash]).size).toBe(5);
+    expect(atlas.glyphCount).toBe(5);
+    // Cached, and the whole run is what is drawn for each cell.
+    expect(atlas.ligatureGlyph("->", 1, 0)).toBe(second);
+    expect(atlas.ligatureGlyph("->", 0, CellFlags.BOLD)).toBe(bold);
+    expect(fillText.mock.calls.map(([text]) => text)).toEqual([
+      "->",
+      "->",
+      "->",
+      "-=",
+      "-",
+    ]);
+    // Colour, underline and the like never make another glyph.
+    expect(atlas.ligatureGlyph("->", 0, CellFlags.FAINT)).toBe(first);
+    // A middle cell is exactly one cell wide, with no bearing.
+    const middle = atlas.ligatureGlyph("===", 1, 0);
+    expect(middle.originOffsetX).toBe(0);
+    expect(middle.width).toBe(METRICS.deviceCellWidth);
+    atlas.dispose();
+  });
+});
+
 function createWebGlHarness(
   texSubImage2D: ReturnType<typeof vi.fn>,
   pixelStorei: ReturnType<typeof vi.fn>,
@@ -203,6 +235,7 @@ function createWebGlHarness(
         getImageData: vi.fn(() => ({ data: pixels })),
         // Arrows are drawn two cells wide, as a fallback font might.
         measureText: vi.fn((text: string) => ({
+          width: text.length * 8,
           actualBoundingBoxLeft: 0,
           actualBoundingBoxRight: text === "→" ? 16 : 8,
           actualBoundingBoxAscent: 10,

@@ -13,6 +13,11 @@ import {
   type GestureGrowth,
 } from "../gpu/CanvasBackingStore";
 import { constraintCells } from "../gpu/glyphConstraint";
+import {
+  findRowLigatureRuns,
+  ligatureRunIndex,
+  ligatureRunLength,
+} from "../gpu/ligatureRuns";
 import { type LinkCellRange, linkRangesEqual } from "../gpu/linkUnderline";
 import { contrastedColor } from "../gpu/minimumContrast";
 import type {
@@ -140,6 +145,9 @@ export class WebGlCellRenderer {
   private flags = new Uint8Array(0);
   private decorations = new Uint8Array(0);
   private blinkingRows = new Uint8Array(0);
+  /** One row's ligature keys and runs (`findRowLigatureRuns`). */
+  private ligatureKeys = new Float64Array(0);
+  private ligatureRuns = new Uint16Array(0);
   private readonly backgroundVertices: RectangleVertices = {
     attributes: new Float32Array(INITIAL_RECTANGLE_CAPACITY * RECTANGLE_FLOATS),
     count: 0,
@@ -608,11 +616,14 @@ export class WebGlCellRenderer {
     const canvasHeight = this.canvas.height;
     const viewportOrigin = frame.model.viewportOriginLine();
     const minimumContrast = this.profile.theme.minimumContrast ?? 1;
+    const ligatures = frame.model.ligatures?.() === true;
 
     for (let row = first; row <= last; row += 1) {
       let rowHasBlinkingCell = false;
       let rowRectanglesChanged = false;
       let previousBackground = this.packRgb(this.profile.theme.background);
+      const runs = ligatures ? this.findRowLigatures(cells, row) : null;
+      let runText = "";
       for (let column = 0; column < this.cols; column += 1) {
         const cellIndex = row * this.cols + column;
         const glyphIndex = cellIndex * GLYPH_FLOATS;
@@ -686,19 +697,29 @@ export class WebGlCellRenderer {
             cells.graphemeLength(cellIndex) > 0
               ? frame.model.grapheme(row, column)
               : null;
-          // Ghostty's cell rule, as the core applies it for WebGPU: a symbol
-          // may use two cells when the next one is free.
-          const glyph = this.atlas.glyph(
-            codepoint,
-            grapheme,
-            flags,
-            constraintCells(
+          const run = runs === null ? 0 : runs[column];
+          let glyph: WebGlGlyphEntry;
+          if (run !== 0) {
+            const index = ligatureRunIndex(run);
+            if (index === 0) {
+              runText = runTextAt(cells, cellIndex, ligatureRunLength(run));
+            }
+            glyph = this.atlas.ligatureGlyph(runText, index, flags);
+          } else {
+            // Ghostty's cell rule, as the core applies it for WebGPU: a symbol
+            // may use two cells when the next one is free.
+            glyph = this.atlas.glyph(
               codepoint,
-              width,
-              column > 0 ? cells.codepoint(cellIndex - 1) : 0,
-              column + 1 < this.cols ? cells.codepoint(cellIndex + 1) : null,
-            ),
-          );
+              grapheme,
+              flags,
+              constraintCells(
+                codepoint,
+                width,
+                column > 0 ? cells.codepoint(cellIndex - 1) : 0,
+                column + 1 < this.cols ? cells.codepoint(cellIndex + 1) : null,
+              ),
+            );
+          }
           // Ghostty's minimum contrast applies to text, not to colour glyphs or
           // procedural shapes (and never to decorations).
           const textColor =
@@ -729,6 +750,26 @@ export class WebGlCellRenderer {
       }
     }
     return rectanglesChanged;
+  }
+
+  /** The ligature runs of `row`, or null when it has none. */
+  private findRowLigatures(
+    cells: TerminalCellReader,
+    row: number,
+  ): Uint16Array | null {
+    if (this.ligatureKeys.length < this.cols) {
+      this.ligatureKeys = new Float64Array(this.cols);
+      this.ligatureRuns = new Uint16Array(this.cols);
+    }
+    return findRowLigatureRuns(
+      cells,
+      row,
+      this.cols,
+      this.ligatureKeys,
+      this.ligatureRuns,
+    ) > 0
+      ? this.ligatureRuns
+      : null;
   }
 
   private writeGlyph(
@@ -1392,6 +1433,18 @@ export class WebGlCellRenderer {
   private assertLive(): void {
     if (this.disposed) throw new Error("WebGL renderer is disposed");
   }
+}
+
+function runTextAt(
+  cells: TerminalCellReader,
+  first: number,
+  length: number,
+): string {
+  let text = "";
+  for (let index = first; index < first + length; index += 1) {
+    text += String.fromCharCode(cells.codepoint(index));
+  }
+  return text;
 }
 
 export function rendererProfileKey(profile: WebGlRendererProfile): string {

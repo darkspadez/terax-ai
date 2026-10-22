@@ -44,6 +44,18 @@ export const GPU_GLYPH_ITALIC = 1 << 1;
  * follows another symbol. Icons, symbols and emoji are fitted to the count.
  */
 export const GPU_GLYPH_TWO_CELLS = 1 << 2;
+/**
+ * One cell of a ligature run (`setLigatures`, on by default): two or more
+ * adjacent narrow cells of a row that each hold one ASCII punctuation or
+ * symbol code point, drawn alike (bold, italic, foreground with faint, blink),
+ * at most 16 per run. The glyph's text is the whole run and bits 4..7
+ * (`GPU_GLYPH_LIGATURE_INDEX_*`) hold the cell's index in it; the renderer
+ * draws the part of the run that falls in that cell. Never combined with
+ * `GPU_GLYPH_TWO_CELLS`.
+ */
+export const GPU_GLYPH_LIGATURE = 1 << 3;
+export const GPU_GLYPH_LIGATURE_INDEX_SHIFT = 4;
+export const GPU_GLYPH_LIGATURE_INDEX_MASK = 0xf;
 
 /** Decoded view of one record, for tests and diagnostics (not a hot path). */
 export type TeraxGhosttyGpuCell = {

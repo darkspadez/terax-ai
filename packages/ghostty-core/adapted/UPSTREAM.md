@@ -11,10 +11,10 @@ per-terminal frame loop, or per-pane GPU lifecycle.
 - Restty commit: `7700b14a7643ba9240818209ef1e0aa90d83ad77`
 - Zig: `0.16.0`
 - Optimization: `ReleaseFast`, WebAssembly SIMD and scalar variants
-- SIMD artifact size: `1055960` bytes
-- Scalar artifact size: `996476` bytes
-- SIMD SHA-256: `e41ef491a4ce5c4e5f75af82f0b824fe18db9fc113b06fdc2a426ad804130ac8`
-- Scalar SHA-256: `7e427f3a680cb185b6ae459ee3df82f12b30879873344e75a9feb370d2d1ab4d`
+- SIMD artifact size: `1058480` bytes
+- Scalar artifact size: `999003` bytes
+- SIMD SHA-256: `caa9854865ad0aa41387556dcbe993908cce073010be9e5cd72d30181067871a`
+- Scalar SHA-256: `44c99aa8b648e326b5b76dec51342fd532c1e2eb89c2748bf325c6567519d5be`
 
 Terax-specific changes include:
 
@@ -134,6 +134,18 @@ XTVERSION, OSC 9;4 progress), instead of answering only a hand-picked set:
   symbol, gets glyph style bit 2 (`GPU_GLYPH_TWO_CELLS`). The renderer fits
   icons, symbols and emoji to that many cells, so a Nerd Font icon before a
   space is drawn at Ghostty's size.
+- Ligature runs (`restty_set_ligatures`, on by default): 2 to 16 adjacent
+  narrow cells of a row that each hold one ASCII punctuation or symbol code
+  point with the same foreground (faint included), bold, italic and blink.
+  Each cell is interned as the whole run with glyph style bit 3
+  (`GPU_GLYPH_LIGATURE`) and its index in bits 4..7, so the renderer draws the
+  font's contextual alternates (`->`, `!=`, `===`) across cells; longer runs
+  continue as new runs. A run's cells get consecutive ids from one lookup, and
+  a full table takes a run whole or not at all. Only punctuation is tested
+  (one table lookup), so letters, digits and spaces keep the ASCII table path
+  at its old cost (a 200x60 re-encode of plain text measured the same); a
+  screen dense with operators costs about 1.6 times as much. Changing the
+  switch re-encodes every row once, like a palette change.
 
 ## October 15 instance-per-terminal memory
 

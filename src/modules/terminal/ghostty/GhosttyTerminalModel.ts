@@ -4,6 +4,7 @@ import type {
   TerminalModel,
   TerminalRowRange,
 } from "@/modules/terminal/backend/contracts";
+import type { TerminalCellReader } from "@/modules/terminal/ghostty/core/packedCells";
 import type {
   TeraxGhosttyGpuGlyph,
   TeraxGhosttyKittyPlacement,
@@ -15,7 +16,6 @@ import type {
   GhosttyTerminalEvent,
   KeyEvent,
 } from "@terax/ghostty-core/protocol";
-import type { TerminalCellReader } from "@/modules/terminal/ghostty/core/packedCells";
 
 export type GhosttyTerminalModelOptions = {
   readonly backend: Extract<TerminalBackendKind, `ghostty-${string}`>;
@@ -259,6 +259,13 @@ export interface GhosttyTerminalModelApi extends TerminalModel {
   setTerminalVersion?(version: string): void;
   /** Kitty image bytes per screen; 0 disables the protocol. */
   setImageStorageLimit?(bytes: number): void;
+  /**
+   * Whether runs of punctuation are drawn as one sequence so a font's
+   * ligatures join across cells (`gpu/ligatureRuns.ts`). On by default; the
+   * GPU format interns the runs natively, SoA renderers apply the rule.
+   */
+  setLigatures?(enabled: boolean): void;
+  ligatures?(): boolean;
   /** A buffer range as plain text, VT sequences or HTML, soft wraps joined. */
   formatTextRange?(
     startLine: number,

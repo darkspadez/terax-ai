@@ -48,7 +48,8 @@ export type GlyphProcessResult = {
 export class TerminalGlyphMap {
   private values = new Uint32Array(MIN_ENTRIES).fill(GLYPH_PENDING);
   private texts: Array<string | undefined> = [];
-  private styles = new Uint8Array(MIN_ENTRIES);
+  /** `GLYPH_STYLE_*` bits; wider than the eight in use so none is cut off. */
+  private styles = new Uint16Array(MIN_ENTRIES);
   private queued = new Uint8Array(MIN_ENTRIES);
   private visibleMark = new Uint8Array(0);
   private normal: number[] = [];
@@ -125,7 +126,7 @@ export class TerminalGlyphMap {
     const values = new Uint32Array(next).fill(GLYPH_PENDING);
     values.set(this.values);
     this.values = values;
-    const styles = new Uint8Array(next);
+    const styles = new Uint16Array(next);
     styles.set(this.styles);
     this.styles = styles;
     const queued = new Uint8Array(next);

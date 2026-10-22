@@ -5,7 +5,11 @@ import {
   hasPrivateUseCodepoint,
   isPrivateUseCodepoint,
 } from "./GlyphFontGate";
-import { GLYPH_STYLE_TWO_CELLS, GlyphRasterizer } from "./GlyphRasterizer";
+import {
+  GLYPH_STYLE_LAYOUT_MASK,
+  GLYPH_STYLE_TWO_CELLS,
+  GlyphRasterizer,
+} from "./GlyphRasterizer";
 import { SkylineAtlasAllocator } from "./SkylineAtlasAllocator";
 import type { TerminalFontMetrics } from "./terminalVisuals";
 
@@ -160,7 +164,8 @@ export class GlyphAtlas {
    * `style` is `GLYPH_STYLE_*` bits from the core, which applies Ghostty's
    * cell rule: with `GLYPH_STYLE_TWO_CELLS` the glyph may use two cells (a
    * wide cell, or a symbol with room after it) and is a separate glyph;
-   * without it, one.
+   * without it, one. With `GLYPH_STYLE_LIGATURE` `text` is a ligature run and
+   * the glyph is the slice of the cell at the style's index.
    */
   resolve(text: string, style: number): number {
     this.assertActive();
@@ -176,8 +181,8 @@ export class GlyphAtlas {
         : hasPrivateUseCodepoint(text));
     const keyStyle = builtin
       ? 0
-      : (styleless ? 0 : style & 3) | (style & GLYPH_STYLE_TWO_CELLS);
-    const simpleKey = codepoint * 8 + keyStyle;
+      : (styleless ? 0 : style & 3) | (style & GLYPH_STYLE_LAYOUT_MASK);
+    const simpleKey = codepoint * 256 + keyStyle;
     const complexKey = single ? "" : `${keyStyle}\u0000${text}`;
     const cached = single
       ? this.simple.get(simpleKey)

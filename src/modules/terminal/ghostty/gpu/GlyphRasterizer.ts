@@ -17,9 +17,12 @@ import {
   glyphConstraint,
   isEmojiPresentation,
 } from "./glyphConstraint";
+import { isLigatureRun } from "./ligatureRuns";
 import { fontCss, type TerminalFontMetrics } from "./terminalVisuals";
 
 const RASTER_SIZE = 256;
+/** Ligature runs whose measurements are kept (cells of a run come together). */
+const MAX_CACHED_RUNS = 64;
 const GLYPH_PADDING = 2;
 const CLEAR_MARGIN = 8;
 /** Ink smaller than this has no shape worth constraining (as Ghostty). */
@@ -33,6 +36,19 @@ export const GLYPH_STYLE_ITALIC = 2;
  * follows from the text: emoji take two cells, everything else one.
  */
 export const GLYPH_STYLE_TWO_CELLS = 4;
+/**
+ * One cell of a ligature run (`ligatureRuns.ts`): the text is the whole run
+ * and bits 4-7 hold the cell's index in it. The glyph is that cell's slice of
+ * the run (`ligatureSlicePlacement`).
+ */
+export const GLYPH_STYLE_LIGATURE = 8;
+export const GLYPH_STYLE_LIGATURE_INDEX_SHIFT = 4;
+export const GLYPH_STYLE_LIGATURE_INDEX_MASK = 0xf0;
+/** Style bits that change a glyph's bitmap beyond bold and italic. */
+export const GLYPH_STYLE_LAYOUT_MASK =
+  GLYPH_STYLE_TWO_CELLS |
+  GLYPH_STYLE_LIGATURE |
+  GLYPH_STYLE_LIGATURE_INDEX_MASK;
 
 export type RasterizedGlyph = {
   readonly width: number;
@@ -77,6 +93,11 @@ export type GlyphPlacement = {
   readonly originY: number;
   readonly scaleX: number;
   readonly scaleY: number;
+};
+
+type LigatureRun = {
+  readonly ink: InkBounds;
+  readonly pens: readonly number[];
 };
 
 type CellGeometry = Pick<
@@ -165,6 +186,48 @@ function naturalPlacement(ink: InkBounds, cell: CellGeometry): GlyphPlacement {
   };
 }
 
+/**
+ * Where cell `index` of a ligature run is drawn. The whole run is drawn with
+ * that cell's character on the cell's pen origin, where it sits when drawn
+ * alone, and the bitmap is exactly the cell: neighbouring slices meet without
+ * overlapping, and every character stays on its own cell even when the cell
+ * is wider than the font's advance (a cell is whole device pixels). `pens[i]`
+ * is the pen offset of character `i` from the run's start and `ink` the whole
+ * run's ink around that start. The first and last cells also keep the ink
+ * that leaves the run (a slant, an overhang), as a glyph drawn alone does.
+ */
+export function ligatureSlicePlacement(
+  ink: InkBounds,
+  pens: readonly number[],
+  cell: CellGeometry,
+  index: number,
+): GlyphPlacement {
+  const pen = pens[index];
+  const last = pens.length - 1;
+  const ascent = Math.ceil(ink.ascent || cell.deviceBaseline);
+  const descent = Math.ceil(
+    ink.descent || cell.deviceCellHeight - cell.deviceBaseline,
+  );
+  // Cell coordinates: x = 0 is the cell's left edge and this cell's pen.
+  const left =
+    index === 0 ? Math.min(0, Math.floor(-ink.left)) - GLYPH_PADDING : 0;
+  const right =
+    index === last
+      ? Math.max(cell.deviceCellWidth, Math.ceil(ink.right - pen)) +
+        GLYPH_PADDING
+      : cell.deviceCellWidth;
+  return {
+    width: clampSize(right - left),
+    height: clampSize(ascent + descent + GLYPH_PADDING * 2),
+    bearingX: left,
+    bearingY: cell.deviceBaseline - ascent - GLYPH_PADDING,
+    originX: -pen - left,
+    originY: GLYPH_PADDING + ascent,
+    scaleX: 1,
+    scaleY: 1,
+  };
+}
+
 function clampSize(size: number): number {
   return Math.min(RASTER_SIZE, Math.max(1, size));
 }
@@ -194,6 +257,8 @@ export class GlyphRasterizer {
   private readonly coverage = new Uint8Array(RASTER_SIZE * RASTER_SIZE);
   private builtin: BuiltinGlyphRenderer | null = null;
   private constraintMetricsValue: ConstraintMetrics | null = null;
+  /** Measured runs by font style and text: every cell of a run needs them. */
+  private runs = new Map<string, LigatureRun>();
 
   constructor(
     private readonly metrics: TerminalFontMetrics,
@@ -230,6 +295,9 @@ export class GlyphRasterizer {
     style: number,
     cells?: 1 | 2,
   ): RasterizedGlyph | null {
+    if ((style & GLYPH_STYLE_LIGATURE) !== 0) {
+      return this.rasterizeLigature(text, style);
+    }
     const builtin = this.rasterizeBuiltin(text);
     if (builtin) return builtin;
     // Icons ignore bold and italic, like procedural glyphs: no synthesized
@@ -281,6 +349,83 @@ export class GlyphRasterizer {
       rgba = this.draw(context, text, placement);
     }
 
+    return this.glyph(rgba, placement, intrinsicColor);
+  }
+
+  /**
+   * Cell `index` of a ligature run: the run drawn once per cell, shifted so
+   * the cell's character sits on its pen origin, and cut to the cell
+   * (`ligatureSlicePlacement`). Drawing per cell keeps every character on the
+   * pixel phase it has when drawn alone; the run's measurements are cached.
+   * Text that is not a run, or letter spacing (cells off the font's advance),
+   * draws the cell's own character.
+   */
+  private rasterizeLigature(
+    text: string,
+    style: number,
+  ): RasterizedGlyph | null {
+    const index =
+      (style & GLYPH_STYLE_LIGATURE_INDEX_MASK) >>>
+      GLYPH_STYLE_LIGATURE_INDEX_SHIFT;
+    const fontStyle = style & (GLYPH_STYLE_BOLD | GLYPH_STYLE_ITALIC);
+    if (
+      !isLigatureRun(text) ||
+      index >= text.length ||
+      this.metrics.font.letterSpacing !== 0
+    ) {
+      return this.rasterize(text.charAt(index) || text, fontStyle, 1);
+    }
+    if (!this.fontGate.ready(this.fonts[fontStyle], text)) return null;
+    const context = this.ensureContext();
+    this.selectFont(context, fontStyle);
+    const run = this.measureRun(context, text, fontStyle);
+    const placement = ligatureSlicePlacement(
+      run.ink,
+      run.pens,
+      this.metrics,
+      index,
+    );
+    const rgba = this.draw(
+      context,
+      text,
+      placement,
+      placement.originX + run.ink.right,
+    );
+    return this.glyph(rgba, placement, hasIntrinsicColor(rgba));
+  }
+
+  private measureRun(
+    context: CanvasRenderingContext2D,
+    text: string,
+    fontStyle: number,
+  ): LigatureRun {
+    const key = `${fontStyle}\u0000${text}`;
+    const cached = this.runs.get(key);
+    if (cached) return cached;
+    const measurement = context.measureText(text);
+    const pens = [0];
+    for (let index = 1; index < text.length; index += 1) {
+      pens.push(context.measureText(text.slice(0, index)).width || 0);
+    }
+    const run: LigatureRun = {
+      ink: {
+        left: measurement.actualBoundingBoxLeft || 0,
+        right: measurement.actualBoundingBoxRight || 0,
+        ascent: measurement.actualBoundingBoxAscent || 0,
+        descent: measurement.actualBoundingBoxDescent || 0,
+      },
+      pens,
+    };
+    if (this.runs.size >= MAX_CACHED_RUNS) this.runs.clear();
+    this.runs.set(key, run);
+    return run;
+  }
+
+  private glyph(
+    rgba: Uint8ClampedArray,
+    placement: GlyphPlacement,
+    intrinsicColor: boolean,
+  ): RasterizedGlyph {
     const { width, height } = placement;
     let pixels: Uint8Array;
     if (intrinsicColor) {
@@ -322,11 +467,16 @@ export class GlyphRasterizer {
     };
   }
 
-  /** Clears what the last glyph touched, draws `text` and reads it back. */
+  /**
+   * Clears what the last glyph touched, draws `text` and reads it back.
+   * `inkRight` is where the drawn ink ends when it goes past the bitmap (the
+   * rest of a ligature run), so the next glyph clears it.
+   */
   private draw(
     context: CanvasRenderingContext2D,
     text: string,
     placement: GlyphPlacement,
+    inkRight = 0,
   ): Uint8ClampedArray {
     context.clearRect(0, 0, this.dirtyWidth, this.dirtyHeight);
     const { originX, originY, scaleX, scaleY, width, height } = placement;
@@ -337,7 +487,10 @@ export class GlyphRasterizer {
       context.fillText(text, 0, 0);
       context.setTransform(1, 0, 0, 1, 0, 0);
     }
-    this.dirtyWidth = Math.min(RASTER_SIZE, width + CLEAR_MARGIN);
+    this.dirtyWidth = Math.min(
+      RASTER_SIZE,
+      Math.max(width, Math.ceil(inkRight)) + CLEAR_MARGIN,
+    );
     this.dirtyHeight = Math.min(RASTER_SIZE, height + CLEAR_MARGIN);
     return context.getImageData(0, 0, width, height).data;
   }
@@ -378,6 +531,7 @@ export class GlyphRasterizer {
     this.canvas = null;
     this.context = null;
     this.builtin = null;
+    this.runs = new Map();
     this.activeStyle = -1;
   }
 

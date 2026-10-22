@@ -175,6 +175,8 @@ export type Preferences = {
   terminalLineHeight: number;
   /** Ghostty's minimum contrast for terminal text (1 is off). */
   terminalMinimumContrast: number;
+  /** Join punctuation such as `->` and `!=` with the font's ligatures. */
+  terminalLigatures: boolean;
   terminalFontSize: number;
   terminalScrollback: number;
   terminalBehavior: TerminalBehavior;
@@ -274,6 +276,7 @@ const KEY_TERMINAL_SHELL = "terminalShell";
 const KEY_TERMINAL_LETTER_SPACING = "terminalLetterSpacing";
 const KEY_TERMINAL_LINE_HEIGHT = "terminalLineHeight";
 const KEY_TERMINAL_MINIMUM_CONTRAST = "terminalMinimumContrast";
+const KEY_TERMINAL_LIGATURES = "terminalLigatures";
 const KEY_TERMINAL_FONT_SIZE = "terminalFontSize";
 const KEY_TERMINAL_SCROLLBACK = "terminalScrollback";
 const KEY_TERMINAL_BEHAVIOR = "terminalBehavior";
@@ -313,6 +316,11 @@ export function clampMinimumContrast(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value)
     ? Math.min(21, Math.max(1, value))
     : 1;
+}
+
+/** On unless explicitly turned off. */
+export function coerceTerminalLigatures(value: unknown): boolean {
+  return value !== false;
 }
 
 const TERMINAL_FONT_SIZE_MIN = 8;
@@ -394,6 +402,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   terminalLetterSpacing: 0,
   terminalLineHeight: TERMINAL_LINE_HEIGHT_DEFAULT,
   terminalMinimumContrast: 1,
+  terminalLigatures: true,
   terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT,
   terminalScrollback: TERMINAL_SCROLLBACK_DEFAULT,
   terminalBehavior: defaultTerminalBehavior(currentPlatform()),
@@ -570,6 +579,9 @@ export async function loadPreferences(): Promise<Preferences> {
     ),
     terminalMinimumContrast: clampMinimumContrast(
       get<number>(KEY_TERMINAL_MINIMUM_CONTRAST),
+    ),
+    terminalLigatures: coerceTerminalLigatures(
+      get<unknown>(KEY_TERMINAL_LIGATURES),
     ),
     terminalFontSize:
       get<number>(KEY_TERMINAL_FONT_SIZE) ??
@@ -906,6 +918,10 @@ export async function setTerminalMinimumContrast(value: number): Promise<void> {
   await writePref(KEY_TERMINAL_MINIMUM_CONTRAST, clampMinimumContrast(value));
 }
 
+export async function setTerminalLigatures(value: boolean): Promise<void> {
+  await writePref(KEY_TERMINAL_LIGATURES, coerceTerminalLigatures(value));
+}
+
 export async function setTerminalFontSize(value: number): Promise<void> {
   const clamped = Number.isFinite(value)
     ? Math.min(
@@ -1082,6 +1098,7 @@ export async function onPreferencesChange(
     [KEY_TERMINAL_LETTER_SPACING]: "terminalLetterSpacing",
     [KEY_TERMINAL_LINE_HEIGHT]: "terminalLineHeight",
     [KEY_TERMINAL_MINIMUM_CONTRAST]: "terminalMinimumContrast",
+    [KEY_TERMINAL_LIGATURES]: "terminalLigatures",
     [KEY_TERMINAL_FONT_SIZE]: "terminalFontSize",
     [KEY_TERMINAL_SCROLLBACK]: "terminalScrollback",
     [KEY_TERMINAL_BEHAVIOR]: "terminalBehavior",
