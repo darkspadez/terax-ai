@@ -151,5 +151,27 @@ describe.each(["ghostty-vt", "ghostty-vt-scalar"])(
         model.dispose();
       }
     });
+
+    it("jumps between shell prompts in history", () => {
+      const { model, write } = create();
+      try {
+        for (let command = 0; command < 3; command += 1) {
+          write(`\x1b]133;A\x07$ cmd${command}\r\n`);
+          write("output\r\n".repeat(30));
+        }
+        expect(model.scrollPosition().offset).toBe(0);
+        expect(model.scrollToPrompt(-1)).toBe(true);
+        const first = model.scrollPosition().offset;
+        expect(first).toBeGreaterThan(0);
+        expect(model.scrollToPrompt(-1)).toBe(true);
+        expect(model.scrollPosition().offset).toBeGreaterThan(first);
+        expect(model.scrollToPrompt(1)).toBe(true);
+        expect(model.scrollPosition().offset).toBe(first);
+        write("\x1b[?1049h");
+        expect(model.scrollToPrompt(-1)).toBe(false);
+      } finally {
+        model.dispose();
+      }
+    });
   },
 );

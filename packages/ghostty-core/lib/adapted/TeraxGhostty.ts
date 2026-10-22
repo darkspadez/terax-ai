@@ -34,10 +34,10 @@ export const ADAPTED_GHOSTTY_COMMIT =
 export const ADAPTED_RESTTY_COMMIT =
   "7700b14a7643ba9240818209ef1e0aa90d83ad77";
 export const ADAPTED_GHOSTTY_WASM_SHA256 =
-  "6a541e7208afa1d7a0b55998c2928cddf8a4495958183d83f780e760acfae308";
+  "b6413d48ba90b02438828a7849cdafc6615d4595b2fca228a8ccd0326bdb759b";
 
 export const ADAPTED_GHOSTTY_SCALAR_WASM_SHA256 =
-  "c8b6489230b763c3441a0dd23026f6591ca7237e9a363ef8e928a3557e5edab6";
+  "b80eda8107c828d1811a847be2c97acc5bc17afc8060e0ef6097d70e30e86e9e";
 
 let wasmSimdAvailable: boolean | undefined;
 
@@ -1043,6 +1043,18 @@ export class TeraxGhosttyTerminal {
     checkResult(
       this.exports.restty_scroll_viewport(this.handle, delta),
       "scroll viewport",
+    );
+  }
+
+  /** Scrolls by shell prompts (OSC 133): negative earlier, positive later. */
+  scrollViewportToPrompt(delta: number): void {
+    this.assertLive();
+    checkResult(
+      this.exports.restty_scroll_viewport_prompt(
+        this.handle,
+        clampInteger(delta, -0x7fff_ffff, 0x7fff_ffff),
+      ),
+      "scroll viewport to prompt",
     );
   }
 

@@ -9,9 +9,12 @@ import {
   ghosttyCwdForLeaf,
   ghosttyPtyIdForLeaf,
   ghosttySelectionForLeaf,
+  ghosttySessionInAlternateScreen,
+  type GhosttyScrollAction,
   hasGhosttySession,
   interruptGhosttySession,
   pasteIntoGhosttySession,
+  scrollGhosttySession,
   submitToGhosttySession,
   whenGhosttySessionReady,
   writeToGhosttySession,
@@ -23,6 +26,7 @@ import {
 } from "@/modules/terminal/ghostty/ghosttyBlockSessions";
 export type { WatermarkState } from "@/modules/terminal/ghostty/ghosttyBlockSessions";
 import { forgetLeafPresentation } from "@/modules/terminal/lib/ptyPresentation";
+import { useTerminalFontOffsets } from "@/modules/terminal/lib/terminalFontOffsets";
 import type { WatermarkState } from "@/modules/terminal/ghostty/ghosttyBlockSessions";
 
 export async function whenSessionReady(
@@ -62,10 +66,34 @@ export function leafCwd(leafId: number): string | null {
 
 export function navigateFocusedBlocks(direction: -1 | 1): boolean {
   const leaf = ghosttyFocusedLeaf();
-  return (
-    leaf !== null &&
-    (ghosttyBlocks(leaf)?.controller?.navigate(direction) ?? false)
+  if (leaf === null) return false;
+  const controller = ghosttyBlocks(leaf)?.controller;
+  if (controller) return controller.navigate(direction);
+  // Plain terminals jump between the prompts shell integration marks.
+  return scrollGhosttySession(
+    leaf,
+    direction < 0 ? "prompt-previous" : "prompt-next",
   );
+}
+
+/** Scrolls the focused pane (page, top, bottom). */
+export function scrollFocusedTerminal(action: GhosttyScrollAction): boolean {
+  const leaf = ghosttyFocusedLeaf();
+  return leaf !== null && scrollGhosttySession(leaf, action);
+}
+
+/** The focused pane runs a full-screen program, which keeps its keys. */
+export function focusedTerminalInAlternateScreen(): boolean {
+  const leaf = ghosttyFocusedLeaf();
+  return leaf !== null && ghosttySessionInAlternateScreen(leaf);
+}
+
+/** Grows, shrinks or resets the focused pane's text size. */
+export function adjustFocusedTerminalFont(delta: number | "reset"): boolean {
+  const leaf = ghosttyFocusedLeaf();
+  if (leaf === null) return false;
+  useTerminalFontOffsets.getState().adjust(leaf, delta);
+  return true;
 }
 
 export function clearLeafBlockSelection(leafId: number): boolean {

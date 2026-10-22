@@ -90,8 +90,13 @@ import {
   hasLeaf,
   isTerminalSurfaceTarget,
   leafIds,
+  adjustFocusedTerminalFont,
+  equalizePanes,
+  focusedTerminalInAlternateScreen,
   navigateFocusedBlocks,
   type PaneBounds,
+  resizeActivePane,
+  scrollFocusedTerminal,
   ptyIdForLeaf,
   setTerminalFileOpener,
   type TerminalPaneHandle,
@@ -151,6 +156,20 @@ const BenchBridge = __TERAX_BENCH__
   ? lazy(() => import("@/bench/BenchBridge"))
   : null;
 
+/** Shortcuts that act between split terminal panes. */
+const SPLIT_PANE_SHORTCUTS: ReadonlySet<ShortcutId> = new Set<ShortcutId>([
+  "pane.focusLeft",
+  "pane.focusRight",
+  "pane.focusUp",
+  "pane.focusDown",
+  "pane.zoom",
+  "pane.resizeLeft",
+  "pane.resizeRight",
+  "pane.resizeUp",
+  "pane.resizeDown",
+  "pane.equalize",
+]);
+
 export default function App() {
   const {
     tabs,
@@ -189,6 +208,8 @@ export default function App() {
     setLeafCwd,
     focusPane,
     focusNextPaneInTab,
+    focusPaneInDirection,
+    togglePaneZoom,
     swapActivePaneInDirection,
     splitActivePane,
     closeActivePane,
@@ -868,6 +889,22 @@ export default function App() {
     [activeId, livePaneBounds, swapActivePaneInDirection],
   );
 
+  const focusActivePaneToward = useCallback(
+    (direction: "left" | "right" | "up" | "down") => {
+      focusPaneInDirection(activeId, direction, livePaneBounds(activeId));
+    },
+    [activeId, livePaneBounds, focusPaneInDirection],
+  );
+
+  const resizeActiveTerminalPane = useCallback(
+    (direction: "left" | "right" | "up" | "down") => {
+      const tab = tabsRef.current.find((t) => t.id === activeId);
+      if (tab?.kind !== "terminal" || tab.zoomedLeafId !== undefined) return;
+      resizeActivePane(tab.paneTree, tab.activeLeafId, direction);
+    },
+    [activeId],
+  );
+
   const handleCloseTabOrPane = useCallback(() => {
     const t = tabsRef.current.find((x) => x.id === activeId);
     if (t?.kind === "terminal" && leafIds(t.paneTree).length > 1) {
@@ -921,6 +958,19 @@ export default function App() {
       "pane.swapRight": () => swapActivePane("right"),
       "pane.swapUp": () => swapActivePane("up"),
       "pane.swapDown": () => swapActivePane("down"),
+      "pane.focusLeft": () => focusActivePaneToward("left"),
+      "pane.focusRight": () => focusActivePaneToward("right"),
+      "pane.focusUp": () => focusActivePaneToward("up"),
+      "pane.focusDown": () => focusActivePaneToward("down"),
+      "pane.zoom": () => togglePaneZoom(activeId),
+      "pane.resizeLeft": () => resizeActiveTerminalPane("left"),
+      "pane.resizeRight": () => resizeActiveTerminalPane("right"),
+      "pane.resizeUp": () => resizeActiveTerminalPane("up"),
+      "pane.resizeDown": () => resizeActiveTerminalPane("down"),
+      "pane.equalize": () => {
+        const tab = tabsRef.current.find((t) => t.id === activeId);
+        if (tab?.kind === "terminal") equalizePanes(tab.paneTree);
+      },
       "pane.source": toggleSourceControl,
       "terminal.clear": () => {
         clearFocusedTerminal();
@@ -929,6 +979,13 @@ export default function App() {
         window.dispatchEvent(new CustomEvent(TOGGLE_BLOCK_INPUT_EVENT)),
       "blocks.prev": () => navigateFocusedBlocks(-1),
       "blocks.next": () => navigateFocusedBlocks(1),
+      "terminal.scrollPageUp": () => scrollFocusedTerminal("page-up"),
+      "terminal.scrollPageDown": () => scrollFocusedTerminal("page-down"),
+      "terminal.scrollTop": () => scrollFocusedTerminal("top"),
+      "terminal.scrollBottom": () => scrollFocusedTerminal("bottom"),
+      "terminal.fontSizeUp": () => adjustFocusedTerminalFont(1),
+      "terminal.fontSizeDown": () => adjustFocusedTerminalFont(-1),
+      "terminal.fontSizeReset": () => adjustFocusedTerminalFont("reset"),
       "search.focus": () => {
         const editor = editorRefs.current.get(activeId);
         if (editor) editor.openSearch();
@@ -980,6 +1037,9 @@ export default function App() {
       splitActivePaneInActiveTab,
       focusNextPaneInTab,
       swapActivePane,
+      focusActivePaneToward,
+      togglePaneZoom,
+      resizeActiveTerminalPane,
       toggleSourceControl,
       hasComposer,
       togglePanelAndFocus,
@@ -1026,12 +1086,27 @@ export default function App() {
           (e.target as HTMLElement | null) ?? document.activeElement;
         return !isTerminalSurfaceTarget(target);
       }
-      if (
-        id === "terminal.toggleInput" ||
-        id === "blocks.prev" ||
-        id === "blocks.next"
-      ) {
+      if (id === "terminal.toggleInput") {
         return !(activeTab?.kind === "terminal" && activeTab.blocks === true);
+      }
+      if (id === "blocks.prev" || id === "blocks.next") {
+        if (activeTab?.kind !== "terminal") return true;
+        // Block tabs navigate blocks; plain terminals jump between prompts,
+        // except while a full-screen program owns the keys.
+        return activeTab.blocks !== true && focusedTerminalInAlternateScreen();
+      }
+      if (id.startsWith("terminal.scroll") || id.startsWith("terminal.fontSize")) {
+        const target =
+          (e.target as HTMLElement | null) ?? document.activeElement;
+        if (!isTerminalSurfaceTarget(target)) return true;
+        return id.startsWith("terminal.scroll") && focusedTerminalInAlternateScreen();
+      }
+      if (SPLIT_PANE_SHORTCUTS.has(id)) {
+        // Pane keys mean nothing without split terminal panes; let them through.
+        return (
+          activeTab?.kind !== "terminal" ||
+          leafIds(activeTab.paneTree).length < 2
+        );
       }
       if (id === "sidebar.toggle") {
         // Ctrl+B is also Claude Code's "run in background" key. While a terminal

@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  findLeafNode,
   firstLeafSlotId,
   leafIds,
-  swapLeafInDirection,
+  leafInDirection,
   type PaneNode,
+  splitIds,
+  splitResizeTarget,
+  swapLeafInDirection,
 } from "@/modules/terminal/lib/panes";
 
 function row(...ids: number[]): PaneNode {
@@ -141,5 +145,77 @@ describe("swapLeafInDirection", () => {
   it("does nothing when the tree contains only one pane", () => {
     const tree: PaneNode = { kind: "leaf", id: 1 };
     expect(swapLeafInDirection(tree, 1, "left")).toBe(tree);
+  });
+});
+
+describe("directional pane focus and resizing", () => {
+  // [1 | [2 / 3]]
+  const tree: PaneNode = {
+    kind: "split",
+    id: 10,
+    dir: "row",
+    children: [
+      { kind: "leaf", id: 1 },
+      {
+        kind: "split",
+        id: 20,
+        dir: "col",
+        children: [
+          { kind: "leaf", id: 2 },
+          { kind: "leaf", id: 3 },
+        ],
+      },
+    ],
+  };
+
+  it("finds the neighbour in a direction", () => {
+    expect(leafInDirection(tree, 1, "right")).toBe(2);
+    expect(leafInDirection(tree, 3, "up")).toBe(2);
+    expect(leafInDirection(tree, 3, "left")).toBe(1);
+    expect(leafInDirection({ kind: "leaf", id: 1 }, 1, "left")).toBeNull();
+  });
+
+  it("finds leaves and splits", () => {
+    expect(findLeafNode(tree, 3)).toEqual({ kind: "leaf", id: 3 });
+    expect(findLeafNode(tree, 9)).toBeNull();
+    expect(splitIds(tree)).toEqual([10, 20]);
+  });
+
+  it("moves the divider on the requested side, else the other one", () => {
+    const right = splitResizeTarget(tree, 1, "right");
+    expect(
+      right && {
+        split: right.split.id,
+        divider: right.divider,
+        sign: right.sign,
+      },
+    ).toEqual({
+      split: 10,
+      divider: 0,
+      sign: 1,
+    });
+    // Pane 2 has no divider to its right: its left divider moves right.
+    const shrink = splitResizeTarget(tree, 2, "right");
+    expect(
+      shrink && {
+        split: shrink.split.id,
+        divider: shrink.divider,
+        sign: shrink.sign,
+      },
+    ).toEqual({
+      split: 10,
+      divider: 0,
+      sign: 1,
+    });
+    // Vertical resize uses the nearest column split.
+    const up = splitResizeTarget(tree, 3, "up");
+    expect(
+      up && { split: up.split.id, divider: up.divider, sign: up.sign },
+    ).toEqual({
+      split: 20,
+      divider: 0,
+      sign: -1,
+    });
+    expect(splitResizeTarget(tree, 1, "up")).toBeNull();
   });
 });

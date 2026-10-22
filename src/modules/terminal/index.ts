@@ -14,8 +14,11 @@ export {
   disposeSession,
   leafHasForegroundProcess,
   leafIdForPty,
+  adjustFocusedTerminalFont,
+  focusedTerminalInAlternateScreen,
   navigateFocusedBlocks,
   ptyIdForLeaf,
+  scrollFocusedTerminal,
   whenSessionReady,
   writeToSession,
 } from "./lib/terminalSessionApi";
@@ -25,6 +28,7 @@ export {
   type TerminalTabStatus,
   useTerminalStatusStore,
 } from "./lib/terminalStatus";
+export { equalizePanes, resizeActivePane } from "./lib/paneLayout";
 export { setTerminalFileOpener } from "./lib/terminalLinkOpen";
 export { isTerminalSurfaceTarget } from "./lib/terminalSurfaceTarget";
 export { TerminalPromptDialog } from "./TerminalPromptDialog";

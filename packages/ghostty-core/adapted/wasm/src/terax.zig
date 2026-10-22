@@ -2108,6 +2108,17 @@ pub export fn restty_scroll_viewport(handle: ?*Restty, delta: i32) u32 {
     return @intFromEnum(ErrorCode.ok);
 }
 
+/// Scrolls the viewport by shell prompts (OSC 133 marks): negative to earlier
+/// prompts, positive to later ones, stopping at the first or last.
+pub export fn restty_scroll_viewport_prompt(handle: ?*Restty, delta: i32) u32 {
+    const h = handle orelse return @intFromEnum(ErrorCode.invalid_handle);
+    h.term.scrollViewport(.{ .delta_prompt = delta });
+    if (h.search.isActive()) {
+        h.search.viewport_dirty = true;
+    }
+    return @intFromEnum(ErrorCode.ok);
+}
+
 pub export fn restty_scroll_viewport_to(handle: ?*Restty, row: u32) u32 {
     const h = handle orelse return @intFromEnum(ErrorCode.invalid_handle);
     h.term.scrollViewport(.{ .row = row });

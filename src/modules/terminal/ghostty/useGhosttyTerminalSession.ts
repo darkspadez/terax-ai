@@ -25,6 +25,7 @@ import {
 } from "../lib/terminalClipboard";
 import { openTerminalFile, resolveTerminalLink } from "../lib/terminalLinkOpen";
 import { requestTerminalPrompt } from "../lib/terminalPrompts";
+import { useTerminalFontOffsets } from "../lib/terminalFontOffsets";
 import { useTerminalStatusStore } from "../lib/terminalStatus";
 import { LatestClipboardWrite } from "@/modules/terminal/lib/LatestClipboardWrite";
 import { GhosttySemanticEventRouter } from "./core/GhosttySemanticEventRouter";
@@ -159,15 +160,18 @@ export function useGhosttyTerminalSession({
     (state) => state.terminalLetterSpacing,
   );
   const zoomLevel = usePreferencesStore((state) => state.zoomLevel);
+  const fontOffset = useTerminalFontOffsets(
+    (state) => state.offsets[leafId] ?? 0,
+  );
   const font = useMemo<TerminalFontSpec>(
     () => ({
       family: resolveFontFamily(fontFamily),
-      size: Math.max(4, Math.round(fontSize * zoomLevel)),
+      size: Math.max(4, Math.round((fontSize + fontOffset) * zoomLevel)),
       lineHeight: 1.2,
       letterSpacing,
       weight: fontWeight,
     }),
-    [fontFamily, fontSize, fontWeight, letterSpacing, zoomLevel],
+    [fontFamily, fontSize, fontOffset, fontWeight, letterSpacing, zoomLevel],
   );
   const fontRef = useRef(font);
   fontRef.current = font;
@@ -439,7 +443,45 @@ export function disposeGhosttySession(leafId: number): boolean {
   session.pty = null;
   sessions.delete(leafId);
   useTerminalStatusStore.getState().clear(leafId);
+  useTerminalFontOffsets.getState().clear(leafId);
   return true;
+}
+
+export type GhosttyScrollAction =
+  | "page-up"
+  | "page-down"
+  | "top"
+  | "bottom"
+  | "prompt-previous"
+  | "prompt-next";
+
+/** Scrolls a pane's viewport; false when there is nothing to scroll. */
+export function scrollGhosttySession(
+  leafId: number,
+  action: GhosttyScrollAction,
+): boolean {
+  const model = sessions.get(leafId)?.model;
+  if (!model || model.isDisposed?.()) return false;
+  const page = Math.max(1, model.rows - 1);
+  switch (action) {
+    case "page-up":
+      return model.scrollBy(-page);
+    case "page-down":
+      return model.scrollBy(page);
+    case "top":
+      return model.scrollTo(model.scrollPosition().history);
+    case "bottom":
+      return model.scrollToBottom();
+    case "prompt-previous":
+      return model.scrollToPrompt?.(-1) ?? false;
+    case "prompt-next":
+      return model.scrollToPrompt?.(1) ?? false;
+  }
+}
+
+/** The pane runs a full-screen program (alternate screen). */
+export function ghosttySessionInAlternateScreen(leafId: number): boolean {
+  return sessions.get(leafId)?.model?.modes().alternateScreen ?? false;
 }
 
 async function respawnGhosttySession(

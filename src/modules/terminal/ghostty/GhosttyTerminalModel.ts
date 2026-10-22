@@ -189,6 +189,8 @@ export interface GhosttyTerminalModelApi extends TerminalModel {
   scrollBy(lines: number): boolean;
   scrollTo(offset: number): boolean;
   scrollToBottom(): boolean;
+  /** Scrolls by shell prompts (OSC 133): -1 earlier, +1 later. */
+  scrollToPrompt?(delta: number): boolean;
   clear(): void;
   revision(): number;
   viewportOriginLine(): number;

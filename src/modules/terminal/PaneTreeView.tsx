@@ -6,6 +6,7 @@ import {
 import type { TerminalSearchController } from "@/modules/terminal/search/TerminalSearchController";
 import { Fragment, useCallback, useEffect, useRef } from "react";
 import { useTerminalDropStore } from "./lib/dropStore";
+import { paneSlotPanelId, registerPaneGroup } from "./lib/paneLayout";
 import { firstLeafSlotId, type PaneNode } from "./lib/panes";
 import {
   beginTerminalResizeInteraction,
@@ -67,13 +68,14 @@ export function PaneTreeView(props: Props) {
   return (
     <ResizablePanelGroup
       orientation={node.dir === "row" ? "horizontal" : "vertical"}
+      groupRef={(handle) => registerPaneGroup(node.id, handle)}
     >
       {node.children.map((child, i) => {
         const slotId = firstLeafSlotId(child);
         return (
           <Fragment key={slotId}>
             {i > 0 && <TerminalResizableHandle />}
-            <ResizablePanel id={`pane-slot-${slotId}`} minSize="10%">
+            <ResizablePanel id={paneSlotPanelId(child)} minSize="10%">
               <PaneTreeView {...props} node={child} />
             </ResizablePanel>
           </Fragment>

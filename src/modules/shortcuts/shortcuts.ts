@@ -27,11 +27,28 @@ export type ShortcutId =
   | "pane.swapRight"
   | "pane.swapUp"
   | "pane.swapDown"
+  | "pane.focusLeft"
+  | "pane.focusRight"
+  | "pane.focusUp"
+  | "pane.focusDown"
+  | "pane.zoom"
+  | "pane.resizeLeft"
+  | "pane.resizeRight"
+  | "pane.resizeUp"
+  | "pane.resizeDown"
+  | "pane.equalize"
   | "pane.source"
   | "terminal.clear"
   | "terminal.toggleInput"
   | "blocks.prev"
   | "blocks.next"
+  | "terminal.scrollPageUp"
+  | "terminal.scrollPageDown"
+  | "terminal.scrollTop"
+  | "terminal.scrollBottom"
+  | "terminal.fontSizeUp"
+  | "terminal.fontSizeDown"
+  | "terminal.fontSizeReset"
   | "search.focus"
   | "explorer.search"
   | "explorer.focus"
@@ -183,6 +200,41 @@ export const SHORTCUTS: Shortcut[] = [
     group: "Panes",
     defaultBindings: [{ [MOD_PROP]: true, alt: true, key: "ArrowDown" }],
   },
+  ...(["Left", "Right", "Up", "Down"] as const).map(
+    (side): Shortcut => ({
+      id: `pane.focus${side}`,
+      label: `Focus pane ${side.toLowerCase()}`,
+      group: "Panes",
+      defaultBindings: [{ [MOD_PROP]: true, shift: true, key: `Arrow${side}` }],
+    }),
+  ),
+  {
+    id: "pane.zoom",
+    label: "Zoom pane (show it alone)",
+    group: "Panes",
+    defaultBindings: [{ [MOD_PROP]: true, shift: true, key: "Enter" }],
+  },
+  // Ghostty's resize_split keys: ⌘⌃Arrow on macOS, Ctrl+Alt+Shift+Arrow
+  // elsewhere (Ctrl+Alt+Arrow is pane swapping here).
+  ...(["Left", "Right", "Up", "Down"] as const).map(
+    (side): Shortcut => ({
+      id: `pane.resize${side}`,
+      label: `Move pane divider ${side.toLowerCase()}`,
+      group: "Panes",
+      defaultBindings: IS_MAC
+        ? [{ meta: true, ctrl: true, key: `Arrow${side}` }]
+        : [{ ctrl: true, alt: true, shift: true, key: `Arrow${side}` }],
+      allowRepeat: true,
+    }),
+  ),
+  {
+    id: "pane.equalize",
+    label: "Equalize pane sizes",
+    group: "Panes",
+    defaultBindings: IS_MAC
+      ? [{ meta: true, ctrl: true, key: "=" }]
+      : [{ ctrl: true, alt: true, shift: true, key: "+" }],
+  },
   {
     id: "pane.source",
     label: "Toggle source panel",
@@ -206,17 +258,68 @@ export const SHORTCUTS: Shortcut[] = [
   },
   {
     id: "blocks.prev",
-    label: "Previous command block",
+    label: "Previous prompt",
     group: "Terminal",
     defaultBindings: [{ [MOD_PROP]: true, key: "ArrowUp" }],
     allowRepeat: true,
   },
   {
     id: "blocks.next",
-    label: "Next command block",
+    label: "Next prompt",
     group: "Terminal",
     defaultBindings: [{ [MOD_PROP]: true, key: "ArrowDown" }],
     allowRepeat: true,
+  },
+  {
+    id: "terminal.scrollPageUp",
+    label: "Scroll up one page",
+    group: "Terminal",
+    defaultBindings: [{ shift: true, key: "PageUp" }],
+    allowRepeat: true,
+  },
+  {
+    id: "terminal.scrollPageDown",
+    label: "Scroll down one page",
+    group: "Terminal",
+    defaultBindings: [{ shift: true, key: "PageDown" }],
+    allowRepeat: true,
+  },
+  {
+    id: "terminal.scrollTop",
+    label: "Scroll to the top",
+    group: "Terminal",
+    defaultBindings: IS_MAC
+      ? [{ meta: true, key: "Home" }]
+      : [{ shift: true, key: "Home" }],
+  },
+  {
+    id: "terminal.scrollBottom",
+    label: "Scroll to the bottom",
+    group: "Terminal",
+    defaultBindings: IS_MAC
+      ? [{ meta: true, key: "End" }]
+      : [{ shift: true, key: "End" }],
+  },
+  // Per-pane text size. Unbound by default: ⌘/Ctrl +/- zoom the whole app.
+  {
+    id: "terminal.fontSizeUp",
+    label: "Increase pane font size",
+    group: "Terminal",
+    defaultBindings: [],
+    allowRepeat: true,
+  },
+  {
+    id: "terminal.fontSizeDown",
+    label: "Decrease pane font size",
+    group: "Terminal",
+    defaultBindings: [],
+    allowRepeat: true,
+  },
+  {
+    id: "terminal.fontSizeReset",
+    label: "Reset pane font size",
+    group: "Terminal",
+    defaultBindings: [],
   },
   {
     id: "tab.next",

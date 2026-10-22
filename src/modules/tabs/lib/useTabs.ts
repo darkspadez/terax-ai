@@ -7,6 +7,7 @@ import {
   findLeafCwd,
   hasLeaf,
   leafIds,
+  leafInDirection,
   nextLeafId,
   type PaneBounds,
   type PaneDirection,
@@ -48,6 +49,8 @@ export type TerminalTab = TabBase & {
   private?: boolean;
   /** User-set label that overrides the cwd-derived name. Survives cd. */
   customTitle?: string;
+  /** The pane shown alone (pane zoom); others keep running hidden. */
+  zoomedLeafId?: number;
 };
 
 export type EditorTab = TabBase & {
@@ -1250,6 +1253,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         return {
           ...t,
           activeLeafId: leafId,
+          zoomedLeafId: undefined,
           ...(cwd !== undefined && { cwd }),
         };
       }),
@@ -1263,7 +1267,50 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         const next = nextLeafId(t.paneTree, t.activeLeafId, delta);
         if (next === t.activeLeafId) return t;
         const cwd = findLeafCwd(t.paneTree, next);
-        return { ...t, activeLeafId: next, ...(cwd !== undefined && { cwd }) };
+        return {
+          ...t,
+          activeLeafId: next,
+          zoomedLeafId: undefined,
+          ...(cwd !== undefined && { cwd }),
+        };
+      }),
+    );
+  }, []);
+
+  /** Focus the pane next to the active one in a direction (live layout). */
+  const focusPaneInDirection = useCallback(
+    (tabId: number, direction: PaneDirection, bounds?: PaneBounds[]) => {
+      setTabs((curr) =>
+        curr.map((t) => {
+          if (t.id !== tabId || t.kind !== "terminal") return t;
+          const next = leafInDirection(
+            t.paneTree,
+            t.activeLeafId,
+            direction,
+            bounds,
+          );
+          if (next === null || next === t.activeLeafId) return t;
+          const cwd = findLeafCwd(t.paneTree, next);
+          return {
+            ...t,
+            activeLeafId: next,
+            zoomedLeafId: undefined,
+            ...(cwd !== undefined && { cwd }),
+          };
+        }),
+      );
+    },
+    [],
+  );
+
+  /** Shows the active pane alone, or the whole split again. */
+  const togglePaneZoom = useCallback((tabId: number) => {
+    setTabs((curr) =>
+      curr.map((t) => {
+        if (t.id !== tabId || t.kind !== "terminal") return t;
+        if (t.zoomedLeafId !== undefined) return { ...t, zoomedLeafId: undefined };
+        if (leafIds(t.paneTree).length < 2) return t;
+        return { ...t, zoomedLeafId: t.activeLeafId };
       }),
     );
   }, []);
@@ -1305,7 +1352,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
             dir,
             t.cwd,
           );
-          return { ...t, paneTree, activeLeafId: leafId };
+          return { ...t, paneTree, activeLeafId: leafId, zoomedLeafId: undefined };
         }),
       );
       return newLeafId;
@@ -1338,7 +1385,12 @@ export function useTabs(initial?: Partial<TerminalTab>) {
       didRemove = true;
       return curr.map((x) =>
         x.id === tab.id
-          ? { ...x, paneTree: newTree, activeLeafId: newActive }
+          ? {
+              ...x,
+              paneTree: newTree,
+              activeLeafId: newActive,
+              zoomedLeafId: undefined,
+            }
           : x,
       );
     });
@@ -1368,7 +1420,12 @@ export function useTabs(initial?: Partial<TerminalTab>) {
       removedLeaf = target;
       return curr.map((x) =>
         x.id === tabId
-          ? { ...x, paneTree: newTree, activeLeafId: newActive }
+          ? {
+              ...x,
+              paneTree: newTree,
+              activeLeafId: newActive,
+              zoomedLeafId: undefined,
+            }
           : x,
       );
     });
@@ -1442,6 +1499,8 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     setLeafCwd,
     focusPane,
     focusNextPaneInTab,
+    focusPaneInDirection,
+    togglePaneZoom,
     swapActivePaneInDirection,
     splitActivePane,
     closeActivePane,

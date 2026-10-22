@@ -762,6 +762,20 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
     return this.scrollTo(0);
   }
 
+  scrollToPrompt(delta: number): boolean {
+    this.assertLive();
+    if (!Number.isInteger(delta) || delta === 0) return false;
+    if (this.modes().alternateScreen) return false;
+    const before = this.scrollPosition().offset;
+    this.terminal.scrollViewportToPrompt(delta);
+    this.scrollPositionCurrent = false;
+    if (this.scrollPosition().offset === before) return false;
+    this.invalidateRenderState();
+    this.pendingDamage = FULL_DAMAGE;
+    this.notifyDamage();
+    return true;
+  }
+
   clear(): void {
     this.assertLive();
     this.setSelection(null);
