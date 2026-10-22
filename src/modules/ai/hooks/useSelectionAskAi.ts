@@ -1,3 +1,5 @@
+import { isPrimaryClick } from "@/lib/nativeContextMenu";
+import { IS_MAC } from "@/lib/platform";
 import { isTerminalSurfaceTarget } from "@/modules/terminal/lib/terminalSurfaceTarget";
 import { useCallback, useEffect, useState } from "react";
 
@@ -34,7 +36,8 @@ export function useSelectionAskAi({
       setAskPopup(null);
     };
     const onUp = (e: MouseEvent) => {
-      if (isInsideAi(e.target)) return;
+      // A right click on a selection opens the text menu, not Ask AI too.
+      if (!isPrimaryClick(e, IS_MAC) || isInsideAi(e.target)) return;
       const el = e.target as HTMLElement | null;
       const inContentArea =
         isTerminalSurfaceTarget(e.target) || el?.closest?.(".cm-editor");

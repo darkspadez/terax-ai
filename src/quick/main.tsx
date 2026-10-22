@@ -1,10 +1,13 @@
 import "../styles/globals.css";
 
+import { installNativeContextMenuGuard } from "@/lib/nativeContextMenu";
 import { ThemeProvider } from "@/modules/theme";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import ReactDOM from "react-dom/client";
 import { QuickTerminalApp } from "./QuickTerminalApp";
+
+installNativeContextMenuGuard();
 
 // Reap shells a previous load of this window left behind (this window's only).
 await invoke("pty_close_all").catch(() => {});
