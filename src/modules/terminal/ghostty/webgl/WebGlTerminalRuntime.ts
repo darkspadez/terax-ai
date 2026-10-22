@@ -1,4 +1,5 @@
 import { SurfaceFramePacer } from "@/modules/terminal/ghostty/SurfaceFramePacer";
+import { MAX_PANES_PER_TAB } from "@/modules/terminal/lib/panes";
 import {
   subscribeWindowPresentation,
   terminalWindowPresentation,
@@ -14,7 +15,9 @@ import {
   WebGlCellRenderer,
 } from "./WebGlCellRenderer";
 
-export const MAX_WEBGL_RENDERER_SLOTS = 5;
+// Every pane of the visible tab, plus one so a pane being shown never waits
+// for another to give its renderer back.
+export const MAX_WEBGL_RENDERER_SLOTS = MAX_PANES_PER_TAB + 1;
 const MIN_WARM_WEBGL_RENDERER_SLOTS = 1;
 export const WEBGL_RENDERER_IDLE_TTL_MS = 30_000;
 

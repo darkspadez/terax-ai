@@ -1,6 +1,6 @@
 import type { SearchTarget } from "@/modules/header";
-import { MAX_PANES_PER_TAB, type Tab } from "@/modules/tabs";
-import { leafIds } from "@/modules/terminal";
+import type { Tab } from "@/modules/tabs";
+import { canSplitPane, leafIds } from "@/modules/terminal";
 import {
   AppWindowIcon,
   Cancel01Icon,
@@ -82,7 +82,7 @@ export function createCommandItems(
   const noWorkspaceRoot = !ctx.explorerRoot && !ctx.home;
   const splitDisabled = !activeTerminalTab
     ? "No terminal tab"
-    : activePaneCount >= MAX_PANES_PER_TAB
+    : !canSplitPane(activeTerminalTab.paneTree)
       ? "Pane limit"
       : undefined;
   const closeDisabled =

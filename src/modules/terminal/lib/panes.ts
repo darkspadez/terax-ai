@@ -30,6 +30,13 @@ export function leafIds(n: PaneNode): PaneId[] {
   return n.children.flatMap(leafIds);
 }
 
+/** Panes one terminal tab holds at most; the WebGL fallback sizes its pool from it. */
+export const MAX_PANES_PER_TAB = 8;
+
+export function canSplitPane(tree: PaneNode): boolean {
+  return leafIds(tree).length < MAX_PANES_PER_TAB;
+}
+
 export function firstLeafSlotId(n: PaneNode): PaneId {
   if (isLeaf(n)) return n.slotId ?? n.id;
   return firstLeafSlotId(n.children[0]);

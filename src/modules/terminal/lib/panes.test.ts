@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  canSplitPane,
   findLeafNode,
   firstLeafSlotId,
   leafIds,
+  MAX_PANES_PER_TAB,
   leafInDirection,
   type PaneNode,
   splitIds,
+  splitLeaf,
   splitResizeTarget,
   swapLeafInDirection,
 } from "@/modules/terminal/lib/panes";
+import { MAX_WEBGL_RENDERER_SLOTS } from "@/modules/terminal/ghostty/webgl/WebGlTerminalRuntime";
 
 function row(...ids: number[]): PaneNode {
   return {
@@ -217,5 +221,24 @@ describe("directional pane focus and resizing", () => {
       sign: -1,
     });
     expect(splitResizeTarget(tree, 1, "up")).toBeNull();
+  });
+});
+
+// crynta/terax-ai#1035, #1149: a 2x2 grid was as far as a tab could go.
+describe("pane limit", () => {
+  it("splits a tab into eight panes and no further", () => {
+    let tree: PaneNode = { kind: "leaf", id: 1 };
+    let next = 2;
+    while (canSplitPane(tree)) {
+      const ids = leafIds(tree);
+      const target = ids[ids.length - 1];
+      tree = splitLeaf(tree, target, next++, next++, next % 2 ? "row" : "col");
+    }
+    expect(leafIds(tree)).toHaveLength(8);
+    expect(MAX_PANES_PER_TAB).toBe(8);
+  });
+
+  it("leaves the WebGL fallback a renderer for every pane and one more", () => {
+    expect(MAX_WEBGL_RENDERER_SLOTS).toBe(MAX_PANES_PER_TAB + 1);
   });
 });

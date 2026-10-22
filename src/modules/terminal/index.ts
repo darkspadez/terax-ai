@@ -3,6 +3,7 @@ export {
   useAgentActivityStore,
 } from "./lib/agentActivity";
 export {
+  canSplitPane,
   findLeafCwd,
   hasLeaf,
   leafIds,
