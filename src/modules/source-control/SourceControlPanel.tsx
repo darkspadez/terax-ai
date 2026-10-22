@@ -56,6 +56,7 @@ import {
   ArrowUp01Icon,
   CheckmarkCircle01Icon,
   Download01Icon,
+  FileEditIcon,
   Folder01Icon,
   FolderCloudIcon,
   FolderGitTwoIcon,
@@ -1190,6 +1191,10 @@ function ListHeader({
   );
 }
 
+/** Shown on hover, on the keyboard-focused or selected row, and while focused. */
+const ROW_ACTION =
+  "flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 group-data-[focused=true]:opacity-100 group-data-[selected=true]:opacity-100 focus-within:opacity-100";
+
 const EntryRow = memo(function EntryRow({
   row,
   focused,
@@ -1279,8 +1284,24 @@ const EntryRow = memo(function EntryRow({
             </div>
           </button>
 
+          {!isDeleted && onOpenFile && absolutePath ? (
+            <div className={ROW_ACTION}>
+              <IconActionButton
+                label={`Open ${fileName} for editing`}
+                side="top"
+                onClick={() => onOpenFile(absolutePath)}
+              >
+                <HugeiconsIcon
+                  icon={FileEditIcon}
+                  size={11}
+                  strokeWidth={1.9}
+                />
+              </IconActionButton>
+            </div>
+          ) : null}
+
           {showDiscard ? (
-            <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 data-[focused=true]:opacity-100 data-[selected=true]:opacity-100">
+            <div className={ROW_ACTION}>
               <IconActionButton
                 label={`Discard ${entry.path}`}
                 disabled={disabled}
