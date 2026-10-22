@@ -3,7 +3,9 @@
 //! so the webview declares the family's faces again through `FontFace` with
 //! the features; `local()` cannot name them reliably (face names differ per
 //! platform and font), so this hands it each face's file instead, which it
-//! loads through the asset protocol when the face is first drawn.
+//! loads through the asset protocol when the face is first drawn. On macOS
+//! the same holds without features: WKWebView's canvas does not see fonts the
+//! user installed.
 //!
 //! The font database is built on first use (it reads every installed font's
 //! name table) and rebuilt when a family is missing, at most every

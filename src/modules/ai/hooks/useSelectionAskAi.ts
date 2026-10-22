@@ -1,3 +1,5 @@
+import { isPrimaryClick } from "@/lib/nativeContextMenu";
+import { IS_MAC } from "@/lib/platform";
 import { isTerminalSurfaceTarget } from "@/modules/terminal/lib/terminalSurfaceTarget";
 import { useCallback, useEffect, useState } from "react";
 
@@ -6,9 +8,12 @@ import { useCallback, useEffect, useState } from "react";
  * terminal or an editor. A right click only opens the context menu.
  */
 export function endsContentSelection(
-  event: Pick<MouseEvent, "button" | "target">,
+  event: Pick<MouseEvent, "button" | "ctrlKey" | "target">,
+  isMac: boolean = IS_MAC,
 ): boolean {
-  if (event.button !== 0) return false;
+  // A right click (or a Control-click on macOS) on a selection opens the
+  // text menu, not Ask AI too.
+  if (!isPrimaryClick(event, isMac)) return false;
   const el = event.target as HTMLElement | null;
   return isTerminalSurfaceTarget(event.target) || !!el?.closest?.(".cm-editor");
 }

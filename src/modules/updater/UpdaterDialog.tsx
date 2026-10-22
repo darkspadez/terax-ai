@@ -10,7 +10,7 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState } from "react";
-import { useUpdater } from "./useUpdater";
+import { UPDATES_ENABLED, useUpdater } from "./useUpdater";
 
 type DistroKey = "arch" | "debian" | "fedora";
 
@@ -37,7 +37,12 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** Offers an update when one is found; nothing while updates are off. */
 export function UpdaterDialog() {
+  return UPDATES_ENABLED ? <UpdatePrompt /> : null;
+}
+
+function UpdatePrompt() {
   const { status, install, dismiss } = useUpdater();
   const [copied, setCopied] = useState(false);
   const [distro, setDistro] = useState<DistroKey>("arch");

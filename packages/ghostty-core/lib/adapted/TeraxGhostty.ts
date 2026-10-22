@@ -2157,9 +2157,14 @@ function checkResult(code: number, operation: string): void {
   throw new Error(`Adapted Ghostty ${operation} failed: ${reason} (${code})`);
 }
 
+/**
+ * The render state's cursor style, as `cursorStyleToAbi` in terax.zig writes
+ * it: 0 block, 1 bar, 2 underline, 3 hollow block. Not the order
+ * `restty_set_cursor_options` takes.
+ */
 function decodeCursorStyle(value: number): "block" | "underline" | "bar" {
-  if (value === 1) return "underline";
-  if (value === 2) return "bar";
+  if (value === 1) return "bar";
+  if (value === 2) return "underline";
   return "block";
 }
 

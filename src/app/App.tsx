@@ -135,6 +135,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -151,6 +152,7 @@ import {
   renamedPath,
   spacesEmptiedByTabs,
 } from "./hooks/tabCloseGuards";
+import { aiToggleAction } from "./hooks/aiToggle";
 import { useAppCloseGuard } from "./hooks/useAppCloseGuard";
 import { useTabCloseGuards } from "./hooks/useTabCloseGuards";
 import { useWorkspaceSwitcher } from "./hooks/useWorkspaceSwitcher";
@@ -570,12 +572,11 @@ export default function App() {
   }, [tabs, activeId]);
 
   const togglePanelAndFocus = useCallback(() => {
-    if (!hasComposer) {
-      void openSettingsWindow("models");
-      return;
-    }
-    if (panelOpen) {
+    const action = aiToggleAction(panelOpen, hasComposer);
+    if (action === "close") {
       useChatStore.getState().closePanel();
+    } else if (action === "connect") {
+      void openSettingsWindow("models");
     } else {
       openPanel();
       focusInput(null);
@@ -941,6 +942,24 @@ export default function App() {
     }
     void handleClose(activeId);
   }, [activeId, closeActivePane, handleClose]);
+
+  // The macOS menu's Close Tab (Cmd+W) lands here too, also while a preview
+  // frame has the keyboard and the tab.close shortcut never sees the key.
+  const closeTabFromMenu = useEffectEvent(handleCloseTabOrPane);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void getCurrentWindow()
+      .listen("terax:close-tab-requested", () => closeTabFromMenu())
+      .then((stop) => {
+        if (disposed) stop();
+        else unlisten = stop;
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   const [zenMode, setZenMode] = useState(false);
 

@@ -246,6 +246,16 @@ html[data-vibrancy="on"] {
 html[data-chrome="borderless"] .terax-bg-surface {
   border-radius: 12px;
 }
+/* The background image lies over the whole page, so a modal's overlay (z-50)
+ * could not dim or blur it. While one is open the image goes under it. */
+body:has(
+    [data-slot="dialog-overlay"],
+    [data-slot="alert-dialog-overlay"],
+    [data-slot="sheet-overlay"]
+  )
+  .terax-bg-surface {
+  z-index: 40 !important;
+}
 /* Window drag (macOS WebKit): while `data-live-resize` is set (see
  * modules/theme/livePageResize) the document is given an invisible size rounded
  * up to the tile quantum, so the page tile does not change size at every step.
@@ -286,6 +296,19 @@ html[data-chrome="borderless"] #settings-root {
 }
 html[data-chrome="borderless"] #root {
   background: var(--frame);
+}
+/* Settings keeps its window shadow, and Windows 11 rounds a shadowed
+ * borderless window at 8 px: its corners match that frame. */
+html[data-chrome="borderless"] #settings-root {
+  border-radius: 8px;
+}
+/* A window that fills its screen has no corners to round or edge to draw. */
+html[data-chrome="borderless"][data-window-maximized]
+  :is(#root, #settings-root, .terax-bg-surface),
+html[data-chrome="borderless"][data-window-fullscreen]
+  :is(#root, #settings-root, .terax-bg-surface) {
+  border-radius: 0;
+  border-width: 0;
 }
 
 

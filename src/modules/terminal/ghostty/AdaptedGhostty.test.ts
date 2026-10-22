@@ -28,6 +28,42 @@ describe.each([
   });
 
   describe("Terax Ghostty WASM adaptation", () => {
+    it.each(["block", "underline", "bar"] as const)(
+      "reports the %s cursor style set as the default",
+      (style) => {
+        const terminal = ghostty.createTerminal(10, 3);
+        try {
+          terminal.setCursorOptions(style, false);
+          expect(terminal.updateRenderState().cursor.style).toBe(style);
+          terminal.setRenderFormat("gpu");
+          expect(terminal.updateGpuRenderState().cursor.style).toBe(style);
+        } finally {
+          terminal.dispose();
+        }
+      },
+    );
+
+    it.each([
+      ["\x1b[2 q", "block"],
+      ["\x1b[3 q", "underline"],
+      ["\x1b[4 q", "underline"],
+      ["\x1b[5 q", "bar"],
+      ["\x1b[6 q", "bar"],
+    ] as const)(
+      "reports DECSCUSR %j as the %s cursor style",
+      (sequence, style) => {
+        const terminal = ghostty.createTerminal(10, 3);
+        try {
+          terminal.write(new TextEncoder().encode(sequence));
+          expect(terminal.updateRenderState().cursor.style).toBe(style);
+          terminal.setRenderFormat("gpu");
+          expect(terminal.updateGpuRenderState().cursor.style).toBe(style);
+        } finally {
+          terminal.dispose();
+        }
+      },
+    );
+
     it("repairs a wide character split by an alternate-screen resize before editing that row", () => {
       const terminal = ghostty.createTerminal(132, 4);
       const write = (text: string) =>
@@ -656,8 +692,9 @@ describe.each([
       const dirty = (text: string) => {
         terminal.write(encoder.encode(text));
         const state = terminal.updateRenderState();
-        return Array.from(state.dirtyRows.subarray(0, state.rows), (row, index) =>
-          row ? index : -1,
+        return Array.from(
+          state.dirtyRows.subarray(0, state.rows),
+          (row, index) => (row ? index : -1),
         ).filter((index) => index >= 0);
       };
       try {

@@ -50,6 +50,8 @@ type StubOptions = {
   readonly color?: boolean | ((text: string) => boolean);
   /** Ink bounds per text; capital H measures the cap height. */
   readonly ink?: (text: string) => InkBounds | undefined;
+  /** Monochrome text gets subpixel (LCD) antialiasing: coloured edges. */
+  readonly lcd?: boolean;
 };
 
 function stub(options: StubOptions = {}) {
@@ -62,10 +64,13 @@ function stub(options: StubOptions = {}) {
     x: number;
     y: number;
     transform: number[];
+    fill: string;
   }> = [];
   let font = "";
+  let fill = "";
   let transform = [1, 0, 0, 1, 0, 0];
   let current = "";
+  let currentFill = "";
   const texts: string[] = [];
   const colored = (text: string) =>
     typeof options.color === "function"
@@ -74,7 +79,12 @@ function stub(options: StubOptions = {}) {
   const context = {
     textAlign: "",
     textBaseline: "",
-    fillStyle: "",
+    get fillStyle() {
+      return fill;
+    },
+    set fillStyle(value: string) {
+      fill = value;
+    },
     get font() {
       return font;
     },
@@ -89,8 +99,9 @@ function stub(options: StubOptions = {}) {
     },
     fillText: (text: string, x: number, y: number) => {
       texts.push(text);
-      draws.push({ text, x, y, transform });
+      draws.push({ text, x, y, transform, fill });
       current = text;
+      currentFill = fill;
     },
     measureText: (text: string) => {
       measured.push(text);
@@ -110,10 +121,13 @@ function stub(options: StubOptions = {}) {
     getImageData: (_x: number, _y: number, width: number, height: number) => {
       const data = new Uint8ClampedArray(width * height * 4);
       const color = colored(current);
+      // Monochrome text takes the fill; colour glyphs keep their own colours.
+      const ink = currentFill === "white" ? 255 : 0;
       for (let index = 0; index < data.length; index += 4) {
-        data[index] = color ? 30 : 255;
-        data[index + 1] = 255;
-        data[index + 2] = 255;
+        const fringe = options.lcd && !color && (index / 4) % 2 === 0;
+        data[index] = color ? 30 : ink;
+        data[index + 1] = color ? 255 : fringe ? (ink * 5) >> 3 : ink;
+        data[index + 2] = color ? 255 : fringe ? (ink * 2) >> 3 : ink;
         data[index + 3] = (index / 4) % 256;
       }
       return { data };
@@ -186,6 +200,36 @@ describe("GlyphRasterizer", () => {
     const glyph = drawn(new GlyphRasterizer(METRICS).rasterize("x", 0));
     expect(glyph.intrinsicColor).toBe(true);
     expect(glyph.pixels).toHaveLength(glyph.width * glyph.height * 4);
+  });
+
+  it("keeps text drawn with subpixel antialiasing a coverage glyph", () => {
+    const s = stub({ lcd: true });
+    const rasterizer = new GlyphRasterizer(METRICS);
+    const glyph = drawn(rasterizer.rasterize("a", 0));
+    expect(glyph.intrinsicColor).toBe(false);
+    expect(glyph.pixels).toHaveLength(glyph.width * glyph.height);
+    expect(glyph.pixels[5]).toBe(5);
+    // Its coloured edges made it a suspect, drawn again in black to tell.
+    expect(s.draws.map((draw) => draw.fill)).toEqual(["white", "black"]);
+    const run = drawn(
+      rasterizer.rasterize(
+        "->",
+        GLYPH_STYLE_LIGATURE | (1 << GLYPH_STYLE_LIGATURE_INDEX_SHIFT),
+      ),
+    );
+    expect(run.intrinsicColor).toBe(false);
+    expect(s.draws.map((draw) => draw.fill)).toEqual([
+      "white",
+      "black",
+      "white",
+      "black",
+    ]);
+  });
+
+  it("draws plain greyscale text once, in white", () => {
+    const s = stub();
+    drawn(new GlyphRasterizer(METRICS).rasterize("a", 0));
+    expect(s.draws.map((draw) => draw.fill)).toEqual(["white"]);
   });
 
   it("assigns context.font only when the style changes, at size times ratio", () => {
@@ -576,6 +620,7 @@ describe("GlyphRasterizer constraints", () => {
           placement.originX,
           placement.originY,
         ],
+        fill: "white",
       },
     ]);
     expect(s.transforms[s.transforms.length - 1]).toEqual([1, 0, 0, 1, 0, 0]);
@@ -602,8 +647,9 @@ describe("GlyphRasterizer constraints", () => {
     );
     expect(glyph.bearingX).toBe(placement.bearingX);
     expect(glyph.width).toBe(placement.width);
-    // Predicted from the text: drawn once.
-    expect(s.texts).toEqual(["😀"]);
+    // Predicted from the text: drawn once, and in black to confirm colour.
+    expect(s.texts).toEqual(["😀", "😀"]);
+    expect(s.draws.map((draw) => draw.fill)).toEqual(["white", "black"]);
   });
 
   it("gives a symbol two cells when the cell count says so", () => {
@@ -631,7 +677,11 @@ describe("GlyphRasterizer constraints", () => {
   it("redraws text the font drew in colour as an emoji in its cell", () => {
     const s = stub({ color: (text) => text === "x" });
     const glyph = drawn(new GlyphRasterizer(METRICS).rasterize("x", 0));
-    expect(s.texts).toEqual(["x", "x"]);
+    expect(s.draws.map((draw) => draw.fill)).toEqual([
+      "white",
+      "black",
+      "white",
+    ]);
     expect(glyph.intrinsicColor).toBe(true);
     const placement = placeGlyph(
       TEXT_INK,

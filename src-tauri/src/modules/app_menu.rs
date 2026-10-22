@@ -1,7 +1,8 @@
-use std::io;
-
 use tauri::{
-    menu::{Menu, MenuEvent, MenuId, MenuItem},
+    menu::{
+        AboutMetadata, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu,
+        HELP_SUBMENU_ID, WINDOW_SUBMENU_ID,
+    },
     AppHandle, Runtime,
 };
 
@@ -11,74 +12,146 @@ const GUARDED_QUIT_MENU_ID: &str = "terax.quit";
 const QUIT_ACCELERATOR: &str = "Command+Q";
 const NEW_WINDOW_MENU_ID: &str = "terax.new-window";
 const NEW_WINDOW_ACCELERATOR: &str = "Command+Shift+N";
-
-fn invalid_default_menu(message: &'static str) -> tauri::Error {
-    io::Error::new(io::ErrorKind::InvalidData, message).into()
-}
+const CLOSE_TAB_MENU_ID: &str = "terax.close-tab";
+const CLOSE_TAB_ACCELERATOR: &str = "Command+W";
+const CLOSE_WINDOW_MENU_ID: &str = "terax.close-window";
+const CLOSE_WINDOW_ACCELERATOR: &str = "Command+Shift+W";
 
 fn is_guarded_quit(id: &MenuId) -> bool {
     id == GUARDED_QUIT_MENU_ID
 }
 
+/// The macOS menu bar, built whole rather than by editing `Menu::default` in
+/// place: the app menu, the one whose predefined Quit used to be removed and
+/// replaced, stayed open after Escape or a click elsewhere. Quit, New Window,
+/// Close Tab and Close Window are ours; the rest are AppKit's own items.
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
-    let menu = Menu::default(app)?;
-    let app_menu = menu
-        .items()?
-        .into_iter()
-        .next()
-        .and_then(|item| item.as_submenu().cloned())
-        .ok_or_else(|| invalid_default_menu("macOS default app menu is missing"))?;
-    let items = app_menu.items()?;
-    let quit_index = items
-        .len()
-        .checked_sub(1)
-        .ok_or_else(|| invalid_default_menu("macOS default app menu is empty"))?;
-    let native_quit = items[quit_index]
-        .as_predefined_menuitem()
-        .ok_or_else(|| invalid_default_menu("macOS default Quit item is not predefined"))?;
-    let quit_text = native_quit.text()?;
-    if quit_text != "Quit" && !quit_text.starts_with("Quit ") {
-        return Err(invalid_default_menu(
-            "macOS default app menu does not end with Quit",
-        ));
-    }
+    let package = app.package_info();
+    let config = app.config();
+    let name = package.name.clone();
+    let about = AboutMetadata {
+        name: Some(name.clone()),
+        version: Some(package.version.to_string()),
+        copyright: config.bundle.copyright.clone(),
+        authors: config.bundle.publisher.clone().map(|p| vec![p]),
+        ..Default::default()
+    };
 
-    let guarded_quit = MenuItem::with_id(
+    let app_menu = Submenu::with_items(
         app,
-        GUARDED_QUIT_MENU_ID,
-        quit_text,
+        &name,
         true,
-        Some(QUIT_ACCELERATOR),
+        &[
+            &PredefinedMenuItem::about(app, None, Some(about))?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::services(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::hide(app, None)?,
+            &PredefinedMenuItem::hide_others(app, None)?,
+            &PredefinedMenuItem::show_all(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            // Every window confirms running commands and unsaved files first,
+            // which AppKit's terminate: would not ask.
+            &MenuItem::with_id(
+                app,
+                GUARDED_QUIT_MENU_ID,
+                format!("Quit {name}"),
+                true,
+                Some(QUIT_ACCELERATOR),
+            )?,
+        ],
     )?;
-    app_menu.remove_at(quit_index)?;
-    app_menu.insert(&guarded_quit, quit_index)?;
 
-    // File > New Window, first in the File menu as in other Mac apps.
-    let file_menu = menu
-        .items()?
-        .into_iter()
-        .filter_map(|item| item.as_submenu().cloned())
-        .find(|submenu| submenu.text().is_ok_and(|text| text == "File"));
-    if let Some(file_menu) = file_menu {
-        let new_window = MenuItem::with_id(
-            app,
-            NEW_WINDOW_MENU_ID,
-            "New Window",
-            true,
-            Some(NEW_WINDOW_ACCELERATOR),
-        )?;
-        file_menu.insert(&new_window, 0)?;
-    }
+    // Close Tab reaches the window even while a preview frame has the
+    // keyboard, where the page's own Command+W binding never sees the key.
+    let file_menu = Submenu::with_items(
+        app,
+        "File",
+        true,
+        &[
+            &MenuItem::with_id(
+                app,
+                NEW_WINDOW_MENU_ID,
+                "New Window",
+                true,
+                Some(NEW_WINDOW_ACCELERATOR),
+            )?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(
+                app,
+                CLOSE_TAB_MENU_ID,
+                "Close Tab",
+                true,
+                Some(CLOSE_TAB_ACCELERATOR),
+            )?,
+            &MenuItem::with_id(
+                app,
+                CLOSE_WINDOW_MENU_ID,
+                "Close Window",
+                true,
+                Some(CLOSE_WINDOW_ACCELERATOR),
+            )?,
+        ],
+    )?;
 
-    Ok(menu)
+    let edit_menu = Submenu::with_items(
+        app,
+        "Edit",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, None)?,
+            &PredefinedMenuItem::redo(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::cut(app, None)?,
+            &PredefinedMenuItem::copy(app, None)?,
+            &PredefinedMenuItem::paste(app, None)?,
+            &PredefinedMenuItem::select_all(app, None)?,
+        ],
+    )?;
+
+    let view_menu = Submenu::with_items(
+        app,
+        "View",
+        true,
+        &[&PredefinedMenuItem::fullscreen(app, None)?],
+    )?;
+
+    let window_menu = Submenu::with_id_and_items(
+        app,
+        WINDOW_SUBMENU_ID,
+        "Window",
+        true,
+        &[
+            &PredefinedMenuItem::minimize(app, None)?,
+            &PredefinedMenuItem::maximize(app, None)?,
+        ],
+    )?;
+
+    let help_menu = Submenu::with_id_and_items(app, HELP_SUBMENU_ID, "Help", true, &[])?;
+
+    Menu::with_items(
+        app,
+        &[
+            &app_menu,
+            &file_menu,
+            &edit_menu,
+            &view_menu,
+            &window_menu,
+            &help_menu,
+        ],
+    )
 }
 
 pub fn handle_event(app: &AppHandle, event: MenuEvent) {
-    if is_guarded_quit(event.id()) {
-        // Every window confirms running commands and unsaved files first.
+    let id = event.id();
+    if is_guarded_quit(id) {
         windows::request_quit(app);
-    } else if event.id() == NEW_WINDOW_MENU_ID {
+    } else if id == NEW_WINDOW_MENU_ID {
         windows::request_new_window(app);
+    } else if id == CLOSE_TAB_MENU_ID {
+        windows::request_close_tab(app);
+    } else if id == CLOSE_WINDOW_MENU_ID {
+        windows::close_key_window(app);
     }
 }
 

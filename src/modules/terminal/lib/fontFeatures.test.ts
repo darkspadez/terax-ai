@@ -238,6 +238,73 @@ describe("feature families", () => {
     expect(core.invoke).toHaveBeenCalledOnce();
   });
 
+  it("on macOS declares an installed family from its files with no features", async () => {
+    const added: { family: string; source: string; descriptors: FontFaceDescriptors }[] = [];
+    vi.stubGlobal(
+      "FontFace",
+      class {
+        constructor(
+          readonly family: string,
+          readonly source: string,
+          readonly descriptors: FontFaceDescriptors,
+        ) {
+          added.push({ family, source, descriptors });
+        }
+      },
+    );
+    vi.stubGlobal("document", {
+      baseURI: "https://app.test/",
+      styleSheets: [
+        sheet("https://app.test/assets/index.css", [
+          { ...JETBRAINS, "font-family": '"Plain Bundled"' },
+        ]),
+      ],
+      fonts: { add: () => undefined },
+    });
+    core.invoke.mockReset();
+    core.invoke.mockImplementation(async () => [
+      { path: "/Users/me/Library/Fonts/Meslo-Regular.ttf", weight: 400, style: "normal", stretch: 100 },
+    ]);
+    const changed = vi.fn();
+    const stop = subscribeFontFeatures(changed);
+    const stack = '"Plain Nerd", "Plain Bundled", Menlo, monospace';
+
+    // Elsewhere webviews draw installed fonts by name.
+    expect(withFontFeatures(stack, "normal", false)).toBe(stack);
+    expect(core.invoke).not.toHaveBeenCalled();
+
+    expect(withFontFeatures(stack, "normal", true)).toBe(stack);
+    await vi.waitFor(() => expect(changed).toHaveBeenCalledOnce());
+    stop();
+    // Only the font ahead of the bundled one, which stays as it is.
+    expect(core.invoke.mock.calls).toEqual([
+      ["system_font_faces", { family: "Plain Nerd" }],
+    ]);
+    const plain = withFontFeatures(stack, "normal", true);
+    const nerd = /^"(Plain Nerd \(Terax features \d+\))", "Plain Bundled", Menlo, monospace$/.exec(plain)?.[1];
+    expect(nerd).toBeDefined();
+    expect(added).toEqual([
+      {
+        family: nerd,
+        source: 'url("asset://localhost/Users/me/Library/Fonts/Meslo-Regular.ttf")',
+        descriptors: { weight: "400", style: "normal", stretch: "100%", featureSettings: "normal" },
+      },
+    ]);
+  });
+
+  it("leaves macOS's own fonts as named when there are no features", async () => {
+    vi.stubGlobal("FontFace", class {});
+    vi.stubGlobal("document", { baseURI: "https://app.test/", styleSheets: [], fonts: { add: () => undefined } });
+    core.invoke.mockReset();
+    core.invoke.mockImplementation(async () => [
+      { path: "/System/Library/Fonts/Monaco.ttf", weight: 400, style: "normal", stretch: 100 },
+    ]);
+    expect(withFontFeatures("Monaco, monospace", "normal", true)).toBe("Monaco, monospace");
+    await vi.waitFor(() => expect(core.invoke).toHaveBeenCalledOnce());
+    await Promise.resolve();
+    expect(withFontFeatures("Monaco, monospace", "normal", true)).toBe("Monaco, monospace");
+  });
+
   it("leaves a family that is not installed as named", async () => {
     vi.stubGlobal("FontFace", class {});
     vi.stubGlobal("document", { baseURI: "https://app.test/", styleSheets: [], fonts: { add: () => undefined } });

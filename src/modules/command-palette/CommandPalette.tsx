@@ -21,7 +21,6 @@ import {
   AlertCircleIcon,
   ArrowTurnBackwardIcon,
   CommandIcon,
-  Tick02Icon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -35,6 +34,7 @@ import {
 import { fuzzyBest } from "./lib/fuzzy";
 import { MODE_HINTS, parseQuery } from "./lib/mode";
 import { mruRank, mruSnapshot, recordUse } from "./lib/mru";
+import { ThemeItem } from "./ThemeItem";
 import type { PaletteItem } from "./types";
 
 type Props = {
@@ -249,22 +249,13 @@ export function CommandPalette({
                   <span>Back</span>
                 </CommandItem>
                 {themes.map((t) => (
-                  <CommandItem
+                  <ThemeItem
                     key={t.id}
-                    value={`theme:${t.id}`}
+                    id={t.id}
+                    name={t.name}
+                    active={t.id === themeId}
                     onSelect={() => commitTheme(t.id)}
-                    className="text-[12.5px]"
-                  >
-                    <span className="truncate">{t.name}</span>
-                    {t.id === themeId ? (
-                      <HugeiconsIcon
-                        icon={Tick02Icon}
-                        size={14}
-                        strokeWidth={2}
-                        className="ml-auto text-muted-foreground"
-                      />
-                    ) : null}
-                  </CommandItem>
+                  />
                 ))}
                 {themes.length === 0 ? <StatusItem label="No themes" /> : null}
               </CommandGroup>

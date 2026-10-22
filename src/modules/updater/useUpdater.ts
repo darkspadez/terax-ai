@@ -4,6 +4,15 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useCallback, useEffect, useState } from "react";
 import { IS_LINUX } from "@/lib/platform";
 
+/**
+ * Updates are off until this fork publishes its own releases: the release
+ * feed below and the updater endpoint would offer upstream's builds. Turning
+ * them on takes our feed in `GITHUB_LATEST_RELEASE` and `plugins.updater` in
+ * `tauri.conf.json` (endpoint and signing key) and `updater:default` back in
+ * the desktop capability.
+ */
+export const UPDATES_ENABLED = false;
+
 const LAST_CHECK_KEY = "terax:updater:last-check";
 const CHECK_INTERVAL_MS = 30 * 60 * 1000;
 const GITHUB_LATEST_RELEASE =
@@ -85,6 +94,7 @@ export function useUpdater({ autoCheck = true }: HookOptions = {}) {
   const [status, setStatus] = useState<UpdaterStatus>({ kind: "idle" });
 
   const runCheck = useCallback(async ({ manual }: Options = {}) => {
+    if (!UPDATES_ENABLED) return;
     if (!manual) {
       const last = Number(localStorage.getItem(LAST_CHECK_KEY) ?? 0);
       if (Date.now() - last < CHECK_INTERVAL_MS) return;

@@ -15,15 +15,21 @@ describe("endsContentSelection", () => {
       inside("[data-terax-terminal-surface]"),
       inside(".cm-editor"),
     ]) {
-      expect(endsContentSelection({ button: 0, target })).toBe(true);
+      expect(endsContentSelection({ button: 0, ctrlKey: false, target }, false)).toBe(true);
       // Right and middle clicks open menus or paste.
-      expect(endsContentSelection({ button: 2, target })).toBe(false);
-      expect(endsContentSelection({ button: 1, target })).toBe(false);
+      expect(endsContentSelection({ button: 2, ctrlKey: false, target }, false)).toBe(false);
+      expect(endsContentSelection({ button: 1, ctrlKey: false, target }, false)).toBe(false);
     }
   });
 
+  it("treats a Control-click on macOS as the right click it is", () => {
+    const target = inside(".cm-editor");
+    expect(endsContentSelection({ button: 0, ctrlKey: true, target }, true)).toBe(false);
+    expect(endsContentSelection({ button: 0, ctrlKey: true, target }, false)).toBe(true);
+  });
+
   it("ignores the rest of the window", () => {
-    expect(endsContentSelection({ button: 0, target: inside() })).toBe(false);
-    expect(endsContentSelection({ button: 0, target: null })).toBe(false);
+    expect(endsContentSelection({ button: 0, ctrlKey: false, target: inside() }, false)).toBe(false);
+    expect(endsContentSelection({ button: 0, ctrlKey: false, target: null }, false)).toBe(false);
   });
 });

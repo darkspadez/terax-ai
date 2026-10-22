@@ -8,7 +8,7 @@ import {
   type GlyphFontGate,
   hasPrivateUseCodepoint,
 } from "./GlyphFontGate";
-import { hasIntrinsicColor } from "./glyphColor";
+import { hasIntrinsicColor, ignoresFill } from "./glyphColor";
 import {
   type ConstraintMetrics,
   cellConstraintMetrics,
@@ -333,7 +333,7 @@ export class GlyphRasterizer {
       emoji,
     );
     let rgba = this.draw(context, text, placement);
-    const intrinsicColor = hasIntrinsicColor(rgba);
+    const intrinsicColor = this.isColorGlyph(context, text, placement, rgba);
     if (intrinsicColor !== emoji) {
       // The font chose the other presentation (a colour glyph for text, or a
       // monochrome one for an emoji), which takes the other constraint.
@@ -385,13 +385,34 @@ export class GlyphRasterizer {
       this.metrics,
       index,
     );
-    const rgba = this.draw(
-      context,
-      text,
+    const inkRight = placement.originX + run.ink.right;
+    const rgba = this.draw(context, text, placement, inkRight);
+    return this.glyph(
+      rgba,
       placement,
-      placement.originX + run.ink.right,
+      this.isColorGlyph(context, text, placement, rgba, inkRight),
     );
-    return this.glyph(rgba, placement, hasIntrinsicColor(rgba));
+  }
+
+  /**
+   * Whether `white`, the glyph drawn in white, is a colour glyph. Coloured
+   * pixels alone do not tell: subpixel antialiasing (WebKitGTK on a desktop
+   * set to LCD rendering) fringes plain text with colour, and plain text
+   * drawn as colour would lose the cell's foreground. So a suspect is drawn
+   * again in black, and only a glyph that keeps its colours is one.
+   */
+  private isColorGlyph(
+    context: CanvasRenderingContext2D,
+    text: string,
+    placement: GlyphPlacement,
+    white: Uint8ClampedArray,
+    inkRight = 0,
+  ): boolean {
+    if (!hasIntrinsicColor(white)) return false;
+    context.fillStyle = "black";
+    const black = this.draw(context, text, placement, inkRight);
+    context.fillStyle = "white";
+    return ignoresFill(white, black);
   }
 
   private measureRun(

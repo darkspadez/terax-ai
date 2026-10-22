@@ -24,6 +24,7 @@ import type {
   TerminalFontMetrics,
   TerminalGpuTheme,
 } from "../gpu/terminalVisuals";
+import { detectPlatform } from "../gpu/textContrast";
 import {
   selectionBoundsContain,
   type TerminalSelectionBounds,
@@ -218,16 +219,14 @@ export class WebGlCellRenderer {
   constructor() {
     this.canvas.className = "block";
     this.canvas.setAttribute("aria-hidden", "true");
-    const context = this.canvas.getContext("webgl2", {
-      alpha: false,
-      antialias: false,
-      depth: false,
-      desynchronized: true,
-      failIfMajorPerformanceCaveat: false,
-      powerPreference: "low-power",
-      preserveDrawingBuffer: false,
-      stencil: false,
-    });
+    const context = this.canvas.getContext(
+      "webgl2",
+      webGlContextAttributes(
+        detectPlatform(
+          typeof navigator === "undefined" ? "" : navigator.userAgent,
+        ),
+      ),
+    );
     if (!context) throw new Error("WebGL2 is unavailable in this webview");
     this.gl = context;
     this.resources = this.createResources();
@@ -1534,6 +1533,29 @@ function runTextAt(
     text += String.fromCharCode(cells.codepoint(index));
   }
   return text;
+}
+
+/**
+ * WebKitGTK without hardware acceleration (Ubuntu turns its DMA-BUF renderer
+ * off for the proprietary NVIDIA driver) paints a WebGL canvas by reading the
+ * drawing buffer back after swapping it out, so every frame shows the one
+ * before it, the last keystroke included. A preserved drawing buffer is
+ * copied instead of swapped and still holds the frame just drawn, at the cost
+ * of one copy per drawn frame, so only Linux pays it.
+ */
+export function webGlContextAttributes(
+  platform: ReturnType<typeof detectPlatform>,
+): WebGLContextAttributes {
+  return {
+    alpha: false,
+    antialias: false,
+    depth: false,
+    desynchronized: true,
+    failIfMajorPerformanceCaveat: false,
+    powerPreference: "low-power",
+    preserveDrawingBuffer: platform === "linux",
+    stencil: false,
+  };
 }
 
 export function rendererProfileKey(profile: WebGlRendererProfile): string {

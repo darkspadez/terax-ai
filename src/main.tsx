@@ -5,12 +5,16 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import ReactDOM from "react-dom/client";
 import App from "./app/App";
 import { initLaunchDir } from "./lib/launchDir";
+import { installNativeContextMenuGuard } from "./lib/nativeContextMenu";
 import { USE_CUSTOM_WINDOW_CONTROLS } from "./lib/platform";
+import { installWindowFrame } from "./lib/windowFrame";
 import { terminalDiagnosticsEnabled } from "@/modules/terminal/lib/terminalDiagnosticsEnabled";
 
 if (USE_CUSTOM_WINDOW_CONTROLS) {
   document.documentElement.dataset.chrome = "borderless";
 }
+installNativeContextMenuGuard();
+installWindowFrame();
 
 // Render-instrumentation overlay, opt-in: `VITE_REACT_SCAN=true bun run dev`.
 // Dev-only dynamic import so it never reaches the production bundle.
