@@ -178,6 +178,23 @@ pub async fn fs_canonicalize(
     .await
 }
 
+/// The host path a workspace file is read through. The asset protocol (media
+/// and Markdown image previews) opens host paths, so a WSL path must become
+/// its share or drvfs drive path first; local paths come back unchanged.
+#[tauri::command]
+pub async fn fs_host_path(path: String, workspace: Option<WorkspaceEnv>) -> Result<String, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    if !workspace.is_wsl() {
+        return Ok(path);
+    }
+    // Mapping a WSL path probes the share, which can stall.
+    blocking(move || Ok(host_path(&path, &workspace))).await
+}
+
+fn host_path(path: &str, workspace: &WorkspaceEnv) -> String {
+    resolve_path(path, workspace).to_string_lossy().into_owned()
+}
+
 #[tauri::command]
 pub async fn fs_stat(path: String, workspace: Option<WorkspaceEnv>) -> Result<FileStat, String> {
     blocking(move || stat_path(path, workspace)).await
@@ -208,6 +225,26 @@ fn stat_path(path: String, workspace: Option<WorkspaceEnv>) -> Result<FileStat, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_path_keeps_local_paths() {
+        assert_eq!(
+            host_path("/home/me/pic.png", &WorkspaceEnv::Local),
+            "/home/me/pic.png"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn host_path_maps_wsl_drvfs_paths_to_the_drive() {
+        let workspace = WorkspaceEnv::Wsl {
+            distro: "Ubuntu".into(),
+        };
+        assert_eq!(
+            host_path("/mnt/c/Users/me/pic.png", &workspace),
+            r"C:\Users\me\pic.png"
+        );
+    }
 
     #[test]
     fn read_file_classifies_utf8_as_text() {

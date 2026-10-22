@@ -3,6 +3,7 @@ import { getCustomEndpointKey, getKey } from "@/modules/ai/lib/keyring";
 import { lspFormatDocument, useLspExtension } from "@/modules/lsp";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { onKeysChanged } from "@/modules/settings/store";
+import { useWorkspaceAssetUrl } from "@/modules/workspace";
 import { acceptCompletion, startCompletion } from "@codemirror/autocomplete";
 import { redo, undo } from "@codemirror/commands";
 import {
@@ -16,7 +17,6 @@ import {
 import { Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { vim } from "@replit/codemirror-vim";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import CodeMirror, {
   type ReactCodeMirrorProps,
   type ReactCodeMirrorRef,
@@ -591,6 +591,12 @@ export const EditorPane = memo(
       [path, applyPendingFocus, applyPendingGoto],
     );
 
+    const mediaKind =
+      doc.status === "binary" || doc.status === "toolarge"
+        ? mediaPreviewKind(path)
+        : null;
+    const assetUrl = useWorkspaceAssetUrl(mediaKind ? path : null);
+
     if (doc.status === "loading") {
       return (
         <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
@@ -606,14 +612,13 @@ export const EditorPane = memo(
       );
     }
     if (doc.status === "binary" || doc.status === "toolarge") {
-      const kind = mediaPreviewKind(path);
+      const kind = mediaKind;
       const isImage = kind === "image";
-      const isVideo = kind === "video";
-      const isAudio = kind === "audio";
       const isPdf = kind === "pdf";
 
-      if (isImage || isVideo || isAudio || isPdf) {
-        const assetUrl = convertFileSrc(path);
+      if (kind) {
+        // A WSL path is still being mapped to its host path.
+        if (assetUrl === null) return null;
         return (
           <div className="flex h-full min-h-0 flex-col items-center justify-center bg-background p-4 overflow-auto">
             {isImage && (
@@ -627,7 +632,7 @@ export const EditorPane = memo(
                     "conic-gradient(var(--muted) 0.25turn, transparent 0.25turn 0.5turn, var(--muted) 0.5turn 0.75turn, transparent 0.75turn)",
                   backgroundSize: "20px 20px",
                 }}
-                alt={path.split("/").pop()}
+                alt={path.split(/[\\/]/).pop()}
               />
             )}
             {(kind === "video" || kind === "audio") && (
@@ -637,7 +642,7 @@ export const EditorPane = memo(
               <iframe
                 src={assetUrl}
                 className="w-full h-full border-none"
-                title={path.split("/").pop()}
+                title={path.split(/[\\/]/).pop()}
               />
             )}
           </div>

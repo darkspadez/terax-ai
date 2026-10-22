@@ -53,6 +53,7 @@ Output streams over the `terax-pty` custom URI scheme (one held `poll` request p
 - `fs_write_file` - write file contents
 - `fs_stat` - file metadata
 - `fs_canonicalize` - canonical path
+- `fs_host_path` - host path of a workspace file (WSL share or drive), for asset URLs
 
 #### Mutate
 
