@@ -14,7 +14,7 @@ This boundary is the root of the security model. Untrusted input (terminal escap
 ## Adding a new IPC command
 
 1. Write the `#[tauri::command]` async function in the appropriate `src-tauri/src/modules/<area>/` module.
-2. Register it in `src-tauri/src/lib.rs` inside the `tauri::generate_handler![...]` block (`src-tauri/src/lib.rs:191`).
+2. Register it in `src-tauri/src/lib.rs` inside the `tauri::generate_handler![...]` block.
 3. If the command uses a Tauri plugin API (window, clipboard, dialog, etc.), add the plugin permission to `src-tauri/capabilities/default.json`.
 4. Add a typed frontend wrapper in the matching `src/modules/<area>/lib/` directory and call it through Tauri's `invoke()` API.
 5. If the command touches the file system, network, or shell, it must go through the existing guards (`security.ts` deny-list, workspace authorization registry, SSRF guard, AI tool approval).
@@ -37,6 +37,7 @@ Long-lived interactive terminal sessions.
 - `pty_close` / `pty_close_all` - destroy one or all sessions
 - `pty_has_foreground_process` / `pty_has_foreground_job` - detect whether a command is running
 - `pty_shell_name` / `pty_list_shells` - shell detection and enumeration
+- `pty_diagnostics` - native queue counters for the opt-in terminal diagnostics (`window.__teraxTermSnapshot()`)
 
 Output streams over the `terax-pty` custom URI scheme (one held `poll` request per window), not through `pty_open`; see `pty-transport-v2.md`.
 
@@ -58,6 +59,10 @@ Output streams over the `terax-pty` custom URI scheme (one held `poll` request p
 
 - `fs_create_file` / `fs_create_dir`
 - `fs_rename` / `fs_move` / `fs_delete` / `fs_delete_batch` / `fs_copy`
+
+#### Clipboard
+
+- `fs_clipboard_paths` - file paths currently on the OS clipboard, for explorer paste
 
 #### Watch
 
@@ -101,10 +106,21 @@ Three distinct surfaces:
 - `workspace_authorize` / `workspace_current_dir` - the spawn/git/AI cwd authorization registry
 - `wsl_list_distros` / `wsl_default_distro` / `wsl_home` - WSL bridge
 
-### Network (`src-tauri/src/modules/net.rs`)
+### Network (`src-tauri/src/modules/net.rs`, `net/`)
 
 - `ai_http_stream` / `ai_http_cancel` / `ai_http_ack` - AI HTTP proxy with SSRF guard
 - `lm_ping` - local-model ping
+
+### AI sessions (`src-tauri/src/modules/ai_sessions.rs`)
+
+- `ai_session_load` / `ai_session_save` / `ai_session_delete` - per-session conversation files, written atomically with a `.bak` copy
+- `ai_session_finish_migration` / `ai_session_prune_backup` - migration of conversations stored by older versions
+
+### Language servers (`src-tauri/src/modules/lsp/`)
+
+- `lsp_detect` / `lsp_resolve_root` - find a server binary and the workspace root for a file
+- `lsp_spawn` / `lsp_send` / `lsp_kill` - process lifecycle and the framed JSON-RPC pipe
+- `lsp_host_pid` - host process id
 
 ### Secrets (`src-tauri/src/modules/secrets.rs`)
 
@@ -112,7 +128,7 @@ Three distinct surfaces:
 
 ### Agent hooks (`src-tauri/src/modules/agent.rs`)
 
-- `agent_enable_hooks` / `agent_hooks_status` - install/status terminal coding-agent hooks (Claude Code, Codex, Gemini CLI)
+- `agent_enable_hooks` / `agent_hooks_status` - install/status terminal coding-agent hooks (Claude Code, Codex, Gemini CLI, Pi)
 
 ### History (`src-tauri/src/modules/history/`)
 
@@ -121,8 +137,26 @@ Three distinct surfaces:
 ### Settings window
 
 - `get_launch_dir` - CLI launch directory, drained on first read
-- get_launch_files - files opened at launch (CLI args or OS Open With), drained on first read
+- `get_launch_files` - files opened at launch (CLI args or OS Open With), drained on first read
 - `open_settings_window` - open the separate settings webview (optional `tab` deep-link)
+
+### App windows (`src-tauri/src/modules/windows.rs`, `quick_terminal.rs`)
+
+- `app_window_open` / `app_window_ready` - open another app window; a page reports that it answers quit requests
+- `app_quit` / `app_quit_ready` - quit once every window has confirmed and saved its state
+- `quick_terminal_toggle` / `quick_terminal_set_hotkey` - the quick terminal window and its global hotkey
+
+### Window presentation (`src-tauri/src/modules/vibrancy.rs`, `window_presentation.rs`)
+
+- `window_backdrop_kind` / `window_set_backdrop` - native window backdrop (vibrancy on macOS, Mica on Windows 11)
+- `window_presentation_state` - the calling window's native occlusion, sleep and live-resize state
+
+### Terminal clipboard, scrollback and fonts
+
+- `clipboard_image_read` / `clipboard_image_write` - clipboard images as PNG for the Kitty clipboard protocol (`clipboard_image.rs`)
+- `terminal_primary_selection_read` / `terminal_primary_selection_write` - the Linux PRIMARY selection (`primary_selection.rs`)
+- `terminal_scrollback_save` / `terminal_scrollback_load` / `terminal_scrollback_retain` - saved scrollback per pane (`terminal_scrollback.rs`)
+- `system_font_faces` - an installed family's faces, for terminal font features (`system_fonts.rs`)
 
 ### CLI control plane
 

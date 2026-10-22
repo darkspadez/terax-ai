@@ -184,32 +184,51 @@ Within a PR, individual commit messages can be free-form (they get squashed or g
 
 ```
 src-tauri/                  Rust backend
+  crates/                   terax-cli and its control protocol
   src/
     lib.rs                  Tauri command registration
     modules/
       agent.rs              Terminal coding-agent hook installer/status
+      ai_sessions.rs        AI conversation files (atomic writes, migration)
+      app_menu.rs           macOS app menu (guarded quit, new window)
+      bench.rs              App-lab benchmark support (`--features bench`)
+      clipboard_image.rs    Clipboard images for the Kitty clipboard protocol
+      control.rs            CLI control plane (authenticated local endpoint)
       fs/                   File system commands (read/write/search/grep)
       git/                  Source control commands
       history/              Shell history integration
+      ipc_body.rs           Raw IPC request bodies for large payloads
+      lsp/                  Language server process host
       mod.rs                Module exports
-      net.rs                AI HTTP proxy with SSRF guard
-      proc.rs               Process utilities
+      net.rs, net/          AI HTTP proxy with SSRF guard
+      panics.rs             Panic logging
+      primary_selection.rs  Linux PRIMARY selection
+      proc/                 Process utilities (bounded capture, Windows Job Object)
       pty/                  Terminal sessions, shell integration, DA filter
+      quick_terminal.rs     Quick terminal window and global hotkey
+      runtime.rs            Async runtime behind Tauri commands
       secrets.rs            OS keychain access
       shell/                Oneshot/session/background shell commands
+      system_fonts.rs       Installed font faces for terminal font features
+      terminal_scrollback.rs Saved terminal scrollback
+      vibrancy.rs           Native window backdrop
+      window_presentation.rs Native occlusion, sleep and live-resize state
+      windows.rs            App windows, per-window state and quit
       workspace.rs          WSL bridge, workspace env, authorization registry
 
 src/                        React frontend
-  App.tsx                   Top-level coordinator
+  app/App.tsx               Top-level coordinator
   components/               shadcn/ui + AI Elements
   modules/
     agents/                 Agent notifications and management
     ai/                     Agents, sessions, tools, providers, composer
     command-palette/        Modal command palette and actions
+    control/                UI side of CLI control requests
     editor/                 CodeMirror stack, AI autocomplete
     explorer/               File tree
     git-history/            Git graph and history pane
     header/                 Top bar, search, window controls
+    lsp/                    Opt-in language server client
     markdown/               Markdown preview renderer
     preview/                Dev server, image, and web preview
     settings/               Settings UI and preferences store
