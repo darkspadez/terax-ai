@@ -118,7 +118,8 @@ impl SystemFontsState {
     }
 }
 
-/// The installed faces of `family`; empty when it is not installed.
+/// The installed faces of `family`; empty when it is not installed. Each face's file is
+/// granted to the asset protocol, which is how the webview loads it.
 #[tauri::command]
 pub async fn system_font_faces(
     app: tauri::AppHandle,
@@ -129,9 +130,17 @@ pub async fn system_font_faces(
     if family.is_empty() || family.len() > 256 {
         return Ok(Vec::new());
     }
-    tauri::async_runtime::spawn_blocking(move || app.state::<SystemFontsState>().faces(&family))
-        .await
-        .map_err(|error| error.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let faces = app.state::<SystemFontsState>().faces(&family);
+        if let Some(assets) = app.try_state::<crate::modules::asset_scope::AssetScope>() {
+            for face in &faces {
+                assets.grant_file(std::path::Path::new(&face.path));
+            }
+        }
+        faces
+    })
+    .await
+    .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

@@ -41,6 +41,15 @@ The comparison surface normalizes paths: backslashes to forward slashes, strips 
 
 This is the allow side of the file-system boundary. Any new feature that spawns a shell or mutates files outside the current workspace must interact with this registry.
 
+## Asset protocol scope
+
+Asset URLs (`asset://localhost/...`, `http(s)://asset.localhost/...` on Windows) let a webview load a file from disk without IPC. `tauri.conf.json` allows nothing (`assetProtocol.scope` is `[]`, and a test keeps it so); `src-tauri/src/modules/asset_scope.rs` grants at runtime:
+
+- every root the workspace registry authorizes, recursively, through `WorkspaceRegistry::watch_roots` (roots authorized before the app existed are replayed). The editor's media and PDF previews and the Markdown preview's images load from there. A WSL root is registered by its host path (the `\\wsl.localhost` share or the drive of a `/mnt/<drive>` path), which is also what `fs_host_path` maps a WSL file to for its URL. A root inside one already granted adds nothing, unless the way down passes a dot folder the wildcard skips.
+- each installed font face `system_font_faces` returns, as a single file, for the terminal's font features.
+
+Tauri canonicalizes every requested path before matching, so a link pointing out of a granted root is refused. On Unix the wildcards never enter names starting with a dot (Tauri's default), so a granted home folder does not serve `~/.ssh`. Never widen the configured scope (no `**`); grant what a feature needs where it needs it.
+
 ## Opening files in their default app
 
 `fs_open_default` (`src-tauri/src/modules/fs/file.rs`) hands the OS only an existing file whose canonical path lies in an authorized workspace, so a link pointing out of the workspace is refused. The OS's default handler can run code, so the command classifies the canonical path first (`fs/launch.rs`, a pure function per OS: Windows extensions such as `.exe`, `.bat`, `.ps1`, `.js`, `.lnk`, `.reg`, an alternate data stream; on macOS and Linux the execute bit, Mach-O or ELF headers, bundles, Terminal scripts, launchers, installers and packages; Windows programs everywhere, since Wine may run them). The lists err toward asking. A program opens only when the call says the user confirmed it; otherwise the command answers `confirm` without opening anything, and the explorer's `RunProgramDialog` names the file and asks before calling again. A link named like a document is judged by its target.
@@ -94,6 +103,7 @@ The agent detector (`src-tauri/src/modules/pty/agent_detect.rs`) is armed by `OS
 
 - The deny-list in `security.ts` applies on both read and write. Never bypass it.
 - New file-system-touching commands must respect the workspace authorization registry.
+- The asset protocol's configured scope stays empty; files are granted at runtime (`asset_scope.rs`), never with `**`.
 - New network-facing commands must go through the `net.rs` proxy or reimplement the same classification and DNS pinning.
 - New plugin APIs must be added to `src-tauri/capabilities/default.json`.
 - Keys, tokens, and credentials stay in the keychain / Linux secrets file.
