@@ -1,5 +1,5 @@
 import { isExternalUrl, openExternalUrl } from "@/lib/external-link";
-import type { ComponentProps, MouseEventHandler } from "react";
+import type { ComponentProps, MouseEvent, MouseEventHandler } from "react";
 
 export type MarkdownLinkProps = ComponentProps<"a"> & {
   node?: unknown;
@@ -14,12 +14,23 @@ export function MarkdownLink({
   onSettled,
   ...props
 }: MarkdownLinkProps) {
+  // The webview must never navigate itself or open a window of its own:
+  // external links go to the system's opener.
+  const openExternal = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (event.defaultPrevented || !href || !isExternalUrl(href)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void openExternalUrl(href, onSettled);
+  };
+
   const handleClick: MouseEventHandler<HTMLAnchorElement> = (event) => {
     onClick?.(event);
-    if (event.defaultPrevented || !href || !isExternalUrl(href)) return;
+    openExternal(event);
+  };
 
-    event.preventDefault();
-    void openExternalUrl(href, onSettled);
+  // auxclick also fires for the right button, which must keep its menu.
+  const handleAuxClick: MouseEventHandler<HTMLAnchorElement> = (event) => {
+    if (event.button === 1) openExternal(event);
   };
 
   return (
@@ -27,8 +38,8 @@ export function MarkdownLink({
       {...props}
       href={href}
       onClick={handleClick}
+      onAuxClick={handleAuxClick}
       rel="noreferrer"
-      target="_blank"
     >
       {children}
     </a>
