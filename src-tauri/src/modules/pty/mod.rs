@@ -17,7 +17,7 @@ mod wire;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::{Arc, LockResult, OnceLock, PoisonError, RwLock};
 use std::thread;
 
 use portable_pty::PtySize;
@@ -29,6 +29,14 @@ use hub::{Command, Hub};
 pub use presentation::PresentationClass;
 pub use protocol::stream_protocol;
 use session::Session;
+
+/// A lock's guard even after a thread panicked while holding it. The guarded
+/// state is a map insert or remove, or a child handle, which a panic cannot
+/// leave half-changed, and a poisoned lock would otherwise fail every
+/// terminal command for the rest of the session.
+pub(super) fn unpoisoned<T>(lock: LockResult<T>) -> T {
+    lock.unwrap_or_else(PoisonError::into_inner)
+}
 
 /// Largest `pty_set_presentation` batch accepted; a window never has more
 /// terminals than this, so anything larger is a malformed request.
@@ -58,7 +66,7 @@ impl Default for PtyState {
 impl PtyState {
     /// Removes a session from the registry and from the hub's delivery set.
     pub(super) fn take(&self, id: u32) -> Option<Arc<Session>> {
-        let session = self.sessions.write().unwrap().remove(&id);
+        let session = unpoisoned(self.sessions.write()).remove(&id);
         if session.is_some() {
             self.hub.submit(Command::Unregister { id });
         }
@@ -69,7 +77,7 @@ impl PtyState {
     /// Other windows' terminals are left alone.
     fn take_owned_by(&self, label: &str) -> Vec<(u32, Arc<Session>)> {
         let drained: Vec<(u32, Arc<Session>)> = {
-            let mut sessions = self.sessions.write().unwrap();
+            let mut sessions = unpoisoned(self.sessions.write());
             let ids: Vec<u32> = sessions
                 .iter()
                 .filter(|(_, session)| &*session.owner == label)
@@ -92,7 +100,7 @@ impl PtyState {
         self.hub.submit(Command::ResetWebview {
             label: Arc::from(label),
         });
-        for session in self.sessions.read().unwrap().values() {
+        for session in unpoisoned(self.sessions.read()).values() {
             if &*session.owner == label {
                 session.close_output();
             }
@@ -105,7 +113,7 @@ impl PtyState {
             label: Arc::from(label),
         });
         let owned: Vec<(u32, Arc<Session>)> = {
-            let mut sessions = self.sessions.write().unwrap();
+            let mut sessions = unpoisoned(self.sessions.write());
             let ids: Vec<u32> = sessions
                 .iter()
                 .filter(|(_, session)| &*session.owner == label)
@@ -143,7 +151,7 @@ fn check_presentation_batch(ids: &[u32]) -> Result<(), String> {
 /// thread (`ClosePseudoConsole` can block until conhost drains).
 fn reap(id: u32, session: Arc<Session>, reason: &str) {
     session.close_output();
-    if let Err(e) = session.killer.lock().unwrap().kill() {
+    if let Err(e) = unpoisoned(session.killer.lock()).kill() {
         // Non-fatal: the child may already have exited on its own (e.g. the
         // user ran `exit`). Log so this isn't invisible during debugging.
         log::debug!("pty {reason}: kill id={id} returned {e}");
@@ -222,14 +230,11 @@ pub async fn pty_open(
         log::error!("pty_open failed: {e}");
         e
     })?;
-    state.sessions.write().unwrap().insert(id, session);
+    unpoisoned(state.sessions.write()).insert(id, session);
     // The shell can exit before this insert (instant failure, `exit` in an rc
     // file); the waiter's reap then ran with the id absent. Re-check and reap
     // so the pseudoconsole isn't stranded.
-    let finished = state
-        .sessions
-        .read()
-        .unwrap()
+    let finished = unpoisoned(state.sessions.read())
         .get(&id)
         .map(|s| s.finished.load(Ordering::Acquire))
         .unwrap_or(false);
@@ -261,10 +266,7 @@ pub async fn pty_write(
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("pty_write: expected raw body".to_string());
     };
-    let session = state
-        .sessions
-        .read()
-        .unwrap()
+    let session = unpoisoned(state.sessions.read())
         .get(&id)
         .cloned()
         .ok_or_else(|| {
@@ -286,10 +288,7 @@ pub fn pty_resize(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let session = state
-        .sessions
-        .read()
-        .unwrap()
+    let session = unpoisoned(state.sessions.read())
         .get(&id)
         .cloned()
         .ok_or_else(|| {
@@ -326,7 +325,7 @@ pub fn pty_close(state: tauri::State<PtyState>, id: u32) -> Result<(), String> {
 
 #[tauri::command]
 pub fn pty_has_foreground_process(state: tauri::State<PtyState>, id: u32) -> Result<bool, String> {
-    let sessions = state.sessions.read().unwrap();
+    let sessions = unpoisoned(state.sessions.read());
     let session = sessions.get(&id).ok_or_else(|| {
         log::warn!("pty_has_foreground_process: unknown session id={id}");
         "no session".to_string()
@@ -343,7 +342,7 @@ pub fn pty_has_foreground_process(state: tauri::State<PtyState>, id: u32) -> Res
 // pty_has_foreground_process, which counts background children too.
 #[tauri::command]
 pub fn pty_has_foreground_job(state: tauri::State<PtyState>, id: u32) -> Result<bool, String> {
-    let sessions = state.sessions.read().unwrap();
+    let sessions = unpoisoned(state.sessions.read());
     let session = sessions.get(&id).ok_or_else(|| {
         log::warn!("pty_has_foreground_job: unknown session id={id}");
         "no session".to_string()
@@ -354,10 +353,7 @@ pub fn pty_has_foreground_job(state: tauri::State<PtyState>, id: u32) -> Result<
     }
     #[cfg(unix)]
     {
-        let leader = session
-            .master
-            .lock()
-            .unwrap()
+        let leader = unpoisoned(session.master.lock())
             .as_ref()
             .and_then(|master| master.process_group_leader());
         Ok(matches!(leader, Some(pid) if pid > 0 && pid as u32 != shell_pid))
@@ -461,10 +457,7 @@ struct PtySessionDiagnostics {
 #[tauri::command]
 pub fn pty_diagnostics(state: tauri::State<PtyState>) -> PtyDiagnostics {
     let host_pid = std::process::id();
-    let sessions = state
-        .sessions
-        .read()
-        .unwrap()
+    let sessions = unpoisoned(state.sessions.read())
         .iter()
         .map(|(id, session)| PtySessionDiagnostics {
             id: *id,
@@ -520,7 +513,7 @@ mod tests {
             },
         )
         .unwrap();
-        state.sessions.write().unwrap().insert(id, session.clone());
+        unpoisoned(state.sessions.write()).insert(id, session.clone());
         session
     }
 
@@ -530,6 +523,28 @@ mod tests {
             assert!(Instant::now() < deadline, "timed out waiting for {what}");
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    #[test]
+    fn a_panic_while_the_registry_is_locked_does_not_break_later_commands() {
+        let state = Arc::new(PtyState::default());
+        let poisoner = state.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = poisoner.sessions.write().unwrap();
+            panic!("poison the terminal registry");
+        })
+        .join();
+        assert!(state.sessions.is_poisoned());
+
+        let session = open(&state, 1, "main");
+        state.reset_webview("main");
+        wait_for("main's output to close", || session.queue_closed());
+        let owned = state.take_owned_by("main");
+        assert_eq!(owned.len(), 1);
+        for (id, session) in owned {
+            reap(id, session, "test cleanup");
+        }
+        assert!(state.take(1).is_none());
     }
 
     #[test]

@@ -99,7 +99,7 @@ impl Session {
     }
 
     pub(super) fn resize(&self, size: PtySize) -> Result<(), String> {
-        let master = self.master.lock().unwrap();
+        let master = super::unpoisoned(self.master.lock());
         master
             .as_ref()
             .ok_or("PTY has exited")?
@@ -445,7 +445,7 @@ pub(super) fn spawn_with(
             #[cfg(windows)]
             {
                 // Closing ConPTY can emit a final frame. Keep the reader alive until EOF.
-                let master = master_e.lock().unwrap().take();
+                let master = super::unpoisoned(master_e.lock()).take();
                 close_pseudoconsole(&output_e, &CONPTY_LIFECYCLE_LOCK, move || drop(master));
             }
             if let Err(e) = reader_thread.join() {
