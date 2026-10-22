@@ -5,6 +5,11 @@ import type {
 import type { TerminalProgress } from "../../lib/terminalStatus";
 import { parseOsc7, parseOsc52Clipboard } from "../../lib/osc-handlers";
 
+export type KittyClipboardReadRequest = Extract<
+  GhosttyTerminalEvent,
+  { type: "kitty-clipboard-read" }
+>;
+
 export type GhosttySemanticEventCallbacks = {
   readonly onBell?: () => void;
   readonly onClipboard?: (text: string) => void;
@@ -21,6 +26,10 @@ export type GhosttySemanticEventCallbacks = {
     selection: string,
     terminator: "st" | "bel",
   ) => void;
+  /** Kitty clipboard read held for the host; answer through the model. */
+  readonly onKittyClipboardRead?: (request: KittyClipboardReadRequest) => void;
+  /** Kitty clipboard write: the text to put there (empty clears it). */
+  readonly onKittyClipboardWrite?: (text: string, primary: boolean) => void;
   /** The shell started a command (its text when semantic markers report it). */
   readonly onCommandStarted?: (command: string | null) => void;
   /** The running command finished; null when the shell sent no exit code. */
@@ -72,6 +81,15 @@ export class GhosttySemanticEventRouter {
         break;
       case "clipboard-read":
         this.callbacks.onClipboardRead?.(event.selection, event.terminator);
+        break;
+      case "kitty-clipboard-read":
+        this.callbacks.onKittyClipboardRead?.(event);
+        break;
+      case "kitty-clipboard-write":
+        this.callbacks.onKittyClipboardWrite?.(
+          event.clear ? "" : event.text,
+          event.primary,
+        );
         break;
       case "prompt-start":
         this.inCommand = false;

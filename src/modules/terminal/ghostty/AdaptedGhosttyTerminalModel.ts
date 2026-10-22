@@ -13,11 +13,14 @@ import {
 import type {
   TeraxGhostty,
   TeraxGhosttyGpuRenderState,
+  TeraxGhosttyKittyClipboardAnswer,
+  TeraxGhosttyMimeData,
   TeraxGhosttyRenderBase,
   TeraxGhosttyRenderState,
   TeraxGhosttyTerminal,
 } from "@terax/ghostty-core/adapted";
 import type {
+  GhosttyDragOperation,
   GhosttyTerminalConfig,
   GhosttyTerminalEvent,
   KeyEvent,
@@ -38,6 +41,8 @@ import {
 } from "./core/scrollbackBudget";
 import { clearTerminalBufferSequence } from "./core/terminalActions";
 import type {
+  GhosttyClipboardPolicy,
+  GhosttyDragPosition,
   GhosttyGpuFrame,
   GhosttyGpuFrameOptions,
   GhosttyGpuGlyph,
@@ -469,6 +474,54 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
 
   ligatures(): boolean {
     return this.ligaturesValue;
+  }
+
+  setClipboardPolicy(policy: GhosttyClipboardPolicy): void {
+    this.assertLive();
+    this.terminal.setClipboardPolicy(policy);
+    // Reads held when reads stop are refused now.
+    this.drainReplies();
+  }
+
+  answerClipboardRead(
+    id: number,
+    answer: TeraxGhosttyKittyClipboardAnswer,
+  ): boolean {
+    this.assertLive();
+    const answered = this.terminal.answerKittyClipboardRead(id, answer);
+    this.drainReplies();
+    return answered;
+  }
+
+  dropTargetActive(): boolean {
+    this.assertLive();
+    return this.terminal.dndActive();
+  }
+
+  dragAccepted(): GhosttyDragOperation | null {
+    this.assertLive();
+    return this.terminal.dndAccepted();
+  }
+
+  dragMove(position: GhosttyDragPosition, mimes: readonly string[]): void {
+    this.assertLive();
+    this.terminal.dndMove(position, mimes);
+    this.drainReplies();
+  }
+
+  drop(
+    position: GhosttyDragPosition,
+    items: readonly TeraxGhosttyMimeData[],
+  ): void {
+    this.assertLive();
+    this.terminal.dndDrop(position, items);
+    this.drainReplies();
+  }
+
+  dragLeave(): void {
+    this.assertLive();
+    this.terminal.dndLeave();
+    this.drainReplies();
   }
 
   formatTextRange(

@@ -45,7 +45,9 @@ export function TerminalPromptDialog() {
           <AlertDialogDescription>
             {request?.kind === "paste"
               ? "This text contains line breaks, so pasting it will run the commands it contains."
-              : "A program in this terminal wants to read your clipboard."}
+              : request?.program
+                ? `A program in this terminal, calling itself “${request.program}”, wants to read your clipboard.`
+                : "A program in this terminal wants to read your clipboard."}
           </AlertDialogDescription>
         </AlertDialogHeader>
         {preview && (

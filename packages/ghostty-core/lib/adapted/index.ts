@@ -30,6 +30,7 @@ export type { TeraxGhosttyGpuCell } from "./gpuCells";
 export { GpuGlyphBatch } from "./gpuGlyphs";
 export type {
   TeraxGhosttyCursor,
+  TeraxGhosttyDragPosition,
   TeraxGhosttyGpuGlyph,
   TeraxGhosttyGpuGlyphBatch,
   TeraxGhosttyGpuRenderState,
@@ -40,7 +41,9 @@ export type {
   TeraxGhosttyLoadOptions,
   TeraxGhosttyMemoryStats,
   TeraxGhosttyKeyEvent,
+  TeraxGhosttyKittyClipboardAnswer,
   TeraxGhosttyKittyPlacement,
+  TeraxGhosttyMimeData,
   TeraxGhosttyMouseAction,
   TeraxGhosttyMouseEvent,
   TeraxGhosttyRenderState,

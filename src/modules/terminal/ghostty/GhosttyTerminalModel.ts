@@ -6,12 +6,16 @@ import type {
 } from "@/modules/terminal/backend/contracts";
 import type { TerminalCellReader } from "@/modules/terminal/ghostty/core/packedCells";
 import type {
+  TeraxGhosttyDragPosition,
   TeraxGhosttyGpuGlyph,
+  TeraxGhosttyKittyClipboardAnswer,
   TeraxGhosttyKittyPlacement,
+  TeraxGhosttyMimeData,
   TeraxGhosttyMouseEvent,
   TeraxGhosttyTextFormat,
 } from "@terax/ghostty-core/adapted";
 import type {
+  GhosttyDragOperation,
   GhosttyTerminalConfig,
   GhosttyTerminalEvent,
   KeyEvent,
@@ -27,6 +31,14 @@ export type GhosttyTerminalModelOptions = {
   readonly onEvent?: (event: GhosttyTerminalEvent) => void;
   readonly onDispose?: () => void;
 };
+
+export type GhosttyClipboardPolicy = {
+  readonly readsToHost: boolean;
+  readonly writesAllowed: boolean;
+};
+
+/** Where a drag is, in cells and in the terminal pixels mouse reports use. */
+export type GhosttyDragPosition = TeraxGhosttyDragPosition;
 
 export type TerminalBufferPoint = {
   readonly line: number;
@@ -266,6 +278,31 @@ export interface GhosttyTerminalModelApi extends TerminalModel {
    */
   setLigatures?(enabled: boolean): void;
   ligatures?(): boolean;
+  /**
+   * Kitty clipboard (OSC 5522) access, refused by default. Reads the host
+   * takes are held and reported (`kitty-clipboard-read`) for
+   * `answerClipboardRead`; allowed writes are reported
+   * (`kitty-clipboard-write`). OSC 52 is unaffected.
+   */
+  setClipboardPolicy?(policy: GhosttyClipboardPolicy): void;
+  /** Answers a held Kitty clipboard read; false when none is held by `id`. */
+  answerClipboardRead?(
+    id: number,
+    answer: TeraxGhosttyKittyClipboardAnswer,
+  ): boolean;
+  /** The program registered for drops (Kitty OSC 72). */
+  dropTargetActive?(): boolean;
+  /** The program's answer to the current drag; null before it answers. */
+  dragAccepted?(): GhosttyDragOperation | null;
+  /** A native drag over the terminal carrying `mimes`, for the program. */
+  dragMove?(position: GhosttyDragPosition, mimes: readonly string[]): void;
+  /** A native drop with its data (at most 16 representations). */
+  drop?(
+    position: GhosttyDragPosition,
+    items: readonly TeraxGhosttyMimeData[],
+  ): void;
+  /** The native drag left without dropping. */
+  dragLeave?(): void;
   /** A buffer range as plain text, VT sequences or HTML, soft wraps joined. */
   formatTextRange?(
     startLine: number,

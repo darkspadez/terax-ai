@@ -25,6 +25,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { openPty, type PtySession } from "../lib/pty-bridge";
 import {
+  DROPPED_PATH_MIMES,
+  droppedPathItems,
+  terminalDragPosition,
+} from "../lib/programDrop";
+import {
   readPrimarySelection,
   writePrimarySelection,
   writeTerminalClipboard,
@@ -35,7 +40,10 @@ import { requestTerminalPrompt } from "../lib/terminalPrompts";
 import { useTerminalStatusStore } from "../lib/terminalStatus";
 import { GhosttySemanticEventRouter } from "./core/GhosttySemanticEventRouter";
 import { getGhosttyCoreRuntime } from "./GhosttyCoreRuntime";
-import type { GhosttyTerminalModelApi } from "./GhosttyTerminalModel";
+import type {
+  GhosttyDragPosition,
+  GhosttyTerminalModelApi,
+} from "./GhosttyTerminalModel";
 import {
   measureTerminalFont,
   readTerminalGpuTheme,
@@ -399,6 +407,65 @@ export function pasteIntoGhosttySession(leafId: number, text: string): boolean {
   return true;
 }
 
+/**
+ * The leaf's terminal and where a drag at a client point is over it, when
+ * its program registered for drops (Kitty OSC 72); null otherwise.
+ */
+function programDropTarget(
+  leafId: number,
+  clientX: number,
+  clientY: number,
+): { model: GhosttyTerminalModelApi; position: GhosttyDragPosition } | null {
+  const session = sessions.get(leafId);
+  const model = session?.model;
+  const surface = session?.surface;
+  if (!model || !surface || model.isDisposed?.() || !model.dropTargetActive?.())
+    return null;
+  const rect = surface.eventTarget().getBoundingClientRect();
+  const position = terminalDragPosition(
+    clientX - rect.left,
+    clientY - rect.top + surface.gridShiftY(),
+    surface.cellSize(),
+    model.cellPixelSize?.() ?? null,
+  );
+  return position && { model, position };
+}
+
+/**
+ * Offers a drag of files over the leaf to its program; false when the
+ * program did not register for drops, so the drag is the app's.
+ */
+export function offerDragToGhosttySession(
+  leafId: number,
+  clientX: number,
+  clientY: number,
+): boolean {
+  const target = programDropTarget(leafId, clientX, clientY);
+  if (!target) return false;
+  target.model.dragMove?.(target.position, DROPPED_PATH_MIMES);
+  return true;
+}
+
+/** Drops files on the leaf's program; false when it takes no drops. */
+export function dropOnGhosttySession(
+  leafId: number,
+  clientX: number,
+  clientY: number,
+  paths: readonly string[],
+): boolean {
+  const target = programDropTarget(leafId, clientX, clientY);
+  if (!target) return false;
+  target.model.drop?.(target.position, droppedPathItems(paths));
+  return true;
+}
+
+/** The drag offered to the leaf's program left without dropping. */
+export function leaveGhosttySessionDrag(leafId: number): void {
+  const model = sessions.get(leafId)?.model;
+  if (model && !model.isDisposed?.() && model.dropTargetActive?.())
+    model.dragLeave?.();
+}
+
 export function ghosttySelectionForLeaf(leafId: number): string | null {
   return sessions.get(leafId)?.surface?.getSelection() ?? null;
 }
@@ -745,11 +812,17 @@ async function initializeSessionGeneration(
   ]);
   if (!alive()) return;
 
+  // Events name reads of this model; a later model must not answer them.
+  let eventModel: GhosttyTerminalModelApi | null = null;
   const semanticEvents = new GhosttySemanticEventRouter({
     ...terminalIntegrationCallbacks({
       leafId: session.leafId,
       userIsLooking: () => session.visible && document.hasFocus(),
       reply: (bytes) => session.writer.enqueue(bytes),
+      answerKittyClipboardRead: (id, answer) => {
+        if (eventModel && !eventModel.isDisposed?.())
+          eventModel.answerClipboardRead?.(id, answer);
+      },
       pointerTarget: () => session.surface?.eventTarget() ?? null,
     }),
     onCwd: (cwd) => {
@@ -759,6 +832,10 @@ async function initializeSessionGeneration(
     },
     onClipboard: (text) => {
       oscClipboard.enqueue(text);
+    },
+    onKittyClipboardWrite: (text, primary) => {
+      if (primary) void writePrimarySelection(text);
+      else oscClipboard.enqueue(text);
     },
     onOverflow: (dropped) => {
       console.warn(
@@ -792,6 +869,7 @@ async function initializeSessionGeneration(
       );
     },
   });
+  eventModel = model;
   if (session.disposed || generation !== session.generation) {
     model.dispose();
     return;

@@ -9,6 +9,7 @@ import {
   type ScrollbackDemand,
 } from "./core/scrollbackBudget";
 import type {
+  GhosttyClipboardPolicy,
   GhosttyTerminalModelApi,
   GhosttyTerminalModelOptions,
 } from "./GhosttyTerminalModel";
@@ -64,6 +65,11 @@ export class GhosttyCoreRuntime {
   private idleReleaseTimer: ReturnType<typeof setTimeout> | null = null;
   private scrollbackBudgetBytes: number;
   private ligatures = true;
+  /** Refused until the app applies the user's choice. */
+  private clipboardPolicy: GhosttyClipboardPolicy = {
+    readsToHost: false,
+    writesAllowed: false,
+  };
   private disposed = false;
 
   constructor(
@@ -113,6 +119,7 @@ export class GhosttyCoreRuntime {
         },
       });
       model.setLigatures(this.ligatures);
+      model.setClipboardPolicy(this.clipboardPolicy);
       this.models.set(options.leafId, model);
       this.rebalanceScrollback();
       return model;
@@ -154,6 +161,15 @@ export class GhosttyCoreRuntime {
   setLigatures(enabled: boolean): void {
     this.ligatures = enabled;
     for (const model of this.models.values()) model.setLigatures(enabled);
+  }
+
+  /**
+   * Kitty clipboard access for every model, live and future
+   * (`GhosttyTerminalModelApi.setClipboardPolicy`).
+   */
+  setClipboardPolicy(policy: GhosttyClipboardPolicy): void {
+    this.clipboardPolicy = policy;
+    for (const model of this.models.values()) model.setClipboardPolicy(policy);
   }
 
   dispose(): void {

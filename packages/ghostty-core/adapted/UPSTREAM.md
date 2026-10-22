@@ -11,10 +11,10 @@ per-terminal frame loop, or per-pane GPU lifecycle.
 - Restty commit: `7700b14a7643ba9240818209ef1e0aa90d83ad77`
 - Zig: `0.16.0`
 - Optimization: `ReleaseFast`, WebAssembly SIMD and scalar variants
-- SIMD artifact size: `1058480` bytes
-- Scalar artifact size: `999003` bytes
-- SIMD SHA-256: `caa9854865ad0aa41387556dcbe993908cce073010be9e5cd72d30181067871a`
-- Scalar SHA-256: `44c99aa8b648e326b5b76dec51342fd532c1e2eb89c2748bf325c6567519d5be`
+- SIMD artifact size: `1069664` bytes
+- Scalar artifact size: `1010650` bytes
+- SIMD SHA-256: `eb117b5cf0843d232a3624a2d79aaac8439ad942e66a7ff9bc765785faadb4e3`
+- Scalar SHA-256: `9fad4845dc956b021fd6868f4b3d103b63c43549792b25fdcf3c8ea121bbdf22`
 
 Terax-specific changes include:
 
@@ -146,6 +146,23 @@ XTVERSION, OSC 9;4 progress), instead of answering only a hand-picked set:
   at its old cost (a 200x60 re-encode of plain text measured the same); a
   screen dense with operators costs about 1.6 times as much. Changing the
   switch re-encodes every row once, like a palette change.
+- Kitty clipboard (OSC 5522) through Ghostty's own protocol code, refused
+  until the host sets a policy (`restty_set_clipboard_policy`). Ghostty's
+  clipboard effects are synchronous and the host's clipboard is not, so the
+  bridge holds a read (at most four; more are answered busy), reports it
+  (`kitty_clipboard_read`: id, location, listing flag, the program's name and
+  MIME types) and, when the host answers (`restty_kitty_clipboard_answer`),
+  replays the packet through Ghostty with the answer, letting Ghostty encode
+  the response (the reply queue may hold 4 MiB while it does). Turning reads
+  off refuses those still held. Writes run Ghostty's write state machine and
+  reach the host as text (`kitty_clipboard_write`); one without a text
+  representation is answered unsupported. OSC 52 stays the bridge's own, so
+  Ghostty's handler never sees it.
+- Kitty drag and drop (OSC 72): Ghostty's registration and acceptance state
+  is reported (`drag_and_drop`) and queried (`restty_dnd_active`,
+  `restty_dnd_accepted`); the host feeds native drags in with
+  `restty_dnd_move`, `restty_dnd_drop` (up to 16 representations, served by
+  Ghostty when the program requests them) and `restty_dnd_leave`.
 
 ## October 15 instance-per-terminal memory
 

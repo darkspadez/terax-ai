@@ -16,6 +16,7 @@ import { resolvedTerminalBackend } from "./backend/selection";
 import { getGhosttyCoreRuntime } from "./ghostty/GhosttyCoreRuntime";
 import { ghosttyBlocks } from "./ghostty/ghosttyBlockSessions";
 import { ligaturesApply } from "./ghostty/gpu/ligatureRuns";
+import { kittyClipboardPolicy } from "./ghostty/terminalIntegration";
 import {
   ghosttyBlockGeometry,
   useGhosttyTerminalSession,
@@ -87,6 +88,14 @@ const GhosttyTerminalPane = memo(
     useEffect(() => {
       getGhosttyCoreRuntime().setLigatures(ligatures);
     }, [ligatures]);
+    const clipboardRead = usePreferencesStore(
+      (state) => state.terminalBehavior.clipboardRead,
+    );
+    useEffect(() => {
+      getGhosttyCoreRuntime().setClipboardPolicy(
+        kittyClipboardPolicy(clipboardRead),
+      );
+    }, [clipboardRead]);
     const session = useGhosttyTerminalSession({
       leafId,
       backend,

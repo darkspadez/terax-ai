@@ -4,8 +4,11 @@ import { create } from "zustand";
 export type TerminalPromptRequest =
   /** A paste that would run commands (line breaks without bracketed paste). */
   | { readonly kind: "paste"; readonly text: string }
-  /** A program asked to read the clipboard (OSC 52). */
-  | { readonly kind: "clipboard-read" };
+  /**
+   * A program asked to read the clipboard (OSC 52, Kitty OSC 5522); Kitty
+   * reads carry the name the program gives itself.
+   */
+  | { readonly kind: "clipboard-read"; readonly program?: string };
 
 export type TerminalPromptAnswer = "allow" | "deny";
 

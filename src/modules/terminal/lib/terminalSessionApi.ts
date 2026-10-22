@@ -2,6 +2,7 @@ import type { BlockMode } from "@/modules/terminal/block/lib/modeMachine";
 import {
   clearGhosttySession,
   disposeGhosttySession,
+  dropOnGhosttySession,
   focusGhosttySession,
   ghosttyFocusedLeaf,
   ghosttyLeafHasForegroundProcess,
@@ -13,6 +14,8 @@ import {
   type GhosttyScrollAction,
   hasGhosttySession,
   interruptGhosttySession,
+  leaveGhosttySessionDrag,
+  offerDragToGhosttySession,
   pasteIntoGhosttySession,
   scrollGhosttySession,
   submitToGhosttySession,
@@ -58,6 +61,33 @@ export function interruptLeaf(leafId: number): void {
 
 export function pasteIntoSession(leafId: number, text: string): boolean {
   return pasteIntoGhosttySession(leafId, text);
+}
+
+/**
+ * Offers a drag of files over the leaf to the program running there; false
+ * when it did not register for drops (Kitty OSC 72), so the drop pastes.
+ */
+export function offerDragToSession(
+  leafId: number,
+  clientX: number,
+  clientY: number,
+): boolean {
+  return offerDragToGhosttySession(leafId, clientX, clientY);
+}
+
+/** Drops files on the leaf's program; false when it takes no drops. */
+export function dropOnSession(
+  leafId: number,
+  clientX: number,
+  clientY: number,
+  paths: readonly string[],
+): boolean {
+  return dropOnGhosttySession(leafId, clientX, clientY, paths);
+}
+
+/** A drag offered to the leaf's program left without dropping. */
+export function leaveSessionDrag(leafId: number): void {
+  leaveGhosttySessionDrag(leafId);
 }
 
 export function leafCwd(leafId: number): string | null {

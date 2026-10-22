@@ -1,10 +1,13 @@
 import type {
+  TeraxGhosttyDragPosition,
   TeraxGhosttyGpuRenderState,
+  TeraxGhosttyKittyClipboardAnswer,
   TeraxGhosttyLine,
   TeraxGhosttyLoadOptions,
   TeraxGhosttyKeyEvent,
   TeraxGhosttyKittyPlacement,
   TeraxGhosttyMemoryStats,
+  TeraxGhosttyMimeData,
   TeraxGhosttyMouseEvent,
   TeraxGhosttyRenderBase,
   TeraxGhosttyRenderFormat,
@@ -25,6 +28,7 @@ import { GpuGlyphBatch } from "./gpuGlyphs";
 import { createViewCacheEntry, getCachedView } from "./viewCache";
 import {
   GHOSTTY_POINTER_SHAPES,
+  type GhosttyDragOperation,
   type GhosttyProgressState,
   type GhosttyTerminalEvent,
 } from "../types";
@@ -34,10 +38,10 @@ export const ADAPTED_GHOSTTY_COMMIT =
 export const ADAPTED_RESTTY_COMMIT =
   "7700b14a7643ba9240818209ef1e0aa90d83ad77";
 export const ADAPTED_GHOSTTY_WASM_SHA256 =
-  "caa9854865ad0aa41387556dcbe993908cce073010be9e5cd72d30181067871a";
+  "eb117b5cf0843d232a3624a2d79aaac8439ad942e66a7ff9bc765785faadb4e3";
 
 export const ADAPTED_GHOSTTY_SCALAR_WASM_SHA256 =
-  "44c99aa8b648e326b5b76dec51342fd532c1e2eb89c2748bf325c6567519d5be";
+  "9fad4845dc956b021fd6868f4b3d103b63c43549792b25fdcf3c8ea121bbdf22";
 
 let wasmSimdAvailable: boolean | undefined;
 
@@ -164,6 +168,13 @@ const requiredExports = [
   "restty_link_buffer_len",
   "restty_set_render_format",
   "restty_set_ligatures",
+  "restty_set_clipboard_policy",
+  "restty_kitty_clipboard_answer",
+  "restty_dnd_active",
+  "restty_dnd_accepted",
+  "restty_dnd_move",
+  "restty_dnd_drop",
+  "restty_dnd_leave",
   "restty_render_format",
   "restty_gpu_cell_stride",
   "restty_gpu_cells_ptr",
@@ -937,6 +948,136 @@ export class TeraxGhosttyTerminal {
       this.exports.restty_set_ligatures(this.handle, enabled ? 1 : 0),
       "set ligatures",
     );
+  }
+
+  /**
+   * Kitty clipboard (OSC 5522) access; both off by default, refusing the
+   * program. With `readsToHost` reads are held and announced
+   * (`kitty-clipboard-read`) for `answerKittyClipboardRead`; turning it off
+   * refuses those still held. With `writesAllowed` writes are announced
+   * (`kitty-clipboard-write`) and the program told they succeeded. OSC 52 is
+   * unaffected.
+   */
+  setClipboardPolicy(policy: {
+    readonly readsToHost: boolean;
+    readonly writesAllowed: boolean;
+  }): void {
+    this.assertLive();
+    checkResult(
+      this.exports.restty_set_clipboard_policy(
+        this.handle,
+        policy.readsToHost ? 1 : 0,
+        policy.writesAllowed ? 1 : 0,
+      ),
+      "set clipboard policy",
+    );
+  }
+
+  /**
+   * Answers the held read `id`; the response goes to the reply queue. False
+   * when no such read is held (answered already, or refused when reads
+   * stopped going to the host).
+   */
+  answerKittyClipboardRead(
+    id: number,
+    answer: TeraxGhosttyKittyClipboardAnswer,
+  ): boolean {
+    this.assertLive();
+    const status = KITTY_READ_STATUS[answer.status];
+    if (answer.status !== "success") {
+      return (
+        this.exports.restty_kitty_clipboard_answer(
+          this.handle,
+          clampInteger(id, 0, 0xffff_ffff),
+          status,
+          0,
+          0,
+        ) === 0
+      );
+    }
+    // The most Ghostty serves: four representations, sixteen listed types.
+    const record = encodeMimeRecords(
+      this.textEncoder,
+      answer.contents.slice(0, 4),
+      answer.available.slice(0, 16),
+    );
+    return (
+      this.withInput(record, (pointer, length) =>
+        this.exports.restty_kitty_clipboard_answer(
+          this.handle,
+          clampInteger(id, 0, 0xffff_ffff),
+          status,
+          pointer,
+          length,
+        ),
+      ) === 0
+    );
+  }
+
+  /** Whether the program registered to accept drops (Kitty OSC 72). */
+  dndActive(): boolean {
+    this.assertLive();
+    return this.exports.restty_dnd_active(this.handle) !== 0;
+  }
+
+  /**
+   * The program's answer to the current drag, or null before it answers
+   * (and when no drag is over it).
+   */
+  dndAccepted(): GhosttyDragOperation | null {
+    this.assertLive();
+    return DRAG_OPERATIONS[this.exports.restty_dnd_accepted(this.handle)] ?? null;
+  }
+
+  /**
+   * A native drag moved over the terminal carrying `mimes`. The program
+   * hears of it only while registered; it answers through `dndAccepted`.
+   */
+  dndMove(position: TeraxGhosttyDragPosition, mimes: readonly string[]): void {
+    this.assertLive();
+    const list = this.textEncoder.encode(
+      mimes.filter((mime) => mime && !mime.includes("\n")).join("\n"),
+    );
+    checkResult(
+      this.withInput(list, (pointer, length) =>
+        this.exports.restty_dnd_move(
+          this.handle,
+          ...dragArguments(position),
+          pointer,
+          length,
+        ),
+      ),
+      "drag move",
+    );
+  }
+
+  /**
+   * A native drop with the data it carried (at most 16 representations);
+   * the program requests what it wants of it afterwards.
+   */
+  dndDrop(
+    position: TeraxGhosttyDragPosition,
+    items: readonly TeraxGhosttyMimeData[],
+  ): void {
+    this.assertLive();
+    const record = encodeMimeRecords(this.textEncoder, items.slice(0, 16));
+    checkResult(
+      this.withInput(record, (pointer, length) =>
+        this.exports.restty_dnd_drop(
+          this.handle,
+          ...dragArguments(position),
+          pointer,
+          length,
+        ),
+      ),
+      "drop",
+    );
+  }
+
+  /** The native drag left the terminal without dropping. */
+  dndLeave(): void {
+    this.assertLive();
+    checkResult(this.exports.restty_dnd_leave(this.handle), "drag leave");
   }
 
   /** Kitty image bytes each screen may hold; 0 disables the protocol. */
@@ -1741,6 +1882,28 @@ export class TeraxGhosttyTerminal {
     return pointer;
   }
 
+  /**
+   * Copies `bytes` into WebAssembly memory for one call: the reusable input
+   * buffer when small, a temporary allocation otherwise.
+   */
+  private withInput(
+    bytes: Uint8Array,
+    call: (pointer: number, length: number) => number,
+  ): number {
+    if (bytes.byteLength > REUSABLE_INPUT_LIMIT) {
+      const pointer = this.allocate(bytes.byteLength);
+      try {
+        new Uint8Array(this.memory.buffer, pointer, bytes.byteLength).set(bytes);
+        return call(pointer, bytes.byteLength);
+      } finally {
+        this.exports.restty_free(pointer, bytes.byteLength);
+      }
+    }
+    this.ensureInputCapacity(Math.max(1, bytes.byteLength));
+    new Uint8Array(this.memory.buffer, this.inputPointer, bytes.byteLength).set(bytes);
+    return call(this.inputPointer, bytes.byteLength);
+  }
+
   private ensureInputCapacity(length: number): void {
     if (length <= this.inputCapacity) return;
     if (this.inputPointer) {
@@ -2062,9 +2225,106 @@ function decodeTerminalEvent(
         selection: String.fromCharCode(payload[0]),
         terminator: payload[1] ? "bel" : "st",
       };
+    case 15: {
+      if (payload.byteLength < 8) return null;
+      const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+      const nameLength = view.getUint16(6, true);
+      if (nameLength > payload.byteLength - 8) return null;
+      const mimes = textDecoder.decode(payload.subarray(8 + nameLength));
+      return {
+        type: "kitty-clipboard-read",
+        id: view.getUint32(0, true),
+        primary: payload[4] === 1,
+        list: payload[5] === 1,
+        name: textDecoder.decode(payload.subarray(8, 8 + nameLength)),
+        mimes: mimes ? mimes.split("\n") : [],
+      };
+    }
+    case 16:
+      if (payload.byteLength < 2) return null;
+      return {
+        type: "kitty-clipboard-write",
+        primary: payload[0] === 1,
+        clear: payload[1] === 1,
+        text: textDecoder.decode(payload.subarray(2)),
+      };
+    case 17: {
+      const code = payload[0];
+      if (code === 0) return { type: "drag-and-drop", change: "registration" };
+      if (code === 1) return { type: "drag-and-drop", change: "acceptance" };
+      const operation = DRAG_OPERATIONS[(code ?? 0) - 2];
+      return operation
+        ? { type: "drag-and-drop", change: "concluded", operation }
+        : null;
+    }
     default:
       return null;
   }
+}
+
+const KITTY_READ_STATUS = {
+  success: 0,
+  denied: 1,
+  unsupported: 2,
+  busy: 3,
+  "io-error": 4,
+} as const;
+
+const DRAG_OPERATIONS: readonly GhosttyDragOperation[] = ["none", "copy", "move"];
+
+function dragArguments(
+  position: TeraxGhosttyDragPosition,
+): [number, number, number, number, number] {
+  return [
+    clampInteger(position.cellX, 0, 0xffff),
+    clampInteger(position.cellY, 0, 0xffff),
+    clampInteger(position.pixelX, -0x8000_0000, 0x7fff_ffff),
+    clampInteger(position.pixelY, -0x8000_0000, 0x7fff_ffff),
+    (position.copy ? 1 : 0) | (position.move ? 2 : 0),
+  ];
+}
+
+/**
+ * MIME representations as the core reads them: when `available` is given,
+ * a u16 count and u16-length MIME types first; then a u16 count and, per
+ * representation, a u16-length MIME type and u32-length data.
+ */
+function encodeMimeRecords(
+  encoder: TextEncoder,
+  items: readonly TeraxGhosttyMimeData[],
+  available?: readonly string[],
+): Uint8Array {
+  const listing = (available ?? []).map((mime) => encoder.encode(mime));
+  const entries = items.map((item) => ({
+    mime: encoder.encode(item.mime),
+    data: item.data,
+  }));
+  let length = 2;
+  if (available) length += 2 + listing.reduce((sum, mime) => sum + 2 + mime.byteLength, 0);
+  for (const entry of entries) length += 6 + entry.mime.byteLength + entry.data.byteLength;
+  const bytes = new Uint8Array(length);
+  const view = new DataView(bytes.buffer);
+  let at = 0;
+  const putMime = (mime: Uint8Array) => {
+    if (mime.byteLength > 0xffff) throw new RangeError("MIME type too long");
+    view.setUint16(at, mime.byteLength, true);
+    bytes.set(mime, at + 2);
+    at += 2 + mime.byteLength;
+  };
+  if (available) {
+    view.setUint16(at, listing.length, true);
+    at += 2;
+    for (const mime of listing) putMime(mime);
+  }
+  view.setUint16(at, entries.length, true);
+  at += 2;
+  for (const entry of entries) {
+    putMime(entry.mime);
+    view.setUint32(at, entry.data.byteLength, true);
+    bytes.set(entry.data, at + 4);
+    at += 4 + entry.data.byteLength;
+  }
+  return bytes;
 }
 
 const PROGRESS_STATES: readonly GhosttyProgressState[] = [

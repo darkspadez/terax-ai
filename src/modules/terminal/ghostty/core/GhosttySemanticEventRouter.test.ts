@@ -83,4 +83,42 @@ describe("GhosttySemanticEventRouter", () => {
     expect(onCommandStarted.mock.calls).toEqual([["make"], [null]]);
     expect(onCommandFinished).toHaveBeenCalledWith(2);
   });
+
+  it("routes Kitty clipboard reads and writes", () => {
+    const onKittyClipboardRead = vi.fn();
+    const onKittyClipboardWrite = vi.fn();
+    const router = new GhosttySemanticEventRouter({
+      onKittyClipboardRead,
+      onKittyClipboardWrite,
+    });
+    const read = {
+      type: "kitty-clipboard-read",
+      id: 3,
+      primary: false,
+      list: false,
+      name: "vim",
+      mimes: ["text/plain"],
+    } as const;
+
+    router.handle(read);
+    router.handle({
+      type: "kitty-clipboard-write",
+      primary: true,
+      clear: false,
+      text: "hi",
+    });
+    router.handle({
+      type: "kitty-clipboard-write",
+      primary: false,
+      clear: true,
+      text: "",
+    });
+    router.handle({ type: "drag-and-drop", change: "registration" });
+
+    expect(onKittyClipboardRead).toHaveBeenCalledWith(read);
+    expect(onKittyClipboardWrite.mock.calls).toEqual([
+      ["hi", true],
+      ["", false],
+    ]);
+  });
 });

@@ -5,17 +5,38 @@ import type {
   TerminalNotifyOnFinish,
 } from "@/modules/settings/terminalBehavior";
 import type { GhosttyPointerShape } from "@terax/ghostty-core/protocol";
-import { readTerminalClipboard } from "../lib/terminalClipboard";
+import type { TeraxGhosttyKittyClipboardAnswer } from "@terax/ghostty-core/adapted";
+import {
+  readPrimarySelection,
+  readTerminalClipboard,
+} from "../lib/terminalClipboard";
 import { requestTerminalPrompt } from "../lib/terminalPrompts";
 import {
   type TerminalProgress,
   useTerminalStatusStore,
 } from "../lib/terminalStatus";
-import type { GhosttySemanticEventCallbacks } from "./core/GhosttySemanticEventRouter";
+import type {
+  GhosttySemanticEventCallbacks,
+  KittyClipboardReadRequest,
+} from "./core/GhosttySemanticEventRouter";
 import type { Rgb } from "./core/packedCells";
+import type { GhosttyClipboardPolicy } from "./GhosttyTerminalModel";
 
 /** OSC 52 clipboard reads are answered with at most this much text. */
 const MAX_CLIPBOARD_REPLY_BYTES = 1024 * 1024;
+/**
+ * Kitty clipboard reads serve at most this much text: its base64 framing
+ * stays within the 4 MiB the core lets one answer queue.
+ */
+const MAX_KITTY_CLIPBOARD_BYTES = 2 * 1024 * 1024;
+/** MIME types that name plain text, as Ghostty's `isTextMime` lists them. */
+const TEXT_MIMES = new Set([
+  "text/plain",
+  "text/plain;charset=utf-8",
+  "UTF8_STRING",
+  "TEXT",
+  "STRING",
+]);
 
 const encoder = new TextEncoder();
 
@@ -32,6 +53,29 @@ export function clipboardReadReply(
     binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
   }
   return `\x1b]52;${selection};${btoa(binary)}${terminator === "bel" ? "\x07" : "\x1b\\"}`;
+}
+
+/**
+ * The answer to a Kitty clipboard read once the user allowed it: the text
+ * under each requested text MIME type (Ghostty serves four at most), the
+ * types on offer when listed. Null text means there is no such clipboard.
+ */
+export function kittyClipboardAnswer(
+  mimes: readonly string[],
+  text: string | null,
+): TeraxGhosttyKittyClipboardAnswer {
+  if (text === null) return { status: "unsupported" };
+  const data = encoder.encode(text);
+  if (data.byteLength > MAX_KITTY_CLIPBOARD_BYTES) return { status: "io-error" };
+  if (data.byteLength === 0) return { status: "success", available: [], contents: [] };
+  return {
+    status: "success",
+    available: ["text/plain"],
+    contents: mimes
+      .filter((mime) => TEXT_MIMES.has(mime))
+      .slice(0, 4)
+      .map((mime) => ({ mime, data })),
+  };
 }
 
 /** Whether a finished command deserves a notification. */
@@ -101,6 +145,11 @@ export type TerminalIntegrationContext = {
   readonly userIsLooking: () => boolean;
   /** Writes bytes to the program (terminal replies). */
   readonly reply: (bytes: Uint8Array) => void;
+  /** Answers a held Kitty clipboard read of this pane's terminal. */
+  readonly answerKittyClipboardRead: (
+    id: number,
+    answer: TeraxGhosttyKittyClipboardAnswer,
+  ) => void;
   /** Where the program-set pointer shape applies. */
   readonly pointerTarget: () => HTMLElement | null;
 };
@@ -148,7 +197,8 @@ async function requestWindowAttention(): Promise<void> {
 /**
  * Callbacks that turn a pane's terminal events into app behaviour: tab title
  * and progress, bell marks and sound, desktop notifications (OSC 9/777 and
- * long commands), the program's pointer shape and consented OSC 52 reads.
+ * long commands), the program's pointer shape and consented clipboard reads
+ * (OSC 52, Kitty OSC 5522).
  */
 export function terminalIntegrationCallbacks(
   context: TerminalIntegrationContext,
@@ -181,6 +231,9 @@ export function terminalIntegrationCallbacks(
     onClipboardRead: (selection, terminator) => {
       void answerClipboardRead(context, selection, terminator);
     },
+    onKittyClipboardRead: (request) => {
+      void answerKittyClipboardRead(context, request);
+    },
     onCommandStarted: (text) => {
       commandStartedAt = performance.now();
       command = text;
@@ -206,6 +259,54 @@ export function terminalIntegrationCallbacks(
       }
     },
   };
+}
+
+/**
+ * Reads reach here only while the setting asks or allows
+ * (`kittyClipboardPolicy`); denied ones the core refuses itself.
+ */
+async function answerKittyClipboardRead(
+  context: TerminalIntegrationContext,
+  request: KittyClipboardReadRequest,
+): Promise<void> {
+  // A listing alone shows only the types on offer; Kitty serves it unasked.
+  const program = promptProgramName(request.name);
+  const allowed =
+    request.mimes.length === 0 ||
+    behavior().clipboardRead === "allow" ||
+    (await requestTerminalPrompt({
+      kind: "clipboard-read",
+      ...(program ? { program } : {}),
+    })) === "allow";
+  if (!allowed) {
+    context.answerKittyClipboardRead(request.id, { status: "denied" });
+    return;
+  }
+  const text = request.primary
+    ? await readPrimarySelection()
+    : await readTerminalClipboard();
+  context.answerKittyClipboardRead(
+    request.id,
+    kittyClipboardAnswer(request.mimes, text),
+  );
+}
+
+/**
+ * The name a program gives itself, fit for the consent prompt: without
+ * control or formatting characters (a bidi override could disguise it), and
+ * at most 64 characters.
+ */
+export function promptProgramName(name: string): string {
+  const visible = name.replace(/[\p{Cc}\p{Cf}]/gu, "").trim();
+  return visible.length > 64 ? `${visible.slice(0, 63)}…` : visible;
+}
+
+/** The core's Kitty clipboard policy for the clipboard-read setting. */
+export function kittyClipboardPolicy(
+  access: TerminalBehavior["clipboardRead"],
+): GhosttyClipboardPolicy {
+  // Writes are allowed as OSC 52 writes are.
+  return { readsToHost: access !== "deny", writesAllowed: true };
 }
 
 async function answerClipboardRead(

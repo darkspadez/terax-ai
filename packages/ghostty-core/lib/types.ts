@@ -519,7 +519,43 @@ export type GhosttyTerminalEvent =
       readonly selection: string;
       readonly terminator: "st" | "bel";
     }
+  /**
+   * Kitty clipboard (OSC 5522) read held for the host while reads go to it
+   * (`setClipboardPolicy`). Answer with `answerKittyClipboardRead(id, …)`;
+   * `list` asks for the MIME types available, `mimes` for those
+   * representations (empty for a listing alone).
+   */
+  | {
+      readonly type: "kitty-clipboard-read";
+      readonly id: number;
+      readonly primary: boolean;
+      readonly list: boolean;
+      readonly name: string;
+      readonly mimes: readonly string[];
+    }
+  /**
+   * Kitty clipboard write the policy allows: the text to put on the
+   * clipboard (or the primary selection), or a request to clear it.
+   */
+  | {
+      readonly type: "kitty-clipboard-write";
+      readonly primary: boolean;
+      readonly clear: boolean;
+      readonly text: string;
+    }
+  /**
+   * Kitty drag and drop (OSC 72): the program registered or unregistered
+   * for drops (`dndActive`), answered the current drag (`dndAccepted`), or
+   * finished a drop with the operation it performed.
+   */
+  | {
+      readonly type: "drag-and-drop";
+      readonly change: "registration" | "acceptance" | "concluded";
+      readonly operation?: GhosttyDragOperation;
+    }
   | { readonly type: "overflow"; readonly dropped: number };
+
+export type GhosttyDragOperation = "none" | "copy" | "move";
 
 export type GhosttyProgressState =
   | "remove"

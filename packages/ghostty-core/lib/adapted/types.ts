@@ -366,6 +366,41 @@ export type TeraxGhosttyWasmExports = WebAssembly.Exports & {
   readonly restty_set_visible: (handle: number, visible: number) => number;
   readonly restty_set_image_storage_limit: (handle: number, bytes: number) => number;
   readonly restty_set_ligatures: (handle: number, enabled: number) => number;
+  readonly restty_set_clipboard_policy: (
+    handle: number,
+    readsToHost: number,
+    writesAllowed: number,
+  ) => number;
+  readonly restty_kitty_clipboard_answer: (
+    handle: number,
+    id: number,
+    status: number,
+    ptr: number,
+    len: number,
+  ) => number;
+  readonly restty_dnd_active: (handle: number) => number;
+  readonly restty_dnd_accepted: (handle: number) => number;
+  readonly restty_dnd_move: (
+    handle: number,
+    cellX: number,
+    cellY: number,
+    pixelX: number,
+    pixelY: number,
+    operations: number,
+    ptr: number,
+    len: number,
+  ) => number;
+  readonly restty_dnd_drop: (
+    handle: number,
+    cellX: number,
+    cellY: number,
+    pixelX: number,
+    pixelY: number,
+    operations: number,
+    ptr: number,
+    len: number,
+  ) => number;
+  readonly restty_dnd_leave: (handle: number) => number;
   readonly restty_encode_mouse: (
     handle: number,
     action: number,
@@ -409,6 +444,39 @@ export type TeraxGhosttyMouseEvent = {
   readonly x: number;
   readonly y: number;
   readonly anyButtonPressed: boolean;
+};
+
+/** One MIME representation, of a clipboard answer or a drop. */
+export type TeraxGhosttyMimeData = {
+  readonly mime: string;
+  readonly data: Uint8Array;
+};
+
+/**
+ * The host's answer to a held Kitty clipboard read. On success `available`
+ * lists the clipboard's MIME types (served when the read asked for the
+ * list) and `contents` the requested representations it has.
+ */
+export type TeraxGhosttyKittyClipboardAnswer =
+  | {
+      readonly status: "success";
+      readonly available: readonly string[];
+      readonly contents: readonly TeraxGhosttyMimeData[];
+    }
+  | { readonly status: "denied" | "unsupported" | "busy" | "io-error" };
+
+/**
+ * A native drag over the terminal, for a program that registered for drops
+ * (Kitty OSC 72): the cell and the pixel within the terminal it is over, and
+ * the operations the source allows.
+ */
+export type TeraxGhosttyDragPosition = {
+  readonly cellX: number;
+  readonly cellY: number;
+  readonly pixelX: number;
+  readonly pixelY: number;
+  readonly copy: boolean;
+  readonly move: boolean;
 };
 
 /** Output formats of `formatTextRange`. */

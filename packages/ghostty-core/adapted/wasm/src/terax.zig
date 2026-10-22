@@ -52,6 +52,32 @@ const TerminalEvent = enum(u8) {
     /// request ended with BEL (0 for ST). The host answers on the PTY itself,
     /// after asking the user, so this never blocks the parser.
     clipboard_read = 14,
+    /// A Kitty clipboard (OSC 5522) read is held for the host's answer
+    /// (`restty_kitty_clipboard_answer`): u32 request id, 1 for the primary
+    /// selection, 1 when the targets listing was asked for, u16 name length,
+    /// the program's name, then the requested MIME types separated by "\n".
+    kitty_clipboard_read = 15,
+    /// A Kitty clipboard write the host allows: 1 for the primary selection,
+    /// 1 when the write clears the clipboard, then the text written.
+    kitty_clipboard_write = 16,
+    /// Kitty drag and drop (OSC 72) changed: one byte, 0 the program
+    /// registered or unregistered for drops (`restty_dnd_active`), 1 it
+    /// answered the current drag (`restty_dnd_accepted`), 2-4 it concluded a
+    /// drop with no operation, a copy or a move.
+    drag_and_drop = 17,
+};
+
+/// Kitty clipboard reads held for the host at once; more are answered busy.
+const max_pending_kitty_reads: usize = 4;
+/// A held read's answer is replayed through Ghostty's encoder in one call,
+/// so the reply queue may hold this much while it is.
+const max_kitty_answer_output: usize = 4 * 1024 * 1024;
+
+const PendingKittyRead = struct {
+    id: u32,
+    metadata: []u8,
+    payload: ?[]u8,
+    terminator: ghostty.kitty.clipboard.Terminator,
 };
 
 const CursorInfo = extern struct {
@@ -367,6 +393,17 @@ const StreamHandler = struct {
     /// An OSC 9;4 progress bar is showing (a reset only reports its removal
     /// then).
     progress_active: bool = false,
+    /// Kitty clipboard reads go to the host (`restty_set_clipboard_policy`);
+    /// otherwise Ghostty refuses them (EPERM) at once.
+    kitty_reads_to_host: bool = false,
+    /// Kitty clipboard writes are passed to the host; otherwise refused.
+    kitty_writes_allowed: bool = false,
+    kitty_reads: std.ArrayListUnmanaged(PendingKittyRead) = .empty,
+    next_kitty_read: u32 = 1,
+    /// The host's answer while a held read is replayed through Ghostty.
+    kitty_read_answer: ?ghostty.clipboard.Read.Result = null,
+    /// The reply queue's bound; raised while a held read is answered.
+    output_limit: usize = max_output_bytes,
 
     pub fn init(
         alloc: Allocator,
@@ -386,6 +423,11 @@ const StreamHandler = struct {
         readonly.effects.color_scheme = &effectColorScheme;
         readonly.effects.xtversion = &effectXtversion;
         readonly.effects.progress_report = &effectProgressReport;
+        // OSC 5522 and OSC 72 run through Ghostty's own protocol code; these
+        // answer it. OSC 52 never reaches them (`vtFallible` keeps it).
+        readonly.effects.clipboard_read = &effectClipboardRead;
+        readonly.effects.clipboard_write = &effectClipboardWrite;
+        readonly.effects.drag_and_drop = &effectDragAndDrop;
         return .{
             .alloc = alloc,
             .term = term,
@@ -403,6 +445,8 @@ const StreamHandler = struct {
     }
 
     pub fn deinit(self: *StreamHandler) void {
+        for (self.kitty_reads.items) |read| self.freeKittyRead(read);
+        self.kitty_reads.deinit(self.alloc);
         self.readonly.deinit();
         self.apc.deinit();
         self.dcs.deinit();
@@ -429,6 +473,162 @@ const StreamHandler = struct {
 
     fn effectXtversion(readonly: *ReadonlyHandler) []const u8 {
         return fromReadonly(readonly).xtversion();
+    }
+
+    /// Ghostty asks for a Kitty clipboard read only while one held for the
+    /// host is replayed with its answer (`answerKittyRead`); anything else
+    /// is refused.
+    fn effectClipboardRead(
+        readonly: *ReadonlyHandler,
+        read: ghostty.clipboard.Read,
+    ) void {
+        const self = fromReadonly(readonly);
+        read.reply(self.kitty_read_answer orelse .denied);
+    }
+
+    /// A completed Kitty clipboard write: handed to the host when allowed.
+    /// The host writes text only, so a write without a text representation
+    /// is refused as unsupported, and one too large for the event queue as
+    /// an I/O error rather than lost. The host writes the clipboard
+    /// afterwards; the program hears success once the text is with it.
+    fn effectClipboardWrite(
+        readonly: *ReadonlyHandler,
+        write: ghostty.clipboard.Write,
+    ) void {
+        const self = fromReadonly(readonly);
+        if (!self.kitty_writes_allowed) return write.reply(.denied);
+        const text: []const u8 = for (write.contents) |content| {
+            if (ghostty.clipboard.isTextMime(content.mime)) break content.data;
+        } else if (write.contents.len == 0) "" else return write.reply(.unsupported);
+        const flags = [_]u8{
+            @intFromBool(write.location == .primary),
+            @intFromBool(write.contents.len == 0),
+        };
+        const before = self.dropped_events.*;
+        self.emitEvent(.kitty_clipboard_write, &.{ &flags, text }) catch |err| {
+            log.warn("dropping kitty clipboard write err={}", .{err});
+            return write.reply(.io_error);
+        };
+        if (self.dropped_events.* != before) return write.reply(.io_error);
+        write.reply(.{ .success = .{} });
+    }
+
+    fn effectDragAndDrop(
+        readonly: *ReadonlyHandler,
+        event: ghostty.kitty.dnd.Event,
+    ) void {
+        const self = fromReadonly(readonly);
+        const code: u8 = switch (event) {
+            .registration => 0,
+            .acceptance => 1,
+            .concluded_none => 2,
+            .concluded_copy => 3,
+            .concluded_move => 4,
+        };
+        self.emitEvent(.drag_and_drop, &.{&[_]u8{code}}) catch |err| {
+            log.warn("dropping drag and drop event err={}", .{err});
+        };
+    }
+
+    /// An OSC 5522 packet: reads the host may answer are held and announced
+    /// (`kitty_clipboard_read`), everything else goes to Ghostty, which
+    /// refuses reads the host does not take, runs the write protocol and
+    /// answers through the effects above.
+    fn kittyClipboard(
+        self: *StreamHandler,
+        value: StreamAction.Value(.kitty_clipboard),
+    ) !void {
+        const clipboard = ghostty.kitty.clipboard;
+        const op = clipboard.Metadata.operation(value.metadata);
+        if (op != .read or !self.kitty_reads_to_host) {
+            self.readonly.vt(.kitty_clipboard, value);
+            return;
+        }
+        if (self.kitty_reads.items.len >= max_pending_kitty_reads) {
+            self.kitty_read_answer = .busy;
+            defer self.kitty_read_answer = null;
+            self.readonly.vt(.kitty_clipboard, value);
+            return;
+        }
+
+        // Parsed as Ghostty does; what it would drop silently is dropped.
+        var arena: std.heap.ArenaAllocator = .init(self.alloc);
+        defer arena.deinit();
+        const meta = (clipboard.Metadata.parse(arena.allocator(), value.metadata) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.InvalidValue => return,
+        }) orelse return;
+        const decoded = clipboard.Payload.init(arena.allocator(), value.payload orelse "") catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.Invalid => return,
+        };
+        if (!decoded.isValidUtf8()) return;
+
+        var mimes: std.ArrayListUnmanaged(u8) = .empty;
+        var list = false;
+        var it = decoded.mimeIterator();
+        while (it.next()) |mime| {
+            if (std.mem.eql(u8, mime, clipboard.targets_mime)) {
+                list = true;
+                continue;
+            }
+            if (mimes.items.len > 0) try mimes.append(arena.allocator(), '\n');
+            try mimes.appendSlice(arena.allocator(), mime);
+        }
+
+        const id = self.next_kitty_read;
+        self.next_kitty_read +%= 1;
+        if (self.next_kitty_read == 0) self.next_kitty_read = 1;
+        const metadata = try self.alloc.dupe(u8, value.metadata);
+        errdefer self.alloc.free(metadata);
+        const payload: ?[]u8 = if (value.payload) |bytes| try self.alloc.dupe(u8, bytes) else null;
+        errdefer if (payload) |bytes| self.alloc.free(bytes);
+        try self.kitty_reads.append(self.alloc, .{
+            .id = id,
+            .metadata = metadata,
+            .payload = payload,
+            .terminator = value.terminator,
+        });
+
+        const name = meta.name[0..@min(meta.name.len, std.math.maxInt(u16))];
+        var header: [8]u8 = undefined;
+        std.mem.writeInt(u32, header[0..4], id, .little);
+        header[4] = @intFromBool(meta.loc == .primary);
+        header[5] = @intFromBool(list);
+        std.mem.writeInt(u16, header[6..8], @intCast(name.len), .little);
+        try self.emitEvent(.kitty_clipboard_read, &.{ &header, name, mimes.items });
+    }
+
+    /// Replays the held read `id` through Ghostty with the host's answer,
+    /// which encodes the response into the reply queue. False when no such
+    /// read is held (answered already, or never held).
+    fn answerKittyRead(
+        self: *StreamHandler,
+        id: u32,
+        answer: ghostty.clipboard.Read.Result,
+    ) bool {
+        const index = for (self.kitty_reads.items, 0..) |read, i| {
+            if (read.id == id) break i;
+        } else return false;
+        const read = self.kitty_reads.orderedRemove(index);
+        defer self.freeKittyRead(read);
+        self.kitty_read_answer = answer;
+        self.output_limit = max_kitty_answer_output;
+        defer {
+            self.kitty_read_answer = null;
+            self.output_limit = max_output_bytes;
+        }
+        self.readonly.vt(.kitty_clipboard, .{
+            .metadata = read.metadata,
+            .payload = read.payload,
+            .terminator = read.terminator,
+        });
+        return true;
+    }
+
+    fn freeKittyRead(self: *StreamHandler, read: PendingKittyRead) void {
+        self.alloc.free(read.metadata);
+        if (read.payload) |bytes| self.alloc.free(bytes);
     }
 
     fn effectProgressReport(
@@ -725,14 +925,15 @@ const StreamHandler = struct {
     fn appendOutput(self: *StreamHandler, bytes: []const u8) !void {
         if (bytes.len == 0) return;
 
-        if (bytes.len >= max_output_bytes) {
+        const limit = self.output_limit;
+        if (bytes.len >= limit) {
             self.output.clearRetainingCapacity();
-            try self.output.appendSlice(self.alloc, bytes[bytes.len - max_output_bytes ..]);
+            try self.output.appendSlice(self.alloc, bytes[bytes.len - limit ..]);
             return;
         }
 
-        if (self.output.items.len + bytes.len > max_output_bytes) {
-            const drop = self.output.items.len + bytes.len - max_output_bytes;
+        if (self.output.items.len + bytes.len > limit) {
+            const drop = self.output.items.len + bytes.len - limit;
             if (drop >= self.output.items.len) {
                 self.output.clearRetainingCapacity();
             } else {
@@ -973,8 +1174,10 @@ const StreamHandler = struct {
                 self.readonly.vt(action, value);
                 try self.emitEvent(.pwd, &.{value.url});
             },
+            // OSC 52 stays the bridge's: reads are answered by the host after
+            // asking the user, writes go out as events. Ghostty's handler only
+            // calls the clipboard effects for it, which serve OSC 5522.
             .clipboard_contents => {
-                self.readonly.vt(action, value);
                 if (value.data.len == 1 and value.data[0] == '?') {
                     const request = [_]u8{ value.kind, @intFromBool(value.terminator == .bel) };
                     try self.emitEvent(.clipboard_read, &.{&request});
@@ -1031,6 +1234,7 @@ const StreamHandler = struct {
                 self.apc.feedSlice(self.alloc, value.bytes);
             },
             .apc_end => try self.apcEnd(),
+            .kitty_clipboard => try self.kittyClipboard(value),
             else => self.readonly.vt(action, value),
         }
     }
@@ -2708,6 +2912,214 @@ pub export fn restty_set_xtversion(handle: ?*Restty, ptr: [*]const u8, len: usiz
 }
 
 /// Whether the terminal can be seen (DSR 996 / mode 2033 visibility reports).
+/// Reads one length-prefixed field from `data` at `at`: a little-endian
+/// length of type `Len` then that many bytes. Null when `data` ends early.
+fn readField(comptime Len: type, data: []const u8, at: *usize) ?[]const u8 {
+    if (data.len - at.* < @sizeOf(Len)) return null;
+    const len = std.mem.readInt(Len, data[at.*..][0..@sizeOf(Len)], .little);
+    at.* += @sizeOf(Len);
+    if (data.len - at.* < len) return null;
+    defer at.* += len;
+    return data[at.*..][0..len];
+}
+
+/// Kitty clipboard (OSC 5522) access. With `reads_to_host` a read is held
+/// and announced (`kitty_clipboard_read`) for the host to answer after it
+/// asks the user; otherwise reads are refused (EPERM) at once, and so are
+/// any still held. With `writes_allowed` completed writes are passed to the
+/// host (`kitty_clipboard_write`); otherwise refused. OSC 52 is unaffected.
+pub export fn restty_set_clipboard_policy(
+    handle: ?*Restty,
+    reads_to_host: u8,
+    writes_allowed: u8,
+) u32 {
+    const h = handle orelse return @intFromEnum(ErrorCode.invalid_handle);
+    const handler = &h.stream.handler;
+    handler.kitty_reads_to_host = reads_to_host != 0;
+    handler.kitty_writes_allowed = writes_allowed != 0;
+    if (!handler.kitty_reads_to_host) {
+        while (handler.kitty_reads.items.len > 0) {
+            _ = handler.answerKittyRead(handler.kitty_reads.items[0].id, .denied);
+        }
+    }
+    return @intFromEnum(ErrorCode.ok);
+}
+
+/// Answers the held Kitty clipboard read `id` (`kitty_clipboard_read`);
+/// Ghostty encodes the response into the reply queue. `status`: 0 success,
+/// 1 denied, 2 unsupported, 3 busy, 4 read error. On success `data` holds the
+/// available MIME types (u16 count, then u16 length and MIME each, used for a
+/// targets listing) and the representations served (u16 count, then u16 MIME
+/// length, MIME, u32 data length and data each).
+pub export fn restty_kitty_clipboard_answer(
+    handle: ?*Restty,
+    id: u32,
+    status: u8,
+    data_ptr: ?[*]const u8,
+    data_len: usize,
+) u32 {
+    const h = handle orelse return @intFromEnum(ErrorCode.invalid_handle);
+    const handler = &h.stream.handler;
+    const answer: ghostty.clipboard.Read.Result = switch (status) {
+        0 => .{ .success = .{} },
+        1 => .denied,
+        2 => .unsupported,
+        3 => .busy,
+        else => .io_error,
+    };
+    if (answer != .success) {
+        return if (handler.answerKittyRead(id, answer))
+            @intFromEnum(ErrorCode.ok)
+        else
+            @intFromEnum(ErrorCode.invalid_arg);
+    }
+
+    const data: []const u8 = if (data_ptr) |ptr| ptr[0..data_len] else &.{};
+    const clipboard = ghostty.kitty.clipboard;
+    var available: [clipboard.max_listing_mimes][]const u8 = undefined;
+    var contents: [clipboard.max_read_mimes]ghostty.clipboard.Content = undefined;
+    const success = decodeKittyAnswer(data, &available, &contents) orelse {
+        // A malformed answer still releases the read.
+        _ = handler.answerKittyRead(id, .io_error);
+        return @intFromEnum(ErrorCode.invalid_arg);
+    };
+    return if (handler.answerKittyRead(id, .{ .success = success }))
+        @intFromEnum(ErrorCode.ok)
+    else
+        @intFromEnum(ErrorCode.invalid_arg);
+}
+
+fn decodeKittyAnswer(
+    data: []const u8,
+    available: [][]const u8,
+    contents: []ghostty.clipboard.Content,
+) ?ghostty.clipboard.Read.Result.Success {
+    var at: usize = 0;
+    const available_count = std.mem.readInt(u16, (readFixed(data, &at, 2) orelse return null)[0..2], .little);
+    if (available_count > available.len) return null;
+    for (available[0..available_count]) |*mime| mime.* = readField(u16, data, &at) orelse return null;
+    const content_count = std.mem.readInt(u16, (readFixed(data, &at, 2) orelse return null)[0..2], .little);
+    if (content_count > contents.len) return null;
+    for (contents[0..content_count]) |*content| {
+        const mime = readField(u16, data, &at) orelse return null;
+        const bytes = readField(u32, data, &at) orelse return null;
+        content.* = .{ .mime = mime, .data = bytes };
+    }
+    return .{
+        .contents = contents[0..content_count],
+        .available = available[0..available_count],
+    };
+}
+
+fn readFixed(data: []const u8, at: *usize, len: usize) ?[]const u8 {
+    if (data.len - at.* < len) return null;
+    defer at.* += len;
+    return data[at.*..][0..len];
+}
+
+/// Whether the program registered to accept drops (Kitty OSC 72); the host
+/// feeds native drags to it then instead of pasting what is dropped.
+pub export fn restty_dnd_active(handle: ?*Restty) u8 {
+    const h = handle orelse return 0;
+    return @intFromBool(h.term.kitty_dnd != null);
+}
+
+/// The program's answer to the current drag: 0 none, 1 copy, 2 move, 255
+/// not answered yet (or no drag).
+pub export fn restty_dnd_accepted(handle: ?*Restty) u8 {
+    const h = handle orelse return 255;
+    const state = h.term.kitty_dnd orelse return 255;
+    const op = state.clientAccepted() orelse return 255;
+    return @intFromEnum(op);
+}
+
+/// A native drag moved over the terminal: `operations` bit 0 copy, bit 1
+/// move; `mimes_ptr` the MIME types it can drop, separated by "\n".
+pub export fn restty_dnd_move(
+    handle: ?*Restty,
+    cell_x: u32,
+    cell_y: u32,
+    pixel_x: i32,
+    pixel_y: i32,
+    operations: u8,
+    mimes_ptr: ?[*]const u8,
+    mimes_len: usize,
+) u32 {
+    const h = handle orelse return @intFromEnum(ErrorCode.invalid_handle);
+    const state = h.term.kitty_dnd orelse return @intFromEnum(ErrorCode.ok);
+    var mimes: [ghostty.kitty.dnd.State.max_items][]const u8 = undefined;
+    var count: usize = 0;
+    if (mimes_ptr) |ptr| {
+        var it = std.mem.tokenizeScalar(u8, ptr[0..mimes_len], '\n');
+        while (it.next()) |mime| {
+            if (count == mimes.len) break;
+            mimes[count] = mime;
+            count += 1;
+        }
+    }
+    var out: std.Io.Writer.Allocating = .init(h.alloc);
+    defer out.deinit();
+    state.dragMove(h.alloc, &out.writer, .{
+        .cell_x = cell_x,
+        .cell_y = cell_y,
+        .pixel_x = pixel_x,
+        .pixel_y = pixel_y,
+        .operations = @bitCast(@as(u2, @truncate(operations))),
+    }, mimes[0..count]) catch return @intFromEnum(ErrorCode.internal);
+    h.stream.handler.appendOutput(out.written()) catch return @intFromEnum(ErrorCode.out_of_memory);
+    return @intFromEnum(ErrorCode.ok);
+}
+
+/// A native drop on the terminal with the data it carried: u16 count, then
+/// u16 MIME length, MIME, u32 data length and data each. The program
+/// requests the data afterwards; Ghostty serves it from a copy.
+pub export fn restty_dnd_drop(
+    handle: ?*Restty,
+    cell_x: u32,
+    cell_y: u32,
+    pixel_x: i32,
+    pixel_y: i32,
+    operations: u8,
+    items_ptr: ?[*]const u8,
+    items_len: usize,
+) u32 {
+    const h = handle orelse return @intFromEnum(ErrorCode.invalid_handle);
+    const state = h.term.kitty_dnd orelse return @intFromEnum(ErrorCode.ok);
+    const data: []const u8 = if (items_ptr) |ptr| ptr[0..items_len] else &.{};
+    var at: usize = 0;
+    const count_bytes = readFixed(data, &at, 2) orelse return @intFromEnum(ErrorCode.invalid_arg);
+    const count = std.mem.readInt(u16, count_bytes[0..2], .little);
+    var items: [ghostty.kitty.dnd.State.max_items]ghostty.kitty.dnd.Item = undefined;
+    if (count > items.len) return @intFromEnum(ErrorCode.invalid_arg);
+    for (items[0..count]) |*item| {
+        const mime = readField(u16, data, &at) orelse return @intFromEnum(ErrorCode.invalid_arg);
+        const bytes = readField(u32, data, &at) orelse return @intFromEnum(ErrorCode.invalid_arg);
+        item.* = .{ .mime = mime, .data = bytes };
+    }
+    var out: std.Io.Writer.Allocating = .init(h.alloc);
+    defer out.deinit();
+    state.dragDrop(h.alloc, &out.writer, .{
+        .cell_x = cell_x,
+        .cell_y = cell_y,
+        .pixel_x = pixel_x,
+        .pixel_y = pixel_y,
+        .operations = @bitCast(@as(u2, @truncate(operations))),
+    }, items[0..count]) catch return @intFromEnum(ErrorCode.internal);
+    h.stream.handler.appendOutput(out.written()) catch return @intFromEnum(ErrorCode.out_of_memory);
+    return @intFromEnum(ErrorCode.ok);
+}
+
+/// The native drag left the terminal without dropping.
+pub export fn restty_dnd_leave(handle: ?*Restty) u32 {
+    const h = handle orelse return @intFromEnum(ErrorCode.invalid_handle);
+    const state = h.term.kitty_dnd orelse return @intFromEnum(ErrorCode.ok);
+    var out: std.Io.Writer.Allocating = .init(h.alloc);
+    defer out.deinit();
+    state.dragLeave(h.alloc, &out.writer) catch return @intFromEnum(ErrorCode.internal);
+    h.stream.handler.appendOutput(out.written()) catch return @intFromEnum(ErrorCode.out_of_memory);
+    return @intFromEnum(ErrorCode.ok);
+}
+
 pub export fn restty_set_visible(handle: ?*Restty, visible: u8) u32 {
     const h = handle orelse return @intFromEnum(ErrorCode.invalid_handle);
     const value = visible != 0;

@@ -265,6 +265,16 @@ times per second while visible. Ordinary URL detection runs on pointer demand;
 OSC 8 links take precedence. OSC 52 side effects retain one in-flight write and
 only the latest pending value across the window.
 
+Kitty clipboard reads (OSC 5522) follow the clipboard-read setting: denied ones
+the core refuses itself, others are held in the core until the user answers
+the same prompt OSC 52 uses (naming the program as it names itself) and then
+answered with the clipboard text under each requested text type; a listing of
+the types on offer is served unasked, as Kitty does. Writes are allowed like
+OSC 52 writes and share its latest-value queue (the primary selection where
+asked). Files dragged over a pane whose program registered for drops (Kitty
+OSC 72) go to the program as a copy, offered as `text/uri-list` and
+`text/plain`; elsewhere a drop pastes shell-quoted paths as before.
+
 The adapted Ghostty revision is pinned in `packages/ghostty-core/adapted/UPSTREAM.md`.
 Both SIMD and scalar artifacts are shipped; the loader fetches only the variant
 the webview supports. Scalar validation explicitly disables SIMD instructions

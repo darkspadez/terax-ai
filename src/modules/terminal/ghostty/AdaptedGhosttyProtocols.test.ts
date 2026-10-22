@@ -9,7 +9,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 // Protocols the Terax core answers or reports beyond plain VT parsing: Kitty
 // graphics, in-band size reports, colour scheme and visibility reports,
-// mouse encoding, progress / pointer / clipboard-read events and VT export.
+// mouse encoding, progress / pointer / clipboard-read events, Kitty
+// clipboard and drag and drop, and VT export.
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -365,6 +366,172 @@ describe.each([
           { type: "clipboard-read", selection: "c", terminator: "bel" },
           { type: "clipboard-read", selection: "p", terminator: "st" },
           { type: "clipboard", selection: "c", data: "aGk=" },
+        ]);
+      });
+    });
+  });
+
+  describe("Kitty clipboard (OSC 5522)", () => {
+    const b64 = (text: string) => base64(encoder.encode(text));
+    const kittyWrite = (mime: string | null, data = "") =>
+      "\x1b]5522;type=write\x1b\\" +
+      (mime === null
+        ? ""
+        : `\x1b]5522;type=wdata:mime=${b64(mime)};${b64(data)}\x1b\\`) +
+      "\x1b]5522;type=wdata\x1b\\";
+
+    it("refuses reads and writes until the host takes them", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        expect(write(`\x1b]5522;type=read;${b64("text/plain")}\x1b\\`)).toBe(
+          "\x1b]5522;type=read:status=EPERM\x1b\\",
+        );
+        expect(write(kittyWrite("text/plain", "hi"))).toBe(
+          "\x1b]5522;type=write:status=EPERM\x1b\\",
+        );
+        expect(terminal.drainEvents()).toEqual([]);
+      });
+    });
+
+    it("holds a read for the host and replays its answer through Ghostty", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        terminal.setClipboardPolicy({ readsToHost: true, writesAllowed: false });
+        // Nothing answers the program until the host does.
+        expect(
+          write(`\x1b]5522;type=read:name=${b64("vim")};${b64("text/plain .")}\x07`),
+        ).toBe("");
+        expect(terminal.drainEvents()).toEqual([
+          {
+            type: "kitty-clipboard-read",
+            id: 1,
+            primary: false,
+            list: true,
+            name: "vim",
+            mimes: ["text/plain"],
+          },
+        ]);
+        expect(
+          terminal.answerKittyClipboardRead(1, {
+            status: "success",
+            available: ["text/plain"],
+            contents: [{ mime: "text/plain", data: encoder.encode("hello") }],
+          }),
+        ).toBe(true);
+        expect(decoder.decode(terminal.drainOutputBytes())).toBe(
+          "\x1b]5522;type=read:status=OK\x07" +
+            `\x1b]5522;type=read:status=DATA:mime=Lg==;${b64("text/plain\n")}\x07` +
+            `\x1b]5522;type=read:status=DATA:mime=${b64("text/plain")};${b64("hello")}\x07` +
+            "\x1b]5522;type=read:status=DONE\x07",
+        );
+        // An answered read is gone.
+        expect(terminal.answerKittyClipboardRead(1, { status: "denied" })).toBe(false);
+      });
+    });
+
+    it("answers refusals, busy beyond four held reads, and held reads when reads stop", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        terminal.setClipboardPolicy({ readsToHost: true, writesAllowed: false });
+        const read = `\x1b]5522;type=read;${b64("text/plain")}\x1b\\`;
+        expect(write(read.repeat(4))).toBe("");
+        expect(write(read)).toBe("\x1b]5522;type=read:status=EBUSY\x1b\\");
+        expect(
+          terminal.drainEvents().map((event) =>
+            event.type === "kitty-clipboard-read" ? event.id : null,
+          ),
+        ).toEqual([1, 2, 3, 4]);
+        expect(terminal.answerKittyClipboardRead(2, { status: "denied" })).toBe(true);
+        expect(decoder.decode(terminal.drainOutputBytes())).toBe(
+          "\x1b]5522;type=read:status=EPERM\x1b\\",
+        );
+        terminal.setClipboardPolicy({ readsToHost: false, writesAllowed: false });
+        expect(decoder.decode(terminal.drainOutputBytes())).toBe(
+          "\x1b]5522;type=read:status=EPERM\x1b\\".repeat(3),
+        );
+        expect(terminal.answerKittyClipboardRead(4, { status: "denied" })).toBe(false);
+      });
+    });
+
+    it("hands allowed text writes to the host and refuses what it cannot write", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        terminal.setClipboardPolicy({ readsToHost: false, writesAllowed: true });
+        expect(write(kittyWrite("text/plain", "hi"))).toBe(
+          "\x1b]5522;type=write:status=DONE\x1b\\",
+        );
+        expect(write(kittyWrite(null))).toBe(
+          "\x1b]5522;type=write:status=DONE\x1b\\",
+        );
+        expect(write(kittyWrite("image/png", "png"))).toBe(
+          "\x1b]5522;type=write:status=ENOSYS\x1b\\",
+        );
+        expect(terminal.drainEvents()).toEqual([
+          { type: "kitty-clipboard-write", primary: false, clear: false, text: "hi" },
+          { type: "kitty-clipboard-write", primary: false, clear: true, text: "" },
+        ]);
+      });
+    });
+
+    it("leaves OSC 52 to the host's own handling", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        terminal.setClipboardPolicy({ readsToHost: true, writesAllowed: true });
+        expect(write("\x1b]52;c;?\x07")).toBe("");
+        expect(terminal.drainEvents()).toEqual([
+          { type: "clipboard-read", selection: "c", terminator: "bel" },
+        ]);
+      });
+    });
+  });
+
+  describe("Kitty drag and drop (OSC 72)", () => {
+    const position = {
+      cellX: 4,
+      cellY: 2,
+      pixelX: 40,
+      pixelY: 20,
+      copy: true,
+      move: false,
+    };
+
+    it("feeds native drags to a registered program", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        // Unregistered: drags are not the program's.
+        terminal.dndMove(position, ["text/plain"]);
+        expect(decoder.decode(terminal.drainOutputBytes())).toBe("");
+        expect(terminal.dndActive()).toBe(false);
+
+        write("\x1b]72;t=a;text/plain text/uri-list\x1b\\");
+        expect(terminal.dndActive()).toBe(true);
+        terminal.dndMove(position, ["text/uri-list", "text/plain"]);
+        expect(decoder.decode(terminal.drainOutputBytes())).toBe(
+          "\x1b]72;t=m:x=4:y=2:X=40:Y=20:o=1:m=0;text/uri-list text/plain \x1b\\",
+        );
+        expect(terminal.dndAccepted()).toBeNull();
+        write("\x1b]72;t=m:o=1;text/plain\x1b\\");
+        expect(terminal.dndAccepted()).toBe("copy");
+
+        terminal.dndDrop(position, [
+          { mime: "text/uri-list", data: encoder.encode("file:///tmp/a.txt\r\n") },
+          { mime: "text/plain", data: encoder.encode("hello") },
+        ]);
+        expect(decoder.decode(terminal.drainOutputBytes())).toBe(
+          "\x1b]72;t=M:x=4:y=2:X=40:Y=20:o=1:m=0;text/uri-list text/plain \x1b\\",
+        );
+        expect(write("\x1b]72;t=r:x=2\x1b\\")).toBe(
+          `\x1b]72;t=r:x=2:m=0;${base64(encoder.encode("hello"))}\x1b\\\x1b]72;t=r:x=2\x1b\\`,
+        );
+        write("\x1b]72;t=r:o=1\x1b\\");
+
+        terminal.dndMove(position, ["text/plain"]);
+        terminal.drainOutputBytes();
+        terminal.dndLeave();
+        expect(decoder.decode(terminal.drainOutputBytes())).toBe(
+          "\x1b]72;t=m:x=-1:y=-1\x1b\\",
+        );
+        write("\x1b]72;t=A\x1b\\");
+        expect(terminal.dndActive()).toBe(false);
+        expect(terminal.drainEvents()).toEqual([
+          { type: "drag-and-drop", change: "registration" },
+          { type: "drag-and-drop", change: "acceptance" },
+          { type: "drag-and-drop", change: "concluded", operation: "copy" },
+          { type: "drag-and-drop", change: "registration" },
         ]);
       });
     });

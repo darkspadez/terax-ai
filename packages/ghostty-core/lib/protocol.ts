@@ -7,6 +7,7 @@ export {
 } from "./types";
 export type {
   GhosttyTerminalConfig,
+  GhosttyDragOperation,
   GhosttyPointerShape,
   GhosttyProgressState,
   GhosttyTerminalEvent,
