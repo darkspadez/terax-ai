@@ -3,6 +3,7 @@ mod parse;
 
 use index::HistoryIndex;
 use parse::{demetafy, parse_bash, parse_fish, parse_zsh};
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -32,7 +33,7 @@ fn read_histories() -> Vec<(String, i64)> {
     let mut all = Vec::new();
     let home = dirs::home_dir();
 
-    if let Some(path) = zsh_histfile(home.as_ref()) {
+    if let Some(path) = zsh_histfile(std::env::var_os("HISTFILE"), home.as_ref()) {
         if let Ok(bytes) = std::fs::read(&path) {
             let content = String::from_utf8_lossy(&demetafy(&bytes)).into_owned();
             all.extend(parse_zsh(&content));
@@ -43,7 +44,7 @@ fn read_histories() -> Vec<(String, i64)> {
             all.extend(parse_bash(&content));
         }
     }
-    if let Some(path) = fish_histfile(home.as_ref()) {
+    if let Some(path) = fish_histfile(std::env::var_os("XDG_DATA_HOME"), home.as_ref()) {
         if let Ok(content) = std::fs::read_to_string(&path) {
             all.extend(parse_fish(&content));
         }
@@ -51,8 +52,8 @@ fn read_histories() -> Vec<(String, i64)> {
     all
 }
 
-fn zsh_histfile(home: Option<&PathBuf>) -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("HISTFILE") {
+fn zsh_histfile(histfile: Option<OsString>, home: Option<&PathBuf>) -> Option<PathBuf> {
+    if let Some(p) = histfile {
         let pb = PathBuf::from(p);
         if pb.exists() {
             return Some(pb);
@@ -61,8 +62,8 @@ fn zsh_histfile(home: Option<&PathBuf>) -> Option<PathBuf> {
     home.map(|h| h.join(".zsh_history"))
 }
 
-fn fish_histfile(home: Option<&PathBuf>) -> Option<PathBuf> {
-    if let Ok(data) = std::env::var("XDG_DATA_HOME") {
+fn fish_histfile(xdg_data_home: Option<OsString>, home: Option<&PathBuf>) -> Option<PathBuf> {
+    if let Some(data) = xdg_data_home {
         let pb = PathBuf::from(data).join("fish/fish_history");
         if pb.exists() {
             return Some(pb);
@@ -107,15 +108,18 @@ fn is_executable(entry: &std::fs::DirEntry) -> bool {
 
 #[cfg(windows)]
 fn is_executable(entry: &std::fs::DirEntry) -> bool {
-    match entry.file_name().to_str() {
-        Some(name) => {
-            let lower = name.to_ascii_lowercase();
-            [".exe", ".cmd", ".bat", ".com", ".ps1"]
-                .iter()
-                .any(|e| lower.ends_with(e))
-        }
-        None => false,
-    }
+    entry
+        .file_name()
+        .to_str()
+        .is_some_and(has_launcher_extension)
+}
+
+#[cfg(any(windows, test))]
+fn has_launcher_extension(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    [".exe", ".cmd", ".bat", ".com", ".ps1"]
+        .iter()
+        .any(|e| lower.ends_with(e))
 }
 
 impl HistoryState {
@@ -224,5 +228,71 @@ mod tests {
         );
         state.0.path_cmds.set(Vec::new()).unwrap();
         assert!(state.is_warm(true));
+    }
+
+    #[test]
+    fn zsh_histfile_prefers_an_existing_histfile() {
+        let tmp = tempfile::tempdir().unwrap();
+        let custom = tmp.path().join("custom_zhistory");
+        std::fs::write(&custom, b"").unwrap();
+        let home = tmp.path().join("home");
+
+        let got = zsh_histfile(Some(custom.clone().into()), Some(&home));
+
+        assert_eq!(got, Some(custom));
+    }
+
+    #[test]
+    fn zsh_histfile_falls_back_to_home_when_histfile_is_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+
+        let missing = Some(tmp.path().join("missing").into());
+        assert_eq!(
+            zsh_histfile(missing, Some(&home)),
+            Some(home.join(".zsh_history"))
+        );
+        assert_eq!(
+            zsh_histfile(None, Some(&home)),
+            Some(home.join(".zsh_history"))
+        );
+        assert_eq!(zsh_histfile(None, None), None);
+    }
+
+    #[test]
+    fn fish_histfile_prefers_xdg_then_falls_back_to_default_location() {
+        let tmp = tempfile::tempdir().unwrap();
+        let xdg = tmp.path().join("xdg-data");
+        std::fs::create_dir_all(xdg.join("fish")).unwrap();
+        let fish_file = xdg.join("fish").join("fish_history");
+        std::fs::write(&fish_file, b"").unwrap();
+        let home = tmp.path().join("home");
+        let default = Some(home.join(".local/share/fish/fish_history"));
+
+        assert_eq!(
+            fish_histfile(Some(xdg.into()), Some(&home)),
+            Some(fish_file)
+        );
+        assert_eq!(
+            fish_histfile(Some(tmp.path().join("empty-xdg").into()), Some(&home)),
+            default
+        );
+        assert_eq!(fish_histfile(None, Some(&home)), default);
+    }
+
+    #[test]
+    fn windows_executables_are_matched_by_launcher_extension() {
+        for name in [
+            "cargo.exe",
+            "RUN.CMD",
+            "tool.bat",
+            "legacy.com",
+            "script.ps1",
+        ] {
+            assert!(has_launcher_extension(name), "{name}");
+        }
+        for name in ["readme.txt", "noext", "exe", "archive.exe.zip"] {
+            assert!(!has_launcher_extension(name), "{name}");
+        }
     }
 }
