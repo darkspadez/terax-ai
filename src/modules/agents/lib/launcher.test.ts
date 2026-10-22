@@ -53,7 +53,9 @@ describe("agent launch commands", () => {
       claude: "cc",
       codex: "codex",
       gemini: "gemini",
+      antigravity: "agy",
       pi: "pi --provider local",
+      gjc: "gjc",
       opencode: "opencode",
       grok: "grok",
     });

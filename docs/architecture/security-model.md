@@ -84,7 +84,7 @@ The terminal parses OSC sequences from the PTY byte stream:
 - **OSC 133 A/B/C/D** marks prompt/command boundaries.
 - **OSC 777** is used by the agent detector to signal coding-agent state transitions.
 
-The agent detector (`src-tauri/src/modules/pty/agent_detect.rs`) is armed by `OSC 133;C;<cmd>` or by a self-armed marker and emits `terax:agent-signal` events. It is driven **only by OSC sequences**, never by raw output, so a repainting TUI never flaps.
+The agent detector (`src-tauri/src/modules/pty/agent_detect.rs`) is armed by `OSC 133;C;<cmd>` or by a self-armed marker and emits `terax:agent-signal` events. It is driven **only by OSC sequences**, never by raw output, so a repainting TUI never flaps. The agent name a marker carries is untrusted: any name is shown, but only as plain text with control and bidi characters removed and at most 32 characters, with the generic icon unless it is exactly a known agent id. It never selects a command, path, hook file or icon file.
 
 ## Invariants
 

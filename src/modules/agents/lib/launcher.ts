@@ -20,10 +20,23 @@ export const AGENT_LAUNCHERS = [
     supportsHooks: true,
   },
   {
+    id: "antigravity",
+    label: "Antigravity",
+    defaultCommand: "agy",
+    supportsHooks: true,
+  },
+  {
     id: "pi",
     label: "Pi",
     defaultCommand: "pi",
     supportsHooks: true,
+  },
+  {
+    id: "gjc",
+    label: "GJC",
+    defaultCommand: "gjc",
+    // GJC writes the status marker itself; there is nothing to install.
+    supportsHooks: false,
   },
   {
     id: "opencode",

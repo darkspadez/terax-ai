@@ -57,6 +57,20 @@ const AGENTS: &[AgentSpec] = &[
         matcher: true,
         delivery: Delivery::Osc,
     },
+    // Antigravity CLI (`agy`) is built on Gemini CLI and keeps its hook
+    // schema in a settings file of its own.
+    AgentSpec {
+        agent: "antigravity",
+        dir: ".gemini/antigravity-cli",
+        file: "settings.json",
+        events: &[
+            ("BeforeAgent", "working"),
+            ("Notification", "attention"),
+            ("AfterAgent", "finished"),
+        ],
+        matcher: true,
+        delivery: Delivery::Osc,
+    },
 ];
 
 const PI_EXTENSION_DIR: &str = ".pi/agent/extensions";
@@ -390,7 +404,7 @@ mod tests {
 
     #[test]
     fn is_idempotent_per_agent() {
-        for agent in ["claude", "codex", "gemini"] {
+        for agent in ["claude", "codex", "gemini", "antigravity"] {
             let s = spec(agent);
             let once = merge_hooks(json!({}), s);
             let twice = merge_hooks(once.clone(), s);
@@ -429,6 +443,31 @@ mod tests {
         assert_eq!(out["hooks"]["BeforeAgent"][0]["matcher"], "*");
         assert!(command(&out, "AfterAgent", 0).contains("notify;Terax;gemini;finished"));
         assert!(command(&out, "Notification", 0).contains("notify;Terax;gemini;attention"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn antigravity_uses_gemini_hooks_with_its_own_marker() {
+        let out = merge_hooks(json!({}), spec("antigravity"));
+        assert_eq!(out["hooks"]["BeforeAgent"][0]["matcher"], "*");
+        for (event, marker) in [
+            ("BeforeAgent", "working"),
+            ("Notification", "attention"),
+            ("AfterAgent", "finished"),
+        ] {
+            assert_eq!(hook_count(&out, event), 1, "{event}");
+            let cmd = command(&out, event, 0);
+            assert!(cmd.contains(&format!("notify;Terax;antigravity;{marker}")));
+            assert!(cmd.contains("> /dev/tty"));
+            assert!(cmd.contains("printf '{}'"));
+        }
+    }
+
+    #[test]
+    fn antigravity_settings_live_in_its_own_folder() {
+        let path = settings_path(spec("antigravity")).unwrap();
+        assert!(path.ends_with(".gemini/antigravity-cli/settings.json"));
+        assert_ne!(path, settings_path(spec("gemini")).unwrap());
     }
 
     #[test]

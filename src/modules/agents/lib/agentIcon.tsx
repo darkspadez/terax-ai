@@ -4,6 +4,7 @@ import {
   ClaudeIcon,
   CodeIcon,
   GoogleGeminiIcon,
+  GoogleIcon,
   Grok02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
@@ -28,15 +29,23 @@ function PiIcon({ size, className }: { size: number; className?: string }) {
   );
 }
 
-function iconFor(agent: string): IconSvgElement {
-  const a = agent.toLowerCase();
-  if (a.includes("claude")) return ClaudeIcon;
-  if (a.includes("gemini")) return GoogleGeminiIcon;
-  if (a.includes("opencode")) return CodeIcon;
-  if (a.includes("grok")) return Grok02Icon;
-  if (a.includes("codex") || a.includes("gpt") || a.includes("openai"))
-    return ChatGptIcon;
-  return AiBrowserIcon;
+// Brand marks for the agents Terax knows, by exact id. A name reported by a
+// terminal is untrusted text: anything else, including names that merely
+// contain a known one, gets the generic mark.
+const BRAND_ICONS: ReadonlyMap<string, IconSvgElement> = new Map([
+  ["claude", ClaudeIcon],
+  ["codex", ChatGptIcon],
+  ["gemini", GoogleGeminiIcon],
+  ["antigravity", GoogleIcon],
+  ["opencode", CodeIcon],
+  ["grok", Grok02Icon],
+]);
+
+/** The mark an agent is drawn with: Pi's and Terax's own, or an icon. */
+export function agentMark(agent: string): "pi" | "terax" | IconSvgElement {
+  const id = agent.toLowerCase();
+  if (id === "pi" || id === "terax") return id;
+  return BRAND_ICONS.get(id) ?? AiBrowserIcon;
 }
 
 export function AgentIcon({
@@ -48,10 +57,11 @@ export function AgentIcon({
   size?: number;
   className?: string;
 }) {
-  if (agent.toLowerCase() === "pi") {
+  const mark = agentMark(agent);
+  if (mark === "pi") {
     return <PiIcon size={size} className={className} />;
   }
-  if (agent.toLowerCase().includes("terax")) {
+  if (mark === "terax") {
     return (
       <img
         src="/logo.png"
@@ -65,7 +75,7 @@ export function AgentIcon({
   }
   return (
     <HugeiconsIcon
-      icon={iconFor(agent)}
+      icon={mark}
       size={size}
       strokeWidth={1.75}
       className={className}

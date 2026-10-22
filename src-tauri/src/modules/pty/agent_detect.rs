@@ -14,11 +14,49 @@ const OSC_MAX: usize = 2048;
 /// this window are the same moment of attention and are not re-emitted.
 const ATTENTION_REPEAT: Duration = Duration::from_secs(3);
 
-const DEFAULT_AGENTS: &[&str] = &["claude", "codex", "gemini", "pi", "opencode", "grok"];
+/// Commands that arm the detector from `OSC 133;C`, and the agent each runs.
+const DEFAULT_AGENTS: &[(&str, &str)] = &[
+    ("claude", "claude"),
+    ("codex", "codex"),
+    ("gemini", "gemini"),
+    ("pi", "pi"),
+    ("opencode", "opencode"),
+    ("grok", "grok"),
+    ("agy", "antigravity"),
+    ("gjc", "gjc"),
+];
 
 // OSC 777 marker our agent hooks emit. Legacy 3-field `notify;Terax;<event>`
-// (Claude) or 4-field `notify;Terax;<agent>;<event>` (Codex/Gemini/Pi).
+// (Claude) or 4-field `notify;Terax;<agent>;<event>` (Codex, Gemini, Pi,
+// Antigravity, and any other agent that emits it).
 const TERAX_MARKER: &[u8] = b"notify;Terax;";
+
+/// Longest agent name a marker may carry, in characters; the rest is cut.
+const AGENT_NAME_MAX: usize = 32;
+
+/// The agent name of a 4-field marker as display text, or `None` when nothing
+/// visible is left. PTY output is untrusted, so any name is accepted but only
+/// as a label: control and bidi characters are dropped and the length capped.
+fn sanitize_agent_name(raw: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(raw);
+    let name: String = text
+        .chars()
+        .filter(|&c| !is_hidden_name_char(c))
+        .take(AGENT_NAME_MAX)
+        .collect();
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// C0/C1 controls, line and paragraph separators, and bidi controls, which
+/// could reorder or hide the text around the name.
+fn is_hidden_name_char(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+        )
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum State {
@@ -65,7 +103,7 @@ impl Transition {
 }
 
 pub struct AgentDetector {
-    agents: Vec<String>,
+    agents: &'static [(&'static str, &'static str)],
     state: State,
     osc: Vec<u8>,
     armed: bool,
@@ -77,14 +115,10 @@ pub struct AgentDetector {
 
 impl AgentDetector {
     pub fn new() -> Self {
-        Self::with_agents(DEFAULT_AGENTS.iter().map(|s| s.to_string()).collect())
+        Self::with_clock(DEFAULT_AGENTS, Instant::now)
     }
 
-    pub fn with_agents(agents: Vec<String>) -> Self {
-        Self::with_clock(agents, Instant::now)
-    }
-
-    fn with_clock(agents: Vec<String>, clock: fn() -> Instant) -> Self {
+    fn with_clock(agents: &'static [(&'static str, &'static str)], clock: fn() -> Instant) -> Self {
         Self {
             agents,
             state: State::Ground,
@@ -206,19 +240,18 @@ impl AgentDetector {
 
     fn handle_osc777<F: FnMut(Transition)>(&mut self, pt: &[u8], emit: &mut F) {
         if let Some(tail) = pt.strip_prefix(TERAX_MARKER) {
-            // PTY output is untrusted: only self-arm for known agents.
+            // Any agent that emits the marker is reported, known or not; its
+            // name is sanitized here and stays a label everywhere after.
             let (agent, event) = match tail.iter().position(|&c| c == b';') {
                 Some(i) => {
-                    let Ok(name) = std::str::from_utf8(&tail[..i]) else {
+                    let Some(name) = sanitize_agent_name(&tail[..i]) else {
                         return;
                     };
-                    if !self.agents.iter().any(|a| a == name) {
-                        return;
-                    }
                     (name, &tail[i + 1..])
                 }
-                None => ("claude", tail),
+                None => ("claude".to_string(), tail),
             };
+            let agent = agent.as_str();
             // Self-arms when no shell preexec fired (bash, Windows, tmux).
             match event {
                 b"working" => {
@@ -308,11 +341,11 @@ impl AgentDetector {
                 continue;
             }
             let base = token.rsplit(['/', '\\']).next().unwrap_or(token);
-            if let Some(agent) = self.agents.iter().find(|a| {
-                base.strip_prefix(a.as_str())
+            if let Some((_, agent)) = self.agents.iter().find(|(command, _)| {
+                base.strip_prefix(command)
                     .is_some_and(|rest| rest.is_empty() || rest.starts_with('-'))
             }) {
-                return Some(agent.clone());
+                return Some((*agent).to_string());
             }
         }
         None
@@ -441,16 +474,120 @@ mod tests {
     }
 
     #[test]
-    fn four_field_marker_ignores_unknown_agent() {
+    fn four_field_marker_reports_agents_terax_does_not_know() {
+        for name in [
+            "my-agent-9",
+            "Some Agent",
+            "\u{30A8}\u{30FC}\u{30B8}\u{30A7}\u{30F3}\u{30C8}",
+        ] {
+            let mut d = AgentDetector::new();
+            assert_eq!(
+                run(&mut d, &osc(&format!("777;notify;Terax;{name};attention"))),
+                vec![started(name), Transition::Attention],
+                "{name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn marker_agent_names_are_sanitized_display_text() {
+        let cases = [
+            // Controls (C0, DEL, C1) are dropped.
+            ("ev\u{1}il\r\n\t\u{7f}\u{85}\u{9b}", "evil"),
+            // Bidi controls that could reorder the label go too.
+            ("a\u{202E}b\u{2066}c\u{2069}\u{200F}\u{061C}d", "abcd"),
+            ("x\u{2028}y\u{2029}", "xy"),
+            ("  padded  ", "padded"),
+            // Invalid UTF-8 is shown, not rejected.
+            ("\u{FFFD}", "\u{FFFD}"),
+        ];
+        for (raw, shown) in cases {
+            assert_eq!(
+                sanitize_agent_name(raw.as_bytes()).as_deref(),
+                Some(shown),
+                "{raw:?}"
+            );
+        }
+        assert_eq!(
+            sanitize_agent_name(b"\xffgent").as_deref(),
+            Some("\u{FFFD}gent")
+        );
+        let long = "x".repeat(AGENT_NAME_MAX + 10);
+        assert_eq!(
+            sanitize_agent_name(long.as_bytes())
+                .unwrap()
+                .chars()
+                .count(),
+            AGENT_NAME_MAX
+        );
+        let wide = "\u{1F600}".repeat(AGENT_NAME_MAX + 1);
+        assert_eq!(
+            sanitize_agent_name(wide.as_bytes())
+                .unwrap()
+                .chars()
+                .count(),
+            AGENT_NAME_MAX
+        );
+        for hidden in ["", "   ", "\u{1}\u{202E}\u{2066}"] {
+            assert_eq!(sanitize_agent_name(hidden.as_bytes()), None, "{hidden:?}");
+        }
+    }
+
+    #[test]
+    fn a_marker_with_nothing_visible_to_name_does_not_arm() {
         let mut d = AgentDetector::new();
-        assert!(run(&mut d, &osc("777;notify;Terax;evil;attention")).is_empty());
-        // A known agent in the same chunk still works.
+        assert!(run(&mut d, &osc("777;notify;Terax;\u{202E} ;attention")).is_empty());
+        assert!(run(&mut d, &osc("777;notify;Terax;;working")).is_empty());
         assert_eq!(
             run(&mut d, &osc("777;notify;Terax;codex;attention")),
             vec![started("codex"), Transition::Attention]
         );
     }
 
+    #[test]
+    fn the_first_name_sticks_until_the_agent_exits() {
+        let mut d = AgentDetector::new();
+        assert_eq!(
+            run(&mut d, &osc("777;notify;Terax;first;working")),
+            vec![started("first")]
+        );
+        assert_eq!(
+            run(&mut d, &osc("777;notify;Terax;second;attention")),
+            vec![Transition::Attention]
+        );
+    }
+
+    #[test]
+    fn antigravity_and_gjc_arm_on_their_commands_and_markers() {
+        let mut d = AgentDetector::new();
+        assert_eq!(run(&mut d, &osc("133;C;agy")), vec![started("antigravity")]);
+        let mut d = AgentDetector::new();
+        assert_eq!(
+            run(&mut d, &osc("133;C;gjc --continue")),
+            vec![started("gjc")]
+        );
+        let mut d = AgentDetector::new();
+        assert_eq!(
+            run(&mut d, &osc("777;notify;Terax;antigravity;finished")),
+            vec![started("antigravity"), Transition::Finished]
+        );
+        let mut d = AgentDetector::new();
+        assert_eq!(
+            run(&mut d, &osc("777;notify;Terax;gjc;working")),
+            vec![started("gjc")]
+        );
+        assert_eq!(
+            run(&mut d, &osc("777;notify;Terax;gjc;finished")),
+            vec![Transition::Finished]
+        );
+    }
+
+    #[test]
+    fn unknown_names_never_arm_from_a_command_line() {
+        let mut d = AgentDetector::new();
+        assert!(run(&mut d, &osc("133;C;my-agent-9")).is_empty());
+        assert!(run(&mut d, &osc("133;C;antigravity")).is_empty());
+    }
     #[test]
     fn four_field_marker_drives_status_after_preexec() {
         let mut d = AgentDetector::new();
@@ -477,10 +614,7 @@ mod tests {
     }
 
     fn timed() -> AgentDetector {
-        AgentDetector::with_clock(
-            DEFAULT_AGENTS.iter().map(|s| s.to_string()).collect(),
-            fake_now,
-        )
+        AgentDetector::with_clock(DEFAULT_AGENTS, fake_now)
     }
 
     #[test]

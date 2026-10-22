@@ -19,6 +19,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useMemo, useState } from "react";
 import { AgentIcon } from "../lib/agentIcon";
 import { displayAgent } from "../lib/format";
+import { AGENT_LAUNCHERS } from "../lib/launcher";
 import type { AgentNotification, AgentStatus } from "../lib/types";
 import { useAgentStore } from "../store/agentStore";
 
@@ -80,7 +81,9 @@ const NOTIF_LABEL: Record<AgentNotification["kind"], string> = {
   error: "failed",
 };
 
-const HOOK_AGENTS = ["claude", "codex", "gemini", "pi"] as const;
+const HOOK_AGENTS = AGENT_LAUNCHERS.filter((a) => a.supportsHooks).map(
+  (a) => a.id,
+);
 
 function HookAgentRow({
   id,
