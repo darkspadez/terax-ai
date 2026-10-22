@@ -8,6 +8,7 @@ use tempfile::NamedTempFile;
 
 use super::blocking;
 use super::index::FileIndexState;
+use super::launch;
 use super::mutate::note_changed;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv, WorkspaceRegistry};
 
@@ -242,24 +243,64 @@ fn default_app_target(registry: &WorkspaceRegistry, path: &Path) -> Result<PathB
     Ok(canonical)
 }
 
+/// What "Open in Default App" does with a request.
+#[derive(Debug, PartialEq, Eq)]
+enum OpenStep {
+    /// Hand this path to the OS.
+    Open(PathBuf),
+    /// The file would run as a program, which the user has not confirmed yet.
+    Confirm,
+}
+
+/// Decides on the real path, so a link or an innocent-looking name cannot skip the question.
+fn open_step(
+    registry: &WorkspaceRegistry,
+    path: &Path,
+    confirmed: bool,
+    runs_as_program: impl Fn(&Path) -> bool,
+) -> Result<OpenStep, String> {
+    let target = default_app_target(registry, path)?;
+    if !confirmed && runs_as_program(&target) {
+        return Ok(OpenStep::Confirm);
+    }
+    Ok(OpenStep::Open(target))
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OpenOutcome {
+    Opened,
+    /// Nothing was opened: the file would run as a program. Calling again with `confirmed`
+    /// opens it.
+    Confirm,
+}
+
 /// Opens a file with the application the OS associates with it, as a double-click in the file
-/// manager would.
+/// manager would. A file that would run as a program (`launch::runs_as_program`) opens only
+/// when the call says the user confirmed that.
 #[tauri::command]
 pub async fn fs_open_default(
     app: tauri::AppHandle,
     path: String,
     workspace: Option<WorkspaceEnv>,
-) -> Result<(), String> {
+    confirmed: Option<bool>,
+) -> Result<OpenOutcome, String> {
     blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
-        let target = default_app_target(
+        let step = open_step(
             &app.state::<WorkspaceRegistry>(),
             &resolve_path(&path, &workspace),
+            confirmed.unwrap_or(false),
+            launch::file_runs_as_program,
         )?;
+        let OpenStep::Open(target) = step else {
+            return Ok(OpenOutcome::Confirm);
+        };
         tauri_plugin_opener::open_path(&target, None::<&str>).map_err(|e| {
             log::warn!("fs_open_default({}) failed: {e}", target.display());
             e.to_string()
-        })
+        })?;
+        Ok(OpenOutcome::Opened)
     })
     .await
 }
@@ -330,6 +371,64 @@ mod tests {
         assert_eq!(default_app_target(&registry, &file).unwrap(), file);
         assert!(default_app_target(&registry, &root).is_err(), "a folder");
         assert!(default_app_target(&registry, &root.join("missing")).is_err());
+    }
+
+    #[test]
+    fn a_program_opens_only_once_confirmed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let doc = root.join("report.pdf");
+        std::fs::write(&doc, b"%PDF").unwrap();
+        let script = root.join("setup.bat");
+        std::fs::write(&script, b"@echo off").unwrap();
+        let registry = WorkspaceRegistry::default();
+        registry.authorize(&root).unwrap();
+        let step = |path: &Path, confirmed| {
+            open_step(&registry, path, confirmed, launch::file_runs_as_program)
+        };
+
+        assert_eq!(step(&doc, false), Ok(OpenStep::Open(doc.clone())));
+        assert_eq!(step(&script, false), Ok(OpenStep::Confirm));
+        assert_eq!(step(&script, true), Ok(OpenStep::Open(script.clone())));
+    }
+
+    #[test]
+    fn confirming_never_opens_outside_the_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = std::fs::canonicalize(dir.path()).unwrap().join("setup.bat");
+        std::fs::write(&script, b"@echo off").unwrap();
+        let registry = WorkspaceRegistry::default();
+        assert!(open_step(&registry, &script, true, |_| true).is_err());
+        assert!(open_step(&registry, &script, false, |_| true).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_to_a_program_is_judged_by_its_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let script = root.join("setup.sh");
+        std::fs::write(&script, b"echo hi").unwrap();
+        let link = root.join("readme.txt");
+        std::os::unix::fs::symlink(&script, &link).unwrap();
+        let registry = WorkspaceRegistry::default();
+        registry.authorize(&root).unwrap();
+        assert_eq!(
+            open_step(&registry, &link, false, launch::file_runs_as_program),
+            Ok(OpenStep::Confirm)
+        );
+    }
+
+    #[test]
+    fn the_outcome_reaches_the_frontend_as_a_word() {
+        assert_eq!(
+            serde_json::to_string(&OpenOutcome::Opened).unwrap(),
+            r#""opened""#
+        );
+        assert_eq!(
+            serde_json::to_string(&OpenOutcome::Confirm).unwrap(),
+            r#""confirm""#
+        );
     }
 
     #[cfg(unix)]

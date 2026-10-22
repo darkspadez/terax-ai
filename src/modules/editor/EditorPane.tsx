@@ -8,6 +8,7 @@ import {
   type EditorDefaultIndent,
   onKeysChanged,
 } from "@/modules/settings/store";
+import { openInDefaultApp } from "@/modules/explorer/lib/openDefault";
 import { useWorkspaceAssetUrl } from "@/modules/workspace";
 import { acceptCompletion, startCompletion } from "@codemirror/autocomplete";
 import { redo, undo } from "@codemirror/commands";
@@ -716,15 +717,24 @@ export const EditorPane = memo(
             {formatBytes(doc.size)} ·{" "}
             {canForce ? "syntax features disabled" : "preview not supported"}
           </div>
-          {canForce && (
+          <div className="mt-2 flex flex-wrap justify-center gap-2">
+            {canForce && (
+              <button
+                type="button"
+                onClick={openAnyway}
+                className="rounded-md border border-border bg-muted/60 px-3 py-1 text-xs text-foreground hover:bg-accent"
+              >
+                Open anyway
+              </button>
+            )}
             <button
               type="button"
-              onClick={openAnyway}
-              className="mt-2 rounded-md border border-border bg-muted/60 px-3 py-1 text-xs text-foreground hover:bg-accent"
+              onClick={() => void openInDefaultApp(path)}
+              className="rounded-md border border-border bg-muted/60 px-3 py-1 text-xs text-foreground hover:bg-accent"
             >
-              Open anyway
+              Open in Default App
             </button>
-          )}
+          </div>
         </div>
       );
     }

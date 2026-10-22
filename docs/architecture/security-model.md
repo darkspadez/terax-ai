@@ -41,6 +41,10 @@ The comparison surface normalizes paths: backslashes to forward slashes, strips 
 
 This is the allow side of the file-system boundary. Any new feature that spawns a shell or mutates files outside the current workspace must interact with this registry.
 
+## Opening files in their default app
+
+`fs_open_default` (`src-tauri/src/modules/fs/file.rs`) hands the OS only an existing file whose canonical path lies in an authorized workspace, so a link pointing out of the workspace is refused. The OS's default handler can run code, so the command classifies the canonical path first (`fs/launch.rs`, a pure function per OS: Windows extensions such as `.exe`, `.bat`, `.ps1`, `.js`, `.lnk`, `.reg`, an alternate data stream; on macOS and Linux the execute bit, Mach-O or ELF headers, bundles, Terminal scripts, launchers, installers and packages; Windows programs everywhere, since Wine may run them). The lists err toward asking. A program opens only when the call says the user confirmed it; otherwise the command answers `confirm` without opening anything, and the explorer's `RunProgramDialog` names the file and asks before calling again. A link named like a document is judged by its target.
+
 ## AI tool approval flow
 
 In `src/modules/ai/tools/tools.ts`:
