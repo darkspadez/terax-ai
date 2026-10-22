@@ -339,7 +339,8 @@ pub fn pty_has_foreground_process(state: tauri::State<PtyState>, id: u32) -> Res
 
 // Foreground-only check for the renderer hibernation path: true while a job
 // owns the tty (tcgetpgrp != shell pgid). Stricter and cheaper than
-// pty_has_foreground_process, which counts background children too.
+// pty_has_foreground_process, which counts background children too. Windows
+// has no foreground group: there, a child built for the console subsystem.
 #[tauri::command]
 pub fn pty_has_foreground_job(state: tauri::State<PtyState>, id: u32) -> Result<bool, String> {
     let sessions = unpoisoned(state.sessions.read());
@@ -360,7 +361,7 @@ pub fn pty_has_foreground_job(state: tauri::State<PtyState>, id: u32) -> Result<
     }
     #[cfg(windows)]
     {
-        Ok(foreground::shell_has_children(shell_pid))
+        Ok(foreground::shell_has_console_children(shell_pid))
     }
 }
 

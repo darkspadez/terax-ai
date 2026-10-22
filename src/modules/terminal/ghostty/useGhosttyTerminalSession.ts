@@ -538,8 +538,9 @@ export async function ghosttyLeafHasForegroundProcess(
 }
 
 /**
- * A job owns the pane's terminal (Unix), or its shell has a child (Windows);
- * null when that cannot be told.
+ * A job owns the pane's terminal (Unix), or its shell has a console program
+ * as a child (Windows; a GUI app it started does not count); null when that
+ * cannot be told.
  */
 export async function ghosttyLeafHasForegroundJob(
   leafId: number,
