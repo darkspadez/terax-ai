@@ -166,14 +166,22 @@ export const chats = new Map<string, Chat<UIMessage>>();
 export function touchChat(id: string, c: Chat<UIMessage>) {
   if (chats.has(id)) chats.delete(id);
   chats.set(id, c);
-  while (chats.size > CHATS_LRU_CAP) {
-    const oldest = chats.keys().next().value;
-    if (!oldest || oldest === id) break;
-    if (useChatStore.getState().activeSessionId === oldest) break;
-    flushPersistEntry(oldest);
-    void chats.get(oldest)?.stop();
-    chats.delete(oldest);
+  if (chats.size <= CHATS_LRU_CAP) return;
+  // The touched and the active chat are kept even when they are the oldest,
+  // and so is a background chat still answering (stopping it would cut its
+  // reply off); eviction moves on to the next oldest instead of stopping.
+  const activeId = useChatStore.getState().activeSessionId;
+  for (const [key, chat] of chats) {
+    if (chats.size <= CHATS_LRU_CAP) break;
+    if (key === id || key === activeId || isRunning(chat)) continue;
+    flushPersistEntry(key);
+    void chat.stop();
+    chats.delete(key);
   }
+}
+
+function isRunning(chat: Chat<UIMessage>): boolean {
+  return chat.status === "submitted" || chat.status === "streaming";
 }
 // Initial messages for a session, populated at hydration time and consumed
 // when the matching Chat is constructed.
