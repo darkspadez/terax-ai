@@ -205,7 +205,10 @@ and native cursor hiding stops cursor timers. Selection is a uniform and needs n
 row damage; streaming search invalidations coalesce instead of rebuilding per
 output chunk.
 WebGL surface and renderer code load only when selected, needed for fallback,
-or explicitly requested by diagnostics. Delayed imports cannot install into a
+or explicitly requested by diagnostics. On Linux a WebGL context keeps its
+drawing buffer (`webGlContextAttributes`): WebKitGTK without hardware
+acceleration (NVIDIA on Ubuntu) paints the canvas from the buffer it just
+swapped out, so every frame, the last keystroke included, showed one late. Delayed imports cannot install into a
 closed, restarted, or replaced session.
 xterm, its addons, CSS, snapshots, session pool, and dormant byte ring are removed.
 Unsupported graphics produce a visible error with retry instead of changing models.
