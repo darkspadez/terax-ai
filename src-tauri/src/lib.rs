@@ -346,6 +346,7 @@ pub fn run() {
             git::commands::git_commit_file_diff,
             git::commands::git_remote_url,
             git::commands::git_list_branches,
+            git::commands::git_discover_repos,
             git::commands::git_checkout_branch,
             shell::shell_run_command,
             shell::shell_session_open,

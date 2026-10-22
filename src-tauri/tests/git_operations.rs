@@ -983,3 +983,51 @@ fn switching_to_a_missing_branch_never_restores_a_file_of_that_name() {
         vec!["other"]
     );
 }
+
+#[test]
+fn discover_repos_finds_projects_in_a_folder_that_is_not_one() {
+    if skip_if_no_git() {
+        return;
+    }
+    let tmp = TempDir::new().unwrap();
+    let root = std::fs::canonicalize(tmp.path()).unwrap();
+    let init = |rel: &str| {
+        let dir = root.join(rel);
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+    };
+    init("api");
+    init("web");
+    init("libs/shared");
+    // Not searched: inside a repository, hidden, dependencies, or too deep.
+    init("api/vendored");
+    init(".cache/tool");
+    init("node_modules/pkg");
+    init("deep/er/still");
+    std::fs::create_dir_all(root.join("docs")).unwrap();
+    let registry = WorkspaceRegistry::default();
+    let base = to_canon(&root);
+
+    assert!(
+        operations::discover_repos(&registry, &base, &WorkspaceEnv::Local).is_err(),
+        "an unauthorized folder is not searched"
+    );
+    registry.authorize(&root).unwrap();
+    let found = operations::discover_repos(&registry, &base, &WorkspaceEnv::Local).unwrap();
+    assert_eq!(
+        found,
+        vec![
+            format!("{base}/api"),
+            format!("{base}/web"),
+            format!("{base}/libs/shared"),
+        ]
+    );
+    let with_slash =
+        operations::discover_repos(&registry, &format!("{base}/"), &WorkspaceEnv::Local).unwrap();
+    assert_eq!(with_slash, found);
+}

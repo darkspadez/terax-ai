@@ -83,6 +83,7 @@ import {
   type SourceControlRepositoryTarget,
 } from "./repositoryTarget";
 import type { SourceControlSummary } from "./useSourceControl";
+import { NestedRepositories } from "./NestedRepositories";
 import {
   useSourceControlPanel,
   type CheckState,
@@ -104,6 +105,8 @@ type Props = {
   onNavigateToPath?: (path: string) => void;
   repositoryTarget: SourceControlRepositoryTarget;
   onFollowRepositoryContext: () => void;
+  /** Shows a repository in Source Control, as the explorer's "Open in Source Control" does. */
+  onOpenRepository?: (path: string) => void;
 };
 
 const SOURCE_CONTROL_TOOLTIP_CLASS =
@@ -398,6 +401,7 @@ export const SourceControlPanel = memo(function SourceControlPanel({
   onNavigateToPath,
   repositoryTarget,
   onFollowRepositoryContext,
+  onOpenRepository,
 }: Props) {
   const scm = useSourceControlPanel(open, sourceControl, onOpenDiff);
   const refreshAnimationRef = useRef<number | null>(null);
@@ -818,6 +822,14 @@ export const SourceControlPanel = memo(function SourceControlPanel({
           <PanelCenter
             title="No repository"
             body="The active workspace is not inside a Git repository."
+            action={
+              sourceControl.contextPath && onOpenRepository ? (
+                <NestedRepositories
+                  folder={sourceControl.contextPath}
+                  onOpen={onOpenRepository}
+                />
+              ) : null
+            }
           />
         ) : null}
 

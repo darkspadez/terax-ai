@@ -1639,6 +1639,7 @@ export default function App() {
                           onFollowRepositoryContext={
                             handleFollowRepositoryContext
                           }
+                          onOpenRepository={handleOpenRepositoryInSourceControl}
                         />
                       )}
                     </div>

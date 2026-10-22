@@ -274,6 +274,12 @@ export const native = {
       cwd,
       workspace: currentWorkspaceEnv(),
     }),
+  /** Repositories inside a folder that is not one itself (children, grandchildren). */
+  gitDiscoverRepos: (path: string) =>
+    invoke<string[]>("git_discover_repos", {
+      path,
+      workspace: currentWorkspaceEnv(),
+    }),
   gitPanelSnapshot: (cwd: string) =>
     invoke<GitPanelSnapshot>("git_panel_snapshot", {
       cwd,

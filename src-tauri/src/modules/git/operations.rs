@@ -1,5 +1,6 @@
+use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::modules::git::errors::{GitError, Result};
 use crate::modules::git::parser::{parse_decorations, parse_porcelain_v2};
@@ -79,6 +80,75 @@ fn resolve_repo_in_authorized(
         upstream,
         is_detached: head == "HEAD",
     }))
+}
+
+const MAX_DISCOVERED_REPOS: usize = 24;
+const MAX_DISCOVERY_READS: usize = 256;
+/// How deep below the folder repositories are looked for (children and grandchildren).
+const DISCOVERY_DEPTH: usize = 2;
+/// Folders never searched for repositories: hidden ones and dependency or build trees.
+const DISCOVERY_SKIP: &[&str] = &["node_modules", "target", "vendor", "dist", "build"];
+
+/// Git work trees inside `path`, a folder that holds several projects without being one
+/// itself, spelled under `path` as given. Children and grandchildren are searched, a
+/// repository is not searched further, links are not followed, and the walk stops after a
+/// fixed number of folder reads, so a huge folder costs a bounded amount.
+pub fn discover_repos(
+    registry: &WorkspaceRegistry,
+    path: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<Vec<String>> {
+    let dir = canonical_dir(registry, path, workspace)?;
+    if !registry.is_authorized(&dir.local_path) {
+        return Err(GitError::PathOutsideWorkspace(dir.local_path));
+    }
+    let base = match path.trim_end_matches('/') {
+        "" => "/".to_string(),
+        trimmed => trimmed.to_string(),
+    };
+    let mut found: Vec<String> = Vec::new();
+    let mut queue: VecDeque<(PathBuf, String, usize)> = VecDeque::from([(dir.local_path, base, 0)]);
+    let mut reads = 0;
+    while let Some((local, spelled, depth)) = queue.pop_front() {
+        if reads == MAX_DISCOVERY_READS {
+            break;
+        }
+        reads += 1;
+        let Ok(entries) = std::fs::read_dir(&local) else {
+            continue;
+        };
+        let mut children: Vec<(String, PathBuf)> = entries
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                // `file_type` does not follow links, so a link never leads the walk astray.
+                if !entry.file_type().ok()?.is_dir() {
+                    return None;
+                }
+                let name = entry.file_name().into_string().ok()?;
+                if name.starts_with('.') || DISCOVERY_SKIP.contains(&name.as_str()) {
+                    return None;
+                }
+                Some((name, entry.path()))
+            })
+            .collect();
+        children.sort_unstable();
+        for (name, child) in children {
+            let child_spelled = if spelled.ends_with('/') {
+                format!("{spelled}{name}")
+            } else {
+                format!("{spelled}/{name}")
+            };
+            if child.join(".git").exists() {
+                found.push(child_spelled);
+                if found.len() == MAX_DISCOVERED_REPOS {
+                    return Ok(found);
+                }
+            } else if depth + 1 < DISCOVERY_DEPTH {
+                queue.push_back((child, child_spelled, depth + 1));
+            }
+        }
+    }
+    Ok(found)
 }
 
 pub fn panel_snapshot(
