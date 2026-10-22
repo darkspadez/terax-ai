@@ -299,6 +299,63 @@ pub fn diff_content(
     })
 }
 
+/// Most bytes of paths one git command line carries. Windows caps a whole command line at
+/// 32,767 UTF-16 units (UTF-8 bytes never count fewer) and `wsl.exe` adds arguments of its
+/// own, so Stage All on a deleted folder of a few hundred files could not start git at all.
+/// Unix allows far more, but not without bound.
+#[cfg(windows)]
+const PATHSPEC_BATCH_BYTES: usize = 16 * 1024;
+#[cfg(not(windows))]
+const PATHSPEC_BATCH_BYTES: usize = 256 * 1024;
+
+/// Splits pathspecs, in order, into runs that each fit one command line. A path longer than
+/// the budget gets a run of its own.
+fn pathspec_batches(paths: &[String], budget: usize) -> Vec<&[String]> {
+    let mut batches = Vec::new();
+    let mut start = 0;
+    let mut used = 0;
+    for (i, path) in paths.iter().enumerate() {
+        // Quoting and a separator per argument.
+        let cost = path.len() + 3;
+        if i > start && used + cost > budget {
+            batches.push(&paths[start..i]);
+            start = i;
+            used = 0;
+        }
+        used += cost;
+    }
+    if start < paths.len() {
+        batches.push(&paths[start..]);
+    }
+    batches
+}
+
+/// `git <command...> -- <paths>`, as many times as the command line limit needs.
+fn run_git_on_paths(
+    repo_root: &ResolvedGitDirectory,
+    command: &[&str],
+    paths: &[String],
+    context: &'static str,
+) -> Result<()> {
+    for batch in pathspec_batches(paths, PATHSPEC_BATCH_BYTES) {
+        let output = run_git(
+            &repo_root.workspace,
+            Some(&repo_root.git_path),
+            pathspec_args(command, batch),
+            DEFAULT_TIMEOUT_SECS,
+        )?;
+        ensure_success(&output, context)?;
+    }
+    Ok(())
+}
+
+fn pathspec_args(command: &[&str], paths: &[String]) -> Vec<OsString> {
+    let mut args: Vec<OsString> = command.iter().map(OsString::from).collect();
+    args.push("--".into());
+    args.extend(paths.iter().map(OsString::from));
+    args
+}
+
 pub fn stage(
     registry: &WorkspaceRegistry,
     repo_root: &str,
@@ -311,17 +368,7 @@ pub fn stage(
         return Ok(());
     }
     let resolved = resolve_pathspecs(&repo_root.local_path, paths)?;
-    let mut args: Vec<OsString> = vec!["add".into(), "--".into()];
-    for p in &resolved {
-        args.push(p.clone().into());
-    }
-    let output = run_git(
-        &repo_root.workspace,
-        Some(&repo_root.git_path),
-        args,
-        DEFAULT_TIMEOUT_SECS,
-    )?;
-    ensure_success(&output, "git add failed")
+    run_git_on_paths(&repo_root, &["add"], &resolved, "git add failed")
 }
 
 pub fn unstage(
@@ -336,33 +383,28 @@ pub fn unstage(
         return Ok(());
     }
     let resolved = resolve_pathspecs(&repo_root.local_path, paths)?;
-    let mut reset_args: Vec<OsString> = vec!["reset".into(), "HEAD".into(), "--".into()];
-    for p in &resolved {
-        reset_args.push(p.clone().into());
+    for batch in pathspec_batches(&resolved, PATHSPEC_BATCH_BYTES) {
+        let output = run_git(
+            &repo_root.workspace,
+            Some(&repo_root.git_path),
+            pathspec_args(&["reset", "HEAD"], batch),
+            DEFAULT_TIMEOUT_SECS,
+        )?;
+        if output.exit_code == Some(0) {
+            continue;
+        }
+        if !looks_like_no_head(&output) {
+            return ensure_success(&output, "git reset failed");
+        }
+        let output = run_git(
+            &repo_root.workspace,
+            Some(&repo_root.git_path),
+            pathspec_args(&["rm", "--cached", "-r"], batch),
+            DEFAULT_TIMEOUT_SECS,
+        )?;
+        ensure_success(&output, "git rm --cached failed")?;
     }
-    let output = run_git(
-        &repo_root.workspace,
-        Some(&repo_root.git_path),
-        reset_args,
-        DEFAULT_TIMEOUT_SECS,
-    )?;
-    if output.exit_code == Some(0) {
-        return Ok(());
-    }
-    if !looks_like_no_head(&output) {
-        return ensure_success(&output, "git reset failed");
-    }
-    let mut rm_args: Vec<OsString> = vec!["rm".into(), "--cached".into(), "-r".into(), "--".into()];
-    for p in &resolved {
-        rm_args.push(p.clone().into());
-    }
-    let output = run_git(
-        &repo_root.workspace,
-        Some(&repo_root.git_path),
-        rm_args,
-        DEFAULT_TIMEOUT_SECS,
-    )?;
-    ensure_success(&output, "git rm --cached failed")
+    Ok(())
 }
 
 fn looks_like_no_head(output: &GitOutput) -> bool {
@@ -396,35 +438,18 @@ pub fn discard(
         }
     }
 
-    if !tracked.is_empty() {
-        let mut args: Vec<OsString> = vec!["restore".into(), "--worktree".into(), "--".into()];
-        for p in &tracked {
-            args.push(p.clone().into());
-        }
-        let output = run_git(
-            &repo_root.workspace,
-            Some(&repo_root.git_path),
-            args,
-            DEFAULT_TIMEOUT_SECS,
-        )?;
-        ensure_success(&output, "git restore failed")?;
-    }
-
-    if !untracked.is_empty() {
-        let mut args: Vec<OsString> = vec!["clean".into(), "-f".into(), "-d".into(), "--".into()];
-        for p in &untracked {
-            args.push(p.clone().into());
-        }
-        let output = run_git(
-            &repo_root.workspace,
-            Some(&repo_root.git_path),
-            args,
-            DEFAULT_TIMEOUT_SECS,
-        )?;
-        ensure_success(&output, "git clean failed")?;
-    }
-
-    Ok(())
+    run_git_on_paths(
+        &repo_root,
+        &["restore", "--worktree"],
+        &tracked,
+        "git restore failed",
+    )?;
+    run_git_on_paths(
+        &repo_root,
+        &["clean", "-f", "-d"],
+        &untracked,
+        "git clean failed",
+    )
 }
 
 pub fn commit(
@@ -1196,6 +1221,28 @@ pub fn checkout_branch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pathspec_batches_fit_the_budget_and_keep_every_path_once_in_order() {
+        let paths: Vec<String> = (0..10).map(|i| format!("dir/file-{i}.txt")).collect();
+        // Each path costs its 14 bytes plus 3.
+        let batches = pathspec_batches(&paths, 40);
+        assert!(batches.iter().all(|batch| batch.len() == 2));
+        assert_eq!(batches.concat(), paths);
+        assert_eq!(pathspec_batches(&paths, 1 << 20), vec![&paths[..]]);
+        assert!(pathspec_batches(&[], 40).is_empty());
+    }
+
+    #[test]
+    fn a_path_longer_than_the_budget_still_gets_a_batch() {
+        let paths = vec!["a".to_owned(), "x".repeat(100), "b".to_owned()];
+        let batches = pathspec_batches(&paths, 10);
+        assert_eq!(
+            batches,
+            vec![&paths[0..1], &paths[1..2], &paths[2..3]],
+            "nothing is dropped and nothing is merged past the budget"
+        );
+    }
 
     #[test]
     fn commit_timeout_covers_slow_hooks() {

@@ -780,3 +780,29 @@ fn reading_status_leaves_the_git_dir_alone() {
     operations::status(&fx.registry, &fx.repo_str(), &fx.workspace).expect("status");
     assert_eq!(snapshot(), before);
 }
+
+/// Stage All on a deleted folder sends every path at once; a single command line cannot hold
+/// them all on Windows (32,767 characters), so they go to git in batches.
+#[test]
+fn staging_more_paths_than_one_command_line_holds_stages_them_all() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    let dir = "a-folder-with-a-rather-long-name-to-fill-the-command-line-quickly";
+    let names: Vec<String> = (0..2_500)
+        .map(|i| format!("{dir}/generated-source-file-with-a-long-descriptive-name-{i:05}.ts"))
+        .collect();
+    for name in &names {
+        fx.write_file(name, "x\n");
+    }
+    // About 320 KB of paths: more than one batch on every platform.
+    assert!(names.iter().map(|n| n.len() + 3).sum::<usize>() > 256 * 1024);
+
+    operations::stage(&fx.registry, &fx.repo_str(), &names, &fx.workspace).expect("stage");
+    let staged = git_stdout(&fx, &["diff", "--cached", "--name-only"]);
+    assert_eq!(staged.len(), names.len());
+
+    operations::unstage(&fx.registry, &fx.repo_str(), &names, &fx.workspace).expect("unstage");
+    assert!(git_stdout(&fx, &["diff", "--cached", "--name-only"]).is_empty());
+}
