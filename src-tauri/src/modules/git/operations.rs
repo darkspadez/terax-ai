@@ -4,8 +4,8 @@ use std::path::Path;
 use crate::modules::git::errors::{GitError, Result};
 use crate::modules::git::parser::parse_porcelain_v2;
 use crate::modules::git::process::{
-    ensure_git_available, ensure_success, git_show_text, git_stdout_line_opt, git_stdout_lines,
-    read_text_file, run_git, run_git_capped,
+    decode_text, ensure_git_available, ensure_success, git_show_text, git_stdout_line_opt,
+    git_stdout_lines, read_text_file, run_git, run_git_capped,
 };
 use crate::modules::git::types::{
     DiscardEntry, GitBranchEntry, GitBranchListResult, GitCommitFileChange, GitCommitResult,
@@ -295,6 +295,56 @@ pub fn diff_content(
         is_binary,
         fallback_patch: patch.diff_text,
         truncated: patch.truncated,
+    })
+}
+
+/// The HEAD version of a file, for the editor's change gutter: one `git show`
+/// run in the file's own folder, so no repository lookup is needed. None when
+/// the file is not in HEAD (untracked, new, outside a repository), is binary,
+/// or is too large to show whole.
+pub fn file_base(
+    registry: &WorkspaceRegistry,
+    path: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<Option<String>> {
+    let Some(i) = path.rfind(['/', '\\']) else {
+        return Ok(None);
+    };
+    let name = &path[i + 1..];
+    if matches!(name, "" | "." | "..") {
+        return Ok(None);
+    }
+    // A file at a root keeps its separator ("/", "C:\").
+    let dir = if i == 0 || path[..i].ends_with(':') {
+        &path[..=i]
+    } else {
+        &path[..i]
+    };
+    let cwd = canonical_dir(registry, dir, workspace)?;
+    if !registry.is_authorized(&cwd.local_path) {
+        return Err(GitError::PathOutsideWorkspace(cwd.local_path));
+    }
+    ensure_git_available(&cwd.workspace)?;
+    let spec = format!("HEAD:./{name}");
+    let output = run_git(
+        &cwd.workspace,
+        Some(&cwd.git_path),
+        [
+            OsStr::new("show"),
+            OsStr::new("--no-textconv"),
+            OsStr::new(&spec),
+        ],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    if output.timed_out {
+        return Err(GitError::TimedOut("git show"));
+    }
+    if output.exit_code != Some(0) || output.truncated {
+        return Ok(None);
+    }
+    Ok(match decode_text(output.stdout) {
+        TextSource::Text(text) => Some(text),
+        TextSource::Missing | TextSource::Binary => None,
     })
 }
 
@@ -1182,6 +1232,55 @@ pub fn checkout_branch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn git(dir: &Path, args: &[&str]) -> bool {
+        std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .is_ok_and(|o| o.status.success())
+    }
+
+    #[test]
+    fn file_base_reads_the_committed_version() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path();
+        if !git(root, &["init", "-q"]) {
+            return;
+        }
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::fs::write(root.join("src/a b.ts"), "one\n").unwrap();
+        assert!(git(root, &["add", "."]));
+        assert!(git(root, &["commit", "-q", "-m", "init"]));
+        std::fs::write(root.join("src/a b.ts"), "two\n").unwrap();
+        std::fs::write(root.join("src/new.ts"), "new\n").unwrap();
+
+        let registry = WorkspaceRegistry::default();
+        registry.authorize(root).unwrap();
+        let local = WorkspaceEnv::Local;
+        let file = |name: &str| root.join("src").join(name).to_string_lossy().into_owned();
+        assert_eq!(
+            file_base(&registry, &file("a b.ts"), &local)
+                .unwrap()
+                .as_deref(),
+            Some("one\n")
+        );
+        assert_eq!(file_base(&registry, &file("new.ts"), &local).unwrap(), None);
+        assert_eq!(file_base(&registry, "relative.ts", &local).unwrap(), None);
+
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("x.ts"), "x").unwrap();
+        let path = outside.path().join("x.ts").to_string_lossy().into_owned();
+        assert!(file_base(&registry, &path, &local).is_err());
+    }
 
     #[test]
     fn sha_is_safe_accepts_hex() {

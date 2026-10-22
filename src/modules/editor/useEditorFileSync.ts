@@ -7,7 +7,7 @@ import type { Tab } from "@/modules/tabs";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { type RefObject, useEffect, useRef } from "react";
 import type { EditorPaneHandle } from "./EditorPane";
-import { editorTabsUnder, onFilesDiscarded } from "./lib/discardSignal";
+import { editorTabsUnder, onFilesDiscarded } from "./lib/gitSignals";
 import { fileWatchTargets } from "./lib/fileWatchTargets";
 
 type Params = {

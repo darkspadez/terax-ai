@@ -1,5 +1,6 @@
 import { endpointIdFromCompatModel } from "@/modules/ai/config";
 import { getCustomEndpointKey, getKey } from "@/modules/ai/lib/keyring";
+import { native } from "@/modules/ai/lib/native";
 import { lspFormatDocument, useLspExtension } from "@/modules/lsp";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { onKeysChanged } from "@/modules/settings/store";
@@ -56,6 +57,9 @@ import {
   resolveFormatter,
   runExternalFormatter,
 } from "./lib/externalFormat";
+import { normalizeToLf } from "./lib/eol";
+import { gitChangeGutter, setGitBase } from "./lib/gitGutter";
+import { onHeadMoved } from "./lib/gitSignals";
 import { detectIndentUnit } from "./lib/indent";
 import { type LanguageResult, resolveLanguage } from "./lib/languageResolver";
 import { FORCE_READ_LIMIT, useDocument } from "./lib/useDocument";
@@ -365,6 +369,7 @@ export const EditorPane = memo(
         indentCompartment.of(DEFAULT_INDENT),
         languageCompartment.of([]),
         lspCompartment.of([]),
+        gitChangeGutter,
         diagnosticsReporter(() => pathRef.current),
         // Before inlineCompletion so an open popup wins Tab over the ghost.
         Prec.highest(keymap.of([{ key: "Tab", run: acceptCompletion }])),
@@ -457,6 +462,36 @@ export const EditorPane = memo(
         ),
       });
     }, [doc]);
+
+    // The change gutter's base is the committed text, fetched when the file
+    // is (re)loaded, when the pane comes into view, and after a commit or
+    // pull in Source Control. Hidden panes catch up when shown.
+    const [headMoves, setHeadMoves] = useState(0);
+    const mediaActiveRef = useRef(mediaActive);
+    mediaActiveRef.current = mediaActive;
+    useEffect(
+      () =>
+        onHeadMoved(() => {
+          if (mediaActiveRef.current) setHeadMoves((n) => n + 1);
+        }),
+      [],
+    );
+    useEffect(() => {
+      if (doc.status !== "ready" || doc.size > SYNTAX_MAX_BYTES) return;
+      if (!mediaActive) return;
+      void headMoves;
+      let cancelled = false;
+      const apply = (base: string | null) => {
+        if (cancelled) return;
+        cmRef.current?.view?.dispatch({
+          effects: setGitBase.of(base === null ? null : normalizeToLf(base)),
+        });
+      };
+      native.gitFileBase(path).then(apply, () => apply(null));
+      return () => {
+        cancelled = true;
+      };
+    }, [doc, path, mediaActive, headMoves]);
 
     const lspExt = useLspExtension(path, langId, doc.status === "ready");
     useEffect(() => {

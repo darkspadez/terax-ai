@@ -3,9 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 import {
   editorTabsUnder,
   notifyFilesDiscarded,
+  notifyHeadMoved,
   onFilesDiscarded,
+  onHeadMoved,
   repoFilePath,
-} from "./discardSignal";
+} from "./gitSignals";
 
 const editor = (id: number, path: string): Tab => ({
   id,
@@ -69,6 +71,17 @@ describe("notifyFilesDiscarded", () => {
     expect(listener).toHaveBeenCalledWith(["/repo/src/a.ts", "/repo/new/"]);
     off();
     notifyFilesDiscarded("/repo", ["src/a.ts"]);
+    expect(listener).toHaveBeenCalledOnce();
+  });
+});
+
+describe("notifyHeadMoved", () => {
+  it("tells change gutters until they unsubscribe", () => {
+    const listener = vi.fn();
+    const off = onHeadMoved(listener);
+    notifyHeadMoved();
+    off();
+    notifyHeadMoved();
     expect(listener).toHaveBeenCalledOnce();
   });
 });

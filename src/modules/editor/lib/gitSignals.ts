@@ -46,3 +46,17 @@ export function onFilesDiscarded(listener: Listener): () => void {
     listeners.delete(listener);
   };
 }
+
+const headListeners = new Set<() => void>();
+
+/** A commit or pull in Source Control moved HEAD: change gutters are stale. */
+export function notifyHeadMoved(): void {
+  for (const listener of headListeners) listener();
+}
+
+export function onHeadMoved(listener: () => void): () => void {
+  headListeners.add(listener);
+  return () => {
+    headListeners.delete(listener);
+  };
+}

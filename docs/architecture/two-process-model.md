@@ -82,6 +82,7 @@ All git commands are gated through the workspace authorization registry.
 - `git_resolve_repo` / `git_panel_snapshot`
 - `git_status`
 - `git_diff` / `git_diff_content`
+- `git_file_base` - a file's committed (HEAD) text, for the editor's change gutter
 - `git_stage` / `git_unstage` / `git_discard`
 - `git_commit`
 - `git_fetch` / `git_pull_ff_only` / `git_push`

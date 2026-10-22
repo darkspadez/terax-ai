@@ -16,7 +16,10 @@ import {
   invalidateRepoDiffs,
   workingDiffKey,
 } from "@/modules/editor/lib/diffCache";
-import { notifyFilesDiscarded } from "@/modules/editor/lib/discardSignal";
+import {
+  notifyFilesDiscarded,
+  notifyHeadMoved,
+} from "@/modules/editor/lib/gitSignals";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SourceControlSummary } from "./useSourceControl";
@@ -949,6 +952,7 @@ export function useSourceControlPanel(
     setActionError(null);
     try {
       const result = await native.gitCommit(repo.repoRoot, commitMessage);
+      notifyHeadMoved();
       setCommitMessage("");
       setActionMessage(
         `Committed ${result.commitSha.slice(0, 7)} ${result.summary}`,
