@@ -335,19 +335,18 @@ export function TabBar({
                     endDrag(e.currentTarget);
                   }}
                   onPointerCancel={(e) => endDrag(e.currentTarget)}
-                  onDoubleClick={() => isPreview && onPin(t.id)}
-                  onAuxClick={(e) => {
-                    if (e.button === 1 && tabs.length > 1) {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onClose(t.id);
-                    }
+                  onDoubleClick={() => {
+                    if (isPreview) onPin(t.id);
+                    else if (t.kind === "terminal") setEditingId(t.id);
                   }}
                   // Suppress Radix's switch-on-mousedown so a tab grabbed to
                   // drag (or a plain click) only activates on release.
                   onMouseDown={(e) => {
+                    // Middle-click closes on press: WebKit sends no auxclick.
                     if (e.button === 1) {
                       e.preventDefault();
+                      e.stopPropagation();
+                      if (tabs.length > 1) onClose(t.id);
                       return;
                     }
                     if (
