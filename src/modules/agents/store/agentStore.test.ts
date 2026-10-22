@@ -91,6 +91,16 @@ describe("agent session store", () => {
     expect(useAgentStore.getState().notifications.every((n) => n.read)).toBe(true);
   });
 
+  it("removeNotification drops only that notification", () => {
+    push({ leafId: 1, tabId: 1 });
+    push({ leafId: 2, tabId: 2 });
+    const [newest, oldest] = useAgentStore.getState().notifications;
+
+    useAgentStore.getState().removeNotification(oldest.id);
+
+    expect(useAgentStore.getState().notifications).toEqual([newest]);
+  });
+
   it("nextAttentionTarget returns the most recently waiting agent", () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);

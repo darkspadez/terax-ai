@@ -22,6 +22,7 @@ type AgentStoreState = {
     n: Omit<AgentNotification, "id" | "at" | "read">,
   ) => void;
   markAllRead: () => void;
+  removeNotification: (id: string) => void;
   clearNotifications: () => void;
 };
 
@@ -98,6 +99,9 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
       if (!s.notifications.some((n) => !n.read)) return s;
       return { notifications: s.notifications.map((n) => ({ ...n, read: true })) };
     }),
+
+  removeNotification: (id) =>
+    set((s) => ({ notifications: s.notifications.filter((n) => n.id !== id) })),
 
   clearNotifications: () => set({ notifications: [] }),
 }));
