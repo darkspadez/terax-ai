@@ -94,6 +94,28 @@ pub struct GitCommitFileChange {
     pub is_binary: bool,
 }
 
+#[derive(Serialize, Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
+#[serde(rename_all = "lowercase")]
+pub enum GitRefKind {
+    /// HEAD itself, detached.
+    Head,
+    Branch,
+    Tag,
+    Remote,
+}
+
+/// A ref pointing at a commit, classified by its namespace (`refs/heads`, `refs/tags`,
+/// `refs/remotes`), never by its name: a local branch may well be called `origin/x`.
+#[derive(Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GitLogRef {
+    pub kind: GitRefKind,
+    /// Without its namespace: `main`, `v1.0`, `origin/main`.
+    pub name: String,
+    /// HEAD is here: the branch it is on, or HEAD itself when detached.
+    pub head: bool,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitLogEntry {
@@ -103,6 +125,7 @@ pub struct GitLogEntry {
     pub author_email: String,
     pub timestamp_secs: i64,
     pub parents: Vec<String>,
+    pub refs: Vec<GitLogRef>,
     pub subject: String,
     pub files_changed: u32,
     pub insertions: u32,
@@ -310,6 +333,11 @@ mod serde_shape_tests {
             author_email: "a@example.com".into(),
             timestamp_secs: 1_700_000_000,
             parents: vec!["p0".into()],
+            refs: vec![GitLogRef {
+                kind: GitRefKind::Branch,
+                name: "main".into(),
+                head: true,
+            }],
             subject: "s".into(),
             files_changed: 2,
             insertions: 10,
@@ -327,6 +355,10 @@ mod serde_shape_tests {
             assert!(json.get(key).is_some(), "missing key {key}");
         }
         assert_eq!(json["parents"], serde_json::json!(["p0"]));
+        assert_eq!(
+            json["refs"],
+            serde_json::json!([{ "kind": "branch", "name": "main", "head": true }])
+        );
     }
 
     #[test]

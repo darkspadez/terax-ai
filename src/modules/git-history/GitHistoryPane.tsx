@@ -33,6 +33,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { GraphRail, MAX_VISIBLE_LANES, railWidth } from "./GraphRail";
+import { RefChips } from "./RefChips";
 import {
   EMPTY_GRAPH_STATE,
   layoutGraph,
@@ -40,6 +41,7 @@ import {
   type GraphState,
 } from "./lib/graph";
 import { nextHistoryPage } from "./lib/historyPaging";
+import { refsMatch } from "./lib/refs";
 import {
   commitWebUrl,
   hostLabel,
@@ -302,7 +304,8 @@ export function GitHistoryPane({
         subject.includes(q) ||
         author.includes(q) ||
         email.includes(q) ||
-        c.shortSha.includes(q)
+        c.shortSha.includes(q) ||
+        refsMatch(c.refs, q)
       );
     });
   }, [commits, activeSearch]);
@@ -735,17 +738,20 @@ const CommitRow = memo(function CommitRow({
       </span>
       <span
         className={cn(
-          "min-w-0 truncate text-[12px] leading-tight",
+          "flex min-w-0 items-center gap-1.5 text-[12px] leading-tight",
           active
             ? "font-semibold text-foreground"
             : "font-medium text-foreground/95",
         )}
       >
-        {commit.subject ? (
-          highlight(commit.subject, query)
-        ) : (
-          <span className="text-muted-foreground">(no subject)</span>
-        )}
+        <RefChips refs={commit.refs} max={2} className="shrink-0" />
+        <span className="min-w-0 truncate">
+          {commit.subject ? (
+            highlight(commit.subject, query)
+          ) : (
+            <span className="text-muted-foreground">(no subject)</span>
+          )}
+        </span>
       </span>
       <span aria-hidden />
       <span
@@ -852,6 +858,7 @@ function CommitDetail({
             )}
           </div>
         </div>
+        <RefChips refs={commit.refs} className="mt-2 flex-wrap" />
         <div className="mt-2 flex min-w-0 items-center gap-1.5 text-[10.5px] text-muted-foreground">
           <span className="truncate">{commit.author || "Unknown"}</span>
           {commit.authorEmail ? (

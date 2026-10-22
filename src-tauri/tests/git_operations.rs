@@ -806,3 +806,54 @@ fn staging_more_paths_than_one_command_line_holds_stages_them_all() {
     operations::unstage(&fx.registry, &fx.repo_str(), &names, &fx.workspace).expect("unstage");
     assert!(git_stdout(&fx, &["diff", "--cached", "--name-only"]).is_empty());
 }
+
+#[test]
+fn log_reports_the_branches_and_tags_on_each_commit() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    for name in ["first", "second"] {
+        fx.write_file(&format!("{name}.txt"), "x\n");
+        fx.run_git(&["add", "."]);
+        fx.run_git(&["commit", "-q", "-m", name]);
+    }
+    fx.run_git(&["tag", "v1.0", "HEAD~1"]);
+    fx.run_git(&["tag", "-a", "-m", "release", "v2.0"]);
+    // A local branch whose name looks like a remote one.
+    fx.run_git(&["branch", "origin/feature", "HEAD~1"]);
+
+    let log = || operations::log(&fx.registry, &fx.repo_str(), 10, 0, None, &fx.workspace).unwrap();
+    let refs =
+        |entry: &terax_lib::modules::git::types::GitLogEntry| -> Vec<(String, String, bool)> {
+            let json = serde_json::to_value(&entry.refs).unwrap();
+            json.as_array()
+                .unwrap()
+                .iter()
+                .map(|r| {
+                    (
+                        r["kind"].as_str().unwrap().to_owned(),
+                        r["name"].as_str().unwrap().to_owned(),
+                        r["head"].as_bool().unwrap(),
+                    )
+                })
+                .collect()
+        };
+    let owned = |kind: &str, name: &str, head: bool| (kind.to_owned(), name.to_owned(), head);
+    let entries = log();
+    assert_eq!(
+        refs(&entries[0]),
+        vec![owned("branch", "main", true), owned("tag", "v2.0", false)]
+    );
+    assert_eq!(
+        refs(&entries[1]),
+        vec![
+            owned("branch", "origin/feature", false),
+            owned("tag", "v1.0", false)
+        ]
+    );
+    assert_eq!(entries[1].subject, "first");
+
+    fx.run_git(&["checkout", "-q", "--detach", "HEAD~1"]);
+    assert_eq!(refs(&log()[0])[0], owned("head", "HEAD", true));
+}

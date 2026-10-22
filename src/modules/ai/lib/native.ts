@@ -91,6 +91,15 @@ export type GitPushResult = {
   pushed: boolean;
 };
 
+/** A ref on a commit, classified by its namespace in Rust, never by its name. */
+export type GitLogRef = {
+  kind: "head" | "branch" | "tag" | "remote";
+  /** Without its namespace: `main`, `v1.0`, `origin/main`. */
+  name: string;
+  /** HEAD is here: the branch it is on, or HEAD itself when detached. */
+  head: boolean;
+};
+
 export type GitLogEntry = {
   sha: string;
   shortSha: string;
@@ -98,6 +107,8 @@ export type GitLogEntry = {
   authorEmail: string;
   timestampSecs: number;
   parents: string[];
+  /** HEAD and its branch first, then branches, tags and remote branches. */
+  refs: GitLogRef[];
   subject: string;
   filesChanged: number;
   insertions: number;
