@@ -356,7 +356,8 @@ describe("built startup graph", () => {
           .map(([feature, needs]) => `${file}: ${feature} (Safari ${needs})`),
       );
     expect(offenders).toEqual([]);
-  });
+    // Parses every chunk (5.5 MB): a second alone, more beside other suites.
+  }, 30_000);
 
   it("contains none of the app-lab benchmark driver (TERAX_BENCH is off)", () => {
     // The driver (src/bench) and its Tauri commands exist only in builds made with
