@@ -53,11 +53,25 @@ function documentHost(
   return {
     state: setDoc,
     dirty: setDirty,
-    saved: notifyDocumentSaved,
+    saved: (path) => {
+      // A successful write supersedes any earlier failure or conflict notice.
+      toast.dismiss(`save-error:${path}`);
+      toast.dismiss(`save-conflict:${path}`);
+      notifyDocumentSaved(path);
+    },
+    saveFailed: (path, error) => {
+      console.error("[save]", path, error);
+      toast.error(`Could not save ${fileName(path)}`, {
+        id: `save-error:${path}`,
+        description: String(error),
+      });
+    },
+    // Stays until the user acts, a write lands, or the pane leaves the path.
     conflict: (path, overwrite) => {
       toast.warning("File changed on disk", {
         id: `save-conflict:${path}`,
         description: `${fileName(path)} was modified by another program while you had unsaved changes. Overwrite to keep your version.`,
+        duration: Number.POSITIVE_INFINITY,
         action: { label: "Overwrite", onClick: overwrite },
       });
     },

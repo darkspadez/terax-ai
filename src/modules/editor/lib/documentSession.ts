@@ -1,5 +1,6 @@
 import { detectEol, type Eol, normalizeToLf, restoreEol } from "./eol";
 import { consumeRetarget } from "./pathRetarget";
+import { decideSave } from "./saveConflict";
 
 export type ReadResult =
   | { kind: "text"; content: string; size: number; mtime: number }
@@ -25,6 +26,8 @@ export type DocumentHost = {
   state: (doc: DocumentState) => void;
   dirty: (dirty: boolean) => void;
   saved: (path: string) => void;
+  /** The write failed; the buffer stays dirty. */
+  saveFailed: (path: string, error: unknown) => void;
   /** The file changed on disk under unsaved edits; `overwrite` writes anyway. */
   conflict: (path: string, overwrite: () => void) => void;
   /** Notices tied to `path` no longer apply: the pane moved on or closed. */
@@ -96,6 +99,7 @@ export class DocumentSession {
     this.armAutoSave();
   };
 
+  // Never rejects: a failed write is reported through the host.
   save = async (): Promise<boolean> => {
     this.clearTimer();
     if (this.text === this.saved) return true;
@@ -185,7 +189,9 @@ export class DocumentSession {
   }
 
   // False when the write was withheld because the file changed on disk
-  // since load; overwriting is an explicit user action from the notice.
+  // since load; overwriting is an explicit user action from the notice. An
+  // mtime that moved while the content did not (touch, git, a watcher event
+  // missed while dirty) is not a conflict.
   private async saveNow(): Promise<boolean> {
     const path = this.path;
     if (!this.active || path === null || this.loadedPath !== path) return false;
@@ -194,7 +200,21 @@ export class DocumentSession {
     if (known !== null) {
       const mtime = await this.io.mtime(path);
       if (epoch !== this.epoch) return false;
+      let diskText: string | null = null;
       if (mtime !== null && mtime !== known) {
+        const disk = await this.io.read(path, this.force).catch(() => null);
+        // Moved on while the disk was read: a notice now would offer to
+        // overwrite a path this buffer no longer belongs to.
+        if (epoch !== this.epoch) return false;
+        if (disk?.kind === "text") diskText = normalizeToLf(disk.content);
+      }
+      const decision = decideSave({
+        knownMtime: known,
+        statMtime: mtime,
+        diskText,
+        savedText: this.saved,
+      });
+      if (decision === "conflict") {
         this.host.conflict(path, () => void this.write(epoch));
         return false;
       }
@@ -206,7 +226,13 @@ export class DocumentSession {
     const path = this.path;
     if (epoch !== this.epoch || path === null) return false;
     const content = this.text;
-    const mtime = await this.io.write(path, restoreEol(content, this.eol));
+    let mtime: number;
+    try {
+      mtime = await this.io.write(path, restoreEol(content, this.eol));
+    } catch (e) {
+      if (epoch === this.epoch) this.host.saveFailed(path, e);
+      return false;
+    }
     // Retargeted or closed while the write was in flight: the old path's
     // mtime is not this path's baseline, and the buffer stays dirty so the
     // next save lands on the current path.
@@ -225,7 +251,7 @@ export class DocumentSession {
     if (!enabled) return;
     this.timer = setTimeout(() => {
       this.timer = null;
-      this.saveNow().catch((e) => console.error("[autosave]", e));
+      void this.saveNow();
     }, delay);
   }
 

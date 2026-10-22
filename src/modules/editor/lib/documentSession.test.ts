@@ -91,6 +91,7 @@ function setup(
     state: vi.fn<(doc: DocumentState) => void>(),
     dirty: vi.fn<(dirty: boolean) => void>(),
     saved: vi.fn<(path: string) => void>(),
+    saveFailed: vi.fn<(path: string, error: unknown) => void>(),
     conflict: vi.fn<(path: string, overwrite: () => void) => void>(),
     released: vi.fn<(path: string) => void>(),
     autoSave: () => autoSave,
@@ -271,5 +272,105 @@ describe("DocumentSession rename (crynta/terax-ai#1369)", () => {
     overwrite?.();
     await flush();
     expect(t.log.filter((l) => l.startsWith("write"))).toEqual([]);
+  });
+});
+
+describe("DocumentSession save conflicts (crynta/terax-ai#1375)", () => {
+  it("writes when only the mtime moved on disk", async () => {
+    const t = setup({ "/p/.env": "A=1\n" });
+    t.session.open("/p/.env");
+    await flush();
+    t.session.change("A=2\n");
+    t.touch("/p/.env");
+    expect(await t.session.save()).toBe(true);
+    expect(t.host.conflict).not.toHaveBeenCalled();
+    expect(t.disk.get("/p/.env")?.content).toBe("A=2\n");
+  });
+
+  it("refuses when the disk content changed, until the user overwrites", async () => {
+    const t = setup({ "/p/a.ts": "one\n" });
+    t.session.open("/p/a.ts");
+    await flush();
+    t.session.change("mine\n");
+    t.touch("/p/a.ts", "theirs\n");
+    expect(await t.session.save()).toBe(false);
+    expect(t.disk.get("/p/a.ts")?.content).toBe("theirs\n");
+    expect(t.host.conflict).toHaveBeenCalledOnce();
+    t.host.conflict.mock.lastCall?.[1]();
+    await flush();
+    expect(t.disk.get("/p/a.ts")?.content).toBe("mine\n");
+    expect(t.dirty()).toBe(false);
+    expect(t.host.saved).toHaveBeenCalledWith("/p/a.ts");
+  });
+
+  it("compares a file opened anyway without the size limit", async () => {
+    const t = setup({ "/p/big.log": "x\n" });
+    t.session.open("/p/big.log");
+    await flush();
+    t.session.openAnyway();
+    await flush();
+    t.session.change("y\n");
+    t.touch("/p/big.log");
+    expect(await t.session.save()).toBe(true);
+    expect(t.log).toContain("stat /p/big.log");
+    expect(t.log.filter((l) => l === "read /p/big.log force")).toHaveLength(2);
+  });
+
+  it("raises no notice for a check that resolves after a rename", async () => {
+    const t = setup({ "/p/a.ts": "one\n" });
+    t.session.open("/p/a.ts");
+    await flush();
+    t.session.change("mine\n");
+    t.touch("/p/a.ts", "theirs\n");
+    t.hold("read");
+    const saving = t.session.save();
+    await flush();
+    t.rename("/p/a.ts", "/p/b.ts");
+    noteRetarget("/p/a.ts", "/p/b.ts");
+    t.session.open("/p/b.ts");
+    t.release("read");
+    expect(await saving).toBe(false);
+    expect(t.host.conflict).not.toHaveBeenCalled();
+    expect(t.log.filter((l) => l.startsWith("write"))).toEqual([]);
+  });
+
+  it("reports a failed save and keeps the buffer dirty", async () => {
+    const t = setup({ "/p/a.ts": "one\n" });
+    t.session.open("/p/a.ts");
+    await flush();
+    t.failures.set("/p/a.ts", "EROFS");
+    t.session.change("two\n");
+    expect(await t.session.save()).toBe(false);
+    expect(t.host.saveFailed).toHaveBeenCalledWith(
+      "/p/a.ts",
+      new Error("EROFS"),
+    );
+    expect(t.dirty()).toBe(true);
+    expect(t.host.saved).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed autosave", async () => {
+    vi.useFakeTimers();
+    const t = setup({ "/p/a.ts": "one\n" }, { enabled: true, delay: 500 });
+    t.session.open("/p/a.ts");
+    await vi.advanceTimersByTimeAsync(0);
+    t.failures.set("/p/a.ts", "EACCES: permission denied");
+    t.session.change("two\n");
+    await vi.advanceTimersByTimeAsync(600);
+    expect(t.host.saveFailed).toHaveBeenCalledOnce();
+    expect(t.dirty()).toBe(true);
+  });
+
+  it("reports a failed Overwrite", async () => {
+    const t = setup({ "/p/a.ts": "one\n" });
+    t.session.open("/p/a.ts");
+    await flush();
+    t.session.change("mine\n");
+    t.touch("/p/a.ts", "theirs\n");
+    await t.session.save();
+    t.failures.set("/p/a.ts", "EACCES");
+    t.host.conflict.mock.lastCall?.[1]();
+    await flush();
+    expect(t.host.saveFailed).toHaveBeenCalledOnce();
   });
 });
