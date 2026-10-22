@@ -5,14 +5,23 @@ on:
     branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Jobs run on Namespace runner profiles (cloud.namespace.so, Actions profiles),
+# each with a cache volume attached:
+#   terax-linux    Linux amd64, Ubuntu 22.04 (the release glibc baseline)
+#   terax-macos    macOS arm64
+#   terax-windows  Windows amd64
+# nscloud-cache-action keeps the Bun, Cargo, apt and target caches on that
+# volume. Cargo's target dir is src-tauri/target, so it is listed explicitly.
+
 jobs:
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-terax-linux
     steps:
       - uses: actions/checkout@v7
         with:
@@ -21,6 +30,10 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
+
+      - uses: namespacelabs/nscloud-cache-action@v1
+        with:
+          cache: bun
 
       - run: bun install --frozen-lockfile
 
@@ -56,8 +69,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+        include:
+          - os: windows
+            runner: namespace-profile-terax-windows
+          - os: macos
+            runner: namespace-profile-terax-macos
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -65,16 +82,23 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
+      - uses: namespacelabs/nscloud-cache-action@v1
+        with:
+          cache: bun
       - run: bun install --frozen-lockfile
       - name: Terminal models, input, blocks, transport, and renderer lifecycle
         run: bun run vitest run src/modules/terminal
 
   rust:
-    runs-on: ubuntu-22.04
+    runs-on: namespace-profile-terax-linux
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      - uses: namespacelabs/nscloud-cache-action@v1
+        with:
+          cache: apt
 
       - name: Install Linux build dependencies
         run: |
@@ -90,9 +114,10 @@ jobs:
         with:
           components: clippy
 
-      - uses: swatinem/rust-cache@v2
+      - uses: namespacelabs/nscloud-cache-action@v1
         with:
-          workspaces: ./src-tauri -> target
+          cache: rust
+          path: src-tauri/target
 
       - uses: taiki-e/install-action@v2.87.28
         with:
@@ -123,38 +148,65 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+        include:
+          - os: windows
+            runner: namespace-profile-terax-windows
+          - os: macos
+            runner: namespace-profile-terax-macos
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
-
-      - uses: swatinem/rust-cache@v2
         with:
-          workspaces: ./src-tauri -> target
+          components: clippy
+
+      - uses: namespacelabs/nscloud-cache-action@v1
+        with:
+          cache: rust
+          path: src-tauri/target
 
       - uses: taiki-e/install-action@v2.87.28
         with:
           tool: cargo-nextest
 
-      - name: cargo check
+      - name: cargo clippy
         working-directory: src-tauri
-        run: cargo check --all-targets --locked
+        run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: cargo nextest
         working-directory: src-tauri
         run: cargo nextest run --locked --retries 2
 
+      # keychain_compat (secrets.rs) writes real Keychain / Credential Manager
+      # items. A throwaway, unlocked default keychain keeps it from depending
+      # on (or prompting for) the runner's login keychain.
+      - name: Prepare a test keychain
+        if: matrix.os == 'macos'
+        run: |
+          security create-keychain -p terax-ci terax-ci.keychain-db
+          security set-keychain-settings terax-ci.keychain-db
+          security unlock-keychain -p terax-ci terax-ci.keychain-db
+          security list-keychains -d user -s terax-ci.keychain-db $(security list-keychains -d user | tr -d '"')
+          security default-keychain -d user -s terax-ci.keychain-db
+
+      - name: Saved keys stay readable (keychain_compat)
+        working-directory: src-tauri
+        run: cargo nextest run --locked --run-ignored only -E 'test(keychain_compat)'
+
   coverage:
-    runs-on: ubuntu-22.04
+    runs-on: namespace-profile-terax-linux
     needs: rust
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      - uses: namespacelabs/nscloud-cache-action@v1
+        with:
+          cache: apt
 
       - name: Install Linux build dependencies
         run: |
@@ -169,10 +221,10 @@ jobs:
         with:
           components: llvm-tools-preview
 
-      - uses: swatinem/rust-cache@v2
+      - uses: namespacelabs/nscloud-cache-action@v1
         with:
-          workspaces: ./src-tauri -> target
-          key: coverage
+          cache: rust
+          path: src-tauri/target
 
       - uses: taiki-e/install-action@v2.87.28
         with:

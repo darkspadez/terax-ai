@@ -12,24 +12,31 @@ jobs:
       actions: read
       contents: write
       id-token: write
+    # `platform` names the leg (the steps below branch on it); `runner` is the
+    # Namespace profile it builds on (see ci.yml). The Linux profile is Ubuntu
+    # 22.04 so the packages keep that glibc baseline.
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: macos-latest
+            runner: namespace-profile-terax-macos
             args: --target aarch64-apple-darwin
             rust-target: aarch64-apple-darwin
           - platform: macos-latest
+            runner: namespace-profile-terax-macos
             args: --target x86_64-apple-darwin
             rust-target: x86_64-apple-darwin
           - platform: ubuntu-22.04
+            runner: namespace-profile-terax-linux
             args: ""
             rust-target: ""
           - platform: windows-latest
+            runner: namespace-profile-terax-windows
             args: ""
             rust-target: ""
 
-    runs-on: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
 
@@ -53,10 +60,12 @@ jobs:
         with:
           targets: ${{ matrix.rust-target }}
 
-      - uses: swatinem/rust-cache@v2
+      - uses: namespacelabs/nscloud-cache-action@v1
         with:
-          workspaces: ./src-tauri -> target
-          key: ${{ matrix.platform }}-${{ matrix.rust-target }}
+          cache: |
+            bun
+            rust
+          path: src-tauri/target
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
@@ -246,7 +255,7 @@ jobs:
   patch-updater-manifest:
     needs: publish-tauri
     if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-terax-linux
     permissions:
       contents: write
     steps:

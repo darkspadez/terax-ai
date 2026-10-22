@@ -18,6 +18,14 @@ cargo nextest run --locked        # CI uses nextest
 
 If you do not have `cargo-nextest` installed, `cargo test --locked` is the local fallback. Install nextest with `cargo install cargo-nextest`.
 
+## macOS and Windows code from another host
+
+`scripts/cross-clippy.sh` runs `cargo clippy --all-targets -D warnings` for `aarch64-apple-darwin`, `x86_64-apple-darwin` and `x86_64-pc-windows-msvc` from any host (pass targets to choose). Build scripts that compile C get stand-in tools, since clippy never links, so platform-only modules and their tests are fully type-checked and linted. Nothing runs: behaviour on those platforms is covered by the CI jobs.
+
+## CI runners
+
+CI, release and the Nix-sources job run on [Namespace](https://namespace.so) runner profiles, each with a cache volume attached: `terax-linux` (Linux amd64, Ubuntu 22.04, the release glibc baseline), `terax-macos` (macOS arm64) and `terax-windows` (Windows amd64). A repository needs the Namespace GitHub app and those three profiles before its workflows can start. `keychain_compat` runs only in the macOS and Windows jobs (`--run-ignored only`), against a throwaway keychain on macOS.
+
 ## What must have a test
 
 `CONTRIBUTING.md` requires a test for any change that touches behavior in these load-bearing paths:

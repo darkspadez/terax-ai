@@ -10,7 +10,7 @@ concurrency:
 jobs:
   test-sign-windows:
     if: github.repository == 'crynta/terax-ai'
-    runs-on: windows-latest
+    runs-on: namespace-profile-terax-windows
     permissions:
       contents: read
       id-token: write
@@ -24,10 +24,12 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - uses: swatinem/rust-cache@v2
+      - uses: namespacelabs/nscloud-cache-action@v1
         with:
-          workspaces: ./src-tauri -> target
-          key: windows-signpath-test
+          cache: |
+            bun
+            rust
+          path: src-tauri/target
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile

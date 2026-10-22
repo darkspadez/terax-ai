@@ -11,7 +11,7 @@ on:
 
 jobs:
   update:
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-terax-linux
     permissions:
       contents: write
       pull-requests: write
