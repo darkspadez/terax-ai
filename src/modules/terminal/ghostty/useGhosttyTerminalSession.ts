@@ -23,11 +23,7 @@ import type { TerminalSearchController } from "@/modules/terminal/search/Termina
 import { currentWorkspaceEnv } from "@/modules/workspace/env";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  loadFeatureFamilies,
-  parseFontFeatures,
-  withFontFeatures,
-} from "../lib/fontFeatures";
+import { loadFeatureFamilies, useFontFeatureStack } from "../lib/fontFeatures";
 import { openPty, type PtySession } from "../lib/pty-bridge";
 import {
   DROPPED_PATH_MIMES,
@@ -198,23 +194,20 @@ export function useGhosttyTerminalSession({
   const fontFeatures = usePreferencesStore(
     (state) => state.terminalFontFeatures,
   );
+  const family = useFontFeatureStack(resolveFontFamily(fontFamily), fontFeatures);
   const fontOffset = useTerminalFontOffsets(
     (state) => state.offsets[leafId] ?? 0,
   );
   const font = useMemo<TerminalFontSpec>(
     () => ({
-      family: withFontFeatures(
-        resolveFontFamily(fontFamily),
-        parseFontFeatures(fontFeatures).settings ?? "normal",
-      ),
+      family,
       size: Math.max(4, Math.round((fontSize + fontOffset) * zoomLevel)),
       lineHeight,
       letterSpacing,
       weight: fontWeight,
     }),
     [
-      fontFamily,
-      fontFeatures,
+      family,
       fontSize,
       fontOffset,
       fontWeight,

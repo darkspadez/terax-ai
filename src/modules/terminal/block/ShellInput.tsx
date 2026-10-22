@@ -5,7 +5,7 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useTheme } from "@/modules/theme";
 import { useEffect, useRef } from "react";
 import { runScopeHandlers } from "@codemirror/view";
-import { parseFontFeatures, withFontFeatures } from "../lib/fontFeatures";
+import { useFontFeatureStack } from "../lib/fontFeatures";
 import {
   clearLeafBlockSelection,
   getLeafDraft,
@@ -73,9 +73,9 @@ export default function ShellInput({
   const { activeTheme, resolvedMode } = useTheme();
   const fontFeatures = usePreferencesStore((s) => s.terminalFontFeatures);
   // The derived faces carry the features into the editor's DOM text too.
-  const fontFamily = withFontFeatures(
+  const fontFamily = useFontFeatureStack(
     resolveFontFamily(fontFamilyPref),
-    parseFontFeatures(fontFeatures).settings ?? "normal",
+    fontFeatures,
   );
   const fontRef = useRef({ fontFamily, fontSize, fontWeight });
   fontRef.current = { fontFamily, fontSize, fontWeight };

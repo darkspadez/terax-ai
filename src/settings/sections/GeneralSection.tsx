@@ -781,7 +781,7 @@ function FontFeaturesInput({
       title="Font features"
       description={
         error ??
-        "OpenType features as Ghostty's font-feature takes them, e.g. zero, ss01, -calt. Applies to the bundled JetBrains Mono, not to installed fonts."
+        "OpenType features as Ghostty's font-feature takes them, e.g. zero, ss01, -calt. Applies to the bundled JetBrains Mono and to installed fonts such as Nerd Fonts."
       }
     >
       <input

@@ -1,9 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const core = vi.hoisted(() => ({
+  invoke: vi.fn(async (): Promise<unknown> => []),
+  convertFileSrc: (path: string) => `asset://localhost${path}`,
+}));
+vi.mock("@tauri-apps/api/core", () => core);
+
 import {
   declaredFaces,
+  fontFeaturesRevision,
   fontStackFamilies,
   parseFontFeatures,
   resolveSourceUrls,
+  subscribeFontFeatures,
   withFontFeatures,
 } from "./fontFeatures";
 
@@ -163,5 +172,79 @@ describe("feature families", () => {
     expect(withFontFeatures("Menlo, monospace", settings)).toBe(
       "Menlo, monospace",
     );
+  });
+
+  it("declares an installed family's faces from their files, ahead of the bundled font only", async () => {
+    const added: { family: string; source: string; descriptors: FontFaceDescriptors }[] = [];
+    vi.stubGlobal(
+      "FontFace",
+      class {
+        constructor(
+          readonly family: string,
+          readonly source: string,
+          readonly descriptors: FontFaceDescriptors,
+        ) {
+          added.push({ family, source, descriptors });
+        }
+      },
+    );
+    vi.stubGlobal("document", {
+      baseURI: "https://app.test/",
+      styleSheets: [
+        sheet("https://app.test/assets/index.css", [
+          { ...JETBRAINS, "font-family": '"Bundled Mono"' },
+        ]),
+      ],
+      fonts: { add: () => undefined },
+    });
+    core.invoke.mockImplementation(async () => [
+      { path: "/fonts/Nerd-Regular.ttf", weight: 400, style: "normal", stretch: 100 },
+      { path: "/fonts/Nerd-BoldItalic.ttf", weight: 700, style: "italic", stretch: 100 },
+    ]);
+    const changed = vi.fn();
+    const stop = subscribeFontFeatures(changed);
+    const before = fontFeaturesRevision();
+    const stack = '"Nerd Mono", "Bundled Mono", Menlo, monospace';
+    const settings = '"ss01" 1';
+
+    // Until the lookup answers the installed font draws as named.
+    const first = withFontFeatures(stack, settings);
+    expect(first).toMatch(/^"Nerd Mono", "Bundled Mono \(Terax features \d+\)", Menlo, monospace$/);
+    await vi.waitFor(() => expect(changed).toHaveBeenCalledOnce());
+    stop();
+    expect(fontFeaturesRevision()).toBe(before + 1);
+    // Only the font ahead of the bundled one is looked up.
+    expect(core.invoke.mock.calls).toEqual([
+      ["system_font_faces", { family: "Nerd Mono" }],
+    ]);
+
+    const second = withFontFeatures(stack, settings);
+    const nerd = /^"(Nerd Mono \(Terax features \d+\))"/.exec(second)?.[1];
+    expect(nerd).toBeDefined();
+    const faces = added.filter((face) => face.family === nerd);
+    expect(faces).toEqual([
+      {
+        family: nerd,
+        source: 'url("asset://localhost/fonts/Nerd-Regular.ttf")',
+        descriptors: { weight: "400", style: "normal", stretch: "100%", featureSettings: settings },
+      },
+      {
+        family: nerd,
+        source: 'url("asset://localhost/fonts/Nerd-BoldItalic.ttf")',
+        descriptors: { weight: "700", style: "italic", stretch: "100%", featureSettings: settings },
+      },
+    ]);
+    // Looked up once per family and feature list.
+    expect(core.invoke).toHaveBeenCalledOnce();
+  });
+
+  it("leaves a family that is not installed as named", async () => {
+    vi.stubGlobal("FontFace", class {});
+    vi.stubGlobal("document", { baseURI: "https://app.test/", styleSheets: [], fonts: { add: () => undefined } });
+    core.invoke.mockImplementation(async () => []);
+    expect(withFontFeatures('"Missing Font", monospace', '"zero" 1')).toBe('"Missing Font", monospace');
+    await vi.waitFor(() => expect(core.invoke).toHaveBeenCalled());
+    await Promise.resolve();
+    expect(withFontFeatures('"Missing Font", monospace', '"zero" 1')).toBe('"Missing Font", monospace');
   });
 });
