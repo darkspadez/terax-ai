@@ -1,0 +1,13 @@
+Unmodified upstream files, used as test fixtures only (never bundled):
+
+- ghostty/*: iTerm2-Color-Schemes, ghostty/ directory at commit
+  86a776d947b6f0c95d35005cb67f3cea435362fc
+  (https://github.com/mbadolato/iTerm2-Color-Schemes). MIT License,
+  Copyright (c) 2011 to Present Mark Badolato. Scheme credits and licences
+  are listed in src/modules/theme/themes/NOTICE.txt.
+- OneHalfDark.itermcolors: sonph/onehalf, iterm/ at commit 75eb2e97acd7
+  (https://github.com/sonph/onehalf). MIT License, Copyright (c) 2019
+  Son A. Pham.
+- flexoki-dark.toml, flexoki-dark.json: kepano/flexoki, alacritty/ and
+  windows-terminal/ at commit 8d723bac4a9a (https://github.com/kepano/flexoki).
+  MIT License, Copyright (c) 2023 Steph Ango.

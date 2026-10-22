@@ -14,8 +14,19 @@ export async function listCustomThemes(): Promise<Theme[]> {
 }
 
 export async function saveCustomTheme(theme: Theme): Promise<void> {
+  await saveCustomThemes([theme]);
+}
+
+/** Upserts by id in one store write; a later duplicate id wins. */
+export async function saveCustomThemes(
+  themes: readonly Theme[],
+): Promise<void> {
+  if (themes.length === 0) return;
+  const incoming = new Map(themes.map((t) => [t.id, t]));
   const current = await listCustomThemes();
-  const next = current.filter((t) => t.id !== theme.id).concat(theme);
+  const next = current
+    .filter((t) => !incoming.has(t.id))
+    .concat([...incoming.values()]);
   await store.set(KEY, next);
   await store.save();
   await emit(CHANGED_EVENT);
