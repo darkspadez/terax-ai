@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import type { TeraxLspClient } from "./client";
 import { detectBinary } from "./detect";
 import { getLspNavigator } from "./navigator";
-import { type LspPreset, serverForLanguage } from "./presets";
+import { type LspPreset, rootMarkersOf, serverForLanguage } from "./presets";
 import { useLspRuntimeStore } from "./runtimeStore";
 import type { TauriLspTransport } from "./transport";
 import { fileUriToPath, pathToFileUri } from "./uri";
@@ -77,10 +77,9 @@ export async function acquireDocExtension(
 
   // No project root means no session: a per-directory fallback multiplied
   // servers per open file and burned gigabytes.
-  const markers = preset.rootMarkers.length > 0 ? preset.rootMarkers : [".git"];
   const root = await invoke<string | null>("lsp_resolve_root", {
     path,
-    markers,
+    markers: rootMarkersOf(preset),
   }).catch(() => null);
   if (!root) return null;
   const key = `${preset.id}\u0000${root}`;
