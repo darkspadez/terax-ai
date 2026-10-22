@@ -81,6 +81,23 @@ function quickTerminalHotkeyOptions(
   });
 }
 
+const UNFOCUSED_SPLIT_OPTIONS: Option<number>[] = [
+  { value: 1, label: "Off" },
+  { value: 0.85, label: "Slightly" },
+  { value: 0.7, label: "Medium" },
+  { value: 0.5, label: "Strongly" },
+];
+
+/** The offered strengths, plus a hand-edited value so the picker shows it. */
+function unfocusedSplitOptions(current: number): Option<number>[] {
+  return UNFOCUSED_SPLIT_OPTIONS.some((option) => option.value === current)
+    ? UNFOCUSED_SPLIT_OPTIONS
+    : [
+        ...UNFOCUSED_SPLIT_OPTIONS,
+        { value: current, label: `${Math.round(current * 100)}% opacity` },
+      ];
+}
+
 /** Terminal input, clipboard and notification behaviour (Ghostty's defaults). */
 export function TerminalBehaviorSettings() {
   const behavior = usePreferencesStore((s) => s.terminalBehavior);
@@ -209,6 +226,16 @@ export function TerminalBehaviorSettings() {
             value: lines,
             label: `${lines} line${lines === 1 ? "" : "s"}`,
           }))}
+        />
+      </SettingRow>
+      <SettingRow
+        title="Dim unfocused split panes"
+        description="In a split tab, panes other than the one you type into fade into the background, so the focused one stands out."
+      >
+        <Choice
+          value={behavior.unfocusedSplitOpacity}
+          onChange={(unfocusedSplitOpacity) => set({ unfocusedSplitOpacity })}
+          options={unfocusedSplitOptions(behavior.unfocusedSplitOpacity)}
         />
       </SettingRow>
       <SettingRow
