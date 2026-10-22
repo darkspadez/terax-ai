@@ -82,10 +82,6 @@ fn parse_launch_target() -> LaunchTarget {
     resolve_launch_target(entries)
 }
 
-const fn settings_always_on_top(is_macos: bool) -> bool {
-    !is_macos
-}
-
 #[tauri::command]
 async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Result<(), String> {
     let url_path = match tab.as_deref() {
@@ -94,8 +90,6 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
     };
 
     if let Some(window) = app.get_webview_window("settings") {
-        #[cfg(not(target_os = "macos"))]
-        let _ = window.set_always_on_top(true);
         let _ = window.show();
         let _ = window.set_focus();
         if let Some(t) = tab.as_deref().filter(|s| !s.is_empty()) {
@@ -111,12 +105,12 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
         .inner_size(900.0, 700.0)
         .min_inner_size(820.0, 620.0)
         .resizable(true)
-        .visible(false)
-        .always_on_top(settings_always_on_top(cfg!(target_os = "macos")));
+        .visible(false);
 
-    // A normal-level child stays above Terax but recedes with the app on macOS.
-    // Never combine the macOS parent with always_on_top; that breaks WebView
-    // compositing and can hide Settings behind the main window (#33, #957).
+    // A normal-level child (an owned window on Windows, a transient one on
+    // Linux) stays above the window it opens over and recedes with the app.
+    // Never always_on_top: that floats it over every other app (#957), and
+    // with the macOS parent it breaks WebView compositing (#33).
     // It opens over the window in front, and closes with it.
     let parent = windows::target_window(&app);
     let builder = if let Some(parent) = &parent {
@@ -474,7 +468,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod launch_target_tests {
-    use super::{resolve_launch_target, settings_always_on_top, LaunchEntry, LaunchTarget};
+    use super::{resolve_launch_target, LaunchEntry, LaunchTarget};
     use std::path::PathBuf;
 
     #[test]
@@ -519,11 +513,5 @@ mod launch_target_tests {
         ]);
         assert_eq!(out.dir.as_deref(), Some("/workspace"));
         assert_eq!(out.files, vec!["/other/x.rs".to_string()]);
-    }
-
-    #[test]
-    fn settings_float_only_outside_macos() {
-        assert!(!settings_always_on_top(true));
-        assert!(settings_always_on_top(false));
     }
 }
