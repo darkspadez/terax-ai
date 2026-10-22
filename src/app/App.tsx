@@ -1019,7 +1019,11 @@ export default function App() {
         if (editor) editor.openSearch();
         else searchInlineRef.current?.focus();
       },
-      "ai.toggle": togglePanelAndFocus,
+      // Without a provider the open panel is only the connect bar: close it.
+      "ai.toggle": () =>
+        panelOpen && !hasComposer
+          ? useChatStore.getState().closePanel()
+          : togglePanelAndFocus(),
       "ai.toggleMini": () => {
         if (!hasComposer) {
           void openSettingsWindow("models");
@@ -1071,6 +1075,7 @@ export default function App() {
       resizeActiveTerminalPane,
       toggleSourceControl,
       hasComposer,
+      panelOpen,
       togglePanelAndFocus,
       toggleMini,
       onAskFromSelection,
@@ -1687,6 +1692,7 @@ export default function App() {
                       panelOpen={panelOpen}
                       keysLoaded={keysLoaded}
                       onConnect={() => void openSettingsWindow("models")}
+                      onClose={() => useChatStore.getState().closePanel()}
                     />
                   </div>
                 </div>
