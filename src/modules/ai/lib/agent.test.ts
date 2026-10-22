@@ -13,14 +13,69 @@ vi.mock("ai", async (importOriginal) => ({
   streamText: streamTextMock,
 }));
 vi.mock("./native", () => ({ native: {} }));
+
+// The native AI proxy (`ai_http_stream`): records each request and answers it
+// with one JSON body through the packet protocol proxyFetch decodes.
+const proxy = vi.hoisted(() => {
+  type Channel = { onmessage: (value: ArrayBuffer) => void };
+  const channels: Channel[] = [];
+  const requests: { url: string; headers: Record<string, string> }[] = [];
+  const reply = { body: "{}" };
+  const encoder = new TextEncoder();
+  const send = (channel: Channel, kind: number, text = "") => {
+    const bytes = encoder.encode(text);
+    const packet = new Uint8Array(bytes.length + 1);
+    packet[0] = kind;
+    packet.set(bytes, 1);
+    channel.onmessage(packet.buffer);
+  };
+  return {
+    requests,
+    reply,
+    invoke: async (
+      command: string,
+      _body?: unknown,
+      options?: { headers?: Record<string, string> },
+    ) => {
+      if (command !== "ai_http_stream") return undefined;
+      const meta = JSON.parse(options?.headers?.["x-terax-ai-request"] ?? "{}");
+      requests.push({ url: meta.url, headers: meta.headers ?? {} });
+      const channel = channels[channels.length - 1];
+      queueMicrotask(() => {
+        const headers = { "content-type": "application/json" };
+        send(channel, 0, JSON.stringify({ status: 200, headers }));
+        send(channel, 1, reply.body);
+        send(channel, 2);
+      });
+      return undefined;
+    },
+    Channel: class {
+      onmessage = (_value: ArrayBuffer) => {};
+      constructor() {
+        channels.push(this);
+      }
+      toJSON() {
+        return "__CHANNEL__";
+      }
+    },
+  };
+});
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: proxy.invoke,
+  Channel: proxy.Channel,
+}));
 vi.mock("@/modules/workspace", () => ({
   currentWorkspaceEnv: () => ({ kind: "local" }),
   workspaceScopeKey: () => "local",
 }));
 
-import { MAX_AGENT_STEPS } from "../config";
+import { compatModelIdForEndpoint, MAX_AGENT_STEPS } from "../config";
 import { TOOL_APPROVAL } from "../tools/tools";
-import { buildLanguageModel, runAgentStream } from "./agent";
+import {
+  buildConfiguredLanguageModel,
+  buildLanguageModel,
+  runAgentStream,
+} from "./agent";
 import { EMPTY_PROVIDER_KEYS } from "./keyring";
 
 const toolContext = {
@@ -165,5 +220,56 @@ describe("buildLanguageModel", () => {
     expect(request.headers.get("anthropic-dangerous-direct-browser-access")).toBe(
       "true",
     );
+  });
+
+  it("sends OpenCode's session header to an OpenCode custom endpoint, through the native proxy", async () => {
+    proxy.reply.body = JSON.stringify({
+      id: "c1",
+      object: "chat.completion",
+      created: 0,
+      model: "deepseek-v4-pro",
+      choices: [
+        {
+          index: 0,
+          message: { role: "assistant", content: "hi" },
+          finish_reason: "stop",
+        },
+      ],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    });
+    const endpoints = [
+      {
+        id: "ocgo0001",
+        name: "OpenCode Go",
+        baseURL: "https://opencode.ai/zen/go/v1",
+        modelId: "deepseek-v4-pro",
+        contextLimit: 128_000,
+      },
+      {
+        id: "other001",
+        name: "Other",
+        baseURL: "https://llm.example.com/v1",
+        modelId: "m",
+        contextLimit: 128_000,
+      },
+    ];
+    for (const endpoint of endpoints) {
+      const model = await buildConfiguredLanguageModel(
+        compatModelIdForEndpoint(endpoint.id),
+        EMPTY_PROVIDER_KEYS,
+        {
+          customEndpoints: endpoints,
+          customEndpointKeys: { [endpoint.id]: "sk-endpoint" },
+        },
+      );
+      await generateText({ model, prompt: "hello" });
+    }
+
+    const [opencode, other] = proxy.requests;
+    expect(opencode.url).toBe("https://opencode.ai/zen/go/v1/chat/completions");
+    expect(opencode.headers.authorization).toBe("Bearer sk-endpoint");
+    expect(opencode.headers["x-opencode-session"]).toMatch(/^[0-9a-f]+$/);
+    expect(other.url).toBe("https://llm.example.com/v1/chat/completions");
+    expect(other.headers).not.toHaveProperty("x-opencode-session");
   });
 });
