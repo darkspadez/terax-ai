@@ -7,6 +7,7 @@ import {
   DashboardSquare01Icon,
   FileEditIcon,
   FileSearchIcon,
+  FolderOpenIcon,
   Globe02Icon,
   IncognitoIcon,
   KeyboardIcon,
@@ -44,6 +45,7 @@ export type CommandPaletteActionContext = {
   home: string | null;
   openNewTab: () => void;
   openNewWindow: () => void;
+  openFolder: () => void;
   quit: () => void;
   openNewBlock: () => void;
   openNewPrivate: () => void;
@@ -113,6 +115,14 @@ export function createCommandItems(
       icon: AppWindowIcon,
       shortcutId: "window.new",
       run: ctx.openNewWindow,
+    },
+    {
+      id: "folder.open",
+      title: "Open folder...",
+      group: "General",
+      keywords: ["directory", "project", "workspace", "drive", "volume"],
+      icon: FolderOpenIcon,
+      run: ctx.openFolder,
     },
     {
       id: "app.quit",

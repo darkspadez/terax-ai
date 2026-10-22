@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Tab } from "@/modules/tabs";
 import {
   type CommandPaletteActionContext,
@@ -30,6 +30,7 @@ function baseContext(
     activeSpaceId: null,
     openNewTab: noop,
     openNewWindow: noop,
+    openFolder: noop,
     quit: noop,
     openNewBlock: noop,
     openNewPrivate: noop,
@@ -122,6 +123,16 @@ describe("createCommandItems", () => {
     expect(reasonById({ explorerRoot: null }, "explorer.search")).toBe(
       "No workspace root",
     );
+  });
+
+  it("offers Open folder even without a workspace root", () => {
+    const openFolder = vi.fn();
+    const item = createCommandItems(
+      baseContext({ explorerRoot: null, home: null, openFolder }),
+    ).find((i) => i.id === "folder.open");
+    expect(item?.disabledReason).toBeUndefined();
+    item?.run();
+    expect(openFolder).toHaveBeenCalledOnce();
   });
 
   it("marks the active space as the current one", () => {

@@ -170,6 +170,7 @@ import {
 } from "./hooks/tabCloseGuards";
 import { aiToggleAction } from "./hooks/aiToggle";
 import { useAppCloseGuard } from "./hooks/useAppCloseGuard";
+import { useOpenFolder } from "./hooks/useOpenFolder";
 import { useTabCloseGuards } from "./hooks/useTabCloseGuards";
 import { useWorkspaceSwitcher } from "./hooks/useWorkspaceSwitcher";
 
@@ -245,6 +246,7 @@ export default function App() {
   // (e.g. cdInNewTab) read the latest pane state instead of a stale closure.
   const tabsRef = useRef(tabs);
   const activeIdRef = useRef(activeId);
+  const openFolder = useOpenFolder({ tabsRef, newTabInSpace, setActiveId });
 
   const activeTerminalTab = useMemo(() => {
     const t = tabs.find((x) => x.id === activeId);
@@ -757,41 +759,36 @@ export default function App() {
     [handleOpenFile],
   );
 
-  // Warm start: the backend emits once the window already exists. Attach on
-  // mount so an "Open With" that lands mid-restore isn't dropped — the backend
-  // also seeds the drain-once state, so the boot drain below is the safety net.
-  // Only the window the files were sent to opens them.
+  // Files the OS asks this window to open (Open With at launch or later, a
+  // second launch) wait in the backend until taken, each once, and every
+  // arrival is announced. Take them only once `booted`: the spaces restore
+  // ends in replaceTabs(), which overwrites the tab list and would discard a
+  // tab opened before it. Booting first also lands the tab in the restored
+  // active space and lets openFileTab dedupe against an already open file.
+  // Listen first, then take what already waits, so no arrival is missed.
+  const takeLaunchFiles = useEffectEvent(async () => {
+    openLaunchFiles(await consumeLaunchFiles());
+  });
   useEffect(() => {
+    if (!booted) return;
     let unlisten: (() => void) | undefined;
     let disposed = false;
-    (async () => {
-      const off = await getCurrentWindow().listen<string[]>(
-        "terax:open-file",
-        (e) => {
-          openLaunchFiles(e.payload);
-        },
-      );
-      if (disposed) off();
-      else unlisten = off;
-    })();
+    void getCurrentWindow()
+      .listen("terax:open-file", () => void takeLaunchFiles())
+      .catch(() => undefined)
+      .then((stop) => {
+        if (disposed) {
+          stop?.();
+          return;
+        }
+        unlisten = stop;
+        void takeLaunchFiles();
+      });
     return () => {
       disposed = true;
       unlisten?.();
     };
-  }, [openLaunchFiles]);
-
-  // Cold start: files arrive as CLI args (Linux/Windows) or the macOS open-files
-  // event, and get_launch_files drains them once. Wait for `booted` — the spaces
-  // restore ends in replaceTabs(), which overwrites the whole tab list and would
-  // discard a launch tab opened before it, making the file flash open and vanish.
-  // Booting first also lands the tab in the restored active space, and lets
-  // openFileTab dedupe against a session that already had the file open.
-  useEffect(() => {
-    if (!booted) return;
-    void (async () => {
-      openLaunchFiles(await consumeLaunchFiles());
-    })();
-  }, [booted, openLaunchFiles]);
+  }, [booted]);
 
   const handleExplorerPathRenamed = useCallback(
     (from: string, to: string) => {
@@ -1422,6 +1419,7 @@ export default function App() {
       onOpenChange={setSwitcherOpen}
       tabs={tabs}
       onNewSpace={() => void handleNewSpace()}
+      onOpenFolder={openFolder}
       onDeleteSpace={handleDeleteSpace}
       onNewTabInSpace={handleNewTabInSpace}
       onJumpTab={jumpToTab}
@@ -1443,6 +1441,7 @@ export default function App() {
             home,
             openNewTab,
             openNewWindow: openWindow,
+            openFolder,
             quit: () => void quitApp(),
             openNewBlock: openNewBlockTab,
             openNewPrivate: openNewPrivateTab,
@@ -1471,6 +1470,7 @@ export default function App() {
         : [],
     [
       openWindow,
+      openFolder,
       commandPaletteOpen,
       tabs,
       activeId,
@@ -1710,6 +1710,7 @@ export default function App() {
                           }
                           onOpenGitHistory={handleOpenGitHistoryForPath}
                           onAttachToAgent={handleAttachFileToAgent}
+                          onOpenFolder={openFolder}
                           pathDropTarget={terminalPathDropTarget}
                           visible={!sidebarCollapsed}
                         />

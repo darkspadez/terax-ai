@@ -11,6 +11,7 @@ import {
   FileAddIcon,
   Folder01Icon,
   FolderAddIcon,
+  FolderOpenIcon,
   Refresh01Icon,
   Search01Icon,
 } from "@hugeicons/core-free-icons";
@@ -81,6 +82,8 @@ type Props = {
   onOpenInSourceControl?: (path: string) => void;
   onOpenGitHistory?: (path: string) => void;
   onAttachToAgent?: (path: string) => void;
+  /** Open Folder: the OS folder picker. */
+  onOpenFolder?: () => void;
   pathDropTarget?: TerminalPathDropTarget;
   gitStatus?: GitStatusSnapshot | null;
   /**
@@ -224,6 +227,7 @@ export const FileExplorer = memo(
       onOpenInSourceControl,
       onOpenGitHistory,
       onAttachToAgent,
+      onOpenFolder,
       pathDropTarget,
       gitStatus,
       visible = true,
@@ -532,6 +536,16 @@ export const FileExplorer = memo(
           <div className="text-xs text-muted-foreground">
             No current directory
           </div>
+          {onOpenFolder && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-1 h-7 text-xs"
+              onClick={onOpenFolder}
+            >
+              Open folder…
+            </Button>
+          )}
         </div>
       );
     }
@@ -696,6 +710,18 @@ export const FileExplorer = memo(
             {basename(rootPath)}
           </span>
 
+          {onOpenFolder && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6 text-muted-foreground hover:text-foreground"
+              onClick={onOpenFolder}
+              title="Open folder…"
+              aria-label="Open folder"
+            >
+              <HugeiconsIcon icon={FolderOpenIcon} size={13} strokeWidth={2} />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon"

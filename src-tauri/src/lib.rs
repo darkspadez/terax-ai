@@ -6,6 +6,7 @@ use modules::{
     agent, control, fs, git, history, lsp, net, primary_selection, pty, secrets, shell, vibrancy,
     windows, workspace,
 };
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 #[cfg(target_os = "macos")]
@@ -50,9 +51,40 @@ impl LaunchDir {
     }
 }
 
-/// Drained on first read so HMR / re-mounts can't replay the launch files.
+/// Files the OS asked Terax to open, per window, until that window's page
+/// takes them: queued as well as announced, so a file that arrives while the
+/// page boots still opens, and taken once so a reload cannot replay it.
 #[derive(Default)]
-struct LaunchFiles(Mutex<Vec<String>>);
+struct LaunchFiles(Mutex<HashMap<String, Vec<String>>>);
+
+impl LaunchFiles {
+    fn new(label: &str, files: Vec<String>) -> Self {
+        let state = Self::default();
+        state.queue(label, files);
+        state
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Vec<String>>> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn queue(&self, label: &str, files: Vec<String>) {
+        if files.is_empty() {
+            return;
+        }
+        let mut queues = self.lock();
+        let queued = queues.entry(label.to_owned()).or_default();
+        for file in files {
+            if !queued.contains(&file) {
+                queued.push(file);
+            }
+        }
+    }
+
+    fn take(&self, label: &str) -> Vec<String> {
+        self.lock().remove(label).unwrap_or_default()
+    }
+}
 
 #[tauri::command]
 fn get_launch_dir(state: State<'_, LaunchDir>) -> Option<String> {
@@ -60,8 +92,8 @@ fn get_launch_dir(state: State<'_, LaunchDir>) -> Option<String> {
 }
 
 #[tauri::command]
-fn get_launch_files(state: State<'_, LaunchFiles>) -> Vec<String> {
-    std::mem::take(&mut *state.0.lock().expect("LaunchFiles mutex poisoned"))
+fn get_launch_files(window: tauri::Window, state: State<'_, LaunchFiles>) -> Vec<String> {
+    state.take(window.label())
 }
 
 enum LaunchEntry {
@@ -114,6 +146,13 @@ fn parse_launch_args(args: impl IntoIterator<Item = String>, cwd: Option<&Path>)
     let entries = args
         .into_iter()
         .filter(|arg| !arg.starts_with('-'))
+        .map(|arg| {
+            if cfg!(windows) {
+                unescape_root_quote(arg)
+            } else {
+                arg
+            }
+        })
         .map(|arg| match cwd {
             Some(cwd) => cwd.join(arg),
             None => PathBuf::from(arg),
@@ -121,6 +160,16 @@ fn parse_launch_args(args: impl IntoIterator<Item = String>, cwd: Option<&Path>)
         .filter_map(launch_entry)
         .collect();
     resolve_launch_target(entries)
+}
+
+/// Explorer passes a drive root (Open in Terax on a drive or the background
+/// of one) as `"C:\"`, whose `\"` the argument parser reads as an escaped
+/// quote: `C:"`. No Windows path holds a quote, so a final one is that `\`.
+fn unescape_root_quote(arg: String) -> String {
+    match arg.strip_suffix('"') {
+        Some(path) => format!("{path}\\"),
+        None => arg,
+    }
 }
 
 fn launch_entry(path: PathBuf) -> Option<LaunchEntry> {
@@ -282,6 +331,8 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
+        // Open Folder's picker; app windows may only open (capabilities/dialog.json).
+        .plugin(tauri_plugin_dialog::init())
         // One async scheme multiplexes every terminal's output; see pty/hub.rs.
         .register_asynchronous_uri_scheme_protocol("terax-pty", pty::stream_protocol)
         .on_page_load(|webview, payload| {
@@ -339,7 +390,7 @@ pub fn run() {
             registry
         })
         .manage(LaunchDir::new(launch.folder))
-        .manage(LaunchFiles(Mutex::new(launch.files)))
+        .manage(LaunchFiles::new(windows::MAIN, launch.files))
         .invoke_handler(tauri::generate_handler![
             pty::pty_open,
             pty::pty_write,
@@ -492,6 +543,9 @@ pub fn run() {
                     if let Some(state) = app.try_state::<fs::watch::FsWatchState>() {
                         state.release_window(app, &label);
                     }
+                    if let Some(state) = app.try_state::<LaunchFiles>() {
+                        state.take(&label);
+                    }
                     windows::on_destroyed(app, &label);
                 }
                 // Servers exit on stdin EOF, but destructors are not guaranteed
@@ -510,9 +564,9 @@ pub fn run() {
                     }
                 }
                 // macOS delivers "Open With" files here, not as argv (cold and
-                // warm start, several at once). Seed the drain-once state and
-                // emit; canonicalize so the /tmp -> /private/tmp symlink can't
-                // defeat openFileTab's path dedupe against a CLI launch.
+                // warm start, several at once). Canonicalize so the /tmp ->
+                // /private/tmp symlink can't defeat openFileTab's path dedupe
+                // against a CLI launch.
                 #[cfg(target_os = "macos")]
                 tauri::RunEvent::Opened { urls } => {
                     let entries = urls
@@ -537,16 +591,8 @@ pub fn run() {
                             modules::second_launch::open_folder(app, folder);
                         }
                     }
-                    if target.files.is_empty() {
-                        return;
-                    }
-                    if let Some(state) = app.try_state::<LaunchFiles>() {
-                        *state.0.lock().expect("LaunchFiles mutex poisoned") = target.files.clone();
-                    }
-                    // One window opens them: the one in front.
-                    if let Some(window) = windows::target_window(app) {
-                        let _ = window.emit_to(window.label(), "terax:open-file", target.files);
-                    }
+                    // macOS brings the app forward itself.
+                    modules::second_launch::open_files(app, target.files);
                 }
                 _ => {}
             }
@@ -555,7 +601,10 @@ pub fn run() {
 
 #[cfg(test)]
 mod launch_target_tests {
-    use super::{parse_launch_args, resolve_launch_target, LaunchDir, LaunchEntry, LaunchTarget};
+    use super::{
+        launch_entry, parse_launch_args, resolve_launch_target, unescape_root_quote, LaunchDir,
+        LaunchEntry, LaunchFiles, LaunchTarget,
+    };
     use std::path::PathBuf;
 
     #[test]
@@ -637,4 +686,81 @@ mod launch_target_tests {
         assert_eq!(launched.take().as_deref(), Some("/cli"));
     }
 
+    #[test]
+    fn a_launch_entry_is_the_canonical_folder_or_file_and_nothing_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("proj");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("main.rs");
+        std::fs::write(&file, "").unwrap();
+
+        match launch_entry(dir.join(".")) {
+            Some(LaunchEntry::Dir(path)) => assert_eq!(path, dir.canonicalize().unwrap()),
+            _ => panic!("a folder is a Dir entry"),
+        }
+        match launch_entry(dir.join("..").join("proj").join("main.rs")) {
+            Some(LaunchEntry::File(path)) => assert_eq!(path, file.canonicalize().unwrap()),
+            _ => panic!("a file is a File entry"),
+        }
+        assert!(launch_entry(dir.join("missing.rs")).is_none());
+    }
+
+    // What a file manager hands over for Open With: absolute paths, any
+    // directory of its own, possibly several files (`%F`, a Finder selection,
+    // one Explorer launch per file through single-instance).
+    #[test]
+    fn files_opened_from_the_os_open_in_editor_tabs_in_their_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let docs = tmp.path().join("My Notes \u{e9}t\u{e9}");
+        std::fs::create_dir_all(&docs).unwrap();
+        let one = docs.join("read me.md");
+        let two = tmp.path().join("config.yaml");
+        std::fs::write(&one, "").unwrap();
+        std::fs::write(&two, "").unwrap();
+        let canon = |p: &PathBuf| super::fs::to_canon(p.canonicalize().unwrap());
+        let elsewhere = tmp.path().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let arg = |p: &PathBuf| p.to_string_lossy().into_owned();
+
+        let single = parse_launch_args([arg(&one)], Some(&elsewhere));
+        assert_eq!(single.files, vec![canon(&one)]);
+        assert_eq!(single.dir, Some(canon(&docs)));
+        assert_eq!(single.folder, None);
+
+        let several = parse_launch_args([arg(&one), arg(&two)], None);
+        assert_eq!(several.files, vec![canon(&one), canon(&two)]);
+        assert_eq!(several.dir, Some(canon(&docs)));
+
+        let with_folder = parse_launch_args([arg(&two), arg(&docs)], None);
+        assert_eq!(with_folder.files, vec![canon(&two)]);
+        assert_eq!(with_folder.folder, Some(canon(&docs)));
+    }
+
+    #[test]
+    fn a_drive_root_from_explorer_gets_its_backslash_back() {
+        assert_eq!(unescape_root_quote(r#"C:""#.into()), r"C:\");
+        assert_eq!(
+            unescape_root_quote(r#"\\server\share""#.into()),
+            r"\\server\share\"
+        );
+        assert_eq!(unescape_root_quote(r"C:\Users\me".into()), r"C:\Users\me");
+        assert_eq!(unescape_root_quote("/home/me".into()), "/home/me");
+    }
+
+    #[test]
+    fn launch_files_wait_for_their_window_and_are_taken_once() {
+        let files = LaunchFiles::new("main", vec!["/a/x.rs".into()]);
+        files.queue("main", vec!["/a/y.rs".into(), "/a/x.rs".into()]);
+        files.queue("w-2", vec!["/b/z.md".into()]);
+        files.queue("w-3", vec![]);
+
+        assert_eq!(files.take("main"), vec!["/a/x.rs", "/a/y.rs"]);
+        // A reload asks again and gets nothing to replay.
+        assert!(files.take("main").is_empty());
+        assert!(files.take("w-3").is_empty());
+        assert_eq!(files.take("w-2"), vec!["/b/z.md"]);
+
+        files.queue("main", vec!["/a/x.rs".into()]);
+        assert_eq!(files.take("main"), vec!["/a/x.rs"]);
+    }
 }
