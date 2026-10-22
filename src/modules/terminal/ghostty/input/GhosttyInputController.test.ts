@@ -702,6 +702,64 @@ describe.each(["ghostty-vt.wasm", "ghostty-vt-scalar.wasm"])(
       dispose();
     });
 
+    // crynta/terax-ai#192: agents read a clipboard image on Ctrl+V.
+    it.each([
+      ["macOS Cmd+V", { isMac: true }, { key: "v", code: "KeyV", metaKey: true }],
+      [
+        "Linux Ctrl+Shift+V",
+        {},
+        { key: "V", code: "KeyV", ctrlKey: true, shiftKey: true },
+      ],
+      ["Linux Shift+Insert", {}, { key: "Insert", code: "Insert", shiftKey: true }],
+      [
+        "Windows Ctrl+Shift+V",
+        { isWindows: true },
+        { key: "V", code: "KeyV", ctrlKey: true, shiftKey: true },
+      ],
+      [
+        "Windows Shift+Insert",
+        { isWindows: true },
+        { key: "Insert", code: "Insert", shiftKey: true },
+      ],
+    ] as const)(
+      "sends Ctrl+V for %s when the clipboard holds only an image",
+      async (_name, platform, chord) => {
+        let image = true;
+        const clipboardHasImage = vi.fn(async () => image);
+        const { input, sent, model, replies, write, dispose } = setup({
+          ...platform,
+          clipboardHasImage,
+        });
+        clipboard.text = "";
+        const paste = () => input.dispatchEvent(keyboardEvent(chord));
+        paste();
+        await vi.waitFor(() => expect(sent.splice(0)).toEqual(["\x16"]));
+        // In the program's keyboard mode, with the release it asked for.
+        write("\x1b[>3u");
+        paste();
+        await vi.waitFor(() =>
+          expect(sent.splice(0)).toEqual(["\x1b[118;5u", "\x1b[118;5:3u"]),
+        );
+        write("\x1b[<u");
+        // An empty clipboard pastes nothing.
+        image = false;
+        paste();
+        await vi.waitFor(() => expect(clipboardHasImage).toHaveBeenCalledTimes(3));
+        await Promise.resolve();
+        expect(sent).toEqual([]);
+        // A program taking Kitty paste events is offered the image instead.
+        image = true;
+        model.setClipboardPolicy({ readsToHost: true, writesAllowed: true });
+        write("\x1b[?5522h");
+        paste();
+        await vi.waitFor(() =>
+          expect(replies.join("")).toContain("\x1b]5522;type=read:status=OK"),
+        );
+        expect(sent).toEqual([]);
+        dispose();
+      },
+    );
+
     it("keeps Ctrl+C and Ctrl+V for the program on Linux", async () => {
       const onCopy = vi.fn(() => true);
       const { input, sent, dispose } = setup({

@@ -183,8 +183,8 @@ export type GhosttyInputControllerOptions = {
   /** Middle click the program does not track; true when handled (a paste). */
   readonly onMiddleClick?: () => boolean;
   /**
-   * Whether the clipboard holds an image, which a Kitty paste event then
-   * offers as `image/png`; asked only when the program takes paste events.
+   * Whether the clipboard holds an image: a Kitty paste event then offers it
+   * as `image/png`, and a paste key with no text sends the program Ctrl+V.
    */
   readonly clipboardHasImage?: () => Promise<boolean>;
   readonly isMac?: boolean;
@@ -364,17 +364,20 @@ export class GhosttyInputController {
     });
     if (clipboard === "paste" || clipboard === "pasteText") {
       consume(event);
-      void readTerminalClipboard().then((text) => {
-        if (
-          text ||
-          clipboard === "paste" ||
-          this.options.model.pasteEventsWanted?.()
-        ) {
+      void readTerminalClipboard().then(async (text) => {
+        if (text || this.options.model.pasteEventsWanted?.()) {
           this.pasteFromClipboard(text);
-        } else {
+        } else if (clipboard === "pasteText") {
           // No text: the program gets the key and reads the clipboard
           // itself (agents paste an image on Ctrl+V).
           this.sendHeldKey(event);
+        } else if (
+          (await this.options.clipboardHasImage?.().catch(() => false)) ===
+          true
+        ) {
+          // Only an image: agents (Claude Code, Codex) read it themselves
+          // when they get Ctrl+V.
+          this.sendControlV();
         }
       });
       return;
@@ -481,6 +484,28 @@ export class GhosttyInputController {
     if (encoded.byteLength === 0) return;
     this.options.model.scrollToBottom();
     this.emitBytes(encoded);
+  }
+
+  /** Ctrl+V pressed and released, encoded as the program asked (^V, `CSI 118;5u`). */
+  private sendControlV(): void {
+    if (this.disposed || this.options.model.isDisposed?.()) return;
+    const press: KeyEvent = {
+      action: KeyAction.PRESS,
+      key: Key.V,
+      mods: Mods.CTRL,
+      utf8: "v",
+      unshiftedCodepoint: 118,
+    };
+    const pressed = this.options.model.encodeKey(press);
+    const released = this.options.model.encodeKey({
+      ...press,
+      action: KeyAction.RELEASE,
+      utf8: undefined,
+    });
+    if (pressed.byteLength === 0) return;
+    this.options.model.scrollToBottom();
+    this.emitBytes(pressed);
+    if (released.byteLength > 0) this.emitBytes(released);
   }
 
   /** macOS Option-as-Alt applies to this key event (side-aware). */

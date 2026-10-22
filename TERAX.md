@@ -232,7 +232,11 @@ Shift+Insert elsewhere; and on Windows, like Windows Terminal unless Settings
 turns it off (`terminalBehavior.smartCopyPaste`), Ctrl+C copies and clears a
 selection (interrupting without one) and Ctrl+V pastes text, or reaches the
 program when the clipboard holds no text so agents can read an image. Linux
-keeps plain Ctrl+C/V for the program. A copy key with nothing selected goes on
+keeps plain Ctrl+C/V for the program. When the clipboard holds only an image,
+the other paste keys (Cmd+V, Ctrl+Shift+V, Shift+Insert) send the program
+Ctrl+V in its keyboard mode, so agents such as Claude Code and Codex read the
+image themselves; a program that set mode 5522 gets the Kitty paste event
+listing `image/png` instead. A copy key with nothing selected goes on
 to the program. Context clicks expose the selected text through the input element to
 restore the webview's native text menu; no persistent DOM scrollback is maintained.
 On macOS the input `<textarea>` always holds one selected placeholder character
