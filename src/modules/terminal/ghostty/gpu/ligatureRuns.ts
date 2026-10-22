@@ -4,9 +4,10 @@
  * chunks of at most `LIGATURE_MAX_CELLS`. Every cell of a run is drawn as its
  * part of the whole run (`ligatureSlicePlacement`), so a font's contextual
  * alternates and ligatures (`->`, `!=`, `===`) join across cells while each
- * cell keeps its own. The core applies the same rule when it interns WebGPU
- * glyphs (`ligatureChunkLength` in `terax.zig`); the WebGL renderer applies
- * this one.
+ * cell keeps its own. Like Ghostty's renderer, runs break at the visible
+ * cursor, so the text under it reads as typed. The core applies the same
+ * rule when it interns WebGPU glyphs (`ligatureChunkLength` in `terax.zig`);
+ * the WebGL renderer applies this one.
  */
 
 import { CellFlags } from "@terax/ghostty-core/protocol";
@@ -53,20 +54,23 @@ export function ligatureKey(
  * `runs[column]`: 0 outside a run, else the run's length and the cell's index
  * in it (`ligatureRunLength`, `ligatureRunIndex`). A run longer than
  * `LIGATURE_MAX_CELLS` continues as a new run; a last piece of one cell is
- * drawn on its own. Returns how many cells are in runs.
+ * drawn on its own. A run ends before `breakAt` (the cursor's column, or -1),
+ * whose cell is drawn on its own. Returns how many cells are in runs.
  */
 export function findLigatureRuns(
   keys: ArrayLike<number>,
   cols: number,
   runs: Uint16Array,
+  breakAt = -1,
 ): number {
   let total = 0;
   let column = 0;
   while (column < cols) {
     const key = keys[column];
     let end = column + 1;
-    if (key !== LIGATURE_NONE) {
-      const limit = Math.min(cols, column + LIGATURE_MAX_CELLS);
+    if (key !== LIGATURE_NONE && column !== breakAt) {
+      let limit = Math.min(cols, column + LIGATURE_MAX_CELLS);
+      if (breakAt > column) limit = Math.min(limit, breakAt);
       while (end < limit && keys[end] === key) end += 1;
     }
     const length = end - column;
@@ -89,8 +93,8 @@ const LOOK_FLAGS =
 
 /**
  * `findLigatureRuns` for viewport row `row` of a cell reader (the input of the
- * WebGL renderer). `keys` and `runs` hold at least `cols` entries. Only
- * punctuation cells are read beyond their code point.
+ * WebGL renderer), broken at `breakAt`. `keys` and `runs` hold at least `cols`
+ * entries. Only punctuation cells are read beyond their code point.
  */
 export function findRowLigatureRuns(
   cells: TerminalCellReader,
@@ -98,6 +102,7 @@ export function findRowLigatureRuns(
   cols: number,
   keys: Float64Array,
   runs: Uint16Array,
+  breakAt = -1,
 ): number {
   const base = row * cols;
   let candidates = 0;
@@ -125,7 +130,7 @@ export function findRowLigatureRuns(
     runs.fill(0, 0, cols);
     return 0;
   }
-  return findLigatureRuns(keys, cols, runs);
+  return findLigatureRuns(keys, cols, runs, breakAt);
 }
 
 export function ligatureRunLength(run: number): number {

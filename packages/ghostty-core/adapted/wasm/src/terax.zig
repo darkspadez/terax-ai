@@ -1358,6 +1358,9 @@ const Restty = struct {
     ligatures: bool = true,
     /// The next GPU update re-encodes every row (the ligature switch changed).
     gpu_rewrite_pending: bool = false,
+    /// Where the last update broke ligature runs: the visible cursor's
+    /// viewport cell (`ligatureBreak`).
+    ligature_break: ?LigatureBreak = null,
     /// Scratch for `restty_line_cells_prepare`.
     line_cells: std.ArrayListUnmanaged(u32) = .empty,
     key_output: [max_key_output_bytes]u8 = undefined,
@@ -3597,9 +3600,48 @@ inline fn sameLigatureLook(first: *const GpuStyleCache, other: *const GpuStyleCa
         (first.attrs & GpuAttr.blink) == (other.attrs & GpuAttr.blink);
 }
 
+const LigatureBreak = struct { row: u16, col: u16 };
+
+/// Like Ghostty's renderer, runs break at the cursor so the text under it
+/// reads as typed: a run ends before the cursor's cell, which is drawn on its
+/// own, and the rest starts after it. Ghostty breaks at the cursor wherever
+/// it is in the viewport; here only a visible one does, which the WebGL
+/// renderer can tell as well.
+fn ligatureBreak(h: *const Restty) ?LigatureBreak {
+    if (!h.ligatures) return null;
+    const cursor = h.render_state.cursor;
+    if (!cursor.visible) return null;
+    const vp = cursor.viewport orelse return null;
+    return .{ .row = @intCast(vp.y), .col = @intCast(vp.x) };
+}
+
+/// A changed break re-encodes the rows it left and enters when it can change
+/// them (its cell and a neighbour may join a run). Ghostty marks the rows a
+/// moving cursor leaves and enters dirty itself, but not a cursor shown or
+/// hidden. Re-encoded GPU rows that come out the same are not reported.
+fn markLigatureBreakRows(h: *Restty, next: ?LigatureBreak) void {
+    const previous = h.ligature_break;
+    h.ligature_break = next;
+    if (std.meta.eql(previous, next)) return;
+    if (previous) |b| markLigatureBreakRow(h, b);
+    if (next) |b| markLigatureBreakRow(h, b);
+}
+
+fn markLigatureBreakRow(h: *Restty, b: LigatureBreak) void {
+    const row_data = h.render_state.row_data.slice();
+    if (b.row >= row_data.len) return;
+    const raw = row_data.items(.cells)[b.row].slice().items(.raw);
+    const x: usize = b.col;
+    if (x >= raw.len or !ligatureCandidate(raw[x])) return;
+    const joins = (x > 0 and ligatureCandidate(raw[x - 1])) or
+        (x + 1 < raw.len and ligatureCandidate(raw[x + 1]));
+    if (joins) row_data.items(.dirty)[b.row] = true;
+}
+
 /// The ligature rule of `ligatureRuns.ts` (which the WebGL renderer applies):
 /// a run is two or more adjacent candidate cells of one row drawn alike, cut
-/// into chunks of at most `ligature_max_cells`. Returns how many cells from
+/// into chunks of at most `ligature_max_cells` and broken at the cursor
+/// (`break_col`, the cursor's column on its row). Returns how many cells from
 /// `start` (a visible candidate whose style resolved to `first`) form its
 /// chunk; 1 means the cell is drawn on its own. Each cell of a chunk is
 /// interned as the chunk's text with `glyph_style_ligature` and its index
@@ -3612,12 +3654,17 @@ noinline fn ligatureChunkLength(
     cell_styles: []const ghostty.Style,
     start: usize,
     cols: usize,
+    break_col: ?usize,
     first: *const GpuStyleCache,
     palette: anytype,
     default_fg: ghostty.color.RGB,
     default_bg: ghostty.color.RGB,
 ) usize {
-    const end = @min(cols, start + ligature_max_cells);
+    var end = @min(cols, start + ligature_max_cells);
+    if (break_col) |x| {
+        if (x == start) return 1;
+        if (x > start) end = @min(end, x);
+    }
     const style_id = raw_cells[start].style_id;
     var x = start + 1;
     while (x < end) : (x += 1) {
@@ -3748,6 +3795,10 @@ fn writeGpuRows(
         var ligature_start: usize = 0;
         var ligature_end: usize = 0;
         var ligature_glyph: u32 = 0;
+        const break_col: ?usize = if (h.ligature_break) |b|
+            if (b.row == r) b.col else null
+        else
+            null;
 
         var c: usize = 0;
         while (c < cols) : (c += 1) {
@@ -3814,6 +3865,7 @@ fn writeGpuRows(
                                     cell_styles,
                                     c,
                                     cols,
+                                    break_col,
                                     resolved,
                                     palette,
                                     default_fg,
@@ -3965,6 +4017,7 @@ pub export fn restty_render_update(handle: ?*Restty) u32 {
         dynamic_buffers_need_compaction;
 
     @memset(h.buffers.row_dirty[0..h.rows], 0);
+    markLigatureBreakRows(h, ligatureBreak(h));
     if (gpu) {
         // Stored records are stale (every row must be uploaded) only when no
         // render data exists for this geometry or the glyph ids were

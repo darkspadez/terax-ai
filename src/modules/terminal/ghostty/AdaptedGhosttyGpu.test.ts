@@ -211,8 +211,9 @@ function expectedFromSoa(
 }
 
 /**
- * `findLigatureRuns` over one SoA row, keyed as the WebGL renderer keys it:
- * the core's ligature runs must agree with it cell for cell.
+ * `findLigatureRuns` over one SoA row, keyed and broken at the visible cursor
+ * as the WebGL renderer does: the core's ligature runs must agree with it
+ * cell for cell.
  */
 function soaLigatureRuns(
   state: TeraxGhosttyRenderState,
@@ -236,7 +237,13 @@ function soaLigatureRuns(
     );
   }
   const runs = new Uint16Array(cols);
-  findLigatureRuns(keys, cols, runs);
+  const { cursor } = state;
+  findLigatureRuns(
+    keys,
+    cols,
+    runs,
+    cursor.visible && cursor.row === row ? cursor.column : -1,
+  );
   return runs;
 }
 
@@ -943,6 +950,52 @@ describe.each([
         expect(row(7).slice(0, 4)).toEqual(["-", "＝", null, "-"]);
         expect(row(8)).toEqual(["a", "b", "c", "d", "e", "f", "--@0", "--@1"]);
         expect(row(9)[0]).toBe("-");
+      } finally {
+        harness.terminal.dispose();
+      }
+    });
+
+    it("breaks runs at the visible cursor and re-encodes the rows it leaves", () => {
+      const harness = gpu(12, 3);
+      try {
+        harness.write("a->b ===\x1b[1;3H");
+        let snapshot = harness.update();
+        // The cursor's cell is drawn alone; the run resumes after it.
+        expect(cells(harness, snapshot, 0).slice(0, 8)).toEqual([
+          "a",
+          "-",
+          ">",
+          "b",
+          null,
+          "===@0",
+          "===@1",
+          "===@2",
+        ]);
+        harness.write("\x1b[1;7H");
+        snapshot = harness.update();
+        expect(dirtyRowIndexes(snapshot)).toEqual([0]);
+        expect(cells(harness, snapshot, 0).slice(0, 8)).toEqual([
+          "a",
+          "->@0",
+          "->@1",
+          "b",
+          null,
+          "=",
+          "=",
+          "=",
+        ]);
+        // A hidden cursor breaks nothing; a move off any run is not damage.
+        harness.write("\x1b[?25l");
+        snapshot = harness.update();
+        expect(cells(harness, snapshot, 0).slice(5, 8)).toEqual([
+          "===@0",
+          "===@1",
+          "===@2",
+        ]);
+        harness.write("\x1b[?25h\x1b[2;1H");
+        harness.update();
+        harness.write("\x1b[3;4H");
+        expect(harness.update().anyDirty).toBe(false);
       } finally {
         harness.terminal.dispose();
       }

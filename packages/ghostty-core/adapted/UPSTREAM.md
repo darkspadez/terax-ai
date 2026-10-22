@@ -11,10 +11,10 @@ per-terminal frame loop, or per-pane GPU lifecycle.
 - Restty commit: `7700b14a7643ba9240818209ef1e0aa90d83ad77`
 - Zig: `0.16.0`
 - Optimization: `ReleaseFast`, WebAssembly SIMD and scalar variants
-- SIMD artifact size: `1071135` bytes
-- Scalar artifact size: `1012098` bytes
-- SIMD SHA-256: `4b6fc49c8326b09e36a5ca1d1db1ba321b5d5dfee159db2e90474914dcbd4218`
-- Scalar SHA-256: `f9c1cf299a1c51a514486b6f0db5ff04523c74700da2106398b967d02360e418`
+- SIMD artifact size: `1071872` bytes
+- Scalar artifact size: `1012835` bytes
+- SIMD SHA-256: `4665c5f151ab5b3b19ec19251bfd15a95d4b02328d24b29750cee278b5dc4262`
+- Scalar SHA-256: `6caa49c17ea16d9ee8b7ec466b3c9e510baed8a5054d96a0ad9cbd148a433333`
 
 Terax-specific changes include:
 
@@ -145,7 +145,12 @@ XTVERSION, OSC 9;4 progress), instead of answering only a hand-picked set:
   (one table lookup), so letters, digits and spaces keep the ASCII table path
   at its old cost (a 200x60 re-encode of plain text measured the same); a
   screen dense with operators costs about 1.6 times as much. Changing the
-  switch re-encodes every row once, like a palette change.
+  switch re-encodes every row once, like a palette change. Runs break at the
+  visible cursor, as Ghostty's run iterator does (`cursor_x`): a run ends
+  before the cursor's cell, which is drawn alone. When the break moves, the
+  rows it leaves and enters are re-encoded if its cell and a neighbour are
+  candidates (Ghostty dirties a moving cursor's rows itself, not a cursor
+  shown or hidden).
 - Kitty clipboard (OSC 5522) through Ghostty's own protocol code, refused
   until the host sets a policy (`restty_set_clipboard_policy`). Ghostty's
   clipboard effects are synchronous and the host's clipboard is not, so the

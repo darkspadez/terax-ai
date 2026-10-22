@@ -152,6 +152,8 @@ drawn alike (`gpu/ligatureRuns.ts`; the core interns each cell as the whole run
 plus its index, `GPU_GLYPH_LIGATURE`, and WebGL applies the same rule): every
 cell's glyph is the run drawn with that cell's character on its pen origin, cut
 to the cell, so `->` or `!=` joins while each cell keeps its own pixels.
+Runs break at the visible cursor, as in Ghostty, so the text under it reads as
+typed; the rows the break moves between are re-encoded.
 Letters, digits and spaces never form runs and keep the ASCII fast path.
 Kitty graphics draw in both renderers in Ghostty's three layers (under cell
 backgrounds, between backgrounds and text, above text; `gpu/imageLayer.ts`,

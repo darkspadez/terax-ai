@@ -156,6 +156,23 @@ describe("findLigatureRuns", () => {
     expect(runsOf(keysOf("-"))).toEqual({ total: 0, cells: [null] });
   });
 
+  it("breaks runs at the cursor, whose cell is drawn alone", () => {
+    const keys = keysOf("a===b");
+    const at = (breakAt: number) => {
+      const runs = new Uint16Array(keys.length);
+      findLigatureRuns(keys, keys.length, runs, breakAt);
+      return Array.from(runs, (run) =>
+        run === 0 ? null : [ligatureRunLength(run), ligatureRunIndex(run)],
+      );
+    };
+    expect(at(1)).toEqual([null, null, [2, 0], [2, 1], null]);
+    expect(at(2)).toEqual([null, null, null, null, null]);
+    expect(at(3)).toEqual([null, [2, 0], [2, 1], null, null]);
+    // A break elsewhere changes nothing.
+    expect(at(0)).toEqual(runsOf(keys).cells);
+    expect(at(-1)).toEqual(runsOf(keys).cells);
+  });
+
   it("only considers the first `cols` keys and clears stale cells", () => {
     const runs = new Uint16Array(4).fill(0xffff);
     expect(findLigatureRuns(keysOf("a->--"), 3, runs)).toBe(2);

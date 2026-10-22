@@ -650,6 +650,31 @@ describe.each([
       }
     });
 
+    it("reports a run's row when showing or hiding the cursor breaks it", () => {
+      const terminal = ghostty.createTerminal(16, 4);
+      const encoder = new TextEncoder();
+      const dirty = (text: string) => {
+        terminal.write(encoder.encode(text));
+        const state = terminal.updateRenderState();
+        return Array.from(state.dirtyRows.subarray(0, state.rows), (row, index) =>
+          row ? index : -1,
+        ).filter((index) => index >= 0);
+      };
+      try {
+        dirty("a->b x\x1b[1;2H");
+        // Ghostty reports the rows a moving cursor leaves and enters, not a
+        // visibility change; the WebGL renderer re-reads the run's row.
+        expect(dirty("\x1b[?25l")).toEqual([0]);
+        expect(dirty("\x1b[?25h")).toEqual([0]);
+        dirty("\x1b[1;6H");
+        // A cursor on no run breaks nothing.
+        expect(dirty("\x1b[?25l")).toEqual([]);
+        expect(dirty("\x1b[?25h")).toEqual([]);
+      } finally {
+        terminal.dispose();
+      }
+    });
+
     it("interns persistent hyperlinks across dirty-row updates and storage growth", () => {
       const terminal = ghostty.createTerminal(40, 4);
       const encoder = new TextEncoder();

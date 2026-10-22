@@ -639,12 +639,19 @@ export class WebGlCellRenderer {
     const viewportOrigin = frame.model.viewportOriginLine();
     const minimumContrast = this.profile.theme.minimumContrast ?? 1;
     const ligatures = frame.model.ligatures?.() === true;
+    // Runs break at the visible cursor; the core reports its rows as damaged
+    // when it moves.
+    const cursor = ligatures ? frame.model.cursor() : null;
+    const breakRow = cursor?.visible ? cursor.y : -1;
+    const breakColumn = cursor?.visible ? cursor.x : -1;
 
     for (let row = first; row <= last; row += 1) {
       let rowHasBlinkingCell = false;
       let rowRectanglesChanged = false;
       let previousBackground = this.packRgb(this.profile.theme.background);
-      const runs = ligatures ? this.findRowLigatures(cells, row) : null;
+      const runs = ligatures
+        ? this.findRowLigatures(cells, row, row === breakRow ? breakColumn : -1)
+        : null;
       let runText = "";
       for (let column = 0; column < this.cols; column += 1) {
         const cellIndex = row * this.cols + column;
@@ -774,10 +781,11 @@ export class WebGlCellRenderer {
     return rectanglesChanged;
   }
 
-  /** The ligature runs of `row`, or null when it has none. */
+  /** The ligature runs of `row` broken at `breakAt`, or null when it has none. */
   private findRowLigatures(
     cells: TerminalCellReader,
     row: number,
+    breakAt: number,
   ): Uint16Array | null {
     if (this.ligatureKeys.length < this.cols) {
       this.ligatureKeys = new Float64Array(this.cols);
@@ -789,6 +797,7 @@ export class WebGlCellRenderer {
       this.cols,
       this.ligatureKeys,
       this.ligatureRuns,
+      breakAt,
     ) > 0
       ? this.ligatureRuns
       : null;
