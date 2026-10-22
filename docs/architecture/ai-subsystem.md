@@ -80,6 +80,8 @@ Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalRespons
 
 A tool call needs a result before any later request: one without it fails every following prompt with `MissingToolResultsError`. So only the newest message's approvals can be answered (`pendingApprovalIds` in `lib/toolApprovals.ts`): older cards render as denied rows, their diff tabs close, and the diff-tab responder ignores them. Every user message (composer, Continue, managed-agent review) goes through `sendUserMessage` in `store/chatRuntime.ts`, which first replaces the messages holding unanswered approvals (waiting, or approved but never run) with copies where those calls are denied, so the model is told they did not run and the settled state is what gets persisted.
 
+In plan mode, an edit that Apply could not write (a write error, or a path the deny-list refuses at write time) stays in the review list with its error until it is applied or rejected; written edits leave the list.
+
 ## Edit diffs
 
 AI-proposed file edits open in an `ai-diff` tab. The user accepts or rejects per hunk. Only after acceptance does the `write_file` or `edit` tool actually run. This keeps the approval UI decoupled from the tool execution.

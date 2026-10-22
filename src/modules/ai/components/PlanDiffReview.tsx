@@ -41,18 +41,16 @@ export function PlanDiffReview() {
 
   if (queue.length === 0) return null;
 
+  // Edits that could not be written stay in the list with their error.
   const onApply = async () => {
     setBusy(true);
     try {
-      const results = await applyAll();
-      const failed = results.filter((r) => !r.ok);
-      if (failed.length) {
-        console.error("plan apply failures:", failed);
-      }
+      await applyAll();
     } finally {
       setBusy(false);
     }
   };
+  const failed = queue.filter((q) => q.error !== undefined).length;
 
   return (
     <div className="absolute inset-0 z-10 flex flex-col bg-background/85 backdrop-blur-xl">
@@ -63,6 +61,9 @@ export function PlanDiffReview() {
           </span>
           <span className="text-[10.5px] text-muted-foreground">
             {queue.length} pending change{queue.length === 1 ? "" : "s"}
+            {failed > 0 ? (
+              <span className="text-destructive">, {failed} not applied</span>
+            ) : null}
           </span>
         </div>
         <div className="flex items-center gap-1.5">
@@ -153,6 +154,11 @@ function PlanRow({
           <div className="truncate font-mono text-[10px] text-muted-foreground">
             {item.path}
           </div>
+          {item.error !== undefined ? (
+            <div className="mt-0.5 text-[10.5px] leading-snug wrap-break-word text-destructive select-text">
+              {item.error}
+            </div>
+          ) : null}
           {stats ? (
             <div className="mt-0.5 flex items-center gap-2 text-[10px] tabular-nums">
               <span className="text-emerald-600 dark:text-emerald-400">
