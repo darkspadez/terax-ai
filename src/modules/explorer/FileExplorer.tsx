@@ -40,6 +40,8 @@ import {
 import { InlineInput } from "./InlineInput";
 import {
   copyToClipboard,
+  openInDefaultApp,
+  REVEAL_LABEL,
   relativePath,
   revealInFinder,
 } from "./lib/contextActions";
@@ -293,11 +295,10 @@ export const FileExplorer = memo(
     const rowActions = useMemo<RowActions>(
       () => ({
         toggle: tree.toggle,
-        beginRename: tree.beginRename,
         commitRename: tree.commitRename,
         cancelRename: tree.cancelRename,
       }),
-      [tree.toggle, tree.beginRename, tree.commitRename, tree.cancelRename],
+      [tree.toggle, tree.commitRename, tree.cancelRename],
     );
     const renameInProgress =
       tree.renaming !== null || tree.pendingCreate !== null;
@@ -610,6 +611,12 @@ export const FileExplorer = memo(
           }
           break;
         }
+        case "F2": {
+          if (currentIdx < 0 || selectedPaths.size > 1) return;
+          e.preventDefault();
+          tree.beginRename(entryPaths[currentIdx]);
+          break;
+        }
         case "Enter": {
           if (currentIdx < 0) return;
           e.preventDefault();
@@ -641,7 +648,6 @@ export const FileExplorer = memo(
               isSelected={selectedPaths.has(row.path)}
               isRenaming={row.kind === "rename"}
               isDropTarget={dropTargetDir === row.path}
-              multiSelectActive={selectedPaths.size > 1}
               onOpenFile={onOpenFile}
               onSelectPath={handleEntrySelect}
               gitStatusCode={row.gitStatusCode}
@@ -723,7 +729,7 @@ export const FileExplorer = memo(
             variant="ghost"
             size="icon"
             className="size-6 text-muted-foreground hover:text-foreground"
-            onClick={() => tree.refresh(rootPath)}
+            onClick={() => void tree.refreshAll()}
             title="Refresh"
           >
             <HugeiconsIcon icon={Refresh01Icon} size={12} strokeWidth={2} />
@@ -891,6 +897,14 @@ export const FileExplorer = memo(
                       Open
                     </ContextMenuItem>
                   )}
+                  {!menuTarget.isDir && (
+                    <ContextMenuItem
+                      className={COMPACT_ITEM}
+                      onSelect={() => void openInDefaultApp(menuTarget.path)}
+                    >
+                      Open in Default App
+                    </ContextMenuItem>
+                  )}
                   {menuTarget.isDir && onRevealInTerminal && (
                     <ContextMenuItem
                       className={COMPACT_ITEM}
@@ -919,7 +933,7 @@ export const FileExplorer = memo(
                     className={COMPACT_ITEM}
                     onSelect={() => void revealInFinder(menuTarget.path)}
                   >
-                    Reveal in Finder
+                    {REVEAL_LABEL}
                   </ContextMenuItem>
                   <ContextMenuSeparator />
                   <ContextMenuItem
@@ -988,6 +1002,13 @@ export const FileExplorer = memo(
                   <ContextMenuSeparator />
                   <ContextMenuItem
                     className={COMPACT_ITEM}
+                    onSelect={() => tree.beginRename(menuTarget.path)}
+                  >
+                    Rename
+                    <ContextMenuShortcut>F2</ContextMenuShortcut>
+                  </ContextMenuItem>
+                  <ContextMenuItem
+                    className={COMPACT_ITEM}
                     variant="destructive"
                     onSelect={(e) => {
                       if (deleteConfirm) {
@@ -1033,7 +1054,7 @@ export const FileExplorer = memo(
                     className={COMPACT_ITEM}
                     onSelect={() => void revealInFinder(rootPath)}
                   >
-                    Reveal in Finder
+                    {REVEAL_LABEL}
                   </ContextMenuItem>
                   <ContextMenuSeparator />
                   <ContextMenuItem
@@ -1064,7 +1085,7 @@ export const FileExplorer = memo(
                   </ContextMenuItem>
                   <ContextMenuItem
                     className={COMPACT_ITEM}
-                    onSelect={() => tree.refresh(rootPath)}
+                    onSelect={() => void tree.refreshAll()}
                   >
                     Refresh
                   </ContextMenuItem>

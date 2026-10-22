@@ -48,6 +48,7 @@ import {
   COMPACT_ITEM,
 } from "@/modules/explorer/lib/menuItemClass";
 import { joinPath } from "@/modules/explorer/lib/useFileTree";
+import { isModChord } from "@/modules/shortcuts/lib/shortcutScope";
 import {
   AiContentGenerator02Icon,
   Alert02Icon,
@@ -56,6 +57,7 @@ import {
   ArrowUp01Icon,
   CheckmarkCircle01Icon,
   Download01Icon,
+  FileEditIcon,
   Folder01Icon,
   FolderCloudIcon,
   FolderGitTwoIcon,
@@ -81,6 +83,7 @@ import {
   type SourceControlRepositoryTarget,
 } from "./repositoryTarget";
 import type { SourceControlSummary } from "./useSourceControl";
+import { NestedRepositories } from "./NestedRepositories";
 import {
   useSourceControlPanel,
   type CheckState,
@@ -102,6 +105,8 @@ type Props = {
   onNavigateToPath?: (path: string) => void;
   repositoryTarget: SourceControlRepositoryTarget;
   onFollowRepositoryContext: () => void;
+  /** Shows a repository in Source Control, as the explorer's "Open in Source Control" does. */
+  onOpenRepository?: (path: string) => void;
 };
 
 const SOURCE_CONTROL_TOOLTIP_CLASS =
@@ -396,6 +401,7 @@ export const SourceControlPanel = memo(function SourceControlPanel({
   onNavigateToPath,
   repositoryTarget,
   onFollowRepositoryContext,
+  onOpenRepository,
 }: Props) {
   const scm = useSourceControlPanel(open, sourceControl, onOpenDiff);
   const refreshAnimationRef = useRef<number | null>(null);
@@ -490,11 +496,7 @@ export const SourceControlPanel = memo(function SourceControlPanel({
       void scm.commit();
       return;
     }
-    if (
-      event.key.toLowerCase() === "g" &&
-      (event.metaKey || event.ctrlKey) &&
-      scm.canGenerateCommitMessage
-    ) {
+    if (isModChord(event, "g", IS_MAC) && scm.canGenerateCommitMessage) {
       event.preventDefault();
       void scm.generateCommitMessage();
     }
@@ -820,6 +822,14 @@ export const SourceControlPanel = memo(function SourceControlPanel({
           <PanelCenter
             title="No repository"
             body="The active workspace is not inside a Git repository."
+            action={
+              sourceControl.contextPath && onOpenRepository ? (
+                <NestedRepositories
+                  folder={sourceControl.contextPath}
+                  onOpen={onOpenRepository}
+                />
+              ) : null
+            }
           />
         ) : null}
 
@@ -848,6 +858,7 @@ export const SourceControlPanel = memo(function SourceControlPanel({
                 )}
               >
                 <Textarea
+                  data-claims-mod-key="g"
                   value={scm.commitMessage}
                   onChange={(event) => scm.setCommitMessage(event.target.value)}
                   onKeyDown={handleCommitShortcut}
@@ -1190,6 +1201,10 @@ function ListHeader({
   );
 }
 
+/** Shown on hover, on the keyboard-focused or selected row, and while focused. */
+const ROW_ACTION =
+  "flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 group-data-[focused=true]:opacity-100 group-data-[selected=true]:opacity-100 focus-within:opacity-100";
+
 const EntryRow = memo(function EntryRow({
   row,
   focused,
@@ -1279,8 +1294,24 @@ const EntryRow = memo(function EntryRow({
             </div>
           </button>
 
+          {!isDeleted && onOpenFile && absolutePath ? (
+            <div className={ROW_ACTION}>
+              <IconActionButton
+                label={`Open ${fileName} for editing`}
+                side="top"
+                onClick={() => onOpenFile(absolutePath)}
+              >
+                <HugeiconsIcon
+                  icon={FileEditIcon}
+                  size={11}
+                  strokeWidth={1.9}
+                />
+              </IconActionButton>
+            </div>
+          ) : null}
+
           {showDiscard ? (
-            <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 data-[focused=true]:opacity-100 data-[selected=true]:opacity-100">
+            <div className={ROW_ACTION}>
               <IconActionButton
                 label={`Discard ${entry.path}`}
                 disabled={disabled}

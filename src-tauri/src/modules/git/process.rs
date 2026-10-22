@@ -10,7 +10,7 @@ use crate::modules::git::types::{
     GitOutput, TextSource, DEFAULT_TIMEOUT_SECS, MAX_FILE_BYTES, MAX_OUTPUT_BYTES,
     MAX_TIMEOUT_SECS, MIN_GIT_VERSION,
 };
-use crate::modules::proc::capture::{self, Limits};
+use crate::modules::proc::capture::{self, Limits, OnTimeout};
 #[cfg(windows)]
 use crate::modules::workspace::validate_wsl_distro_name;
 use crate::modules::workspace::WorkspaceEnv;
@@ -276,7 +276,9 @@ where
         .stderr(Stdio::piped());
     crate::modules::proc::hide_console(&mut cmd);
 
-    let captured = capture::run(
+    // A killed git leaves its lock files (index.lock) behind and its hooks
+    // running, so a timeout terminates the whole group and lets git clean up.
+    let captured = capture::run_with(
         &mut cmd,
         dur,
         Limits {
@@ -284,6 +286,7 @@ where
             stderr: MAX_OUTPUT_BYTES,
             stop_on_stdout_cap,
         },
+        OnTimeout::TerminateGroup,
     )
     .map_err(|e| match e.kind() {
         std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied => {
@@ -389,12 +392,64 @@ mod tests {
     };
     use crate::modules::git::errors::GitError;
     use crate::modules::git::types::TextSource;
-    #[cfg(windows)]
     use crate::modules::workspace::WorkspaceEnv;
     use std::collections::HashMap;
     #[cfg(windows)]
     use std::ffi::OsString;
     use std::time::{Duration, Instant};
+
+    #[cfg(unix)]
+    #[test]
+    fn a_timed_out_commit_removes_its_index_lock_and_stops_its_hooks() {
+        use super::run_git;
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::Command;
+
+        let dir = tempfile::tempdir().unwrap();
+        let repo = std::fs::canonicalize(dir.path()).unwrap();
+        let git = |args: &[&str]| {
+            let out = Command::new("git")
+                .args(args)
+                .current_dir(&repo)
+                .output()
+                .expect("git on PATH");
+            assert!(out.status.success(), "git {args:?} failed");
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "test@terax.local"]);
+        git(&["config", "user.name", "Terax Test"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        git(&["config", "core.hooksPath", ".git/hooks"]);
+        std::fs::write(repo.join("a.txt"), "a\n").unwrap();
+        git(&["add", "a.txt"]);
+        let marker = repo.join("hook-finished");
+        let hook = repo.join(".git/hooks/pre-commit");
+        std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+        std::fs::write(
+            &hook,
+            format!(
+                "#!/bin/sh\ntrap '' TERM\nsleep 2\ntouch '{}'\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let out = run_git(
+            &WorkspaceEnv::Local,
+            Some(repo.to_str().unwrap()),
+            ["commit", "-m", "slow hook"],
+            1,
+        )
+        .unwrap();
+        assert!(out.timed_out);
+        assert!(
+            !repo.join(".git/index.lock").exists(),
+            "a timed-out commit left index.lock behind"
+        );
+        std::thread::sleep(Duration::from_millis(2500));
+        assert!(!marker.exists(), "the hook outlived the timed-out commit");
+    }
 
     #[test]
     fn extracts_simple_version() {

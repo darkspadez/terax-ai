@@ -1,8 +1,9 @@
+use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::modules::git::errors::{GitError, Result};
-use crate::modules::git::parser::parse_porcelain_v2;
+use crate::modules::git::parser::{parse_decorations, parse_porcelain_v2};
 use crate::modules::git::process::{
     decode_text, ensure_git_available, ensure_success, git_show_text, git_stdout_line_opt,
     git_stdout_lines, read_text_file, run_git, run_git_capped,
@@ -10,7 +11,8 @@ use crate::modules::git::process::{
 use crate::modules::git::types::{
     DiscardEntry, GitBranchEntry, GitBranchListResult, GitCommitFileChange, GitCommitResult,
     GitDiffContentResult, GitDiffResult, GitLogEntry, GitOutput, GitPanelSnapshot, GitPushResult,
-    GitRepoInfo, GitStatusSnapshot, TextSource, DEFAULT_TIMEOUT_SECS, NETWORK_TIMEOUT_SECS,
+    GitRepoInfo, GitStatusSnapshot, TextSource, COMMIT_TIMEOUT_SECS, DEFAULT_TIMEOUT_SECS,
+    NETWORK_TIMEOUT_SECS,
 };
 use crate::modules::git::untracked;
 use crate::modules::git::utils::{
@@ -78,6 +80,75 @@ fn resolve_repo_in_authorized(
         upstream,
         is_detached: head == "HEAD",
     }))
+}
+
+const MAX_DISCOVERED_REPOS: usize = 24;
+const MAX_DISCOVERY_READS: usize = 256;
+/// How deep below the folder repositories are looked for (children and grandchildren).
+const DISCOVERY_DEPTH: usize = 2;
+/// Folders never searched for repositories: hidden ones and dependency or build trees.
+const DISCOVERY_SKIP: &[&str] = &["node_modules", "target", "vendor", "dist", "build"];
+
+/// Git work trees inside `path`, a folder that holds several projects without being one
+/// itself, spelled under `path` as given. Children and grandchildren are searched, a
+/// repository is not searched further, links are not followed, and the walk stops after a
+/// fixed number of folder reads, so a huge folder costs a bounded amount.
+pub fn discover_repos(
+    registry: &WorkspaceRegistry,
+    path: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<Vec<String>> {
+    let dir = canonical_dir(registry, path, workspace)?;
+    if !registry.is_authorized(&dir.local_path) {
+        return Err(GitError::PathOutsideWorkspace(dir.local_path));
+    }
+    let base = match path.trim_end_matches('/') {
+        "" => "/".to_string(),
+        trimmed => trimmed.to_string(),
+    };
+    let mut found: Vec<String> = Vec::new();
+    let mut queue: VecDeque<(PathBuf, String, usize)> = VecDeque::from([(dir.local_path, base, 0)]);
+    let mut reads = 0;
+    while let Some((local, spelled, depth)) = queue.pop_front() {
+        if reads == MAX_DISCOVERY_READS {
+            break;
+        }
+        reads += 1;
+        let Ok(entries) = std::fs::read_dir(&local) else {
+            continue;
+        };
+        let mut children: Vec<(String, PathBuf)> = entries
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                // `file_type` does not follow links, so a link never leads the walk astray.
+                if !entry.file_type().ok()?.is_dir() {
+                    return None;
+                }
+                let name = entry.file_name().into_string().ok()?;
+                if name.starts_with('.') || DISCOVERY_SKIP.contains(&name.as_str()) {
+                    return None;
+                }
+                Some((name, entry.path()))
+            })
+            .collect();
+        children.sort_unstable();
+        for (name, child) in children {
+            let child_spelled = if spelled.ends_with('/') {
+                format!("{spelled}{name}")
+            } else {
+                format!("{spelled}/{name}")
+            };
+            if child.join(".git").exists() {
+                found.push(child_spelled);
+                if found.len() == MAX_DISCOVERED_REPOS {
+                    return Ok(found);
+                }
+            } else if depth + 1 < DISCOVERY_DEPTH {
+                queue.push_back((child, child_spelled, depth + 1));
+            }
+        }
+    }
+    Ok(found)
 }
 
 pub fn panel_snapshot(
@@ -348,6 +419,63 @@ pub fn file_base(
     })
 }
 
+/// Most bytes of paths one git command line carries. Windows caps a whole command line at
+/// 32,767 UTF-16 units (UTF-8 bytes never count fewer) and `wsl.exe` adds arguments of its
+/// own, so Stage All on a deleted folder of a few hundred files could not start git at all.
+/// Unix allows far more, but not without bound.
+#[cfg(windows)]
+const PATHSPEC_BATCH_BYTES: usize = 16 * 1024;
+#[cfg(not(windows))]
+const PATHSPEC_BATCH_BYTES: usize = 256 * 1024;
+
+/// Splits pathspecs, in order, into runs that each fit one command line. A path longer than
+/// the budget gets a run of its own.
+fn pathspec_batches(paths: &[String], budget: usize) -> Vec<&[String]> {
+    let mut batches = Vec::new();
+    let mut start = 0;
+    let mut used = 0;
+    for (i, path) in paths.iter().enumerate() {
+        // Quoting and a separator per argument.
+        let cost = path.len() + 3;
+        if i > start && used + cost > budget {
+            batches.push(&paths[start..i]);
+            start = i;
+            used = 0;
+        }
+        used += cost;
+    }
+    if start < paths.len() {
+        batches.push(&paths[start..]);
+    }
+    batches
+}
+
+/// `git <command...> -- <paths>`, as many times as the command line limit needs.
+fn run_git_on_paths(
+    repo_root: &ResolvedGitDirectory,
+    command: &[&str],
+    paths: &[String],
+    context: &'static str,
+) -> Result<()> {
+    for batch in pathspec_batches(paths, PATHSPEC_BATCH_BYTES) {
+        let output = run_git(
+            &repo_root.workspace,
+            Some(&repo_root.git_path),
+            pathspec_args(command, batch),
+            DEFAULT_TIMEOUT_SECS,
+        )?;
+        ensure_success(&output, context)?;
+    }
+    Ok(())
+}
+
+fn pathspec_args(command: &[&str], paths: &[String]) -> Vec<OsString> {
+    let mut args: Vec<OsString> = command.iter().map(OsString::from).collect();
+    args.push("--".into());
+    args.extend(paths.iter().map(OsString::from));
+    args
+}
+
 pub fn stage(
     registry: &WorkspaceRegistry,
     repo_root: &str,
@@ -360,17 +488,7 @@ pub fn stage(
         return Ok(());
     }
     let resolved = resolve_pathspecs(&repo_root.local_path, paths)?;
-    let mut args: Vec<OsString> = vec!["add".into(), "--".into()];
-    for p in &resolved {
-        args.push(p.clone().into());
-    }
-    let output = run_git(
-        &repo_root.workspace,
-        Some(&repo_root.git_path),
-        args,
-        DEFAULT_TIMEOUT_SECS,
-    )?;
-    ensure_success(&output, "git add failed")
+    run_git_on_paths(&repo_root, &["add"], &resolved, "git add failed")
 }
 
 pub fn unstage(
@@ -385,33 +503,28 @@ pub fn unstage(
         return Ok(());
     }
     let resolved = resolve_pathspecs(&repo_root.local_path, paths)?;
-    let mut reset_args: Vec<OsString> = vec!["reset".into(), "HEAD".into(), "--".into()];
-    for p in &resolved {
-        reset_args.push(p.clone().into());
+    for batch in pathspec_batches(&resolved, PATHSPEC_BATCH_BYTES) {
+        let output = run_git(
+            &repo_root.workspace,
+            Some(&repo_root.git_path),
+            pathspec_args(&["reset", "HEAD"], batch),
+            DEFAULT_TIMEOUT_SECS,
+        )?;
+        if output.exit_code == Some(0) {
+            continue;
+        }
+        if !looks_like_no_head(&output) {
+            return ensure_success(&output, "git reset failed");
+        }
+        let output = run_git(
+            &repo_root.workspace,
+            Some(&repo_root.git_path),
+            pathspec_args(&["rm", "--cached", "-r"], batch),
+            DEFAULT_TIMEOUT_SECS,
+        )?;
+        ensure_success(&output, "git rm --cached failed")?;
     }
-    let output = run_git(
-        &repo_root.workspace,
-        Some(&repo_root.git_path),
-        reset_args,
-        DEFAULT_TIMEOUT_SECS,
-    )?;
-    if output.exit_code == Some(0) {
-        return Ok(());
-    }
-    if !looks_like_no_head(&output) {
-        return ensure_success(&output, "git reset failed");
-    }
-    let mut rm_args: Vec<OsString> = vec!["rm".into(), "--cached".into(), "-r".into(), "--".into()];
-    for p in &resolved {
-        rm_args.push(p.clone().into());
-    }
-    let output = run_git(
-        &repo_root.workspace,
-        Some(&repo_root.git_path),
-        rm_args,
-        DEFAULT_TIMEOUT_SECS,
-    )?;
-    ensure_success(&output, "git rm --cached failed")
+    Ok(())
 }
 
 fn looks_like_no_head(output: &GitOutput) -> bool {
@@ -445,35 +558,18 @@ pub fn discard(
         }
     }
 
-    if !tracked.is_empty() {
-        let mut args: Vec<OsString> = vec!["restore".into(), "--worktree".into(), "--".into()];
-        for p in &tracked {
-            args.push(p.clone().into());
-        }
-        let output = run_git(
-            &repo_root.workspace,
-            Some(&repo_root.git_path),
-            args,
-            DEFAULT_TIMEOUT_SECS,
-        )?;
-        ensure_success(&output, "git restore failed")?;
-    }
-
-    if !untracked.is_empty() {
-        let mut args: Vec<OsString> = vec!["clean".into(), "-f".into(), "-d".into(), "--".into()];
-        for p in &untracked {
-            args.push(p.clone().into());
-        }
-        let output = run_git(
-            &repo_root.workspace,
-            Some(&repo_root.git_path),
-            args,
-            DEFAULT_TIMEOUT_SECS,
-        )?;
-        ensure_success(&output, "git clean failed")?;
-    }
-
-    Ok(())
+    run_git_on_paths(
+        &repo_root,
+        &["restore", "--worktree"],
+        &tracked,
+        "git restore failed",
+    )?;
+    run_git_on_paths(
+        &repo_root,
+        &["clean", "-f", "-d"],
+        &untracked,
+        "git clean failed",
+    )
 }
 
 pub fn commit(
@@ -493,12 +589,9 @@ pub fn commit(
         &repo_root.workspace,
         Some(&repo_root.git_path),
         [OsStr::new("commit"), OsStr::new("-m"), OsStr::new(trimmed)],
-        DEFAULT_TIMEOUT_SECS,
+        COMMIT_TIMEOUT_SECS,
     )?;
-    if output.exit_code != Some(0) && nothing_to_commit(&output) {
-        return Err(GitError::command("git commit", "nothing staged"));
-    }
-    ensure_success(&output, "git commit failed")?;
+    ensure_commit_success(&output)?;
 
     let combined = git_stdout_lines(
         &repo_root.workspace,
@@ -515,6 +608,100 @@ pub fn commit(
         commit_sha: sha,
         summary,
     })
+}
+
+/// Undoes the newest commit the way `git reset --soft HEAD~1` does: the branch moves back to
+/// the commit's first parent and its changes stay staged, so nothing is lost. `expected_head`
+/// is the commit the user chose: the move is a compare-and-swap on HEAD, so a commit made in
+/// the meantime fails it instead of being undone in its place.
+pub fn undo_last_commit(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    expected_head: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<()> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    if expected_head.len() != 40 || !sha_is_safe(expected_head) {
+        return Err(GitError::command(
+            "undo commit",
+            "expected a full commit sha",
+        ));
+    }
+    // The parent comes from the chosen commit, not from HEAD, so a racing commit cannot
+    // change which commit is undone.
+    let parent = git_stdout_line_opt(
+        &repo_root.workspace,
+        &repo_root.git_path,
+        [
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{expected_head}^"),
+        ],
+    )?
+    .ok_or_else(|| GitError::command("undo commit", "the first commit cannot be undone"))?;
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        [
+            "update-ref",
+            "-m",
+            "reset: moving to HEAD~1",
+            "HEAD",
+            &parent,
+            expected_head,
+        ],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    if output.timed_out || output.exit_code != Some(0) {
+        return Err(GitError::command(
+            "undo commit",
+            "HEAD moved since the history was loaded; refresh and try again",
+        ));
+    }
+    // As `git reset` does; it is also what tells Source Control's watcher HEAD moved.
+    let _ = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        ["update-ref", "ORIG_HEAD", expected_head],
+        DEFAULT_TIMEOUT_SECS,
+    );
+    Ok(())
+}
+
+/// The first remote-tracking branch that already contains `sha`, if any: undoing such a commit
+/// rewrites history that was shared.
+pub fn commit_on_remote(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    sha: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<Option<String>> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    if !sha_is_safe(sha) {
+        return Err(GitError::command(
+            "git for-each-ref",
+            "invalid commit identifier",
+        ));
+    }
+    let contains = format!("--contains={sha}");
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        [
+            "for-each-ref",
+            "--count=1",
+            contains.as_str(),
+            "--format=%(refname:short)",
+            "refs/remotes",
+        ],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git for-each-ref failed")?;
+    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok((!name.is_empty()).then_some(name))
 }
 
 pub fn push(
@@ -551,39 +738,47 @@ pub fn push(
     })
 }
 
-const LOG_FORMAT: &str = "%H%x1f%an%x1f%ae%x1f%at%x1f%P%x1f%s";
+const LOG_FORMAT: &str = "%H%x1f%an%x1f%ae%x1f%at%x1f%P%x1f%D%x1f%s";
 const MAX_LOG_LIMIT: u32 = 200;
 
 pub fn log(
     registry: &WorkspaceRegistry,
     repo_root: &str,
     limit: u32,
-    before_sha: Option<&str>,
+    skip: u32,
+    anchor_sha: Option<&str>,
     workspace: &WorkspaceEnv,
 ) -> Result<Vec<GitLogEntry>> {
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
     ensure_git_available(&repo_root.workspace)?;
     let bounded = limit.clamp(1, MAX_LOG_LIMIT);
     let count_arg = format!("--max-count={bounded}");
+    let skip_arg = format!("--skip={skip}");
     let format_arg = format!("--format={LOG_FORMAT}");
-    let cursor = match before_sha {
+    // Pages are slices of `git log` from a fixed commit. The history reachable
+    // from it never changes, so paging stays exact even if HEAD moves, and
+    // commits that only a merge's second parent reaches are not skipped.
+    let anchor = match anchor_sha {
         Some(sha) if !sha.is_empty() => {
             if !sha_is_safe(sha) {
-                return Err(GitError::command("git log", "invalid cursor sha"));
+                return Err(GitError::command("git log", "invalid anchor sha"));
             }
-            Some(format!("{sha}^"))
+            Some(sha)
         }
         _ => None,
     };
     let mut args: Vec<&OsStr> = vec![
         OsStr::new("log"),
         OsStr::new("--no-color"),
+        // Full ref names in `%D`, so refs are classified by namespace.
+        OsStr::new("--decorate=full"),
         OsStr::new("--shortstat"),
         OsStr::new(&count_arg),
+        OsStr::new(&skip_arg),
         OsStr::new(&format_arg),
     ];
-    if let Some(spec) = cursor.as_deref() {
-        args.push(OsStr::new(spec));
+    if let Some(sha) = anchor {
+        args.push(OsStr::new(sha));
     }
     let output = run_git(
         &repo_root.workspace,
@@ -605,10 +800,10 @@ pub fn log(
         }
         return ensure_success(&output, "git log failed").map(|_| Vec::new());
     }
-    let stdout = std::str::from_utf8(&output.stdout).unwrap_or("");
+    let stdout = String::from_utf8_lossy(&output.stdout);
     let mut entries: Vec<GitLogEntry> = Vec::with_capacity(bounded as usize);
     // Lines we get back interleave:
-    //   <sha>\x1f<author>\x1f<email>\x1f<ts>\x1f<parents>\x1f<subject>
+    //   <sha>\x1f<author>\x1f<email>\x1f<ts>\x1f<parents>\x1f<refs>\x1f<subject>
     //   <blank>
     //    5 files changed, 12 insertions(+), 3 deletions(-)
     // Commits without diffstats (root commits, merges with no changes) just
@@ -620,7 +815,7 @@ pub fn log(
             continue;
         }
         if line.contains('\x1f') {
-            let mut fields = line.splitn(6, '\x1f');
+            let mut fields = line.splitn(7, '\x1f');
             let sha = fields.next().unwrap_or("").to_string();
             if !sha_is_safe(&sha) {
                 continue;
@@ -633,6 +828,7 @@ pub fn log(
                 .split_ascii_whitespace()
                 .map(|s| s.to_string())
                 .collect();
+            let refs = parse_decorations(fields.next().unwrap_or(""));
             let subject = fields.next().unwrap_or("").to_string();
             let short_sha = sha.chars().take(7).collect::<String>();
             entries.push(GitLogEntry {
@@ -642,6 +838,7 @@ pub fn log(
                 author_email,
                 timestamp_secs: timestamp,
                 parents,
+                refs,
                 subject,
                 files_changed: 0,
                 insertions: 0,
@@ -1033,6 +1230,16 @@ pub fn pull_ff_only(
     ensure_success(&output, "git pull --ff-only failed")
 }
 
+fn ensure_commit_success(output: &GitOutput) -> Result<()> {
+    if output.timed_out {
+        return Err(GitError::CommitTimedOut);
+    }
+    if output.exit_code != Some(0) && nothing_to_commit(output) {
+        return Err(GitError::command("git commit", "nothing staged"));
+    }
+    ensure_success(output, "git commit failed")
+}
+
 fn nothing_to_commit(output: &GitOutput) -> bool {
     let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
     let stdout = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
@@ -1220,13 +1427,16 @@ pub fn checkout_branch(
     if branch_name.starts_with('-') || branch_name.is_empty() {
         return Err(GitError::InvalidPath(branch_name.into()));
     }
+    // `git checkout <name>` falls back to restoring a file of that name when no such branch
+    // exists (one deleted since the list was loaded), discarding its changes. `switch` only
+    // ever switches branches.
     let output = run_git(
         &repo_root.workspace,
         Some(&repo_root.git_path),
-        ["checkout", branch_name],
+        ["switch", branch_name],
         DEFAULT_TIMEOUT_SECS,
     )?;
-    ensure_success(&output, "git checkout failed")
+    ensure_success(&output, "git switch failed")
 }
 
 #[cfg(test)]
@@ -1280,6 +1490,65 @@ mod tests {
         std::fs::write(outside.path().join("x.ts"), "x").unwrap();
         let path = outside.path().join("x.ts").to_string_lossy().into_owned();
         assert!(file_base(&registry, &path, &local).is_err());
+    }
+
+    #[test]
+    fn pathspec_batches_fit_the_budget_and_keep_every_path_once_in_order() {
+        let paths: Vec<String> = (0..10).map(|i| format!("dir/file-{i}.txt")).collect();
+        // Each path costs its 14 bytes plus 3.
+        let batches = pathspec_batches(&paths, 40);
+        assert!(batches.iter().all(|batch| batch.len() == 2));
+        assert_eq!(batches.concat(), paths);
+        assert_eq!(pathspec_batches(&paths, 1 << 20), vec![&paths[..]]);
+        assert!(pathspec_batches(&[], 40).is_empty());
+    }
+
+    #[test]
+    fn a_path_longer_than_the_budget_still_gets_a_batch() {
+        let paths = vec!["a".to_owned(), "x".repeat(100), "b".to_owned()];
+        let batches = pathspec_batches(&paths, 10);
+        assert_eq!(
+            batches,
+            vec![&paths[0..1], &paths[1..2], &paths[2..3]],
+            "nothing is dropped and nothing is merged past the budget"
+        );
+    }
+
+    #[test]
+    fn commit_timeout_covers_slow_hooks() {
+        const { assert!(COMMIT_TIMEOUT_SECS > DEFAULT_TIMEOUT_SECS) };
+        assert_eq!(
+            COMMIT_TIMEOUT_SECS,
+            crate::modules::git::types::MAX_TIMEOUT_SECS
+        );
+    }
+
+    #[test]
+    fn ensure_commit_success_maps_timeout_to_hooks_error() {
+        let out = GitOutput {
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+            exit_code: None,
+            timed_out: true,
+            truncated: false,
+        };
+        assert!(matches!(
+            ensure_commit_success(&out),
+            Err(GitError::CommitTimedOut)
+        ));
+    }
+
+    #[test]
+    fn ensure_commit_success_keeps_nothing_staged_mapping() {
+        let out = GitOutput {
+            stdout: b"nothing to commit, working tree clean".to_vec(),
+            stderr: Vec::new(),
+            exit_code: Some(1),
+            timed_out: false,
+            truncated: false,
+        };
+        let err = ensure_commit_success(&out).unwrap_err();
+        assert_eq!(err.to_string(), "git commit: nothing staged");
     }
 
     #[test]

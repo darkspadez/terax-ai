@@ -91,6 +91,15 @@ export type GitPushResult = {
   pushed: boolean;
 };
 
+/** A ref on a commit, classified by its namespace in Rust, never by its name. */
+export type GitLogRef = {
+  kind: "head" | "branch" | "tag" | "remote";
+  /** Without its namespace: `main`, `v1.0`, `origin/main`. */
+  name: string;
+  /** HEAD is here: the branch it is on, or HEAD itself when detached. */
+  head: boolean;
+};
+
 export type GitLogEntry = {
   sha: string;
   shortSha: string;
@@ -98,6 +107,8 @@ export type GitLogEntry = {
   authorEmail: string;
   timestampSecs: number;
   parents: string[];
+  /** HEAD and its branch first, then branches, tags and remote branches. */
+  refs: GitLogRef[];
   subject: string;
   filesChanged: number;
   insertions: number;
@@ -263,6 +274,12 @@ export const native = {
       cwd,
       workspace: currentWorkspaceEnv(),
     }),
+  /** Repositories inside a folder that is not one itself (children, grandchildren). */
+  gitDiscoverRepos: (path: string) =>
+    invoke<string[]>("git_discover_repos", {
+      path,
+      workspace: currentWorkspaceEnv(),
+    }),
   gitPanelSnapshot: (cwd: string) =>
     invoke<GitPanelSnapshot>("git_panel_snapshot", {
       cwd,
@@ -337,15 +354,33 @@ export const native = {
       repoRoot,
       workspace: currentWorkspaceEnv(),
     }),
-  gitLog: (repoRoot: string, options?: { limit?: number; beforeSha?: string }) =>
+  gitLog: (
+    repoRoot: string,
+    options?: { limit?: number; skip?: number; anchorSha?: string },
+  ) =>
     invoke<GitLogEntry[]>("git_log", {
       repoRoot,
       limit: options?.limit ?? null,
-      beforeSha: options?.beforeSha ?? null,
+      skip: options?.skip ?? null,
+      anchorSha: options?.anchorSha ?? null,
       workspace: currentWorkspaceEnv(),
     }),
   gitShowCommit: (repoRoot: string, sha: string) =>
     invoke<GitDiffResult>("git_show_commit", {
+      repoRoot,
+      sha,
+      workspace: currentWorkspaceEnv(),
+    }),
+  /** `git reset --soft` to the parent, only while HEAD is still `expectedHead`. */
+  gitUndoCommit: (repoRoot: string, expectedHead: string) =>
+    invoke<void>("git_undo_commit", {
+      repoRoot,
+      expectedHead,
+      workspace: currentWorkspaceEnv(),
+    }),
+  /** The first remote-tracking branch already containing `sha`, if any. */
+  gitCommitOnRemote: (repoRoot: string, sha: string) =>
+    invoke<string | null>("git_commit_on_remote", {
       repoRoot,
       sha,
       workspace: currentWorkspaceEnv(),

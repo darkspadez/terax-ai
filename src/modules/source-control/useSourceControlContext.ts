@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import { native } from "@/modules/ai/lib/native";
 import type { SidebarViewId } from "@/modules/sidebar";
 import type { Tab } from "@/modules/tabs";
@@ -8,6 +8,7 @@ import {
   sourceControlRepositoryPath,
   type SourceControlRepositoryTarget,
 } from "./repositoryTarget";
+import { terminalLeafCwd } from "./refreshSignals";
 import { isStatusLive, statusConsumers } from "./statusConsumers";
 import { useSourceControl } from "./useSourceControl";
 
@@ -97,7 +98,16 @@ export function useSourceControlContext({
       explorerGitDecorations,
     }),
   );
-  const sourceControl = useSourceControl(sourceControlPath, true, { live });
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+  const leafCwd = useCallback(
+    (leafId: number) => terminalLeafCwd(tabsRef.current, leafId),
+    [],
+  );
+  const sourceControl = useSourceControl(sourceControlPath, true, {
+    live,
+    leafCwd,
+  });
 
   const toggleSourceControl = useCallback(() => {
     cycleSidebarView("source-control");

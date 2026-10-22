@@ -34,6 +34,19 @@ pub async fn git_resolve_repo(
 }
 
 #[tauri::command]
+pub async fn git_discover_repos(
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<Vec<String>, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        operations::discover_repos(r, &path, &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn git_panel_snapshot(
     cwd: String,
     workspace: Option<WorkspaceEnv>,
@@ -168,6 +181,34 @@ pub async fn git_commit(
 }
 
 #[tauri::command]
+pub async fn git_undo_commit(
+    repo_root: String,
+    expected_head: String,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        operations::undo_last_commit(r, &repo_root, &expected_head, &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_commit_on_remote(
+    repo_root: String,
+    sha: String,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<Option<String>, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        operations::commit_on_remote(r, &repo_root, &sha, &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn git_fetch(
     repo_root: String,
     workspace: Option<WorkspaceEnv>,
@@ -210,7 +251,8 @@ pub async fn git_push(
 pub async fn git_log(
     repo_root: String,
     limit: Option<u32>,
-    before_sha: Option<String>,
+    skip: Option<u32>,
+    anchor_sha: Option<String>,
     workspace: Option<WorkspaceEnv>,
     app: AppHandle,
 ) -> Result<Vec<GitLogEntry>, String> {
@@ -220,7 +262,8 @@ pub async fn git_log(
             r,
             &repo_root,
             limit.unwrap_or(30),
-            before_sha.as_deref(),
+            skip.unwrap_or(0),
+            anchor_sha.as_deref(),
             &workspace,
         )
         .map_err(Into::into)

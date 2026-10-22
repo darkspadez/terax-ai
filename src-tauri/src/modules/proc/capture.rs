@@ -19,6 +19,9 @@ const READ_CHUNK: usize = 16 * 1024;
 /// pin the caller until it exits.
 const EXITED_DRAIN_GRACE: Duration = Duration::from_millis(750);
 const KILLED_DRAIN_GRACE: Duration = Duration::from_millis(500);
+/// How long a process group may take to exit after SIGTERM before SIGKILL.
+#[cfg(unix)]
+const TERM_GRACE: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy)]
 pub struct Limits {
@@ -27,6 +30,18 @@ pub struct Limits {
     /// Kill the child as soon as stdout passes its cap instead of letting it
     /// run on for output nobody will read.
     pub stop_on_stdout_cap: bool,
+}
+
+/// How a child that outlives its timeout is stopped.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum OnTimeout {
+    /// Kill the child alone.
+    Kill,
+    /// On Unix the child leads its own process group, which gets SIGTERM and,
+    /// after `TERM_GRACE`, SIGKILL: the child can clean up (git removes its
+    /// lock files) and whatever it started (hooks) ends with it. Elsewhere
+    /// the same as `Kill`.
+    TerminateGroup,
 }
 
 #[derive(Debug, Default)]
@@ -108,6 +123,20 @@ fn collect(reader: &Reader, grace: Duration) -> Drained {
 /// `cmd` must already pipe stdout and stderr. Blocks the calling thread, so run
 /// it on the blocking pool.
 pub fn run(cmd: &mut Command, timeout: Duration, limits: Limits) -> io::Result<Captured> {
+    run_with(cmd, timeout, limits, OnTimeout::Kill)
+}
+
+pub fn run_with(
+    cmd: &mut Command,
+    timeout: Duration,
+    limits: Limits,
+    on_timeout: OnTimeout,
+) -> io::Result<Captured> {
+    #[cfg(unix)]
+    if on_timeout == OnTimeout::TerminateGroup {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
     let child = Arc::new(SharedChild::spawn(cmd)?);
     let fail = |error: io::Error| {
         let _ = child.kill();
@@ -132,8 +161,7 @@ pub fn run(cmd: &mut Command, timeout: Duration, limits: Limits) -> io::Result<C
     let (exit_code, timed_out) = match child.wait_timeout(timeout)? {
         Some(status) => (status.code(), false),
         None => {
-            let _ = child.kill();
-            let _ = child.wait();
+            stop(&child, on_timeout);
             (None, true)
         }
     };
@@ -153,6 +181,26 @@ pub fn run(cmd: &mut Command, timeout: Duration, limits: Limits) -> io::Result<C
         exit_code,
         timed_out,
     })
+}
+
+fn stop(child: &SharedChild, how: OnTimeout) {
+    #[cfg(unix)]
+    if how == OnTimeout::TerminateGroup {
+        let group = child.id() as libc::pid_t;
+        // SAFETY: plain syscalls on the process group this call created. A
+        // group id is not reused while any member lives, so SIGKILL after the
+        // leader is reaped still reaches only what it left behind.
+        unsafe { libc::killpg(group, libc::SIGTERM) };
+        let exited = matches!(child.wait_timeout(TERM_GRACE), Ok(Some(_)));
+        unsafe { libc::killpg(group, libc::SIGKILL) };
+        if exited {
+            return;
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = how;
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[cfg(all(test, unix))]
@@ -232,6 +280,41 @@ mod tests {
         assert!(out.timed_out);
         assert_eq!(out.exit_code, None);
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn a_timed_out_group_gets_sigterm_first_so_it_can_clean_up() {
+        let out = run_with(
+            &mut sh("trap 'printf cleaned; exit 1' TERM; sleep 30 & wait"),
+            Duration::from_millis(300),
+            LIMITS,
+            OnTimeout::TerminateGroup,
+        )
+        .unwrap();
+        assert!(out.timed_out);
+        assert_eq!(out.stdout, b"cleaned");
+    }
+
+    #[test]
+    fn a_timed_out_group_takes_what_the_child_started_with_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("survived");
+        let script = format!(
+            "(trap '' TERM; sleep 1; touch '{}') & wait",
+            marker.display()
+        );
+        let started = Instant::now();
+        let out = run_with(
+            &mut sh(&script),
+            Duration::from_millis(200),
+            LIMITS,
+            OnTimeout::TerminateGroup,
+        )
+        .unwrap();
+        assert!(out.timed_out);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        std::thread::sleep(Duration::from_millis(1500));
+        assert!(!marker.exists(), "a grandchild outlived the timeout");
     }
 
     #[test]

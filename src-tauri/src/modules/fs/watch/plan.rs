@@ -4,7 +4,7 @@
 //! callback share one tested filter.
 
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -117,6 +117,21 @@ pub fn is_skipped(path: &Path) -> bool {
         .is_some_and(|n| SKIP_DIRS.contains(&n))
 }
 
+/// True for paths reached through the WSL network share, where the OS delivers
+/// no change notifications: `\\wsl.localhost\<distro>\...` or `\\wsl$\<distro>\...`.
+/// Keys are canonical (`to_canon`), so the share appears as `//wsl.localhost/...`.
+pub fn is_wsl_share(key: &str) -> bool {
+    // Backslashes only survive when a raw Windows path is passed: `to_canon` turns them into
+    // separators everywhere else, but this predicate must also hold before that conversion.
+    let normalized = key.replace('\\', "/");
+    let Some(rest) = normalized.strip_prefix("//") else {
+        return false;
+    };
+    let share = rest.split('/').next().unwrap_or_default();
+    // Matched whole: `wsl.localhost.evil` is a different server, not this share.
+    share.eq_ignore_ascii_case("wsl.localhost") || share.eq_ignore_ascii_case("wsl$")
+}
+
 fn is_within(path: &str, ancestor: &str) -> bool {
     path == ancestor
         || path
@@ -226,43 +241,93 @@ pub fn listing_signature(dir: &Path) -> Option<u64> {
     Some(hasher.finish())
 }
 
+/// How the frontend spelled a watched path, refcounted per spelling. Keys here are canonical,
+/// but the explorer and editor tabs key by the path they were given, which differs whenever the
+/// path crosses a link or a share: `/home/x` in a WSL workspace is `//wsl.localhost/<distro>/home/x`
+/// here, `/mnt/c/x` is `C:/x`, and `/tmp/x` on macOS is `/private/tmp/x`. A change is reported
+/// in every spelling registered for it, so each listener finds its own key.
+#[derive(Default)]
+struct Spellings(BTreeMap<String, usize>);
+
+impl Spellings {
+    fn add(&mut self, spelling: String) {
+        *self.0.entry(spelling).or_default() += 1;
+    }
+
+    /// False when `spelling` was never registered: nothing is released.
+    fn remove(&mut self, spelling: &str) -> bool {
+        let Some(count) = self.0.get_mut(spelling) else {
+            return false;
+        };
+        *count -= 1;
+        if *count == 0 {
+            self.0.remove(spelling);
+        }
+        true
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &String> {
+        self.0.keys()
+    }
+}
+
 struct FileWatch {
-    refs: usize,
+    spellings: Spellings,
     stamp: Option<FileStamp>,
 }
 
 struct DirWatch {
-    refs: usize,
+    spellings: Spellings,
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     path: PathBuf,
     /// Fingerprint of the listing the frontend was last told about (or could have read when the
     /// directory was registered); `None` until known.
     listing: Option<u64>,
+    /// On a share with no change notifications the listing is re-read on a timer instead.
+    poll: bool,
+}
+
+/// A repository whose Source Control view is on screen. Any activity in a watched directory
+/// inside its work tree or in its git directory (index, HEAD, ORIG_HEAD, FETCH_HEAD and the
+/// lock files git writes at the top level) can change what `git status` says.
+struct RepoWatch {
+    spellings: Spellings,
+    git_dir: String,
 }
 
 /// Refcounted directories (explorer expansion and open editors can ask for the
-/// same one) and the files whose own changes are reported.
+/// same one) and the files whose own changes are reported, each keyed by its canonical path
+/// and registered under the spelling the frontend used.
 #[derive(Default)]
 pub struct WatchSet {
     dirs: HashMap<String, DirWatch>,
     files: HashMap<String, HashMap<String, FileWatch>>,
+    repos: HashMap<String, RepoWatch>,
 }
 
 impl WatchSet {
-    /// True when the directory was not watched before.
-    pub fn add_dir(&mut self, key: String, path: PathBuf) -> bool {
+    /// True when the directory was not watched before. `poll` is fixed by the first
+    /// registration: every caller derives it from the same canonical key.
+    pub fn add_dir(&mut self, key: String, spelling: String, path: PathBuf, poll: bool) -> bool {
         match self.dirs.get_mut(&key) {
             Some(watch) => {
-                watch.refs += 1;
+                watch.spellings.add(spelling);
                 false
             }
             None => {
+                let mut spellings = Spellings::default();
+                spellings.add(spelling);
                 self.dirs.insert(
                     key,
                     DirWatch {
-                        refs: 1,
+                        spellings,
                         path,
                         listing: None,
+                        poll,
                     },
                 );
                 true
@@ -270,19 +335,25 @@ impl WatchSet {
         }
     }
 
-    /// True when the last reference was released.
-    pub fn remove_dir(&mut self, key: &str) -> bool {
-        match self.dirs.get_mut(key) {
-            Some(watch) if watch.refs > 1 => {
-                watch.refs -= 1;
-                false
-            }
-            Some(_) => {
-                self.dirs.remove(key);
-                true
-            }
-            None => false,
+    /// True when the last reference was released. A spelling `key` was never registered under
+    /// releases nothing.
+    pub fn remove_dir(&mut self, key: &str, spelling: &str) -> bool {
+        let Some(watch) = self.dirs.get_mut(key) else {
+            return false;
+        };
+        if !watch.spellings.remove(spelling) || !watch.spellings.is_empty() {
+            return false;
         }
+        self.dirs.remove(key);
+        true
+    }
+
+    /// Every spelling `key` is watched under, in a stable order.
+    pub fn dir_spellings(&self, key: &str) -> Vec<String> {
+        self.dirs
+            .get(key)
+            .map(|watch| watch.spellings.iter().cloned().collect())
+            .unwrap_or_default()
     }
 
     /// Remembers the listing a newly watched directory had when it was registered, taken before
@@ -293,9 +364,36 @@ impl WatchSet {
         }
     }
 
+    /// Whether the listing moved since the last report, without remembering the new one:
+    /// the poller only decides *whether* to report, and `resolve_changes` still owns the state.
+    pub fn listing_moved(&self, key: &str, current: Option<u64>) -> bool {
+        let Some(watch) = self.dirs.get(key) else {
+            return false;
+        };
+        match (watch.listing, current) {
+            (Some(before), Some(now)) => before != now,
+            // Unreadable or too large to fingerprint: never a change on its own, or an unreadable
+            // directory would report every tick. A deletion is caught by its parent's poll.
+            _ => false,
+        }
+    }
+
     /// Where a watched directory lives on disk.
     pub fn dir_path(&self, key: &str) -> Option<PathBuf> {
         self.dirs.get(key).map(|watch| watch.path.clone())
+    }
+
+    pub fn has_polled_dirs(&self) -> bool {
+        self.dirs.values().any(|watch| watch.poll)
+    }
+
+    /// The directories the OS cannot notify about, re-read on a timer instead.
+    pub fn polled_dirs(&self) -> Vec<(String, PathBuf)> {
+        self.dirs
+            .iter()
+            .filter(|(_, watch)| watch.poll)
+            .map(|(key, watch)| (key.clone(), watch.path.clone()))
+            .collect()
     }
 
     /// Whether the frontend must be told about `key`: its listing (names and kinds) moved since
@@ -314,22 +412,31 @@ impl WatchSet {
         }
     }
 
-    pub fn add_file(&mut self, dir: String, file: String, stamp: Option<FileStamp>) {
+    pub fn add_file(
+        &mut self,
+        dir: String,
+        file: String,
+        spelling: String,
+        stamp: Option<FileStamp>,
+    ) {
         self.files
             .entry(dir)
             .or_default()
             .entry(file)
-            .and_modify(|watch| watch.refs += 1)
-            .or_insert(FileWatch { refs: 1, stamp });
+            .or_insert_with(|| FileWatch {
+                spellings: Spellings::default(),
+                stamp,
+            })
+            .spellings
+            .add(spelling);
     }
 
-    pub fn remove_file(&mut self, dir: &str, file: &str) {
+    pub fn remove_file(&mut self, dir: &str, file: &str, spelling: &str) {
         let Some(in_dir) = self.files.get_mut(dir) else {
             return;
         };
         if let Some(watch) = in_dir.get_mut(file) {
-            if watch.refs > 1 {
-                watch.refs -= 1;
+            if !watch.spellings.remove(spelling) || !watch.spellings.is_empty() {
                 return;
             }
             in_dir.remove(file);
@@ -339,9 +446,13 @@ impl WatchSet {
         }
     }
 
+    /// The directories the OS can notify about; the ones on the WSL share are polled instead.
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub fn dir_paths(&self) -> impl Iterator<Item = &Path> {
-        self.dirs.values().map(|watch| watch.path.as_path())
+        self.dirs
+            .values()
+            .filter(|watch| !watch.poll)
+            .map(|watch| watch.path.as_path())
     }
 
     pub fn dir_keys(&self) -> impl Iterator<Item = &str> {
@@ -355,14 +466,15 @@ impl WatchSet {
 
     #[cfg(test)]
     pub fn is_empty(&self) -> bool {
-        self.dirs.is_empty() && self.files.is_empty()
+        self.dirs.is_empty() && self.files.is_empty() && self.repos.is_empty()
     }
 
     pub fn snapshot(&self) -> DirSet {
         self.dirs.keys().map(|k| k.as_bytes().to_vec()).collect()
     }
 
-    /// Re-stamps the watched files of `dir` and returns those that changed.
+    /// Re-stamps the watched files of `dir` and returns those that changed, in every spelling
+    /// they were registered under.
     pub fn changed_files_in(
         &mut self,
         dir: &str,
@@ -376,10 +488,83 @@ impl WatchSet {
             let now = stamp_of(file);
             if now != watch.stamp {
                 watch.stamp = now;
-                changed.push(file.clone());
+                changed.extend(watch.spellings.iter().cloned());
             }
         }
         changed
+    }
+
+    /// The files registered under `dir`: the open editor buffers it holds.
+    pub fn file_keys(&self, dir: &str) -> Vec<String> {
+        self.files
+            .get(dir)
+            .map(|in_dir| in_dir.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Whether any file registered under `dir` moved since it was stamped, without
+    /// remembering the new stamp: the poller only decides *whether* to report, and
+    /// `resolve_changes` still owns the state.
+    ///
+    /// `current` holds the stamp of each file by its key. A file missing from it was
+    /// registered after the snapshot was taken: it is left alone, and the next tick
+    /// picks it up.
+    pub fn files_moved(&self, dir: &str, current: &HashMap<String, Option<FileStamp>>) -> bool {
+        let Some(in_dir) = self.files.get(dir) else {
+            return false;
+        };
+        in_dir
+            .iter()
+            .any(|(file, watch)| current.get(file).is_some_and(|now| *now != watch.stamp))
+    }
+
+    /// Registers a repository by its canonical work tree root. The git directory's own watch is
+    /// registered separately, as a directory, so the backends see it.
+    pub fn add_repo(&mut self, root: String, spelling: String, git_dir: String) {
+        self.repos
+            .entry(root)
+            .or_insert_with(|| RepoWatch {
+                spellings: Spellings::default(),
+                git_dir,
+            })
+            .spellings
+            .add(spelling);
+    }
+
+    pub fn remove_repo(&mut self, root: &str, spelling: &str) {
+        let Some(repo) = self.repos.get_mut(root) else {
+            return;
+        };
+        if repo.spellings.remove(spelling) && repo.spellings.is_empty() {
+            self.repos.remove(root);
+        }
+    }
+
+    /// The git directory of `root` while it is registered under `spelling`.
+    pub fn repo_git_dir(&self, root: &str, spelling: &str) -> Option<String> {
+        self.repos
+            .get(root)
+            .filter(|repo| repo.spellings.0.contains_key(spelling))
+            .map(|repo| repo.git_dir.clone())
+    }
+
+    /// The repositories, by every spelling they were registered under, that any of `paths`
+    /// (canonical directories that saw activity, or files written) lies in.
+    pub fn repos_touched<'a>(&self, paths: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+        if self.repos.is_empty() {
+            return Vec::new();
+        }
+        let mut hit: Vec<String> = Vec::new();
+        for path in paths {
+            for (root, repo) in &self.repos {
+                if is_within(path, root) || is_within(path, &repo.git_dir) {
+                    hit.extend(repo.spellings.iter().cloned());
+                }
+            }
+        }
+        hit.sort_unstable();
+        hit.dedup();
+        hit
     }
 
     /// The fewest directories that cover everything watched. FSEvents streams
@@ -587,7 +772,12 @@ mod tests {
     fn set_of(dirs: &[&str]) -> WatchSet {
         let mut set = WatchSet::default();
         for dir in dirs {
-            set.add_dir((*dir).to_owned(), PathBuf::from(dir));
+            set.add_dir(
+                (*dir).to_owned(),
+                (*dir).to_owned(),
+                PathBuf::from(dir),
+                false,
+            );
         }
         set
     }
@@ -604,13 +794,68 @@ mod tests {
     #[test]
     fn refcounts_release_only_on_the_last_reference() {
         let mut set = WatchSet::default();
-        assert!(set.add_dir("/a".into(), "/a".into()));
-        assert!(!set.add_dir("/a".into(), "/a".into()));
-        assert!(!set.remove_dir("/a"));
+        assert!(set.add_dir("/a".into(), "/a".into(), "/a".into(), false));
+        assert!(!set.add_dir("/a".into(), "/a".into(), "/a".into(), false));
+        assert!(!set.remove_dir("/a", "/a"));
         assert!(set.contains_dir("/a"));
-        assert!(set.remove_dir("/a"));
+        assert!(set.remove_dir("/a", "/a"));
         assert!(!set.contains_dir("/a"));
-        assert!(!set.remove_dir("/a"), "unknown removals are inert");
+        assert!(!set.remove_dir("/a", "/a"), "unknown removals are inert");
+    }
+
+    #[test]
+    fn a_directory_is_reported_in_every_spelling_it_is_watched_under() {
+        let mut set = WatchSet::default();
+        let key = "/private/tmp/p";
+        assert!(set.add_dir(key.into(), "/tmp/p".into(), key.into(), false));
+        assert!(!set.add_dir(key.into(), key.into(), key.into(), false));
+        assert!(!set.add_dir(key.into(), "/tmp/p".into(), key.into(), false));
+        assert_eq!(set.dir_spellings(key), vec![key, "/tmp/p"]);
+
+        assert!(
+            !set.remove_dir(key, "/elsewhere"),
+            "a spelling never registered releases nothing"
+        );
+        assert!(!set.remove_dir(key, "/tmp/p"));
+        assert_eq!(
+            set.dir_spellings(key),
+            vec![key, "/tmp/p"],
+            "one reference left"
+        );
+        assert!(!set.remove_dir(key, key));
+        assert_eq!(set.dir_spellings(key), vec!["/tmp/p"]);
+        assert!(set.remove_dir(key, "/tmp/p"), "the last reference");
+        assert!(set.dir_spellings(key).is_empty());
+    }
+
+    #[test]
+    fn a_changed_file_is_reported_in_every_spelling_it_is_open_under() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("open.ts");
+        std::fs::write(&file, "one").unwrap();
+        let dir_key = dir.path().to_string_lossy().into_owned();
+        let file_key = file.to_string_lossy().into_owned();
+
+        let mut set = WatchSet::default();
+        let stamp = FileStamp::of(&file);
+        set.add_file(
+            dir_key.clone(),
+            file_key.clone(),
+            "/link/open.ts".into(),
+            stamp,
+        );
+        set.add_file(dir_key.clone(), file_key.clone(), file_key.clone(), stamp);
+        std::fs::write(&file, "two, a different length").unwrap();
+        let stamp_of = |path: &str| FileStamp::of(Path::new(path));
+        let mut changed = set.changed_files_in(&dir_key, &stamp_of);
+        changed.sort();
+        let mut expected = vec![file_key.clone(), "/link/open.ts".to_owned()];
+        expected.sort();
+        assert_eq!(changed, expected);
+
+        set.remove_file(&dir_key, &file_key, "/link/open.ts");
+        std::fs::write(&file, "three").unwrap();
+        assert_eq!(set.changed_files_in(&dir_key, &stamp_of), vec![file_key]);
     }
 
     #[test]
@@ -797,8 +1042,18 @@ mod tests {
         let other_key = other.to_string_lossy().into_owned();
 
         let mut set = WatchSet::default();
-        set.add_file(dir_key.clone(), file_key.clone(), FileStamp::of(&file));
-        set.add_file(dir_key.clone(), other_key.clone(), FileStamp::of(&other));
+        set.add_file(
+            dir_key.clone(),
+            file_key.clone(),
+            file_key.clone(),
+            FileStamp::of(&file),
+        );
+        set.add_file(
+            dir_key.clone(),
+            other_key.clone(),
+            other_key.clone(),
+            FileStamp::of(&other),
+        );
         let stamp_of = |p: &str| FileStamp::of(Path::new(p));
         assert!(set.changed_files_in(&dir_key, &stamp_of).is_empty());
 
@@ -823,19 +1078,19 @@ mod tests {
     #[test]
     fn file_references_are_counted_and_released() {
         let mut set = WatchSet::default();
-        set.add_file("/d".into(), "/d/f".into(), None);
-        set.add_file("/d".into(), "/d/f".into(), None);
-        set.remove_file("/d", "/d/f");
+        set.add_file("/d".into(), "/d/f".into(), "/d/f".into(), None);
+        set.add_file("/d".into(), "/d/f".into(), "/d/f".into(), None);
+        set.remove_file("/d", "/d/f", "/d/f");
         assert!(!set.is_empty());
-        set.remove_file("/d", "/d/f");
+        set.remove_file("/d", "/d/f", "/d/f");
         assert!(set.is_empty());
-        set.remove_file("/d", "/d/f");
+        set.remove_file("/d", "/d/f", "/d/f");
     }
 
     #[test]
     fn watches_within_counts_directories_and_file_parents() {
         let mut set = set_of(&["/w/a"]);
-        set.add_file("/w/b".into(), "/w/b/f".into(), None);
+        set.add_file("/w/b".into(), "/w/b/f".into(), "/w/b/f".into(), None);
         assert!(set.watches_within("/w/a"));
         assert!(set.watches_within("/w"));
         assert!(set.watches_within("/w/b"));
@@ -978,11 +1233,186 @@ mod tests {
     fn releasing_a_directory_forgets_its_baseline() {
         let mut set = set_of(&["/w/a"]);
         set.record_listing("/w/a", Some(5));
-        assert!(set.remove_dir("/w/a"));
-        assert!(set.add_dir("/w/a".into(), "/w/a".into()));
+        assert!(set.remove_dir("/w/a", "/w/a"));
+        assert!(set.add_dir("/w/a".into(), "/w/a".into(), "/w/a".into(), false));
         assert!(
             set.listing_changed("/w/a", Some(5)),
             "a re-registered directory starts unknown"
+        );
+    }
+
+    #[test]
+    fn only_wsl_share_paths_are_polled() {
+        assert!(is_wsl_share("//wsl.localhost/FedoraLinux-43/home/x"));
+        assert!(is_wsl_share("\\\\wsl$\\Ubuntu\\home"));
+        // Canonical keys keep the prefix lowercase, but nothing guarantees the spelling.
+        assert!(is_wsl_share("//WSL.LOCALHOST/Ubuntu/home"));
+        assert!(is_wsl_share("\\\\WSL$\\Ubuntu"));
+        // A plain UNC server that merely starts with the same letters is not the share.
+        assert!(!is_wsl_share("//server/share"));
+        assert!(!is_wsl_share("//wsl.localhost.evil/share"));
+        assert!(!is_wsl_share("/home/x"));
+        assert!(!is_wsl_share("C:/Users/x"));
+        assert!(!is_wsl_share("C:\\Users\\x"));
+        assert!(!is_wsl_share(""));
+    }
+
+    #[test]
+    fn polling_compares_without_remembering_and_ignores_unknown_listings() {
+        let mut set = set_of(&["/w/a"]);
+        // Nothing recorded yet: not a change, or the first tick after registration would fire.
+        assert!(!set.listing_moved("/w/a", Some(1)));
+        set.record_listing("/w/a", Some(1));
+        assert!(!set.listing_moved("/w/a", Some(1)), "unchanged");
+        assert!(set.listing_moved("/w/a", Some(2)), "moved");
+        // The comparison left the remembered listing alone.
+        assert!(set.listing_moved("/w/a", Some(2)));
+        assert!(
+            set.listing_changed("/w/a", Some(2)),
+            "the first report still goes out"
+        );
+        assert!(!set.listing_changed("/w/a", Some(2)));
+        // Unreadable now, or unreadable when registered: never a change on its own.
+        assert!(!set.listing_moved("/w/a", None));
+        set.record_listing("/w/a", None);
+        assert!(!set.listing_moved("/w/a", Some(3)));
+        assert!(!set.listing_moved("/w/zzz", Some(3)));
+    }
+
+    #[test]
+    fn activity_in_a_work_tree_or_its_git_dir_reaches_the_repository_view() {
+        let mut set = WatchSet::default();
+        set.add_repo("/w/repo".into(), "/w/repo".into(), "/w/repo/.git".into());
+        // A linked worktree's git dir lives in the main repository.
+        set.add_repo(
+            "/w/feature".into(),
+            "/link/feature".into(),
+            "/w/repo/.git/worktrees/feature".into(),
+        );
+        set.add_repo(
+            "/w/feature".into(),
+            "/w/feature".into(),
+            "/w/repo/.git/worktrees/feature".into(),
+        );
+
+        assert_eq!(set.repos_touched(["/w/repo/src"]), vec!["/w/repo"]);
+        assert_eq!(set.repos_touched(["/w/repo/.git"]), vec!["/w/repo"]);
+        assert_eq!(
+            set.repos_touched(["/w/repo/.git/worktrees/feature", "/w/feature/a.ts"]),
+            vec!["/link/feature", "/w/feature", "/w/repo"],
+            "the main repository's view also covers its git dir"
+        );
+        assert!(set
+            .repos_touched(["/w/repository", "/w", "/elsewhere"])
+            .is_empty());
+
+        set.remove_repo("/w/feature", "/link/feature");
+        assert_eq!(set.repos_touched(["/w/feature"]), vec!["/w/feature"]);
+        set.remove_repo("/w/feature", "/w/feature");
+        set.remove_repo("/w/repo", "/w/repo");
+        assert!(set.repos_touched(["/w/repo/src"]).is_empty());
+        assert!(set.is_empty());
+    }
+
+    #[test]
+    fn polled_dirs_lists_only_the_directories_registered_for_polling() {
+        let mut set = WatchSet::default();
+        for (key, spelling, poll) in [
+            ("//wsl.localhost/U/home", "/home", true),
+            ("//wsl.localhost/U/home/src", "/home/src", true),
+            ("C:/repo", "/mnt/c/repo", false),
+        ] {
+            set.add_dir(key.into(), spelling.into(), key.into(), poll);
+        }
+        assert_eq!(
+            set.dir_paths().collect::<Vec<_>>(),
+            vec![Path::new("C:/repo")],
+            "the OS is asked only for what it can notify about"
+        );
+        let mut polled = set.polled_dirs();
+        polled.sort();
+        assert_eq!(
+            polled,
+            vec![
+                (
+                    "//wsl.localhost/U/home".to_owned(),
+                    PathBuf::from("//wsl.localhost/U/home")
+                ),
+                (
+                    "//wsl.localhost/U/home/src".to_owned(),
+                    PathBuf::from("//wsl.localhost/U/home/src")
+                ),
+            ]
+        );
+        // Refcounts do not duplicate a directory, and releasing the last reference removes it.
+        assert!(!set.add_dir(
+            "C:/repo".into(),
+            "/mnt/c/repo".into(),
+            "C:/repo".into(),
+            false
+        ));
+        assert!(!set.remove_dir("C:/repo", "/mnt/c/repo"));
+        assert!(set.remove_dir("C:/repo", "/mnt/c/repo"));
+        assert_eq!(set.polled_dirs().len(), 2);
+        assert!(set.has_polled_dirs());
+        assert!(set.remove_dir("//wsl.localhost/U/home", "/home"));
+        assert!(set.remove_dir("//wsl.localhost/U/home/src", "/home/src"));
+        assert!(!set.has_polled_dirs(), "the poller parks again");
+    }
+
+    #[test]
+    fn a_registered_file_is_seen_as_moved_by_its_stamp_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("open.ts");
+        std::fs::write(&file, "one").unwrap();
+        let file_key = file.to_string_lossy().into_owned();
+        let dir_key = dir.path().to_string_lossy().into_owned();
+
+        let mut set = WatchSet::default();
+        set.add_file(
+            dir_key.clone(),
+            file_key.clone(),
+            file_key.clone(),
+            FileStamp::of(&file),
+        );
+        assert_eq!(set.file_keys(&dir_key), vec![file_key.clone()]);
+
+        // The stamp is what moves, not the listing: an edit in place keeps the name.
+        let unchanged = HashMap::from([(file_key.clone(), FileStamp::of(&file))]);
+        assert!(!set.files_moved(&dir_key, &unchanged));
+
+        std::fs::write(&file, "two, a different length").unwrap();
+        let changed = HashMap::from([(file_key.clone(), FileStamp::of(&file))]);
+        assert!(set.files_moved(&dir_key, &changed));
+
+        // A file the snapshot did not catch was registered after it: left for the next tick.
+        assert!(!set.files_moved(&dir_key, &HashMap::new()));
+        assert!(!set.files_moved("/not/watched", &changed));
+
+        // The comparison left the remembered stamp alone.
+        assert!(set.files_moved(&dir_key, &changed));
+    }
+
+    #[test]
+    fn a_deleted_file_reads_as_moved() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("open.ts");
+        std::fs::write(&file, "one").unwrap();
+        let file_key = file.to_string_lossy().into_owned();
+        let dir_key = dir.path().to_string_lossy().into_owned();
+
+        let mut set = WatchSet::default();
+        set.add_file(
+            dir_key.clone(),
+            file_key.clone(),
+            file_key.clone(),
+            FileStamp::of(&file),
+        );
+        std::fs::remove_file(&file).unwrap();
+        let gone = HashMap::from([(file_key, None)]);
+        assert!(
+            set.files_moved(&dir_key, &gone),
+            "a file that no longer exists must still be reported"
         );
     }
 }

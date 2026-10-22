@@ -18,6 +18,8 @@ import {
   excludeNestedSources,
   type FsMoveResult,
 } from "./batchMove";
+import { refreshTargets } from "./refreshTargets";
+import { dirname } from "./treePaths";
 import { listenFsChanged, watchAdd, watchRemove } from "./watch";
 import { createWatchRegistry, planVisibilityEdge } from "./watchRegistry";
 
@@ -47,12 +49,6 @@ export type PendingCreate = {
 export function joinPath(parent: string, name: string): string {
   if (parent.endsWith("/")) return `${parent}${name}`;
   return `${parent}/${name}`;
-}
-
-function dirname(path: string): string {
-  const i = path.lastIndexOf("/");
-  if (i <= 0) return "/";
-  return path.slice(0, i);
 }
 
 const EXPANSION_CACHE_LIMIT = 8;
@@ -411,6 +407,16 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     [fetchChildren, addWatch, rootPath, scopeKey],
   );
 
+  const refreshAll = useCallback(async () => {
+    if (scopeKeyRef.current !== scopeKey) return;
+    const targets = refreshTargets(
+      rootPath,
+      nodesRef.current,
+      expandedRef.current,
+    );
+    await Promise.all(targets.map((path) => fetchChildren(path)));
+  }, [fetchChildren, rootPath, scopeKey]);
+
   // --- mutations ---
 
   const beginCreate = useCallback(
@@ -472,7 +478,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       if (!renaming) return;
       const trimmed = newName.trim();
       const parent = dirname(renaming);
-      const oldName = renaming.slice(parent === "/" ? 1 : parent.length + 1);
+      const oldName = renaming.slice(renaming.lastIndexOf("/") + 1);
       if (!trimmed || trimmed === oldName) {
         setRenaming(null);
         return;
@@ -610,6 +616,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     toggle,
     expand,
     refresh,
+    refreshAll,
     beginCreate,
     cancelCreate,
     commitCreate,
