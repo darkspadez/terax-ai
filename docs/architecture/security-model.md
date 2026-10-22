@@ -58,6 +58,10 @@ One limit remains: `workspace_authorize` is itself a command the page can call, 
 
 This is the allow side of the file-system boundary. Any new command that takes a path must pass it through one of these gates.
 
+## Settings store
+
+The page keeps its settings, preferences, chat list, snippets, todos, agents, custom themes and spaces in JSON stores through `tauri-plugin-store` (`store:default`). The plugin joins the path the page gives it to the app data folder, so an absolute path or `..` would read or write JSON anywhere, and it has no option to stop that. `src-tauri/src/modules/store_scope.rs` registers the plugin inside a thin wrapper that forwards every hook unchanged (stores, resource ids, the `store://change` events that keep windows in sync, file names) and refuses, before the plugin sees them, the two commands that name a file (`load`, `get_store`) unless the name is a plain file name: ASCII letters, digits, `-`, `_` and inner dots, no separator, drive, `..`, leading or trailing dot, or Windows device name (`CON`, `NUL.json`). The only nested name allowed is an extra window's own spaces store, `windows/<label>/terax-spaces.json`, from that window alone. Every other store command takes the resource id of a store opened that way. A test lists every store the page opens (each `STORE_PATH` in `src/`) and checks that each is allowed. The backend's own stores (`StoreExt`) are not affected.
+
 ## Asset protocol scope
 
 Asset URLs (`asset://localhost/...`, `http(s)://asset.localhost/...` on Windows) let a webview load a file from disk without IPC. `tauri.conf.json` allows nothing (`assetProtocol.scope` is `[]`, and a test keeps it so); `src-tauri/src/modules/asset_scope.rs` grants at runtime:
@@ -129,6 +133,7 @@ The agent detector (`src-tauri/src/modules/pty/agent_detect.rs`) is armed by `OS
 - New file-system-touching commands must pass every path the page sends through a registry gate (`authorized_existing`, `authorized_write_target`, `authorized_new`, `authorized_entry`).
 - The page authorizes a path only for what the user chose, never for a path a terminal program or an AI reply named. A terminal's reported folder is authorized only by `pty_authorize_cwd`, which on Linux and macOS requires the OS to confirm the shell or its foreground job is there.
 - The asset protocol's configured scope stays empty; files are granted at runtime (`asset_scope.rs`), never with `**`.
+- The page opens stores by plain names in the app data folder only (`store_scope.rs`); a new store gets a plain name.
 - New network-facing commands must go through the `net.rs` proxy or reimplement the same classification and DNS pinning.
 - New plugin APIs must be added to `src-tauri/capabilities/default.json`.
 - Keys, tokens, and credentials stay in the keychain / Linux secrets file.
