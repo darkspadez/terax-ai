@@ -24,7 +24,11 @@ import {
 } from "react";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { FileIcon } from "./FileIcon";
-import { copyToClipboard, revealInFinder } from "./lib/contextActions";
+import {
+  copyToClipboard,
+  relativePath,
+  revealInFinder,
+} from "./lib/contextActions";
 import { COMPACT_CONTENT, COMPACT_ITEM } from "./lib/menuItemClass";
 import { cn } from "@/lib/utils";
 
@@ -321,6 +325,14 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
                         onSelect={() => void copyToClipboard(hit.path)}
                       >
                         Copy Path
+                      </ContextMenuItem>
+                      <ContextMenuItem
+                        className={COMPACT_ITEM}
+                        onSelect={() =>
+                          void copyToClipboard(relativePath(rootPath, hit.path))
+                        }
+                      >
+                        Copy Relative Path
                       </ContextMenuItem>
                       <ContextMenuSeparator />
                       <ContextMenuItem
