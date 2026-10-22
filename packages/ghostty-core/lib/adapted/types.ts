@@ -378,6 +378,14 @@ export type TeraxGhosttyWasmExports = WebAssembly.Exports & {
     ptr: number,
     len: number,
   ) => number;
+  readonly restty_kitty_paste_event: (
+    handle: number,
+    primary: number,
+    entropyPtr: number,
+    entropyLen: number,
+    mimesPtr: number,
+    mimesLen: number,
+  ) => number;
   readonly restty_dnd_active: (handle: number) => number;
   readonly restty_dnd_accepted: (handle: number) => number;
   readonly restty_dnd_move: (

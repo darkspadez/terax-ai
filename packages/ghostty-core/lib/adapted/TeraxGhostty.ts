@@ -38,10 +38,10 @@ export const ADAPTED_GHOSTTY_COMMIT =
 export const ADAPTED_RESTTY_COMMIT =
   "7700b14a7643ba9240818209ef1e0aa90d83ad77";
 export const ADAPTED_GHOSTTY_WASM_SHA256 =
-  "eb117b5cf0843d232a3624a2d79aaac8439ad942e66a7ff9bc765785faadb4e3";
+  "4b6fc49c8326b09e36a5ca1d1db1ba321b5d5dfee159db2e90474914dcbd4218";
 
 export const ADAPTED_GHOSTTY_SCALAR_WASM_SHA256 =
-  "9fad4845dc956b021fd6868f4b3d103b63c43549792b25fdcf3c8ea121bbdf22";
+  "f9c1cf299a1c51a514486b6f0db5ff04523c74700da2106398b967d02360e418";
 
 let wasmSimdAvailable: boolean | undefined;
 
@@ -170,6 +170,7 @@ const requiredExports = [
   "restty_set_ligatures",
   "restty_set_clipboard_policy",
   "restty_kitty_clipboard_answer",
+  "restty_kitty_paste_event",
   "restty_dnd_active",
   "restty_dnd_accepted",
   "restty_dnd_move",
@@ -1012,6 +1013,34 @@ export class TeraxGhosttyTerminal {
         ),
       ) === 0
     );
+  }
+
+  /**
+   * A paste the user made from a clipboard holding `mimes`. A program that
+   * set mode 5522 (Kitty paste events) is sent Ghostty's paste event, with a
+   * one-time password that lets its follow-up read skip the prompt; true
+   * then. False when the text should be pasted: the mode is off or reads do
+   * not go to the host.
+   */
+  kittyPasteEvent(primary: boolean, mimes: readonly string[]): boolean {
+    this.assertLive();
+    const list = this.textEncoder.encode(
+      mimes.filter((mime) => mime && !mime.includes("\n")).join("\n"),
+    );
+    const bytes = new Uint8Array(PASTE_EVENT_ENTROPY_BYTES + list.byteLength);
+    crypto.getRandomValues(bytes.subarray(0, PASTE_EVENT_ENTROPY_BYTES));
+    bytes.set(list, PASTE_EVENT_ENTROPY_BYTES);
+    const sent = this.withInput(bytes, (pointer, length) =>
+      this.exports.restty_kitty_paste_event(
+        this.handle,
+        primary ? 1 : 0,
+        pointer,
+        PASTE_EVENT_ENTROPY_BYTES,
+        pointer + PASTE_EVENT_ENTROPY_BYTES,
+        length - PASTE_EVENT_ENTROPY_BYTES,
+      ),
+    );
+    return sent === 1;
   }
 
   /** Whether the program registered to accept drops (Kitty OSC 72). */
@@ -2226,17 +2255,18 @@ function decodeTerminalEvent(
         terminator: payload[1] ? "bel" : "st",
       };
     case 15: {
-      if (payload.byteLength < 8) return null;
+      if (payload.byteLength < 9) return null;
       const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
-      const nameLength = view.getUint16(6, true);
-      if (nameLength > payload.byteLength - 8) return null;
-      const mimes = textDecoder.decode(payload.subarray(8 + nameLength));
+      const nameLength = view.getUint16(7, true);
+      if (nameLength > payload.byteLength - 9) return null;
+      const mimes = textDecoder.decode(payload.subarray(9 + nameLength));
       return {
         type: "kitty-clipboard-read",
         id: view.getUint32(0, true),
         primary: payload[4] === 1,
         list: payload[5] === 1,
-        name: textDecoder.decode(payload.subarray(8, 8 + nameLength)),
+        granted: payload[6] === 1,
+        name: textDecoder.decode(payload.subarray(9, 9 + nameLength)),
         mimes: mimes ? mimes.split("\n") : [],
       };
     }
@@ -2261,6 +2291,9 @@ function decodeTerminalEvent(
       return null;
   }
 }
+
+/** Random bytes for a paste event's password: 22 characters need ~25. */
+const PASTE_EVENT_ENTROPY_BYTES = 64;
 
 const KITTY_READ_STATUS = {
   success: 0,

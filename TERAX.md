@@ -269,7 +269,10 @@ Kitty clipboard reads (OSC 5522) follow the clipboard-read setting: denied ones
 the core refuses itself, others are held in the core until the user answers
 the same prompt OSC 52 uses (naming the program as it names itself) and then
 answered with the clipboard text under each requested text type; a listing of
-the types on offer is served unasked, as Kitty does. Writes are allowed like
+the types on offer is served unasked, as Kitty does. A program that sets mode
+5522 is told of a paste from a clipboard (shortcut, menu, middle click) by a
+Kitty paste event instead of the text, and its follow-up read, covered by the
+event's one-time password, is served without the prompt. Writes are allowed like
 OSC 52 writes and share its latest-value queue (the primary selection where
 asked). Files dragged over a pane whose program registered for drops (Kitty
 OSC 72) go to the program as a copy, offered as `text/uri-list` and

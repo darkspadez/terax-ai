@@ -96,6 +96,7 @@ describe("GhosttySemanticEventRouter", () => {
       id: 3,
       primary: false,
       list: false,
+      granted: false,
       name: "vim",
       mimes: ["text/plain"],
     } as const;

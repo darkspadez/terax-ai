@@ -285,6 +285,12 @@ export interface GhosttyTerminalModelApi extends TerminalModel {
    * (`kitty-clipboard-write`). OSC 52 is unaffected.
    */
   setClipboardPolicy?(policy: GhosttyClipboardPolicy): void;
+  /**
+   * A paste the user made from a clipboard holding `mimes`: true when the
+   * program set mode 5522 and was sent a Kitty paste event instead of the
+   * text (it reads the clipboard itself, with a grant that skips the prompt).
+   */
+  sendPasteEvent?(primary: boolean, mimes: readonly string[]): boolean;
   /** Answers a held Kitty clipboard read; false when none is held by `id`. */
   answerClipboardRead?(
     id: number,

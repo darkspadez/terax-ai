@@ -11,10 +11,10 @@ per-terminal frame loop, or per-pane GPU lifecycle.
 - Restty commit: `7700b14a7643ba9240818209ef1e0aa90d83ad77`
 - Zig: `0.16.0`
 - Optimization: `ReleaseFast`, WebAssembly SIMD and scalar variants
-- SIMD artifact size: `1069664` bytes
-- Scalar artifact size: `1010650` bytes
-- SIMD SHA-256: `eb117b5cf0843d232a3624a2d79aaac8439ad942e66a7ff9bc765785faadb4e3`
-- Scalar SHA-256: `9fad4845dc956b021fd6868f4b3d103b63c43549792b25fdcf3c8ea121bbdf22`
+- SIMD artifact size: `1071135` bytes
+- Scalar artifact size: `1012098` bytes
+- SIMD SHA-256: `4b6fc49c8326b09e36a5ca1d1db1ba321b5d5dfee159db2e90474914dcbd4218`
+- Scalar SHA-256: `f9c1cf299a1c51a514486b6f0db5ff04523c74700da2106398b967d02360e418`
 
 Terax-specific changes include:
 
@@ -158,6 +158,14 @@ XTVERSION, OSC 9;4 progress), instead of answering only a hand-picked set:
   reach the host as text (`kitty_clipboard_write`); one without a text
   representation is answered unsupported. OSC 52 stays the bridge's own, so
   Ghostty's handler never sees it.
+- Mode 5522 paste events (`restty_kitty_paste_event`): for a user's paste
+  from a clipboard the bridge mints Kitty's one-time password from host
+  entropy (Ghostty's alphabet and rejection sampling; a freestanding target
+  has no secure random source of its own), records the one-time read grant
+  in Ghostty's handler and queues Ghostty's `PasteEvent`. A held read reports
+  whether a grant covers it (peeked as Ghostty decides on replay: a named
+  request for data, never a listing), and the replay consumes it. Declined,
+  so the host pastes text, while reads do not go to the host.
 - Kitty drag and drop (OSC 72): Ghostty's registration and acceptance state
   is reported (`drag_and_drop`) and queried (`restty_dnd_active`,
   `restty_dnd_accepted`); the host feeds native drags in with

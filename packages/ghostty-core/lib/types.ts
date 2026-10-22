@@ -523,13 +523,15 @@ export type GhosttyTerminalEvent =
    * Kitty clipboard (OSC 5522) read held for the host while reads go to it
    * (`setClipboardPolicy`). Answer with `answerKittyClipboardRead(id, …)`;
    * `list` asks for the MIME types available, `mimes` for those
-   * representations (empty for a listing alone).
+   * representations (empty for a listing alone). `granted` when a session
+   * grant (a paste event's password) covers it, so no prompt is due.
    */
   | {
       readonly type: "kitty-clipboard-read";
       readonly id: number;
       readonly primary: boolean;
       readonly list: boolean;
+      readonly granted: boolean;
       readonly name: string;
       readonly mimes: readonly string[];
     }

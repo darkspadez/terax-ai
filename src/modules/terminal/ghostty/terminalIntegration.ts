@@ -269,10 +269,12 @@ async function answerKittyClipboardRead(
   context: TerminalIntegrationContext,
   request: KittyClipboardReadRequest,
 ): Promise<void> {
-  // A listing alone shows only the types on offer; Kitty serves it unasked.
+  // A listing alone shows only the types on offer; Kitty serves it unasked,
+  // as it does a read with a paste event's password (the user pasted).
   const program = promptProgramName(request.name);
   const allowed =
     request.mimes.length === 0 ||
+    request.granted ||
     behavior().clipboardRead === "allow" ||
     (await requestTerminalPrompt({
       kind: "clipboard-read",

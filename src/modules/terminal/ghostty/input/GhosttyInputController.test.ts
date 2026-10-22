@@ -425,10 +425,12 @@ describe.each(["ghostty-vt.wasm", "ghostty-vt-scalar.wasm"])(
         ConstructorParameters<typeof GhosttyInputController>[0]
       > & { devicePixelRatio?: number } = {},
     ) {
+      const replies: string[] = [];
       const model = new AdaptedGhosttyTerminalModel(core, {
         backend: "ghostty-webgpu",
         cols: 80,
         rows: 24,
+        onReply: (bytes) => replies.push(decoder.decode(bytes)),
       });
       const scale = options.devicePixelRatio ?? 1;
       model.setPixelSize(800 * scale, 480 * scale);
@@ -450,6 +452,7 @@ describe.each(["ghostty-vt.wasm", "ghostty-vt-scalar.wasm"])(
         input,
         pointerTarget,
         sent,
+        replies,
         write: (text: string) => model.write(new TextEncoder().encode(text)),
         dispose: () => {
           controller.dispose();
@@ -603,6 +606,31 @@ describe.each(["ghostty-vt.wasm", "ghostty-vt-scalar.wasm"])(
       controller.paste("bracketed\n");
       expect(confirmPaste).toHaveBeenCalledTimes(2);
       expect(sent[1]).toBe("\x1b[200~bracketed\r\x1b[201~");
+      dispose();
+    });
+
+    it("tells a program with Kitty paste events of clipboard pastes, not their text", () => {
+      const { controller, model, sent, replies, write, dispose } = setup();
+      model.setClipboardPolicy({ readsToHost: true, writesAllowed: true });
+      controller.pasteFromClipboard("one");
+      expect(sent.splice(0)).toEqual(["one"]);
+
+      write("\x1b[?5522h");
+      controller.pasteFromClipboard("two", true);
+      // Text that did not come from a clipboard is still typed.
+      controller.paste("dropped");
+      expect(sent.splice(0)).toEqual(["dropped"]);
+      const event = replies.splice(0).join("");
+      expect(event).toMatch(
+        /^\x1b\]5522;type=read:status=OK:loc=primary:pw=[A-Za-z0-9+/]+=*\x1b\\/,
+      );
+      expect(event).not.toContain(btoa("two"));
+
+      // Without the host serving reads the program could not fetch it.
+      model.setClipboardPolicy({ readsToHost: false, writesAllowed: true });
+      controller.pasteFromClipboard("three");
+      expect(sent.splice(0)).toEqual(["three"]);
+      expect(replies).toEqual([]);
       dispose();
     });
 

@@ -14,6 +14,8 @@ import { TerminalInputProxy } from "@/modules/terminal/ghostty/input/TerminalInp
 import { TerminalNativeSelection } from "@/modules/terminal/ghostty/input/TerminalNativeSelection";
 
 const DUPLICATE_INPUT_WINDOW_MS = 75;
+/** What a paste event offers: the host serves its clipboards as text. */
+const PASTE_EVENT_MIMES: readonly string[] = ["text/plain"];
 
 /** `WheelEvent.deltaMode` values (the constructor is not available everywhere). */
 const DOM_DELTA_PIXEL = 0;
@@ -224,10 +226,29 @@ export class GhosttyInputController {
     });
   }
 
+  /** Text inserted other than from a clipboard (drops, scripted input). */
   paste(text: string): void {
+    this.deliverPaste(text, null);
+  }
+
+  /**
+   * A paste the user made from a clipboard (shortcut, menu, middle click):
+   * a program that set mode 5522 is sent a Kitty paste event and reads the
+   * clipboard itself; anything else gets the text.
+   */
+  pasteFromClipboard(text: string, primary = false): void {
+    this.deliverPaste(text, primary);
+  }
+
+  private deliverPaste(text: string, clipboard: boolean | null): void {
     if (this.disposed || !text) return;
     this.nativeSelection?.reset();
     if (this.options.onPaste?.(text)) return;
+    if (
+      clipboard !== null &&
+      this.options.model.sendPasteEvent?.(clipboard, PASTE_EVENT_MIMES)
+    )
+      return;
     const bracketed = this.options.model.modes().bracketedPaste;
     if (this.options.confirmPaste && isUnsafePaste(text, bracketed)) {
       void this.options.confirmPaste(text).then((confirmed) => {
@@ -291,7 +312,9 @@ export class GhosttyInputController {
 
     if (isPasteShortcut(event, this.isMac)) {
       consume(event);
-      void readTerminalClipboard().then((text) => this.paste(text));
+      void readTerminalClipboard().then((text) =>
+        this.pasteFromClipboard(text),
+      );
       return;
     }
     if (isCopyShortcut(event, this.isMac) && this.options.onCopy()) {
@@ -448,7 +471,7 @@ export class GhosttyInputController {
         data = "\x1b[3~";
         break;
       case "insertFromPaste":
-        if (event.data) this.paste(event.data);
+        if (event.data) this.pasteFromClipboard(event.data);
         consume(event);
         return;
       default:
@@ -481,7 +504,7 @@ export class GhosttyInputController {
     const text = event.clipboardData?.getData("text/plain") ?? "";
     if (!text) return;
     consume(event);
-    this.paste(text);
+    this.pasteFromClipboard(text);
   };
 
   private readonly handleFocus = (): void => {

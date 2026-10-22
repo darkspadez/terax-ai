@@ -405,6 +405,7 @@ describe.each([
             id: 1,
             primary: false,
             list: true,
+            granted: false,
             name: "vim",
             mimes: ["text/plain"],
           },
@@ -466,6 +467,50 @@ describe.each([
           { type: "kitty-clipboard-write", primary: false, clear: false, text: "hi" },
           { type: "kitty-clipboard-write", primary: false, clear: true, text: "" },
         ]);
+      });
+    });
+
+    it("sends paste events whose password grants one follow-up read (mode 5522)", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        terminal.setClipboardPolicy({ readsToHost: true, writesAllowed: true });
+        expect(terminal.kittyPasteEvent(false, ["text/plain"])).toBe(false);
+        write("\x1b[?5522h");
+        expect(terminal.kittyPasteEvent(false, ["text/plain"])).toBe(true);
+        const event = decoder.decode(terminal.drainOutputBytes());
+        // Ghostty's event: the types on offer under a fresh password.
+        const pw = /^\x1b\]5522;type=read:status=OK:pw=([^:;\x1b]+)\x1b\\/.exec(event)?.[1];
+        expect(pw && atob(pw)).toMatch(/^[2-9a-km-zA-HJ-NP-Z]{22}$/);
+        expect(event).toContain(
+          `\x1b]5522;type=read:status=DATA:mime=Lg==:pw=${pw};${b64("text/plain\n")}\x1b\\`,
+        );
+
+        const read = (name: string) =>
+          write(
+            `\x1b]5522;type=read:${name ? `name=${b64(name)}:` : ""}pw=${pw};${b64("text/plain")}\x1b\\`,
+          );
+        // A password counts only with a name, and only once.
+        read("");
+        read("app");
+        read("app");
+        const reads = terminal.drainEvents();
+        expect(
+          reads.map((event) =>
+            event.type === "kitty-clipboard-read" ? event.granted : null,
+          ),
+        ).toEqual([false, true, true]);
+        // Replaying the granted read consumes the grant; the next is asked.
+        terminal.answerKittyClipboardRead(2, { status: "denied" });
+        read("app");
+        expect(
+          terminal.drainEvents().map((event) =>
+            event.type === "kitty-clipboard-read" ? event.granted : null,
+          ),
+        ).toEqual([false]);
+
+        // Reads that cannot reach the host would lose the paste.
+        terminal.setClipboardPolicy({ readsToHost: false, writesAllowed: true });
+        terminal.drainOutputBytes();
+        expect(terminal.kittyPasteEvent(false, ["text/plain"])).toBe(false);
       });
     });
 

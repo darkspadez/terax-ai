@@ -54,8 +54,10 @@ const TerminalEvent = enum(u8) {
     clipboard_read = 14,
     /// A Kitty clipboard (OSC 5522) read is held for the host's answer
     /// (`restty_kitty_clipboard_answer`): u32 request id, 1 for the primary
-    /// selection, 1 when the targets listing was asked for, u16 name length,
-    /// the program's name, then the requested MIME types separated by "\n".
+    /// selection, 1 when the targets listing was asked for, 1 when a session
+    /// grant (a paste event's password) lets the host skip its prompt, u16
+    /// name length, the program's name, then the requested MIME types
+    /// separated by "\n".
     kitty_clipboard_read = 15,
     /// A Kitty clipboard write the host allows: 1 for the primary selection,
     /// 1 when the write clears the clipboard, then the text written.
@@ -566,6 +568,7 @@ const StreamHandler = struct {
 
         var mimes: std.ArrayListUnmanaged(u8) = .empty;
         var list = false;
+        var data_mimes: usize = 0;
         var it = decoded.mimeIterator();
         while (it.next()) |mime| {
             if (std.mem.eql(u8, mime, clipboard.targets_mime)) {
@@ -574,7 +577,12 @@ const StreamHandler = struct {
             }
             if (mimes.items.len > 0) try mimes.append(arena.allocator(), '\n');
             try mimes.appendSlice(arena.allocator(), mime);
+            data_mimes += 1;
         }
+        // As Ghostty decides on replay: a password counts only with a name,
+        // and a listing alone never consults (or consumes) the grants.
+        const granted = !clipboard.readPromptExempt(data_mimes) and
+            meta.name.len > 0 and self.kittyReadGranted(meta.pw);
 
         const id = self.next_kitty_read;
         self.next_kitty_read +%= 1;
@@ -591,12 +599,23 @@ const StreamHandler = struct {
         });
 
         const name = meta.name[0..@min(meta.name.len, std.math.maxInt(u16))];
-        var header: [8]u8 = undefined;
+        var header: [9]u8 = undefined;
         std.mem.writeInt(u32, header[0..4], id, .little);
         header[4] = @intFromBool(meta.loc == .primary);
         header[5] = @intFromBool(list);
-        std.mem.writeInt(u16, header[6..8], @intCast(name.len), .little);
+        header[6] = @intFromBool(granted);
+        std.mem.writeInt(u16, header[7..9], @intCast(name.len), .little);
         try self.emitEvent(.kitty_clipboard_read, &.{ &header, name, mimes.items });
+    }
+
+    /// Whether `pw` holds a read grant, without consuming a one-time one:
+    /// Ghostty consumes it when the read is replayed.
+    fn kittyReadGranted(self: *StreamHandler, pw: []const u8) bool {
+        if (pw.len == 0) return false;
+        for (self.readonly.kitty_clipboard_grants.entries.items) |entry| {
+            if (std.mem.eql(u8, entry.pw, pw)) return entry.read;
+        }
+        return false;
     }
 
     /// Replays the held read `id` through Ghostty with the host's answer,
@@ -3015,6 +3034,79 @@ fn readFixed(data: []const u8, at: *usize, len: usize) ?[]const u8 {
     if (data.len - at.* < len) return null;
     defer at.* += len;
     return data[at.*..][0..len];
+}
+
+/// Kitty's one-time password alphabet (alphanumerics without look-alikes), as
+/// Ghostty's `generateOtp` draws from it.
+const otp_alphabet = "23456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ";
+
+/// A paste the user made from a clipboard, for a program that set mode 5522
+/// (Kitty paste events): instead of the text, Ghostty's paste event lists the
+/// clipboard's MIME types (`mimes_ptr`, separated by "\n") with a one-time
+/// password whose read grant lets the program's follow-up read skip the
+/// prompt (`kitty_clipboard_read` reports it). The password is drawn from
+/// `entropy` (secure random bytes from the host; 64 are plenty). Returns 1
+/// when the event was queued, 0 when the host should paste the text: the
+/// mode is off, reads do not go to the host (the read would be refused and
+/// the paste lost), or the entropy ran short.
+pub export fn restty_kitty_paste_event(
+    handle: ?*Restty,
+    primary: u8,
+    entropy_ptr: ?[*]const u8,
+    entropy_len: usize,
+    mimes_ptr: ?[*]const u8,
+    mimes_len: usize,
+) u8 {
+    const h = handle orelse return 0;
+    const handler = &h.stream.handler;
+    if (!h.term.modes.get(.kitty_paste_events) or !handler.kitty_reads_to_host) return 0;
+    const clipboard = ghostty.kitty.clipboard;
+
+    // Rejection sampling keeps every character equally likely.
+    const entropy: []const u8 = if (entropy_ptr) |ptr| ptr[0..entropy_len] else &.{};
+    const limit = (std.math.maxInt(u8) + 1) / otp_alphabet.len * otp_alphabet.len;
+    var otp: [clipboard.otp_len]u8 = undefined;
+    var len: usize = 0;
+    for (entropy) |byte| {
+        if (len == otp.len) break;
+        if (byte >= limit) continue;
+        otp[len] = otp_alphabet[byte % otp_alphabet.len];
+        len += 1;
+    }
+    if (len < otp.len) return 0;
+
+    var mimes: [clipboard.max_listing_mimes][]const u8 = undefined;
+    var count: usize = 0;
+    if (mimes_ptr) |ptr| {
+        var it = std.mem.tokenizeScalar(u8, ptr[0..mimes_len], '\n');
+        while (it.next()) |mime| {
+            if (count == mimes.len) break;
+            mimes[count] = mime;
+            count += 1;
+        }
+    }
+
+    // Granted before the event can reach the program, revoked (a one-time
+    // grant is consumed by a check) if the event cannot be queued.
+    const grants = &handler.readonly.kitty_clipboard_grants;
+    const gpa = h.term.gpa();
+    grants.grant(gpa, &otp, .read, true) catch return 0;
+    var out: std.Io.Writer.Allocating = .init(h.alloc);
+    defer out.deinit();
+    const event: clipboard.PasteEvent = .{
+        .primary = primary != 0,
+        .pw = &otp,
+        .available = mimes[0..count],
+    };
+    event.encode(&out.writer) catch {
+        _ = grants.use(gpa, &otp, .read);
+        return 0;
+    };
+    handler.appendOutput(out.written()) catch {
+        _ = grants.use(gpa, &otp, .read);
+        return 0;
+    };
+    return 1;
 }
 
 /// Whether the program registered to accept drops (Kitty OSC 72); the host

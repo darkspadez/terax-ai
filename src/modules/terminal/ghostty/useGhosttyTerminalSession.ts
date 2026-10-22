@@ -1126,7 +1126,7 @@ function createGhosttyInput(
       )
         return false;
       void readPrimarySelection().then((text) => {
-        if (text) session.input?.paste(text);
+        if (text) session.input?.pasteFromClipboard(text, true);
       });
       return true;
     },

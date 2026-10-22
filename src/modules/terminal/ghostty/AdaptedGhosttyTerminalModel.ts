@@ -483,6 +483,13 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
     this.drainReplies();
   }
 
+  sendPasteEvent(primary: boolean, mimes: readonly string[]): boolean {
+    this.assertLive();
+    const sent = this.terminal.kittyPasteEvent(primary, mimes);
+    this.drainReplies();
+    return sent;
+  }
+
   answerClipboardRead(
     id: number,
     answer: TeraxGhosttyKittyClipboardAnswer,
