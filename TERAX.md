@@ -146,6 +146,10 @@ Ghostty's cell rule: a wide cell, or a symbol followed by a free cell or a
 space that neither ends the row nor follows another symbol (the core marks it
 with `GPU_GLYPH_TWO_CELLS` for WebGPU; WebGL applies `constraintCells`). Text is never
 transformed. One rasterizer (`gpu/GlyphRasterizer.ts`) serves both atlases.
+Glyphs are drawn in white; one with coloured pixels is drawn again in black and
+is a colour glyph (drawn with its own colours, not the cell's) only if it
+keeps them, since subpixel antialiasing (WebKitGTK on an LCD-rendering desktop)
+fringes plain text with colour (`gpu/glyphColor.ts`).
 Font ligatures (Settings, "Font ligatures", on by default, off while letter
 spacing is set) use runs of 2 to 16 adjacent narrow ASCII punctuation cells
 drawn alike (`gpu/ligatureRuns.ts`; the core interns each cell as the whole run
