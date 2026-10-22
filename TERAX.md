@@ -526,7 +526,7 @@ BYOK. Cloud providers via `@ai-sdk/*`: **OpenAI, Anthropic, Google, xAI, Cerebra
 ### Window styling
 
 - macOS: `titleBarStyle: Overlay` + `hiddenTitle: true` in `tauri.conf.json` (native traffic lights via overlay). The main window is created opaque, because a non-opaque `NSWindow` makes WindowServer blend every terminal frame. `window_set_backdrop` makes the window and its `WKWebView` (`drawsBackground`) see-through only while vibrancy is on, and paints the opaque window with the theme's frame colour otherwise. `macOSPrivateApi: true` stays for that `WKWebView` key and the private `NSVisualEffectView` hosting, so the macOS build uses a private API and is not App Store eligible.
-- Linux: `decorations: false` + `transparent: true` from `tauri.linux.conf.json`; re-asserted post-realize for GNOME/Mutter CSD. Windows and Linux stay transparent from creation because the borderless chrome paints its own rounded corners.
+- Linux: `decorations: false` + `transparent: true` from `tauri.linux.conf.json`; re-asserted post-realize for GNOME/Mutter CSD. Windows and Linux stay transparent from creation because the borderless chrome paints its own rounded corners. WebKitGTK commits DMABUF buffers without an explicit-sync acquire point, which an explicit-sync compositor (KWin 6.6+) answers with a protocol error that ends Terax before its window maps on NVIDIA, so `main.rs` sets `__NV_DISABLE_EXPLICIT_SYNC=1` before GTK starts, only on Wayland with `/sys/module/nvidia` present and never over a value the user set; PTY shells and one-shot commands get it removed again (`workspace::child_env_overrides`).
 - Windows: same as Linux via `tauri.windows.conf.json`. React renders custom `WindowControls`.
 
 ### Tauri capabilities
