@@ -1,0 +1,511 @@
+import { readFile } from "node:fs/promises";
+import { deflateSync } from "node:zlib";
+import { Mods } from "@terax/ghostty-core";
+import {
+  type TeraxGhosttyTerminal,
+  TeraxGhostty,
+} from "@terax/ghostty-core/adapted";
+import { beforeAll, describe, expect, it } from "vitest";
+
+// Protocols the Terax core answers or reports beyond plain VT parsing: Kitty
+// graphics, in-band size reports, colour scheme and visibility reports,
+// mouse encoding, progress / pointer / clipboard-read events and VT export.
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffff_ffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = crc & 1 ? 0xedb8_8320 ^ (crc >>> 1) : crc >>> 1;
+    }
+  }
+  return (crc ^ 0xffff_ffff) >>> 0;
+}
+
+function pngChunk(type: string, data: Uint8Array): Uint8Array {
+  const chunk = new Uint8Array(12 + data.byteLength);
+  const view = new DataView(chunk.buffer);
+  view.setUint32(0, data.byteLength);
+  chunk.set(encoder.encode(type), 4);
+  chunk.set(data, 8);
+  view.setUint32(
+    8 + data.byteLength,
+    crc32(chunk.subarray(4, 8 + data.byteLength)),
+  );
+  return chunk;
+}
+
+/** An 8-bit RGBA PNG (colour type 6), each row with filter type 0. */
+function rgbaPng(
+  width: number,
+  height: number,
+  pixels: Uint8Array,
+): Uint8Array {
+  const header = new Uint8Array(13);
+  const view = new DataView(header.buffer);
+  view.setUint32(0, width);
+  view.setUint32(4, height);
+  header[8] = 8;
+  header[9] = 6;
+  const raw = new Uint8Array(height * (1 + width * 4));
+  for (let row = 0; row < height; row += 1) {
+    raw.set(
+      pixels.subarray(row * width * 4, (row + 1) * width * 4),
+      row * (1 + width * 4) + 1,
+    );
+  }
+  const parts = [
+    Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngChunk("IHDR", header),
+    pngChunk("IDAT", deflateSync(raw)),
+    pngChunk("IEND", new Uint8Array(0)),
+  ];
+  const png = new Uint8Array(
+    parts.reduce((sum, part) => sum + part.byteLength, 0),
+  );
+  let offset = 0;
+  for (const part of parts) {
+    png.set(part, offset);
+    offset += part.byteLength;
+  }
+  return png;
+}
+
+function base64(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString("base64");
+}
+
+describe.each([
+  ["SIMD", "ghostty-vt.wasm"],
+  ["scalar", "ghostty-vt-scalar.wasm"],
+])("%s Ghostty core protocols", (_kind, artifact) => {
+  let ghostty: TeraxGhostty;
+
+  beforeAll(async () => {
+    const file = await readFile(
+      new URL(
+        `../../../../packages/ghostty-core/adapted/${artifact}`,
+        import.meta.url,
+      ),
+    );
+    ghostty = await TeraxGhostty.loadBytes(Uint8Array.from(file).buffer);
+  });
+
+  function withTerminal(
+    cols: number,
+    rows: number,
+    run: (
+      terminal: TeraxGhosttyTerminal,
+      write: (text: string) => string,
+    ) => void,
+  ): void {
+    const terminal = ghostty.createTerminal(cols, rows);
+    const write = (text: string): string => {
+      terminal.write(encoder.encode(text));
+      return decoder.decode(terminal.drainOutputBytes());
+    };
+    try {
+      run(terminal, write);
+    } finally {
+      terminal.dispose();
+    }
+  }
+
+  describe("Kitty graphics", () => {
+    it("answers capability queries and accepts direct RGB and PNG transmissions", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        terminal.setPixelSize(800, 480);
+        expect(write("\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\")).toBe(
+          "\x1b_Gi=31;OK\x1b\\",
+        );
+        const pixels = Uint8Array.from([255, 0, 0, 255, 0, 0, 255, 128]);
+        expect(
+          write(`\x1b_Gi=7,a=T,f=100;${base64(rgbaPng(2, 1, pixels))}\x1b\\`),
+        ).toBe("\x1b_Gi=7;OK\x1b\\");
+        terminal.updateRenderState();
+        const [placement] = terminal.kittyPlacements();
+        expect(placement).toMatchObject({
+          imageId: 7,
+          channels: 4,
+          imageWidth: 2,
+          imageHeight: 1,
+          col: 0,
+          row: 0,
+          width: 2,
+          height: 1,
+          sourceWidth: 2,
+          sourceHeight: 1,
+        });
+        expect([...placement.pixels]).toEqual([...pixels]);
+        expect(placement.generation).toBeGreaterThan(0);
+      });
+    });
+
+    it("refuses file media, which a webview cannot read", () => {
+      withTerminal(80, 24, (_terminal, write) => {
+        const path = base64(encoder.encode("/etc/hostname"));
+        expect(write(`\x1b_Gi=3,a=T,t=f,f=24,s=1,v=1;${path}\x1b\\`)).toMatch(
+          /^\x1b_Gi=3;E[A-Z]+:/,
+        );
+      });
+    });
+
+    it("places images by cell, keeps z order and forgets deleted images", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        terminal.setPixelSize(800, 480);
+        const red = base64(Uint8Array.from([255, 0, 0]));
+        write(
+          `\x1b[3;5H\x1b_Gi=1,a=T,f=24,s=1,v=1,c=2,r=1,z=-1,q=2;${red}\x1b\\`,
+        );
+        write(`\x1b[1;1H\x1b_Gi=2,a=T,f=24,s=1,v=1,z=5,q=2;${red}\x1b\\`);
+        terminal.updateRenderState();
+        expect(
+          terminal
+            .kittyPlacements()
+            .map(({ imageId, channels, col, row, z, width, height }) => ({
+              imageId,
+              channels,
+              col,
+              row,
+              z,
+              width,
+              height,
+            })),
+        ).toEqual([
+          {
+            imageId: 1,
+            channels: 3,
+            col: 4,
+            row: 2,
+            z: -1,
+            width: 20,
+            height: 20,
+          },
+          {
+            imageId: 2,
+            channels: 3,
+            col: 0,
+            row: 0,
+            z: 5,
+            width: 1,
+            height: 1,
+          },
+        ]);
+        expect(terminal.kittyBackgroundZLimit).toBe(-1_073_741_824);
+
+        write("\x1b_Ga=d,d=I,i=1,q=2\x1b\\");
+        terminal.updateRenderState();
+        expect(terminal.kittyPlacements().map((p) => p.imageId)).toEqual([2]);
+        expect(terminal.kittyAnimationTick(1_000)).toBeNull();
+      });
+    });
+
+    it("draws virtual placements through Unicode placeholder cells", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        terminal.setPixelSize(800, 480);
+        const pixels = base64(new Uint8Array(4 * 4 * 3));
+        write(`\x1b_Gi=9,a=T,U=1,f=24,s=4,v=4,c=2,r=1,q=2;${pixels}\x1b\\`);
+        // Foreground colour 9 carries the image id; diacritics give row/column.
+        write("\x1b[38;5;9m\u{10EEEE}̅̅\u{10EEEE}̅̍\x1b[0m");
+        terminal.updateRenderState();
+        // A run of placeholder cells is one placement over those cells.
+        expect(terminal.kittyPlacements()).toMatchObject([
+          {
+            imageId: 9,
+            z: -1,
+            col: 0,
+            row: 0,
+            width: 20,
+            height: 20,
+            sourceWidth: 4,
+          },
+        ]);
+      });
+    });
+
+    it("disables the protocol at a zero storage limit", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        terminal.setImageStorageLimit(0);
+        expect(write("\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\")).not.toBe(
+          "\x1b_Gi=31;OK\x1b\\",
+        );
+      });
+    });
+  });
+
+  describe("size, colour scheme and visibility reports", () => {
+    it("sends one mode 2048 report per resize with the current cell size", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        terminal.setPixelSize(800, 480);
+        expect(terminal.drainOutputBytes()).toHaveLength(0);
+        expect(write("\x1b[?2048h")).toBe("\x1b[48;24;80;480;800t");
+
+        terminal.resize(100, 30);
+        expect(decoder.decode(terminal.drainOutputBytes())).toBe(
+          "\x1b[48;30;100;600;1000t",
+        );
+        // The host confirms the pixel size of the new grid: no news.
+        terminal.setPixelSize(1000, 600);
+        expect(terminal.drainOutputBytes()).toHaveLength(0);
+        // A font or scale change alters the cell size.
+        terminal.setPixelSize(1200, 720);
+        expect(decoder.decode(terminal.drainOutputBytes())).toBe(
+          "\x1b[48;30;100;720;1200t",
+        );
+
+        write("\x1b[?2048l");
+        terminal.resize(80, 24);
+        expect(terminal.drainOutputBytes()).toHaveLength(0);
+      });
+    });
+
+    it("keeps grapheme clustering (mode 2027) on, across a full reset", () => {
+      withTerminal(80, 24, (_terminal, write) => {
+        expect(write("\x1b[?2027$p")).toBe("\x1b[?2027;1$y");
+        write("\x1bc");
+        expect(write("\x1b[?2027$p")).toBe("\x1b[?2027;1$y");
+      });
+    });
+
+    it("identifies as Terax and accepts the host's version", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        expect(write("\x1b[>q")).toBe("\x1bP>|terax\x1b\\");
+        terminal.setXtversion("terax 1.2.3");
+        expect(write("\x1b[>q")).toBe("\x1bP>|terax 1.2.3\x1b\\");
+        expect(() => terminal.setXtversion("bad\x1bversion")).toThrow(
+          RangeError,
+        );
+        expect(() => terminal.setXtversion("")).toThrow(RangeError);
+      });
+    });
+
+    it("answers DSR 996 with the host scheme and reports changes under mode 2031", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        expect(write("\x1b[?996n")).toBe("\x1b[?997;1n");
+        terminal.setColorScheme("light");
+        expect(terminal.drainOutputBytes()).toHaveLength(0);
+        expect(write("\x1b[?996n")).toBe("\x1b[?997;2n");
+
+        write("\x1b[?2031h");
+        terminal.setColorScheme("light");
+        expect(terminal.drainOutputBytes()).toHaveLength(0);
+        terminal.setColorScheme("dark");
+        expect(decoder.decode(terminal.drainOutputBytes())).toBe(
+          "\x1b[?997;1n",
+        );
+      });
+    });
+
+    it("reports visibility on request and on change under mode 2033", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        terminal.setVisible(false);
+        expect(write("\x1b[?998n")).toBe("\x1b[?999;2n");
+        expect(write("\x1b[?2033h")).toBe("\x1b[?999;2n");
+        terminal.setVisible(true);
+        expect(decoder.decode(terminal.drainOutputBytes())).toBe(
+          "\x1b[?999;1n",
+        );
+      });
+    });
+
+    it("answers each colour query once, including Kitty's OSC 21", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        terminal.setDefaultColors(0xcdd6f4, 0x11111b, 0xf9e2af);
+        expect(write("\x1b]10;?\x1b\\\x1b]4;1;?\x07")).toBe(
+          "\x1b]10;rgb:cdcd/d6d6/f4f4\x1b\\\x1b]4;1;rgb:cccc/6666/6666\x07",
+        );
+        expect(write("\x1b]21;foreground=?\x1b\\")).toBe(
+          "\x1b]21;foreground=rgb:cd/d6/f4\x1b\\",
+        );
+      });
+    });
+  });
+
+  describe("events", () => {
+    it("reports OSC 9;4 progress and its removal by a reset", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        write("\x1b]9;4;1;42\x07\x1b]9;4;3\x07\x1b]9;4;0\x07\x1b]9;4;0\x07");
+        expect(terminal.drainEvents()).toEqual([
+          { type: "progress", state: "set", progress: 42 },
+          { type: "progress", state: "indeterminate", progress: null },
+          { type: "progress", state: "remove", progress: null },
+        ]);
+        write("\x1bc\x1b]9;4;2;7\x07\x1bc");
+        expect(terminal.drainEvents()).toEqual([
+          { type: "progress", state: "error", progress: 7 },
+          { type: "progress", state: "remove", progress: null },
+        ]);
+      });
+    });
+
+    it("reports pointer shapes and their reset", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        write("\x1b]22;pointer\x07\x1b]22;pointer\x07\x1b]22;crosshair\x1b\\");
+        expect(terminal.drainEvents()).toEqual([
+          { type: "pointer-shape", shape: "pointer" },
+          { type: "pointer-shape", shape: "crosshair" },
+        ]);
+        write("\x1b]2;job\x07\x1bc");
+        expect(terminal.drainEvents()).toEqual([
+          { type: "title", title: "job" },
+          { type: "title", title: "" },
+          { type: "pointer-shape", shape: "text" },
+        ]);
+      });
+    });
+
+    it("turns OSC 52 reads into requests and keeps writes as writes", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        expect(write("\x1b]52;c;?\x07\x1b]52;p;?\x1b\\")).toBe("");
+        write(`\x1b]52;c;${base64(encoder.encode("hi"))}\x07`);
+        expect(terminal.drainEvents()).toEqual([
+          { type: "clipboard-read", selection: "c", terminator: "bel" },
+          { type: "clipboard-read", selection: "p", terminator: "st" },
+          { type: "clipboard", selection: "c", data: "aGk=" },
+        ]);
+      });
+    });
+  });
+
+  describe("mouse encoding", () => {
+    const left = 1;
+    const press = {
+      action: "press",
+      button: left,
+      mods: 0,
+      anyButtonPressed: true,
+    } as const;
+
+    it("encodes nothing until the program enables tracking", () => {
+      withTerminal(80, 24, (terminal) => {
+        terminal.setPixelSize(800, 480);
+        expect(terminal.encodeMouse({ ...press, x: 25, y: 65 })).toHaveLength(
+          0,
+        );
+      });
+    });
+
+    it("encodes SGR presses, releases, wheel and modifiers in cells", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        terminal.setPixelSize(800, 480);
+        write("\x1b[?1000h\x1b[?1006h");
+        const text = (bytes: Uint8Array) => decoder.decode(bytes);
+        expect(text(terminal.encodeMouse({ ...press, x: 25, y: 65 }))).toBe(
+          "\x1b[<0;3;4M",
+        );
+        expect(
+          text(
+            terminal.encodeMouse({
+              ...press,
+              action: "release",
+              anyButtonPressed: false,
+              x: 25,
+              y: 65,
+            }),
+          ),
+        ).toBe("\x1b[<0;3;4m");
+        expect(
+          text(terminal.encodeMouse({ ...press, button: 4, x: 0, y: 0 })),
+        ).toBe("\x1b[<64;1;1M");
+        expect(
+          text(terminal.encodeMouse({ ...press, button: 7, x: 0, y: 0 })),
+        ).toBe("\x1b[<67;1;1M");
+        expect(
+          text(
+            terminal.encodeMouse({
+              ...press,
+              mods: Mods.SHIFT | Mods.CTRL,
+              x: 0,
+              y: 0,
+            }),
+          ),
+        ).toBe("\x1b[<20;1;1M");
+        // Mode 1000 has no motion.
+        expect(
+          terminal.encodeMouse({
+            ...press,
+            action: "motion",
+            button: 0,
+            anyButtonPressed: false,
+            x: 95,
+            y: 5,
+          }),
+        ).toHaveLength(0);
+      });
+    });
+
+    it("reports any-motion once per cell, and pixels under mode 1016", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        terminal.setPixelSize(800, 480);
+        write("\x1b[?1003h\x1b[?1006h");
+        const motion = {
+          action: "motion",
+          button: 0,
+          mods: 0,
+          anyButtonPressed: false,
+        } as const;
+        expect(
+          decoder.decode(terminal.encodeMouse({ ...motion, x: 11, y: 1 })),
+        ).toBe("\x1b[<35;2;1M");
+        expect(terminal.encodeMouse({ ...motion, x: 19, y: 19 })).toHaveLength(
+          0,
+        );
+        terminal.resetMouseMotion();
+        expect(
+          decoder.decode(terminal.encodeMouse({ ...motion, x: 19, y: 19 })),
+        ).toBe("\x1b[<35;2;1M");
+
+        // SGR-pixels reports the pixel position itself (Ghostty's encoding).
+        write("\x1b[?1016h");
+        expect(
+          decoder.decode(terminal.encodeMouse({ ...motion, x: 123, y: 45 })),
+        ).toBe("\x1b[<35;123;45M");
+      });
+    });
+
+    it("encodes legacy X10 coordinates", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        terminal.setPixelSize(800, 480);
+        write("\x1b[?1000h");
+        expect([...terminal.encodeMouse({ ...press, x: 25, y: 65 })]).toEqual([
+          0x1b,
+          0x5b,
+          0x4d,
+          32,
+          32 + 3,
+          32 + 4,
+        ]);
+      });
+    });
+  });
+
+  describe("VT export", () => {
+    it("exports styled, unwrapped history that replays at another width", () => {
+      withTerminal(10, 4, (terminal, write) => {
+        write(
+          "\x1b[31mred\x1b[0m plain \x1b]8;;https://terax.app\x1b\\link\x1b]8;;\x1b\\ wrapped-line",
+        );
+        // Styles survive; hyperlink targets are not part of the export.
+        const vt = terminal.formatTextRange(0, 3, "vt");
+        expect(vt).toContain("\x1b[38;5;1mred");
+        expect(terminal.formatTextRange(0, 3, "plain")).toBe(
+          "red plain link wrapped-line",
+        );
+        expect(terminal.formatTextRange(0, 0, "html")).toContain("red");
+
+        const replay = ghostty.createTerminal(40, 4);
+        try {
+          replay.write(encoder.encode(vt));
+          expect(replay.readTextRange(0, 0).trimEnd()).toBe(
+            "red plain link wrapped-line",
+          );
+        } finally {
+          replay.dispose();
+        }
+      });
+    });
+  });
+});

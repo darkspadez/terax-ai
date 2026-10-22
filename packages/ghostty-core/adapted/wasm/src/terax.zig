@@ -1,8 +1,18 @@
 const std = @import("std");
 const ghostty = @import("ghostty-vt");
+const wuffs = @import("wuffs");
 const terminfo_responses = @import("ghostty-terminfo-responses");
 
 pub const std_options: std.Options = ghostty.std_options;
+
+/// Kitty graphics compiles its file and temporary-file media against
+/// `std.Io.Dir.max_path_bytes`, which a freestanding target has to supply.
+/// Those media never load here: the terminal's `std.Io` fails every file
+/// operation, so only direct (in-band) transmissions reach the image store.
+pub const os = struct {
+    pub const PATH_MAX = 4096;
+    pub const NAME_MAX = 255;
+};
 
 const Allocator = std.mem.Allocator;
 
@@ -32,6 +42,16 @@ const TerminalEvent = enum(u8) {
     end_of_input = 9,
     end_of_command = 10,
     screen_cleared = 11,
+    /// OSC 9;4 progress: state (0 remove, 1 set, 2 error, 3 indeterminate,
+    /// 4 pause), whether a percentage follows, and the percentage.
+    progress = 12,
+    /// OSC 22 or a reset changed the pointer shape: one `ghostty.MouseShape`
+    /// value.
+    pointer_shape = 13,
+    /// OSC 52 asked to read a clipboard: the selection byte and 1 when the
+    /// request ended with BEL (0 for ST). The host answers on the PTY itself,
+    /// after asking the user, so this never blocks the parser.
+    clipboard_read = 14,
 };
 
 const CursorInfo = extern struct {
@@ -282,31 +302,49 @@ const max_retained_grapheme_codepoints: usize = 64 * 1024;
 const max_retained_link_bytes: usize = 64 * 1024;
 const max_retained_link_count: usize = 4 * 1024;
 const render_state_reset_interval: u32 = 100_000;
+const max_xtversion_bytes: usize = 128;
+/// XTVERSION name until the host sets one with `restty_set_xtversion`.
+const default_xtversion = "terax";
+/// Kitty image storage per screen. Ghostty's 320 MB default suits a native
+/// process; here it is linear memory that WebAssembly never returns until the
+/// terminal (its instance) is closed, so the bound is tighter.
+const default_image_storage_limit: usize = 64 * 1024 * 1024;
 
 const log = std.log.scoped(.restty_apc);
 
+/// One Kitty image placement in the viewport (`restty_kitty_placements_ptr`),
+/// sorted by z. Pixels stay in Ghostty's image storage: `image_data_ptr`
+/// points into linear memory and is valid until the next write or resize.
 const KittyPlacementAbi = extern struct {
     image_id: u32,
+    /// 1 gray, 2 gray + alpha, 3 RGB, 4 RGBA; 8 bits per channel.
     image_format: u8,
     _pad0: [3]u8 = .{ 0, 0, 0 },
     image_width: u32,
     image_height: u32,
     image_data_ptr: u32,
     image_data_len: u32,
+    /// Changes whenever the pixels (or the current animation frame) do, so a
+    /// texture cached under `image_id` can be kept until it moves.
+    generation_lo: u32,
+    generation_hi: u32,
+    /// Viewport cell of the top-left corner; may be negative (partly above
+    /// or left of the viewport).
     x: i32,
     y: i32,
+    /// Below the text when negative; below cell backgrounds under
+    /// `kitty_background_z_limit`.
     z: i32,
+    /// Destination size in terminal pixels.
     width: u32,
     height: u32,
+    /// Pixel offset inside the top-left cell.
     cell_offset_x: u32,
     cell_offset_y: u32,
     source_x: u32,
     source_y: u32,
     source_width: u32,
     source_height: u32,
-    placement_id: u32,
-    placement_external: u8,
-    _pad1: [3]u8 = .{ 0, 0, 0 },
 };
 
 const StreamHandler = struct {
@@ -322,6 +360,13 @@ const StreamHandler = struct {
     apc_debug: std.ArrayListUnmanaged(u8) = .empty,
     apc_debug_truncated: bool = false,
     apc_error_logs_remaining: u8 = max_apc_error_logs,
+    /// Reported for DSR 996 and, while mode 2031 is set, on every change.
+    color_scheme: ghostty.device_status.ColorScheme = .dark,
+    xtversion_buf: [max_xtversion_bytes]u8 = undefined,
+    xtversion_len: u8 = 0,
+    /// An OSC 9;4 progress bar is showing (a reset only reports its removal
+    /// then).
+    progress_active: bool = false,
 
     pub fn init(
         alloc: Allocator,
@@ -331,10 +376,20 @@ const StreamHandler = struct {
         dropped_events: *u32,
         semantic_markers: *SemanticMarkers,
     ) StreamHandler {
+        // Ghostty's own handler applies every action this bridge does not
+        // intercept. Its effects route the replies and notifications it
+        // produces (mode 2048 and 2033 reports, OSC 21 and OSC 5522 answers,
+        // OSC 9;4 progress) into this bridge's reply and event queues.
+        var readonly: ReadonlyHandler = .init(term);
+        readonly.effects.write_pty = &effectWritePty;
+        readonly.effects.size = &effectSize;
+        readonly.effects.color_scheme = &effectColorScheme;
+        readonly.effects.xtversion = &effectXtversion;
+        readonly.effects.progress_report = &effectProgressReport;
         return .{
             .alloc = alloc,
             .term = term,
-            .readonly = .init(term),
+            .readonly = readonly,
             .output = output,
             .events = events,
             .dropped_events = dropped_events,
@@ -352,6 +407,95 @@ const StreamHandler = struct {
         self.apc.deinit();
         self.dcs.deinit();
         self.apc_debug.deinit(self.alloc);
+    }
+
+    fn fromReadonly(readonly: *ReadonlyHandler) *StreamHandler {
+        return @alignCast(@fieldParentPtr("readonly", readonly));
+    }
+
+    fn effectWritePty(readonly: *ReadonlyHandler, data: []const u8) void {
+        fromReadonly(readonly).appendOutput(data) catch |err| {
+            log.warn("dropping terminal reply len={d} err={}", .{ data.len, err });
+        };
+    }
+
+    fn effectSize(readonly: *ReadonlyHandler) ?ghostty.size_report.Size {
+        return fromReadonly(readonly).currentSize();
+    }
+
+    fn effectColorScheme(readonly: *ReadonlyHandler) ?ghostty.device_status.ColorScheme {
+        return fromReadonly(readonly).color_scheme;
+    }
+
+    fn effectXtversion(readonly: *ReadonlyHandler) []const u8 {
+        return fromReadonly(readonly).xtversion();
+    }
+
+    fn effectProgressReport(
+        readonly: *ReadonlyHandler,
+        report: ghostty.osc.Command.ProgressReport,
+    ) void {
+        const self = fromReadonly(readonly);
+        const showing = report.state != .remove;
+        if (!showing and !self.progress_active) return;
+        self.progress_active = showing;
+        const payload = [_]u8{
+            @intCast(@intFromEnum(report.state)),
+            @intFromBool(report.progress != null),
+            @min(report.progress orelse 0, 100),
+        };
+        self.emitEvent(.progress, &.{&payload}) catch |err| {
+            log.warn("dropping progress event err={}", .{err});
+        };
+    }
+
+    fn xtversion(self: *const StreamHandler) []const u8 {
+        return if (self.xtversion_len == 0)
+            default_xtversion
+        else
+            self.xtversion_buf[0..self.xtversion_len];
+    }
+
+    /// Grid and cell geometry for size reports. The cell size comes from the
+    /// pixel size the host last set (`restty_set_pixel_size`), which always
+    /// covers whole cells.
+    fn currentSize(self: *const StreamHandler) ghostty.size_report.Size {
+        const cell = cellPixelSize(self.term);
+        return .{
+            .rows = self.term.rows,
+            .columns = self.term.cols,
+            .cell_width = cell.width,
+            .cell_height = cell.height,
+        };
+    }
+
+    fn colorSchemeReport(self: *StreamHandler) !void {
+        var buf: [ghostty.device_status.max_color_scheme_report_encode_size]u8 = undefined;
+        var writer: std.Io.Writer = .fixed(&buf);
+        try ghostty.device_status.encodeColorSchemeReport(&writer, self.color_scheme);
+        try self.appendOutput(writer.buffered());
+    }
+
+    fn visibilityReport(self: *StreamHandler) !void {
+        var buf: [ghostty.device_status.max_visibility_report_encode_size]u8 = undefined;
+        var writer: std.Io.Writer = .fixed(&buf);
+        try ghostty.device_status.encodeVisibilityReport(
+            &writer,
+            if (self.term.flags.visible) .potentially_visible else .not_visible,
+        );
+        try self.appendOutput(writer.buffered());
+    }
+
+    fn sizeReportInBand(self: *StreamHandler) !void {
+        var buf: [128]u8 = undefined;
+        var writer: std.Io.Writer = .fixed(&buf);
+        try ghostty.size_report.encode(&writer, .mode_2048, self.currentSize());
+        try self.appendOutput(writer.buffered());
+    }
+
+    fn emitPointerShape(self: *StreamHandler) !void {
+        const shape = [_]u8{@intCast(@intFromEnum(self.term.mouse_shape))};
+        try self.emitEvent(.pointer_shape, &.{&shape});
     }
 
     fn dcsHook(self: *StreamHandler, dcs: ghostty.DCS) !void {
@@ -403,6 +547,17 @@ const StreamHandler = struct {
         self.apc_debug.append(self.alloc, byte) catch {
             self.apc_debug_truncated = true;
         };
+    }
+
+    fn apcDebugCaptureSlice(self: *StreamHandler, bytes: []const u8) void {
+        if (self.apc_debug_truncated) return;
+        const room = max_apc_debug_bytes -| self.apc_debug.items.len;
+        const kept = bytes[0..@min(bytes.len, room)];
+        self.apc_debug.appendSlice(self.alloc, kept) catch {
+            self.apc_debug_truncated = true;
+            return;
+        };
+        if (kept.len < bytes.len) self.apc_debug_truncated = true;
     }
 
     fn isBase64Byte(byte: u8) bool {
@@ -672,18 +827,8 @@ const StreamHandler = struct {
                 });
                 try self.appendOutput(resp);
             },
-            .color_scheme => {
-                var buf: [ghostty.device_status.max_color_scheme_report_encode_size]u8 = undefined;
-                var writer: std.Io.Writer = .fixed(&buf);
-                try ghostty.device_status.encodeColorSchemeReport(&writer, .dark);
-                try self.appendOutput(writer.buffered());
-            },
-            .visibility => {
-                var buf: [ghostty.device_status.max_visibility_report_encode_size]u8 = undefined;
-                var writer: std.Io.Writer = .fixed(&buf);
-                try ghostty.device_status.encodeVisibilityReport(&writer, .potentially_visible);
-                try self.appendOutput(writer.buffered());
-            },
+            .color_scheme => try self.colorSchemeReport(),
+            .visibility => try self.visibilityReport(),
         }
     }
 
@@ -713,14 +858,7 @@ const StreamHandler = struct {
             return;
         }
 
-        const cols: u32 = @intCast(self.term.cols);
-        const rows: u32 = @intCast(self.term.rows);
-        const size: ghostty.size_report.Size = .{
-            .rows = self.term.rows,
-            .columns = self.term.cols,
-            .cell_width = if (cols == 0) 1 else @max(1, self.term.width_px / cols),
-            .cell_height = if (rows == 0) 1 else @max(1, self.term.height_px / rows),
-        };
+        const size = self.currentSize();
         var buf: [128]u8 = undefined;
         var writer: std.Io.Writer = .fixed(&buf);
         switch (style) {
@@ -734,57 +872,8 @@ const StreamHandler = struct {
     }
 
     fn reportXtversion(self: *StreamHandler) !void {
-        try self.appendOutput("\x1bP>|ghostty 1.3.2-dev\x1b\\");
-    }
-
-    fn colorOperation(
-        self: *StreamHandler,
-        value: StreamAction.Value(.color_operation),
-    ) !void {
-        self.readonly.vt(.color_operation, value);
-
-        var buf: [4096]u8 = undefined;
-        var writer: std.Io.Writer = .fixed(&buf);
-        var it = value.requests.constIterator(0);
-        while (it.next()) |req| {
-            const kind = switch (req.*) {
-                .query => |kind| kind,
-                else => continue,
-            };
-            const color = switch (kind) {
-                .palette => |index| self.term.colors.palette.current[index],
-                .dynamic => |dynamic| switch (dynamic) {
-                    .foreground => self.term.colors.foreground.get().?,
-                    .background => self.term.colors.background.get().?,
-                    .cursor => self.term.colors.cursor.get() orelse self.term.colors.foreground.get().?,
-                    else => continue,
-                },
-                .special => continue,
-            };
-            switch (kind) {
-                .palette => |index| try writer.print(
-                    "\x1b]4;{d};rgb:{x:0>4}/{x:0>4}/{x:0>4}",
-                    .{
-                        index,
-                        @as(u16, color.r) * 257,
-                        @as(u16, color.g) * 257,
-                        @as(u16, color.b) * 257,
-                    },
-                ),
-                .dynamic => |dynamic| try writer.print(
-                    "\x1b]{d};rgb:{x:0>4}/{x:0>4}/{x:0>4}",
-                    .{
-                        @intFromEnum(dynamic),
-                        @as(u16, color.r) * 257,
-                        @as(u16, color.g) * 257,
-                        @as(u16, color.b) * 257,
-                    },
-                ),
-                .special => unreachable,
-            }
-            try writer.writeAll(value.terminator.string());
-        }
-        try self.appendOutput(writer.buffered());
+        var buf: [max_xtversion_bytes + 8]u8 = undefined;
+        try self.appendOutput(try std.fmt.bufPrint(&buf, "\x1bP>|{s}\x1b\\", .{self.xtversion()}));
     }
 
     fn queryKittyKeyboard(self: *StreamHandler) !void {
@@ -808,7 +897,7 @@ const StreamHandler = struct {
 
         switch (cmd) {
             .kitty => |*kitty_cmd| {
-                if (self.term.kittyGraphics(self.alloc, kitty_cmd)) |resp| {
+                if (self.term.kittyGraphics(self.term.io(), self.alloc, kitty_cmd)) |resp| {
                     if (!resp.ok()) {
                         self.logKittyResponseError(kitty_cmd, resp);
                     }
@@ -818,7 +907,7 @@ const StreamHandler = struct {
                     try self.appendOutput(writer.buffered());
                 }
             },
-            .glyph => {},
+            .glyph, .unknown => {},
         }
     }
 
@@ -844,8 +933,23 @@ const StreamHandler = struct {
                     try self.clearSemanticMarkers();
             },
             .full_reset => {
-                defer self.readonly.vt(action, value);
-                try self.clearSemanticMarkers();
+                const had_title = self.term.getTitle() != null;
+                const shape = self.term.mouse_shape;
+                {
+                    defer self.readonly.vt(action, value);
+                    try self.clearSemanticMarkers();
+                }
+                // Like Ghostty, a reset also restores the text pointer.
+                self.term.mouse_shape = .text;
+                // RIS clears the title and pointer shape without the
+                // sequences that normally report them.
+                if (had_title) try self.emitEvent(.title, &.{""});
+                if (self.term.mouse_shape != shape) try self.emitPointerShape();
+            },
+            .mouse_shape, .mouse_shape_reset => {
+                const before = self.term.mouse_shape;
+                self.readonly.vt(action, value);
+                if (self.term.mouse_shape != before) try self.emitPointerShape();
             },
             .request_mode => try self.requestMode(value.mode),
             .request_mode_unknown => try self.requestModeUnknown(value.mode, value.ansi),
@@ -854,7 +958,6 @@ const StreamHandler = struct {
             .device_attributes => try self.deviceAttributes(value),
             .device_status => try self.deviceStatusReport(value.request),
             .kitty_keyboard_query => try self.queryKittyKeyboard(),
-            .color_operation => try self.colorOperation(value),
             .dcs_hook => try self.dcsHook(value),
             .dcs_put => try self.dcsPut(value),
             .dcs_unhook => try self.dcsUnhook(),
@@ -872,6 +975,11 @@ const StreamHandler = struct {
             },
             .clipboard_contents => {
                 self.readonly.vt(action, value);
+                if (value.data.len == 1 and value.data[0] == '?') {
+                    const request = [_]u8{ value.kind, @intFromBool(value.terminator == .bel) };
+                    try self.emitEvent(.clipboard_read, &.{&request});
+                    return;
+                }
                 const kind = [_]u8{value.kind};
                 try self.emitEvent(.clipboard, &.{ &kind, value.data });
             },
@@ -916,6 +1024,11 @@ const StreamHandler = struct {
             .apc_put => {
                 self.apcDebugCapture(value);
                 self.apc.feed(self.alloc, value);
+            },
+            // The stream hands long APC payloads (Kitty images) over in bulk.
+            .apc_put_slice => {
+                self.apcDebugCaptureSlice(value.bytes);
+                self.apc.feedSlice(self.alloc, value.bytes);
             },
             .apc_end => try self.apcEnd(),
             else => self.readonly.vt(action, value),
@@ -993,6 +1106,10 @@ const Restty = struct {
     link_buffer: std.ArrayListUnmanaged(u8) = .empty,
     link_map: std.HashMapUnmanaged(u32, void, LinkContext, std.hash_map.default_max_load_percentage) = .empty,
     kitty_placements: std.ArrayListUnmanaged(KittyPlacementAbi) = .empty,
+    /// Hash of the last update's placement records, to tell a renderer when
+    /// images moved or changed although no cell did.
+    kitty_placements_hash: u64 = 0,
+    kitty_placements_changed: u8 = 0,
     output: std.ArrayListUnmanaged(u8) = .empty,
     events: std.ArrayListUnmanaged(u8) = .empty,
     selection_text: ?[:0]const u8 = null,
@@ -1018,6 +1135,8 @@ const Restty = struct {
     line_cells: std.ArrayListUnmanaged(u32) = .empty,
     key_output: [max_key_output_bytes]u8 = undefined,
     key_output_len: u16 = 0,
+    /// Last cell a motion event was reported in (`restty_encode_mouse`).
+    mouse_last_cell: ?ghostty.Coordinate = null,
     cursor: CursorInfo = .{
         .row = 0,
         .col = 0,
@@ -1590,15 +1709,26 @@ fn kittyFormatToAbi(format: anytype) u8 {
         .gray_alpha => 2,
         .rgb => 3,
         .rgba => 4,
-        .png => 100,
+        // Loading decodes PNG; a placement never sees it.
+        .png => 0,
     };
 }
 
-fn appendKittyPlacement(
+const KittyImage = if (kitty_graphics_enabled) ghostty.kitty.graphics.Image else void;
+const KittyPlacement = if (kitty_graphics_enabled) ghostty.kitty.graphics.ImageStorage.Placement else void;
+const KittyPlacementKey = if (kitty_graphics_enabled) ghostty.kitty.graphics.ImageStorage.PlacementKey else void;
+
+/// Where a placement sits: a pin plus, for a relative placement, the cell
+/// offsets accumulated along its parent chain (as Ghostty's renderer does).
+const KittyOrigin = struct {
+    pin: *const ghostty.Pin,
+    horizontal_offset: i32 = 0,
+    vertical_offset: i32 = 0,
+};
+
+fn appendKittyAbi(
     h: *Restty,
-    image: ghostty.kitty.graphics.Image,
-    placement_id: u32,
-    placement_external: u8,
+    image: *const KittyImage,
     x: i32,
     y: i32,
     z: i32,
@@ -1611,16 +1741,20 @@ fn appendKittyPlacement(
     source_width: u32,
     source_height: u32,
 ) !void {
-    const data_ptr: u32 = if (image.data.len == 0) 0 else @intCast(@intFromPtr(image.data.ptr));
-    const data_len: u32 = @intCast(image.data.len);
-
+    if (width == 0 or height == 0 or source_width == 0 or source_height == 0) return;
+    // The current animation frame, or the image itself.
+    const data = image.renderData().bytes() orelse return;
+    const format = kittyFormatToAbi(image.format);
+    if (format == 0 or data.len == 0) return;
     try h.kitty_placements.append(h.alloc, .{
         .image_id = image.id,
-        .image_format = kittyFormatToAbi(image.format),
+        .image_format = format,
         .image_width = image.width,
         .image_height = image.height,
-        .image_data_ptr = data_ptr,
-        .image_data_len = data_len,
+        .image_data_ptr = @intCast(@intFromPtr(data.ptr)),
+        .image_data_len = @intCast(data.len),
+        .generation_lo = @truncate(image.generation),
+        .generation_hi = @truncate(image.generation >> 32),
         .x = x,
         .y = y,
         .z = z,
@@ -1632,105 +1766,187 @@ fn appendKittyPlacement(
         .source_y = source_y,
         .source_width = source_width,
         .source_height = source_height,
-        .placement_id = placement_id,
-        .placement_external = placement_external,
     });
 }
 
+fn appendKittyPlacement(
+    h: *Restty,
+    image: *const KittyImage,
+    p: *const KittyPlacement,
+    x: i32,
+    y: i32,
+) !void {
+    const dest = p.pixelSize(image.*, &h.term);
+    const offset = p.cellOffset(&h.term);
+    const source = p.sourceRect(image.*);
+    try appendKittyAbi(
+        h,
+        image,
+        x,
+        y,
+        p.z,
+        dest.width,
+        dest.height,
+        offset.x,
+        offset.y,
+        source.x,
+        source.y,
+        source.width,
+        source.height,
+    );
+}
+
+/// Rebuilds the viewport's placements the way Ghostty's renderer does
+/// (`renderer/image.zig`, `kittyUpdate`): pinned, relative (chained to a
+/// pinned or virtual root) and virtual placements drawn through Unicode
+/// placeholder cells.
 fn collectKittyPlacements(h: *Restty) !void {
     h.kitty_placements.clearRetainingCapacity();
     if (comptime !kitty_graphics_enabled) return;
 
-    const storage = &h.term.screens.active.kitty_images;
-    if (!storage.enabled()) return;
+    const t = &h.term;
+    const storage = &t.screens.active.kitty_images;
+    if (!storage.enabled() or storage.placements.count() == 0) return;
 
-    const pages = &h.term.screens.active.pages;
+    const pages = &t.screens.active.pages;
     const top = pages.getTopLeft(.viewport);
     const bot = pages.getBottomRight(.viewport) orelse return;
-    const top_screen = pages.pointFromPin(.screen, top) orelse return;
-    const bot_screen = pages.pointFromPin(.screen, bot) orelse return;
-    const top_y: u32 = top_screen.screen.y;
-    const bot_y: u32 = bot_screen.screen.y;
+    const top_y: u32 = (pages.pointFromPin(.screen, top) orelse return).screen.y;
+    const bot_y: u32 = (pages.pointFromPin(.screen, bot) orelse return).screen.y;
+
+    // Relative placements rooted at a virtual placement are positioned from
+    // the root's placeholder cells, known only after the scan below.
+    const PendingRelative = struct {
+        image_id: u32,
+        p: KittyPlacement,
+        root_key: KittyPlacementKey,
+        horizontal_offset: i32,
+        vertical_offset: i32,
+    };
+    var pending_relative: std.ArrayListUnmanaged(PendingRelative) = .empty;
+    defer pending_relative.deinit(h.alloc);
+    var has_virtual = false;
 
     var it = storage.placements.iterator();
-    while (it.next()) |entry| {
-        const p = entry.value_ptr;
-        switch (p.location) {
-            .pin => {},
-            .virtual => continue,
-        }
+    while (it.next()) |kv| {
+        const p = kv.value_ptr;
+        const origin: KittyOrigin = switch (p.location) {
+            .pin => |pin| .{ .pin = pin },
+            .virtual => {
+                has_virtual = true;
+                continue;
+            },
+            .relative => |rel| origin: {
+                const chain = storage.resolveChain(rel) orelse continue;
+                switch (chain.root.location) {
+                    .pin => |root_pin| break :origin .{
+                        .pin = root_pin,
+                        .horizontal_offset = chain.horizontal_offset,
+                        .vertical_offset = chain.vertical_offset,
+                    },
+                    .virtual => {
+                        has_virtual = true;
+                        try pending_relative.append(h.alloc, .{
+                            .image_id = kv.key_ptr.image_id,
+                            .p = p.*,
+                            .root_key = chain.root_key,
+                            .horizontal_offset = chain.horizontal_offset,
+                            .vertical_offset = chain.vertical_offset,
+                        });
+                        continue;
+                    },
+                    .relative => unreachable,
+                }
+            },
+        };
 
-        const image = storage.imageById(entry.key_ptr.image_id) orelse continue;
-        const rect = p.rect(image, &h.term) orelse continue;
-        const img_top = pages.pointFromPin(.screen, rect.top_left) orelse continue;
-        const img_bot = pages.pointFromPin(.screen, rect.bottom_right) orelse continue;
-        const img_top_y: u32 = img_top.screen.y;
-        const img_bot_y: u32 = img_bot.screen.y;
+        const image = storage.imageById(kv.key_ptr.image_id) orelse continue;
+        if (image.data.isPending() or origin.pin.garbage) continue;
+        const grid = p.gridSize(image, t);
+        if (grid.cols == 0 or grid.rows == 0) continue;
+
+        const origin_y = (pages.pointFromPin(.screen, origin.pin.*) orelse continue).screen.y;
+        const img_top_y: i64 = @as(i64, origin_y) + origin.vertical_offset;
+        const img_bot_y: i64 = img_top_y + grid.rows - 1;
+        const img_left_x: i64 = @as(i64, origin.pin.x) + origin.horizontal_offset;
+        const img_right_x: i64 = img_left_x + grid.cols - 1;
         if (img_top_y > bot_y or img_bot_y < top_y) continue;
+        if (img_left_x >= t.cols or img_right_x < 0) continue;
 
-        const dest_size = p.pixelSize(image, &h.term);
-        if (dest_size.width == 0 or dest_size.height == 0) continue;
-
-        const source_x: u32 = @min(image.width, p.source_x);
-        const source_y: u32 = @min(image.height, p.source_y);
-        const source_width: u32 = if (p.source_width > 0)
-            @min(image.width - source_x, p.source_width)
-        else
-            image.width;
-        const source_height: u32 = if (p.source_height > 0)
-            @min(image.height - source_y, p.source_height)
-        else
-            image.height;
-        if (source_width == 0 or source_height == 0) continue;
-
-        const y_pos: i32 = @as(i32, @intCast(img_top_y)) - @as(i32, @intCast(top_y));
         try appendKittyPlacement(
             h,
-            image,
-            entry.key_ptr.placement_id.id,
-            @intFromBool(entry.key_ptr.placement_id.tag == .external),
-            @intCast(rect.top_left.x),
-            y_pos,
-            p.z,
-            dest_size.width,
-            dest_size.height,
-            p.x_offset,
-            p.y_offset,
-            source_x,
-            source_y,
-            source_width,
-            source_height,
+            &image,
+            p,
+            std.math.cast(i32, img_left_x) orelse continue,
+            std.math.cast(i32, img_top_y - top_y) orelse continue,
         );
     }
 
-    const cell_width: u32 = if (h.term.cols > 0) @max(1, h.term.width_px / h.term.cols) else 0;
-    const cell_height: u32 = if (h.term.rows > 0) @max(1, h.term.height_px / h.term.rows) else 0;
-    if (cell_width == 0 or cell_height == 0) return;
+    if (has_virtual) {
+        const cell = cellPixelSize(t);
+        var virtual_origins: std.AutoHashMapUnmanaged(
+            KittyPlacementKey,
+            struct { x: u32, y: u32 },
+        ) = .empty;
+        defer virtual_origins.deinit(h.alloc);
 
-    var v_it = ghostty.kitty.graphics.unicode.placementIterator(top, bot);
-    while (v_it.next()) |virtual_p| {
-        const image = storage.imageById(virtual_p.image_id) orelse continue;
-        const rp = virtual_p.renderPlacement(storage, &image, cell_width, cell_height) catch continue;
-        if (rp.dest_width == 0 or rp.dest_height == 0) continue;
-        const viewport = pages.pointFromPin(.viewport, rp.top_left) orelse continue;
+        var v_it = ghostty.kitty.graphics.unicode.placementIterator(top, bot);
+        while (v_it.next()) |virtual_p| {
+            const image = storage.imageById(virtual_p.image_id) orelse continue;
+            if (image.data.isPending()) continue;
+            if (virtual_p.renderPlacement(storage, &image, cell.width, cell.height)) |rp| {
+                if (pages.pointFromPin(.viewport, rp.top_left)) |viewport| {
+                    try appendKittyAbi(
+                        h,
+                        &image,
+                        @intCast(rp.top_left.x),
+                        @intCast(viewport.viewport.y),
+                        -1,
+                        rp.dest_width,
+                        rp.dest_height,
+                        rp.offset_x,
+                        rp.offset_y,
+                        rp.source_x,
+                        rp.source_y,
+                        rp.source_width,
+                        rp.source_height,
+                    );
+                }
+            } else |_| {}
 
-        try appendKittyPlacement(
-            h,
-            image,
-            virtual_p.placement_id,
-            if (virtual_p.placement_id == 0) 0 else 1,
-            @intCast(rp.top_left.x),
-            @intCast(viewport.viewport.y),
-            -1,
-            rp.dest_width,
-            rp.dest_height,
-            rp.offset_x,
-            rp.offset_y,
-            rp.source_x,
-            rp.source_y,
-            rp.source_width,
-            rp.source_height,
-        );
+            if (pending_relative.items.len == 0) continue;
+            const target = storage.placeholderTarget(
+                virtual_p.image_id,
+                virtual_p.placement_id,
+            ) orelse continue;
+            const vp = pages.pointFromPin(.viewport, virtual_p.pin) orelse continue;
+            const gop = try virtual_origins.getOrPut(h.alloc, target.key);
+            if (!gop.found_existing) {
+                gop.value_ptr.* = .{ .x = vp.viewport.x, .y = vp.viewport.y };
+            } else {
+                gop.value_ptr.x = @min(gop.value_ptr.x, vp.viewport.x);
+                gop.value_ptr.y = @min(gop.value_ptr.y, vp.viewport.y);
+            }
+        }
+
+        for (pending_relative.items) |pr| {
+            const origin = virtual_origins.get(pr.root_key) orelse continue;
+            const image = storage.imageById(pr.image_id) orelse continue;
+            if (image.data.isPending()) continue;
+            const grid = pr.p.gridSize(image, t);
+            if (grid.cols == 0 or grid.rows == 0) continue;
+            const x: i64 = @as(i64, origin.x) + pr.horizontal_offset;
+            const y: i64 = @as(i64, origin.y) + pr.vertical_offset;
+            if (y >= t.rows or y + grid.rows - 1 < 0) continue;
+            if (x >= t.cols or x + grid.cols - 1 < 0) continue;
+            try appendKittyPlacement(
+                h,
+                &image,
+                &pr.p,
+                std.math.cast(i32, x) orelse continue,
+                std.math.cast(i32, y) orelse continue,
+            );
+        }
     }
 
     std.mem.sortUnstable(
@@ -1742,15 +1958,30 @@ fn collectKittyPlacements(h: *Restty) !void {
                 _ = ctx;
                 if (lhs.z != rhs.z) return lhs.z < rhs.z;
                 if (lhs.image_id != rhs.image_id) return lhs.image_id < rhs.image_id;
-                if (lhs.placement_external != rhs.placement_external) {
-                    return lhs.placement_external < rhs.placement_external;
-                }
-                if (lhs.placement_id != rhs.placement_id) return lhs.placement_id < rhs.placement_id;
                 if (lhs.y != rhs.y) return lhs.y < rhs.y;
                 return lhs.x < rhs.x;
             }
         }.lessThan,
     );
+}
+
+fn decodePng(alloc: Allocator, data: []const u8) ghostty.sys.DecodeError!ghostty.sys.Image {
+    const result = wuffs.png.decode(alloc, data) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.WuffsError, error.Overflow => return error.InvalidData,
+    };
+    return .{ .width = result.width, .height = result.height, .data = result.data };
+}
+
+/// Pixel size of one cell. The host sets the terminal's pixel size to whole
+/// cells (`restty_set_pixel_size`); before it does, cells count as 1x1.
+fn cellPixelSize(term: *const ghostty.Terminal) struct { width: u32, height: u32 } {
+    const cols: u32 = term.cols;
+    const rows: u32 = term.rows;
+    return .{
+        .width = if (cols == 0) 1 else @max(1, term.width_px / cols),
+        .height = if (rows == 0) 1 else @max(1, term.height_px / rows),
+    };
 }
 
 pub export fn restty_create(cols: u16, rows: u16, max_scrollback: u32) ?*Restty {
@@ -1780,12 +2011,21 @@ fn createWithLimits(
     colors.foreground = ghostty.color.DynamicRGB.init(.{ .r = 0xFF, .g = 0xFF, .b = 0xFF });
     colors.cursor = ghostty.color.DynamicRGB.init(.{ .r = 0xFF, .g = 0xFF, .b = 0xFF });
 
+    // libghostty leaves PNG decoding to the embedder; Kitty clients send PNG
+    // (f=100) by default, so use the decoder Ghostty itself ships.
+    ghostty.sys.decode_png = &decodePng;
+
     var term = ghostty.Terminal.init(ghostty.TinyIo.init.io(), alloc, .{
         .cols = cols,
         .rows = rows,
         .max_scrollback_bytes = max_scrollback_bytes,
         .max_scrollback_lines = max_scrollback_lines,
         .colors = colors,
+        // Ghostty's default `grapheme-width-method = unicode`: emoji
+        // sequences, flags and VS16 presentation take the width the Unicode
+        // grapheme cluster rules give them (mode 2027, kept across RIS).
+        .default_modes = .{ .grapheme_cluster = true },
+        .kitty_image_storage_limit = default_image_storage_limit,
     }) catch return null;
     term.width_px = cols;
     term.height_px = rows;
@@ -2295,9 +2535,13 @@ pub export fn restty_reset_palette(handle: ?*Restty) u32 {
 pub export fn restty_resize(handle: ?*Restty, cols: u16, rows: u16) u32 {
     const h = handle orelse return @intFromEnum(ErrorCode.invalid_handle);
     if (cols == 0 or rows == 0) return @intFromEnum(ErrorCode.invalid_arg);
-    h.term.resize(h.alloc, .{
+    // Ghostty's handler resizes with the current cell size (so the pixel size
+    // follows the grid) and sends the mode 2048 in-band report.
+    const cell = cellPixelSize(&h.term);
+    h.stream.handler.readonly.resize(.{
         .cols = cols,
         .rows = rows,
+        .cell_size_px = .{ .width = cell.width, .height = cell.height },
     }) catch return @intFromEnum(ErrorCode.internal);
     clearSelectionText(h);
     reconcileSelectionAfterMutation(h.term.screens.active);
@@ -2341,8 +2585,163 @@ pub export fn restty_scrollback_page_bytes(handle: ?*Restty) u32 {
 pub export fn restty_set_pixel_size(handle: ?*Restty, width_px: u32, height_px: u32) u32 {
     const h = handle orelse return @intFromEnum(ErrorCode.invalid_handle);
     if (width_px == 0 or height_px == 0) return @intFromEnum(ErrorCode.invalid_arg);
+    const before = cellPixelSize(&h.term);
     h.term.width_px = width_px;
     h.term.height_px = height_px;
+    // A resize already reported the new grid; only a new cell size (font or
+    // scale change) is news to a program using mode 2048.
+    const after = cellPixelSize(&h.term);
+    if ((before.width != after.width or before.height != after.height) and
+        h.term.modes.get(.in_band_size_reports))
+    {
+        h.stream.handler.sizeReportInBand() catch return @intFromEnum(ErrorCode.internal);
+    }
+    return @intFromEnum(ErrorCode.ok);
+}
+
+/// Light or dark (0 dark, 1 light), answered to DSR 996 and, while mode 2031
+/// is set, reported whenever it changes.
+pub export fn restty_set_color_scheme(handle: ?*Restty, scheme: u8) u32 {
+    const h = handle orelse return @intFromEnum(ErrorCode.invalid_handle);
+    const value: ghostty.device_status.ColorScheme = switch (scheme) {
+        0 => .dark,
+        1 => .light,
+        else => return @intFromEnum(ErrorCode.invalid_arg),
+    };
+    const handler = &h.stream.handler;
+    if (handler.color_scheme == value) return @intFromEnum(ErrorCode.ok);
+    handler.color_scheme = value;
+    if (h.term.modes.get(.report_color_scheme)) {
+        handler.colorSchemeReport() catch return @intFromEnum(ErrorCode.internal);
+    }
+    return @intFromEnum(ErrorCode.ok);
+}
+
+/// The XTVERSION (CSI > q) name and version, e.g. "terax 0.6.3".
+pub export fn restty_set_xtversion(handle: ?*Restty, ptr: [*]const u8, len: usize) u32 {
+    const h = handle orelse return @intFromEnum(ErrorCode.invalid_handle);
+    if (len == 0 or len > max_xtversion_bytes) return @intFromEnum(ErrorCode.invalid_arg);
+    for (ptr[0..len]) |byte| {
+        // Printable ASCII only: the reply is a DCS string.
+        if (byte < 0x20 or byte > 0x7E) return @intFromEnum(ErrorCode.invalid_arg);
+    }
+    const handler = &h.stream.handler;
+    @memcpy(handler.xtversion_buf[0..len], ptr[0..len]);
+    handler.xtversion_len = @intCast(len);
+    return @intFromEnum(ErrorCode.ok);
+}
+
+/// Whether the terminal can be seen (DSR 996 / mode 2033 visibility reports).
+pub export fn restty_set_visible(handle: ?*Restty, visible: u8) u32 {
+    const h = handle orelse return @intFromEnum(ErrorCode.invalid_handle);
+    const value = visible != 0;
+    if (h.term.flags.visible == value) return @intFromEnum(ErrorCode.ok);
+    h.term.flags.visible = value;
+    if (h.term.modes.get(.report_visibility)) {
+        h.stream.handler.visibilityReport() catch return @intFromEnum(ErrorCode.internal);
+    }
+    return @intFromEnum(ErrorCode.ok);
+}
+
+/// Total Kitty image bytes each screen may hold; older images are evicted to
+/// stay under it. Zero deletes every image and disables the protocol.
+pub export fn restty_set_image_storage_limit(handle: ?*Restty, bytes: u32) u32 {
+    const h = handle orelse return @intFromEnum(ErrorCode.invalid_handle);
+    h.term.setKittyGraphicsSizeLimit(h.alloc, bytes);
+    return @intFromEnum(ErrorCode.ok);
+}
+
+/// Encodes a mouse event for the program's current tracking mode and format
+/// (X10, normal, button, any; X10, UTF-8, SGR, urxvt, SGR-pixels) into the
+/// input output buffer (`restty_key_output_ptr`/`_len`); nothing is written
+/// when the program does not want the event. `x`/`y` are terminal pixels
+/// relative to the grid's top-left (cells are `restty_set_pixel_size` sized).
+/// `action` is 0 press, 1 release, 2 motion; `button` 0 none, 1 left,
+/// 2 right, 3 middle, 4/5 wheel up/down, 6/7 wheel left/right, 8-11 extra.
+/// `mods` is Ghostty's key modifier bit set.
+pub export fn restty_encode_mouse(
+    handle: ?*Restty,
+    action_value: u8,
+    button_value: u8,
+    mods_value: u16,
+    x: f32,
+    y: f32,
+    any_button_pressed: u8,
+) u32 {
+    const h = handle orelse return @intFromEnum(ErrorCode.invalid_handle);
+    h.key_output_len = 0;
+    const action = std.enums.fromInt(ghostty.input.MouseAction, action_value) orelse
+        return @intFromEnum(ErrorCode.invalid_arg);
+    const button: ?ghostty.input.MouseButton = if (button_value == 0)
+        null
+    else
+        std.enums.fromInt(ghostty.input.MouseButton, button_value) orelse
+            return @intFromEnum(ErrorCode.invalid_arg);
+    const cell = cellPixelSize(&h.term);
+    var opts: ghostty.input.MouseEncodeOptions = .fromTerminal(&h.term, .{
+        .screen = .{
+            .width = @as(u32, h.term.cols) * cell.width,
+            .height = @as(u32, h.term.rows) * cell.height,
+        },
+        .cell = .{ .width = cell.width, .height = cell.height },
+        .padding = .{},
+    });
+    opts.any_button_pressed = any_button_pressed != 0;
+    opts.last_cell = &h.mouse_last_cell;
+    var writer: std.Io.Writer = .fixed(&h.key_output);
+    ghostty.input.encodeMouse(&writer, .{
+        .action = action,
+        .button = button,
+        .mods = @bitCast(mods_value),
+        .pos = .{ .x = x, .y = y },
+    }, opts) catch return @intFromEnum(ErrorCode.internal);
+    h.key_output_len = @intCast(writer.end);
+    return @intFromEnum(ErrorCode.ok);
+}
+
+/// Forgets the last reported motion cell, so the next motion is reported even
+/// in the same cell (after the pointer left the grid or tracking changed).
+pub export fn restty_mouse_reset_motion(handle: ?*Restty) void {
+    const h = handle orelse return;
+    h.mouse_last_cell = null;
+}
+
+/// Formats a buffer range like `restty_text_range_prepare`, as plain text
+/// (0), VT sequences (1) or HTML (2), into the selection text buffer.
+/// Soft-wrapped lines are joined, so VT output written into a terminal of any
+/// width reproduces the range with its colours and styles (scrollback
+/// restore). Palette colours stay indexed and follow the theme they are
+/// replayed in; hyperlink targets are not exported.
+pub export fn restty_text_range_format_prepare(
+    handle: ?*Restty,
+    start_line: u32,
+    start_col: u16,
+    end_line: u32,
+    end_col: u16,
+    format: u8,
+) u32 {
+    const h = handle orelse return @intFromEnum(ErrorCode.invalid_handle);
+    clearSelectionText(h);
+    const emit: ghostty.formatter.Format = switch (format) {
+        0 => .plain,
+        1 => .vt,
+        2 => .html,
+        else => return @intFromEnum(ErrorCode.invalid_arg),
+    };
+    const screen = h.term.screens.active;
+    const start = pinForBufferPoint(screen, start_line, start_col) orelse return @intFromEnum(ErrorCode.invalid_arg);
+    const end = pinForBufferPoint(screen, end_line, end_col) orelse return @intFromEnum(ErrorCode.invalid_arg);
+    var formatter: ghostty.formatter.ScreenFormatter = .init(screen, .{
+        .emit = emit,
+        .unwrap = true,
+        .trim = true,
+    });
+    formatter.content = .{ .selection = ghostty.Selection.init(start, end, false) };
+    if (emit == .vt) formatter.extra = .styles;
+    var output: std.Io.Writer.Allocating = .init(h.alloc);
+    defer output.deinit();
+    formatter.format(&output.writer) catch return @intFromEnum(ErrorCode.out_of_memory);
+    h.selection_text = output.toOwnedSliceSentinel(0) catch return @intFromEnum(ErrorCode.out_of_memory);
     return @intFromEnum(ErrorCode.ok);
 }
 
@@ -2773,6 +3172,9 @@ fn releaseLineScratch(h: *Restty) void {
 pub export fn restty_render_update(handle: ?*Restty) u32 {
     const h = handle orelse return @intFromEnum(ErrorCode.invalid_handle);
     collectKittyPlacements(h) catch return @intFromEnum(ErrorCode.out_of_memory);
+    const placements_hash = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(h.kitty_placements.items));
+    h.kitty_placements_changed = @intFromBool(placements_hash != h.kitty_placements_hash);
+    h.kitty_placements_hash = placements_hash;
     if (h.render_update_count >= render_state_reset_interval) {
         h.render_state.deinit(h.alloc);
         h.render_state = .empty;
@@ -2947,6 +3349,7 @@ pub export fn restty_render_release(handle: ?*Restty) void {
     h.link_buffer = .empty;
     h.kitty_placements.deinit(h.alloc);
     h.kitty_placements = .empty;
+    h.kitty_placements_hash = 0;
     h.has_render_data = false;
     h.render_update_count = 0;
     h.render_reset_count +%= 1;
@@ -3327,9 +3730,34 @@ pub export fn restty_kitty_placement_stride() u32 {
     return @sizeOf(KittyPlacementAbi);
 }
 
+/// Placements with a z below this are drawn under cell backgrounds too.
+pub export fn restty_kitty_background_z_limit() i32 {
+    return std.math.minInt(i32) / 2;
+}
+
+/// Advances running Kitty animations to `now_ms` (any monotonic clock, the
+/// same on every call) and returns the delay in milliseconds until the next
+/// frame is due, or -1 when nothing animates. A frame change bumps the image
+/// generation, so the next `restty_render_update` reports it.
+pub export fn restty_kitty_animation_tick(handle: ?*Restty, now_ms: f64) f64 {
+    const h = handle orelse return -1;
+    if (comptime !kitty_graphics_enabled) return -1;
+    if (!(now_ms >= 0)) return -1;
+    const storage = &h.term.screens.active.kitty_images;
+    const delay = storage.animationTick(h.term.io(), @intFromFloat(now_ms)) orelse return -1;
+    return @floatFromInt(delay);
+}
+
 pub export fn restty_kitty_placement_count(handle: ?*Restty) u32 {
     const h = handle orelse return 0;
     return @intCast(h.kitty_placements.items.len);
+}
+
+/// 1 when the last render update's placements differ from the one before
+/// (an image arrived, moved, changed frame or was deleted).
+pub export fn restty_kitty_placements_changed(handle: ?*Restty) u8 {
+    const h = handle orelse return 0;
+    return h.kitty_placements_changed;
 }
 
 pub export fn restty_kitty_placements_ptr(handle: ?*Restty) usize {

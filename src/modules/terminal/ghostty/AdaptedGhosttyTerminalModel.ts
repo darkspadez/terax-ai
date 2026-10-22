@@ -41,11 +41,14 @@ import type {
   GhosttyGpuFrame,
   GhosttyGpuFrameOptions,
   GhosttyGpuGlyph,
+  GhosttyImagePlacement,
+  GhosttyMouseEvent,
   GhosttyRenderFormat,
   GhosttySearchStatus,
   GhosttySearchViewportSpan,
   GhosttyTerminalModelApi,
   GhosttyTerminalModelOptions,
+  GhosttyTextFormat,
   TerminalBufferPoint,
   TerminalBufferSelection,
 } from "./GhosttyTerminalModel";
@@ -56,6 +59,7 @@ const NO_DAMAGE: TerminalDamage = { kind: "none" };
 const FULL_DAMAGE: TerminalDamage = { kind: "full" };
 const NO_GLYPHS: readonly GhosttyGpuGlyph[] = Object.freeze([]);
 const NO_RANGES: readonly TerminalRowRange[] = Object.freeze([]);
+const NO_PLACEMENTS: readonly GhosttyImagePlacement[] = Object.freeze([]);
 
 type BufferLine = {
   readonly cells: string[];
@@ -124,6 +128,8 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
   private writeCount = 0;
   private renderStateUpdateCount = 0;
   private presentationResourcesReleased = false;
+  /** The last render update moved, changed or removed image placements. */
+  private imagesChanged = false;
   private damageNotificationPending = false;
   private damageNeedsResolution = false;
   private modeBitsValue = 0;
@@ -336,6 +342,8 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
     // Ghostty just cleared a redrawable prompt; keep the previous frame until the shell
     // prints it again (or the deadline), instead of presenting it blank.
     this.resizePromptHold.resized(this.modesValue.alternateScreen);
+    // Mode 2048 in-band size report.
+    this.drainReplies();
     this.notifyDamage();
   }
 
@@ -343,6 +351,73 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
     this.assertLive();
     if (widthPx <= 0 || heightPx <= 0) return;
     this.terminal.setPixelSize(widthPx, heightPx);
+    // A new cell size is reported to programs using mode 2048.
+    this.drainReplies();
+  }
+
+  imagePlacements(): readonly GhosttyImagePlacement[] {
+    this.assertLive();
+    return this.renderStateCurrent
+      ? this.terminal.kittyPlacements()
+      : NO_PLACEMENTS;
+  }
+
+  imageBackgroundZLimit(): number {
+    this.assertLive();
+    return this.terminal.kittyBackgroundZLimit;
+  }
+
+  advanceImageAnimations(nowMs: number): number | null {
+    this.assertLive();
+    const delay = this.terminal.kittyAnimationTick(nowMs);
+    // A new frame bumps the image generation; the next update reports it.
+    this.invalidateRenderState();
+    this.damageNeedsResolution = true;
+    return delay;
+  }
+
+  encodeMouse(event: GhosttyMouseEvent): Uint8Array {
+    this.assertLive();
+    return this.terminal.encodeMouse(event);
+  }
+
+  resetMouseMotion(): void {
+    this.assertLive();
+    this.terminal.resetMouseMotion();
+  }
+
+  setColorScheme(scheme: "dark" | "light"): void {
+    this.assertLive();
+    this.terminal.setColorScheme(scheme);
+    this.drainReplies();
+  }
+
+  setVisible(visible: boolean): void {
+    this.assertLive();
+    this.terminal.setVisible(visible);
+    this.drainReplies();
+  }
+
+  setTerminalVersion(version: string): void {
+    this.assertLive();
+    this.terminal.setXtversion(version);
+  }
+
+  setImageStorageLimit(bytes: number): void {
+    this.assertLive();
+    this.terminal.setImageStorageLimit(bytes);
+    this.invalidateRenderState();
+    this.damageNeedsResolution = true;
+    this.requestPresentation();
+  }
+
+  formatTextRange(
+    startLine: number,
+    endLine: number,
+    format: GhosttyTextFormat,
+  ): string {
+    this.assertLive();
+    return this.terminal.formatTextRange(startLine, endLine, format);
   }
 
   setSearchQuery(query: string): GhosttySearchStatus {
@@ -398,6 +473,10 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
     } else if (damage.kind !== "none") {
       this.ensureRenderState();
     }
+    if (this.imagesChanged) {
+      damage = FULL_DAMAGE;
+      this.imagesChanged = false;
+    }
     this.pendingDamage = NO_DAMAGE;
     this.damageNeedsResolution = false;
     this.damageNotificationPending = false;
@@ -414,9 +493,13 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
     const state = this.ensureGpuState();
 
     const cellDamage = options.resync ? FULL_DAMAGE : this.pendingCellDamage;
-    const damage = options.resync
-      ? FULL_DAMAGE
-      : mergeDamage(this.pendingDamage, cellDamage);
+    // Images are drawn from placements, not cell records: a change redraws
+    // every row without re-uploading them.
+    const damage =
+      options.resync || this.imagesChanged
+        ? FULL_DAMAGE
+        : mergeDamage(this.pendingDamage, cellDamage);
+    this.imagesChanged = false;
     this.pendingDamage = NO_DAMAGE;
     this.pendingCellDamage = NO_DAMAGE;
     this.damageNeedsResolution = false;
@@ -906,6 +989,7 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
     ) {
       this.renderState = this.terminal.updateRenderState();
       this.renderStateCurrent = true;
+      if (this.terminal.kittyPlacementsChanged()) this.imagesChanged = true;
       this.renderVersion += 1;
       this.renderStateUpdateCount += 1;
       this.presentationResourcesReleased = false;
@@ -930,6 +1014,7 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
       const next = this.terminal.updateGpuRenderState();
       this.gpuState = next;
       this.renderStateCurrent = true;
+      if (this.terminal.kittyPlacementsChanged()) this.imagesChanged = true;
       this.renderVersion += 1;
       this.renderStateUpdateCount += 1;
       this.presentationResourcesReleased = false;

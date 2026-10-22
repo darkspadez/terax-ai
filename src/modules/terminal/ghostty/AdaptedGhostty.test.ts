@@ -299,7 +299,7 @@ describe.each([
         expect(new TextDecoder().decode(terminal.drainOutputBytes())).toBe(
           "\x1b[?2004;2$y" +
             "\x1b[4;432;720t\x1b[6;18;9t\x1b[8;24;80t" +
-            "\x1bP>|ghostty 1.3.2-dev\x1b\\" +
+            "\x1bP>|terax\x1b\\" +
             "\x1b[?997;1n\x1b[?999;1n" +
             "\x1b]10;rgb:cdcd/d6d6/f4f4\x07" +
             "\x1b]11;rgb:1111/1111/1b1b\x07" +

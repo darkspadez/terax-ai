@@ -11,10 +11,10 @@ per-terminal frame loop, or per-pane GPU lifecycle.
 - Restty commit: `7700b14a7643ba9240818209ef1e0aa90d83ad77`
 - Zig: `0.16.0`
 - Optimization: `ReleaseFast`, WebAssembly SIMD and scalar variants
-- SIMD artifact size: `755388` bytes
-- Scalar artifact size: `753322` bytes
-- SIMD SHA-256: `302b7952e0f84d1701b64a4348f597bbe5ab2bc1f2b58c12d6cf775251a895f7`
-- Scalar SHA-256: `c9cffe386b771bd1a76b493bf064b30abb30fd5ef3d36d700226b318309c1cad`
+- SIMD artifact size: `1055424` bytes
+- Scalar artifact size: `995913` bytes
+- SIMD SHA-256: `6a541e7208afa1d7a0b55998c2928cddf8a4495958183d83f780e760acfae308`
+- Scalar SHA-256: `c8b6489230b763c3441a0dd23026f6591ca7237e9a363ef8e928a3557e5edab6`
 
 Terax-specific changes include:
 
@@ -95,6 +95,39 @@ Terax-specific changes include:
 The bridge deliberately stays below Terax's model/surface boundary. Terax
 retains renderer pooling, hidden-tab renderer release, damage-driven frame
 scheduling, shell integration, semantic routing, and fallback selection.
+
+## October 22 protocols
+
+The bridge now lets Ghostty's own stream handler answer and report what it
+already implements, through its effects (reply queue, size, colour scheme,
+XTVERSION, OSC 9;4 progress), instead of answering only a hand-picked set:
+
+- Kitty graphics: Ghostty's build disables the protocol on every freestanding
+  target. `build.zig` turns the generated option back on, adds the wuffs
+  import Ghostty wires only with the feature, and builds ghostty-vt from a copy
+  of the pinned source whose image loader refuses the file, temporary-file and
+  shared-memory media on freestanding targets before compiling their POSIX
+  paths (only direct, in-band transmission is possible in a webview). PNG
+  payloads (`f=100`, the default of most clients) are decoded by wuffs, which
+  libghostty leaves to the embedder. Bulk APC payloads (`apc_put_slice`) reach
+  the protocol parser; the per-byte path alone dropped every image. Placements
+  follow Ghostty's renderer (pinned, relative and Unicode-placeholder virtual
+  placements) and carry each image's generation for texture caching. Image
+  storage is 64 MB per screen (`restty_set_image_storage_limit`).
+- Mode 2048 in-band size reports on enable, on every resize (one report, with
+  the current cell size) and on cell-size changes; mode 2027 grapheme
+  clustering on by default and across RIS, like Ghostty's
+  `grapheme-width-method = unicode`.
+- Host-set colour scheme (DSR 996, mode 2031 change reports), visibility
+  (DSR 998, mode 2033) and XTVERSION (`terax <version>`).
+- Ghostty's mouse encoder for every tracking mode and format (X10, normal,
+  button, any; X10, UTF-8, SGR, urxvt, SGR-pixels) with motion deduplication.
+- Events for OSC 9;4 progress, OSC 22 pointer shapes and OSC 52 clipboard
+  reads (answered by the host after asking the user; before, a read arrived as
+  a write of `?`). OSC 21 Kitty colour queries are answered; OSC 4/10/11/12
+  queries are answered once by Ghostty instead of by the bridge.
+- Formatted range export as plain text, VT or HTML with soft wraps joined
+  (`restty_text_range_format_prepare`), used to restore scrollback.
 
 ## October 15 instance-per-terminal memory
 

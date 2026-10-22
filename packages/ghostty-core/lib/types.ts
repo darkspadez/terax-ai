@@ -502,7 +502,71 @@ export type GhosttyTerminalEvent =
       readonly marker?: number;
     }
   | { readonly type: "screen-cleared" }
+  /** OSC 9;4. `progress` is a percentage, or null when none was sent. */
+  | {
+      readonly type: "progress";
+      readonly state: GhosttyProgressState;
+      readonly progress: number | null;
+    }
+  /** OSC 22 or a reset: the pointer shape the program asked for. */
+  | { readonly type: "pointer-shape"; readonly shape: GhosttyPointerShape }
+  /**
+   * OSC 52 read request. Answer, if at all, by writing
+   * `ESC ] 52 ; <selection> ; <base64> <terminator>` to the PTY.
+   */
+  | {
+      readonly type: "clipboard-read";
+      readonly selection: string;
+      readonly terminator: "st" | "bel";
+    }
   | { readonly type: "overflow"; readonly dropped: number };
+
+export type GhosttyProgressState =
+  | "remove"
+  | "set"
+  | "error"
+  | "indeterminate"
+  | "pause";
+
+/** Ghostty's mouse shapes, in its enum order (OSC 22 names, as CSS cursors). */
+export const GHOSTTY_POINTER_SHAPES = [
+  "default",
+  "context-menu",
+  "help",
+  "pointer",
+  "progress",
+  "wait",
+  "cell",
+  "crosshair",
+  "text",
+  "vertical-text",
+  "alias",
+  "copy",
+  "move",
+  "no-drop",
+  "not-allowed",
+  "grab",
+  "grabbing",
+  "all-scroll",
+  "col-resize",
+  "row-resize",
+  "n-resize",
+  "e-resize",
+  "s-resize",
+  "w-resize",
+  "ne-resize",
+  "nw-resize",
+  "se-resize",
+  "sw-resize",
+  "ew-resize",
+  "ns-resize",
+  "nesw-resize",
+  "nwse-resize",
+  "zoom-in",
+  "zoom-out",
+] as const;
+
+export type GhosttyPointerShape = (typeof GHOSTTY_POINTER_SHAPES)[number];
 
 /**
  * Cell structure matching ghostty_cell_t in C (16 bytes)

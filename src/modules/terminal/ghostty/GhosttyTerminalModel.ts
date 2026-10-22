@@ -4,7 +4,12 @@ import type {
   TerminalModel,
   TerminalRowRange,
 } from "@/modules/terminal/backend/contracts";
-import type { TeraxGhosttyGpuGlyph } from "@terax/ghostty-core/adapted";
+import type {
+  TeraxGhosttyGpuGlyph,
+  TeraxGhosttyKittyPlacement,
+  TeraxGhosttyMouseEvent,
+  TeraxGhosttyTextFormat,
+} from "@terax/ghostty-core/adapted";
 import type {
   GhosttyTerminalConfig,
   GhosttyTerminalEvent,
@@ -54,6 +59,14 @@ export type GhosttySearchViewportSpan = {
 export type GhosttyRenderFormat = "soa" | "gpu";
 
 export type GhosttyGpuGlyph = TeraxGhosttyGpuGlyph;
+
+/** A Kitty graphics placement; see `TeraxGhosttyKittyPlacement`. */
+export type GhosttyImagePlacement = TeraxGhosttyKittyPlacement;
+
+/** A mouse event for `encodeMouse`; see `TeraxGhosttyMouseEvent`. */
+export type GhosttyMouseEvent = TeraxGhosttyMouseEvent;
+
+export type GhosttyTextFormat = TeraxGhosttyTextFormat;
 
 export type GhosttyGpuFrameOptions = {
   /**
@@ -191,4 +204,38 @@ export interface GhosttyTerminalModelApi extends TerminalModel {
   setBlockSearchMatch?(
     match: { line: number; col: number; len: number } | null,
   ): void;
+  /**
+   * Kitty image placements of the last render update (`consumeGpuFrame`,
+   * `consumeDamage`), sorted by z. Pixel views are borrowed like `cells`:
+   * upload them before the next call into the model.
+   */
+  imagePlacements?(): readonly GhosttyImagePlacement[];
+  /** Placements with a z below this are drawn under cell backgrounds too. */
+  imageBackgroundZLimit?(): number;
+  /**
+   * Advances Kitty animations to `nowMs` (any monotonic clock); returns the
+   * delay until the next frame change, or null when nothing animates.
+   */
+  advanceImageAnimations?(nowMs: number): number | null;
+  /**
+   * Encodes a mouse event for the program's tracking mode and format, or an
+   * empty array when the program does not want it.
+   */
+  encodeMouse?(event: GhosttyMouseEvent): Uint8Array;
+  /** Reports the next motion even within the cell last reported. */
+  resetMouseMotion?(): void;
+  /** Light or dark, answered to DSR 996 and reported under mode 2031. */
+  setColorScheme?(scheme: "dark" | "light"): void;
+  /** Whether the terminal can be seen (DSR 998, mode 2033). */
+  setVisible?(visible: boolean): void;
+  /** The XTVERSION reply, e.g. "terax 0.6.3". */
+  setTerminalVersion?(version: string): void;
+  /** Kitty image bytes per screen; 0 disables the protocol. */
+  setImageStorageLimit?(bytes: number): void;
+  /** A buffer range as plain text, VT sequences or HTML, soft wraps joined. */
+  formatTextRange?(
+    startLine: number,
+    endLine: number,
+    format: GhosttyTextFormat,
+  ): string;
 }

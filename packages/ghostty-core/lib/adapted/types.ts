@@ -360,6 +360,86 @@ export type TeraxGhosttyWasmExports = WebAssembly.Exports & {
   readonly restty_link_buffer_ptr: (handle: number) => number;
   readonly restty_link_count: (handle: number) => number;
   readonly restty_link_buffer_len: (handle: number) => number;
+  readonly restty_set_color_scheme: (handle: number, scheme: number) => number;
+  readonly restty_set_xtversion: (handle: number, ptr: number, len: number) => number;
+  readonly restty_set_visible: (handle: number, visible: number) => number;
+  readonly restty_set_image_storage_limit: (handle: number, bytes: number) => number;
+  readonly restty_encode_mouse: (
+    handle: number,
+    action: number,
+    button: number,
+    mods: number,
+    x: number,
+    y: number,
+    anyButtonPressed: number,
+  ) => number;
+  readonly restty_mouse_reset_motion: (handle: number) => void;
+  readonly restty_text_range_format_prepare: (
+    handle: number,
+    startLine: number,
+    startCol: number,
+    endLine: number,
+    endCol: number,
+    format: number,
+  ) => number;
+  readonly restty_kitty_placement_stride: () => number;
+  readonly restty_kitty_placement_count: (handle: number) => number;
+  readonly restty_kitty_placements_ptr: (handle: number) => number;
+  readonly restty_kitty_placements_changed: (handle: number) => number;
+  readonly restty_kitty_background_z_limit: () => number;
+  readonly restty_kitty_animation_tick: (handle: number, nowMs: number) => number;
+};
+
+/** Ghostty mouse action (`restty_encode_mouse`). */
+export type TeraxGhosttyMouseAction = "press" | "release" | "motion";
+
+/**
+ * A mouse event to encode for the program's tracking mode and format.
+ * `button` is 0 for none (motion), 1 left, 2 right, 3 middle, 4/5 wheel up
+ * and down, 6/7 wheel left and right, 8-11 extra buttons. `x` and `y` are
+ * terminal pixels from the grid's top-left corner, in the units of
+ * `setPixelSize`. `mods` is Ghostty's key modifier bit set.
+ */
+export type TeraxGhosttyMouseEvent = {
+  readonly action: TeraxGhosttyMouseAction;
+  readonly button: number;
+  readonly mods: number;
+  readonly x: number;
+  readonly y: number;
+  readonly anyButtonPressed: boolean;
+};
+
+/** Output formats of `formatTextRange`. */
+export type TeraxGhosttyTextFormat = "plain" | "vt" | "html";
+
+/**
+ * One Kitty graphics placement in the viewport, sorted by z. `pixels` is a
+ * view into WebAssembly memory, valid until the terminal is next written,
+ * resized or rendered; copy (or upload) it before then.
+ */
+export type TeraxGhosttyKittyPlacement = {
+  readonly imageId: number;
+  /** Bytes per pixel of `pixels`: 1 gray, 2 gray + alpha, 3 RGB, 4 RGBA. */
+  readonly channels: 1 | 2 | 3 | 4;
+  readonly imageWidth: number;
+  readonly imageHeight: number;
+  readonly pixels: Uint8Array;
+  /** Changes whenever the pixels (or animation frame) change. */
+  readonly generation: number;
+  /** Viewport cell of the top-left corner; negative when partly outside. */
+  readonly col: number;
+  readonly row: number;
+  readonly z: number;
+  /** Destination size in terminal pixels. */
+  readonly width: number;
+  readonly height: number;
+  /** Pixel offset inside the top-left cell. */
+  readonly offsetX: number;
+  readonly offsetY: number;
+  readonly sourceX: number;
+  readonly sourceY: number;
+  readonly sourceWidth: number;
+  readonly sourceHeight: number;
 };
 
 export type TypedArray =

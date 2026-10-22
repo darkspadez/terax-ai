@@ -3,7 +3,9 @@ import type {
   TeraxGhosttyLine,
   TeraxGhosttyLoadOptions,
   TeraxGhosttyKeyEvent,
+  TeraxGhosttyKittyPlacement,
   TeraxGhosttyMemoryStats,
+  TeraxGhosttyMouseEvent,
   TeraxGhosttyRenderBase,
   TeraxGhosttyRenderFormat,
   TeraxGhosttyRenderState,
@@ -12,6 +14,7 @@ import type {
   TeraxGhosttySelection,
   TeraxGhosttyTerminalOptions,
   TeraxGhosttyTerminalResourceStats,
+  TeraxGhosttyTextFormat,
   TeraxGhosttyWasmExports,
   TypedArray,
   TypedArrayConstructor,
@@ -20,17 +23,21 @@ import type {
 import { GPU_CELL_BYTES, GPU_CELL_WORDS } from "./gpuCells";
 import { GpuGlyphBatch } from "./gpuGlyphs";
 import { createViewCacheEntry, getCachedView } from "./viewCache";
-import type { GhosttyTerminalEvent } from "../types";
+import {
+  GHOSTTY_POINTER_SHAPES,
+  type GhosttyProgressState,
+  type GhosttyTerminalEvent,
+} from "../types";
 
 export const ADAPTED_GHOSTTY_COMMIT =
   "ad97d331459a0762f7aea5f56fe86748e03b860f";
 export const ADAPTED_RESTTY_COMMIT =
   "7700b14a7643ba9240818209ef1e0aa90d83ad77";
 export const ADAPTED_GHOSTTY_WASM_SHA256 =
-  "302b7952e0f84d1701b64a4348f597bbe5ab2bc1f2b58c12d6cf775251a895f7";
+  "6a541e7208afa1d7a0b55998c2928cddf8a4495958183d83f780e760acfae308";
 
 export const ADAPTED_GHOSTTY_SCALAR_WASM_SHA256 =
-  "c9cffe386b771bd1a76b493bf064b30abb30fd5ef3d36d700226b318309c1cad";
+  "c8b6489230b763c3441a0dd23026f6591ca7237e9a363ef8e928a3557e5edab6";
 
 let wasmSimdAvailable: boolean | undefined;
 
@@ -179,6 +186,7 @@ const textDecoder = new TextDecoder();
 const emptyBytes = new Uint8Array(0);
 const emptyUint32 = new Uint32Array(0);
 const emptyEvents: GhosttyTerminalEvent[] = [];
+const emptyPlacements: readonly TeraxGhosttyKittyPlacement[] = [];
 
 type RenderViewCache = {
   readonly codepoints: ViewCacheEntry<Uint32Array>;
@@ -849,6 +857,184 @@ export class TeraxGhosttyTerminal {
     const pointer = this.exports.restty_selection_text_ptr(this.handle);
     validateRange(this.memory.buffer, pointer, length);
     return textDecoder.decode(new Uint8Array(this.memory.buffer, pointer, length));
+  }
+
+  /**
+   * A buffer range as plain text, VT sequences or HTML, soft-wrapped lines
+   * joined. Writing the VT form into a terminal of any width reproduces the
+   * range with its colours and styles; palette colours stay indexed and
+   * follow the theme they are replayed in. Hyperlink targets are not kept.
+   */
+  formatTextRange(
+    startLine: number,
+    endLine: number,
+    format: TeraxGhosttyTextFormat,
+    startCol = 0,
+    endCol = this.cols - 1,
+  ): string {
+    this.assertLive();
+    const total = this.scrollbar().total;
+    if (!Number.isSafeInteger(startLine) || !Number.isSafeInteger(endLine) || startLine < 0 || endLine < startLine || startLine >= total) return "";
+    checkResult(
+      this.exports.restty_text_range_format_prepare(
+        this.handle,
+        startLine,
+        clampInteger(startCol, 0, this.cols - 1),
+        Math.min(total - 1, endLine),
+        clampInteger(endCol, 0, this.cols - 1),
+        format === "plain" ? 0 : format === "vt" ? 1 : 2,
+      ),
+      "format terminal text range",
+    );
+    const length = this.exports.restty_selection_text_len(this.handle);
+    const pointer = this.exports.restty_selection_text_ptr(this.handle);
+    validateRange(this.memory.buffer, pointer, length);
+    return textDecoder.decode(new Uint8Array(this.memory.buffer, pointer, length));
+  }
+
+  /** Light or dark, for DSR 996 and mode 2031 reports (queued as output). */
+  setColorScheme(scheme: "dark" | "light"): void {
+    this.assertLive();
+    checkResult(
+      this.exports.restty_set_color_scheme(this.handle, scheme === "light" ? 1 : 0),
+      "set color scheme",
+    );
+  }
+
+  /** The XTVERSION reply, e.g. "terax 0.6.3" (printable ASCII, 128 bytes). */
+  setXtversion(version: string): void {
+    this.assertLive();
+    const bytes = this.textEncoder.encode(version);
+    if (bytes.byteLength === 0 || bytes.byteLength > 128 || !/^[\x20-\x7e]+$/.test(version)) {
+      throw new RangeError("XTVERSION must be 1-128 printable ASCII characters");
+    }
+    this.ensureInputCapacity(bytes.byteLength);
+    new Uint8Array(this.memory.buffer, this.inputPointer, bytes.byteLength).set(bytes);
+    checkResult(
+      this.exports.restty_set_xtversion(this.handle, this.inputPointer, bytes.byteLength),
+      "set XTVERSION",
+    );
+  }
+
+  /** Whether the terminal can be seen (DSR 996 and mode 2033 reports). */
+  setVisible(visible: boolean): void {
+    this.assertLive();
+    checkResult(
+      this.exports.restty_set_visible(this.handle, visible ? 1 : 0),
+      "set visibility",
+    );
+  }
+
+  /** Kitty image bytes each screen may hold; 0 disables the protocol. */
+  setImageStorageLimit(bytes: number): void {
+    this.assertLive();
+    checkResult(
+      this.exports.restty_set_image_storage_limit(
+        this.handle,
+        clampInteger(bytes, 0, 0xffff_ffff),
+      ),
+      "set image storage limit",
+    );
+  }
+
+  /**
+   * Encodes a mouse event for the program's tracking mode and format; empty
+   * when the program does not want it (including motion within the cell
+   * last reported).
+   */
+  encodeMouse(event: TeraxGhosttyMouseEvent): Uint8Array {
+    this.assertLive();
+    checkResult(
+      this.exports.restty_encode_mouse(
+        this.handle,
+        event.action === "press" ? 0 : event.action === "release" ? 1 : 2,
+        clampInteger(event.button, 0, 11),
+        clampInteger(event.mods, 0, 0xffff),
+        Number.isFinite(event.x) ? event.x : 0,
+        Number.isFinite(event.y) ? event.y : 0,
+        event.anyButtonPressed ? 1 : 0,
+      ),
+      "encode mouse",
+    );
+    const length = this.exports.restty_key_output_len(this.handle);
+    if (length === 0) return emptyBytes;
+    const pointer = this.exports.restty_key_output_ptr(this.handle);
+    validateRange(this.memory.buffer, pointer, length);
+    return new Uint8Array(this.memory.buffer, pointer, length).slice();
+  }
+
+  /** Reports the next motion even within the last reported cell. */
+  resetMouseMotion(): void {
+    this.assertLive();
+    this.exports.restty_mouse_reset_motion(this.handle);
+  }
+
+  /**
+   * Kitty image placements of the last render update, sorted by z. Their
+   * pixel views stay valid until the terminal is next written, resized or
+   * rendered.
+   */
+  kittyPlacements(): readonly TeraxGhosttyKittyPlacement[] {
+    this.assertLive();
+    const count = this.exports.restty_kitty_placement_count(this.handle);
+    if (count === 0) return emptyPlacements;
+    const stride = this.exports.restty_kitty_placement_stride();
+    const pointer = this.exports.restty_kitty_placements_ptr(this.handle);
+    validateRange(this.memory.buffer, pointer, count * stride);
+    const view = new DataView(this.memory.buffer, pointer, count * stride);
+    const placements: TeraxGhosttyKittyPlacement[] = [];
+    for (let index = 0; index < count; index += 1) {
+      const base = index * stride;
+      const channels = view.getUint8(base + 4);
+      if (channels < 1 || channels > 4) continue;
+      const dataPointer = view.getUint32(base + 16, true);
+      const dataLength = view.getUint32(base + 20, true);
+      validateRange(this.memory.buffer, dataPointer, dataLength);
+      placements.push({
+        imageId: view.getUint32(base, true),
+        channels: channels as 1 | 2 | 3 | 4,
+        imageWidth: view.getUint32(base + 8, true),
+        imageHeight: view.getUint32(base + 12, true),
+        pixels: new Uint8Array(this.memory.buffer, dataPointer, dataLength),
+        generation:
+          view.getUint32(base + 24, true) +
+          view.getUint32(base + 28, true) * 0x1_0000_0000,
+        col: view.getInt32(base + 32, true),
+        row: view.getInt32(base + 36, true),
+        z: view.getInt32(base + 40, true),
+        width: view.getUint32(base + 44, true),
+        height: view.getUint32(base + 48, true),
+        offsetX: view.getUint32(base + 52, true),
+        offsetY: view.getUint32(base + 56, true),
+        sourceX: view.getUint32(base + 60, true),
+        sourceY: view.getUint32(base + 64, true),
+        sourceWidth: view.getUint32(base + 68, true),
+        sourceHeight: view.getUint32(base + 72, true),
+      });
+    }
+    return placements;
+  }
+
+  /** The last render update's placements differ from the update before. */
+  kittyPlacementsChanged(): boolean {
+    this.assertLive();
+    return this.exports.restty_kitty_placements_changed(this.handle) !== 0;
+  }
+
+  /** Placements with a z below this are drawn under cell backgrounds too. */
+  get kittyBackgroundZLimit(): number {
+    return this.exports.restty_kitty_background_z_limit();
+  }
+
+  /**
+   * Advances Kitty animations to `nowMs` (one monotonic clock for every
+   * call); returns the delay until the next frame, or null when nothing
+   * animates.
+   */
+  kittyAnimationTick(nowMs: number): number | null {
+    this.assertLive();
+    const delay = this.exports.restty_kitty_animation_tick(this.handle, nowMs);
+    return delay < 0 ? null : delay;
   }
 
   scrollViewport(deltaRows: number): void {
@@ -1829,7 +2015,36 @@ function decodeTerminalEvent(
     }
     case 11:
       return { type: "screen-cleared" };
+    case 12: {
+      if (payload.byteLength < 3) return null;
+      const state = PROGRESS_STATES[payload[0]];
+      if (!state) return null;
+      return {
+        type: "progress",
+        state,
+        progress: payload[1] ? Math.min(100, payload[2]) : null,
+      };
+    }
+    case 13: {
+      const shape = GHOSTTY_POINTER_SHAPES[payload[0] ?? -1];
+      return shape ? { type: "pointer-shape", shape } : null;
+    }
+    case 14:
+      if (payload.byteLength < 2) return null;
+      return {
+        type: "clipboard-read",
+        selection: String.fromCharCode(payload[0]),
+        terminator: payload[1] ? "bel" : "st",
+      };
     default:
       return null;
   }
 }
+
+const PROGRESS_STATES: readonly GhosttyProgressState[] = [
+  "remove",
+  "set",
+  "error",
+  "indeterminate",
+  "pause",
+];
