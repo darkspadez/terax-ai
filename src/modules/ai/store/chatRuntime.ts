@@ -61,6 +61,10 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     getPlanMode: () => usePlanStore.getState().active,
     getApprovalMode: () =>
       sessionApprovalMode(useChatStore.getState().sessions, sessionId),
+    getReasoningEffort: () =>
+      usePreferencesStore.getState().reasoningEffortByModel[
+        useChatStore.getState().selectedModelId
+      ],
     getLmstudioBaseURL: () => usePreferencesStore.getState().lmstudioBaseURL,
     getLmstudioModelId: () => usePreferencesStore.getState().lmstudioModelId,
     getMlxBaseURL: () => usePreferencesStore.getState().mlxBaseURL,

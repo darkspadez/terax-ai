@@ -42,12 +42,16 @@ Keys are never persisted outside the OS keychain / Linux secrets file.
 1. Resolves the model via `buildConfiguredLanguageModel`.
 2. Builds a stable system prompt from `selectSystemPrompt(modelId)` plus optional persona, custom instructions, and `TERAX.md` project memory.
 3. Converts UI messages to model messages, prunes reasoning content if the model does not keep it, and compacts old messages if the context limit is exceeded.
-4. Streams via `streamText` with the tool set from `buildTools(ctx)`, `toolApproval: TOOL_APPROVAL` and `stopWhen: isStepCount(MAX_AGENT_STEPS)`.
+4. Streams via `streamText` with the tool set from `buildTools(ctx)`, the run's approval policy (`buildToolApproval`, see below), the chosen reasoning effort (`reasoningCallOptions`) and `stopWhen: isStepCount(MAX_AGENT_STEPS)`.
 5. Emits step labels, usage deltas, and finish metadata.
 
 The tool set is assembled in `src/modules/ai/tools/tools.ts` from the `fs`, `edit`, `search`, `shell`, `subagent`, `terminal`, `todo`, and managed-agent (`agent.ts`) builders.
 
 `createContextAwareTransport` (`src/modules/ai/lib/transport.ts`) is the chat transport: it adds the environment block to the last user message, reads `TERAX.md` (capped, cached per workspace root), runs `runAgentStream` and returns `toUIMessageStream(...)` for the `Chat`.
+
+### Reasoning effort
+
+`lib/reasoningEffort.ts` decides which models offer an effort from the catalog metadata: a model tagged `reasoning` on OpenAI, Anthropic, Google or xAI (but Grok 4.20, which the AI SDK refuses an effort for) offers off, low, medium and high; DeepSeek V4 offers off and high (its `thinking` switch, with `reasoning_effort` high when on). Everything else, including endpoints, local servers and OpenRouter, hides the composer's picker. The choice is remembered per model in `reasoningEffortByModel`; until one is made nothing is sent. For the native providers the effort becomes the AI SDK's `reasoning` call option, which each provider maps under its own constraints (Anthropic adaptive thinking with an effort or a budget within the max tokens, temperature dropped; OpenAI `reasoningEffort`; Google `thinkingConfig`; xAI `reasoningEffort`); "off" gives a model that always thinks its lowest setting. `reasoningEffort.test.ts` checks the request body each provider builds.
 
 ## Sub-agents
 

@@ -7,6 +7,7 @@ import { formatAiError } from "./errors";
 import { native } from "./native";
 import type { ToolContext } from "../tools/tools";
 import type { ApprovalMode } from "./approvalMode";
+import type { ReasoningEffort } from "./reasoningEffort";
 
 const TERAX_MD_MAX_BYTES = 32 * 1024;
 type MemoryCacheEntry = { content: string | null; mtime: number };
@@ -68,6 +69,8 @@ type Deps = {
   getPlanMode?: () => boolean;
   /** The conversation's approval mode, read on every gated tool call. */
   getApprovalMode?: () => ApprovalMode;
+  /** The effort remembered for the run's model, if one was chosen. */
+  getReasoningEffort?: () => ReasoningEffort | undefined;
 };
 
 type SendOptions = {
@@ -111,6 +114,7 @@ export function createContextAwareTransport(deps: Deps) {
         mode: deps.getApprovalMode?.() ?? "ask",
         planMode: deps.getPlanMode?.() ?? false,
       }),
+      reasoningEffort: deps.getReasoningEffort?.(),
       projectMemory,
       uiMessages: messagesForRun,
       abortSignal: options.abortSignal,

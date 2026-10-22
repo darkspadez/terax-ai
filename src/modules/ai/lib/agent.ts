@@ -38,6 +38,7 @@ import {
 } from "./modelTarget";
 import { opencodeSessionHeaders } from "./opencodeSession";
 import { prepareAgentPrompt } from "./prompt";
+import { type ReasoningEffort, reasoningCallOptions } from "./reasoningEffort";
 import { createProxyFetch } from "./proxyFetch";
 
 const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
@@ -324,6 +325,8 @@ export type RunAgentOptions = {
   /** The conversation's approval mode and plan mode, read on every gated
    *  tool call. Without it every gated tool asks. */
   approvalState?: () => ApprovalState;
+  /** The effort chosen for this model; absent keeps the model's default. */
+  reasoningEffort?: ReasoningEffort;
   projectMemory?: string | null;
   uiMessages: UIMessage[];
   abortSignal?: AbortSignal;
@@ -387,6 +390,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     instructions: prompt.system,
     messages: prompt.messages,
     allowSystemInMessages: false,
+    ...reasoningCallOptions(info, opts.reasoningEffort),
     tools,
     toolApproval: buildToolApproval(opts.approvalState ?? (() => ASK_STATE)),
     stopWhen: isStepCount(MAX_AGENT_STEPS),

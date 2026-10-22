@@ -156,6 +156,19 @@ describe("runAgentStream", () => {
     expect(resolvePolicy(options.toolApproval)).toEqual(TOOL_APPROVAL);
   });
 
+  it("applies the remembered reasoning effort only to models that take one", async () => {
+    const { options } = await startRun({
+      modelId: "gpt-5.6",
+      reasoningEffort: "low",
+    });
+    expect(options).toMatchObject({ reasoning: "low" });
+
+    streamTextMock.mockClear();
+    const plain = await startRun({ reasoningEffort: "high" });
+    expect(plain.options).not.toHaveProperty("reasoning");
+    expect(plain.options).not.toHaveProperty("providerOptions");
+  });
+
   it("passes the system prompt as instructions, never as a message", async () => {
     const { options } = await startRun({ planMode: true });
     expect(options.instructions).toEqual([

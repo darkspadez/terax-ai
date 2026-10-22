@@ -3,11 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const prefsMock = vi.hoisted(() => ({
   favoriteModelIds: [] as string[],
   recentModelIds: [] as string[],
+  reasoningEffortByModel: {} as Record<string, string>,
 }));
 
 const storeMock = vi.hoisted(() => ({
   setFavoriteModelIds: vi.fn(),
   setRecentModelIds: vi.fn(),
+  setReasoningEffortByModel: vi.fn(),
 }));
 
 vi.mock("@/modules/settings/preferences", () => ({
@@ -15,19 +17,26 @@ vi.mock("@/modules/settings/preferences", () => ({
     getState: () => ({
       favoriteModelIds: prefsMock.favoriteModelIds,
       recentModelIds: prefsMock.recentModelIds,
+      reasoningEffortByModel: prefsMock.reasoningEffortByModel,
     }),
   },
 }));
 
 vi.mock("@/modules/settings/store", () => storeMock);
 
-import { pushRecentModel, toggleFavoriteModel } from "./modelPrefs";
+import {
+  pushRecentModel,
+  setModelReasoningEffort,
+  toggleFavoriteModel,
+} from "./modelPrefs";
 
 beforeEach(() => {
   prefsMock.favoriteModelIds = [];
   prefsMock.recentModelIds = [];
   storeMock.setFavoriteModelIds.mockClear();
   storeMock.setRecentModelIds.mockClear();
+  storeMock.setReasoningEffortByModel.mockClear();
+  prefsMock.reasoningEffortByModel = {};
 });
 
 describe("toggleFavoriteModel", () => {
@@ -95,5 +104,22 @@ describe("pushRecentModel", () => {
   it("propagates a write failure", async () => {
     storeMock.setRecentModelIds.mockRejectedValueOnce(new Error("ipc down"));
     await expect(pushRecentModel("a")).rejects.toThrow("ipc down");
+  });
+});
+
+describe("setModelReasoningEffort", () => {
+  it("remembers the effort per model, keeping the others", async () => {
+    prefsMock.reasoningEffortByModel = { "gpt-5.6": "low" };
+    await setModelReasoningEffort("claude-sonnet-5", "high");
+    expect(storeMock.setReasoningEffortByModel).toHaveBeenCalledWith({
+      "gpt-5.6": "low",
+      "claude-sonnet-5": "high",
+    });
+  });
+
+  it("writes nothing when the effort is unchanged", async () => {
+    prefsMock.reasoningEffortByModel = { "gpt-5.6": "low" };
+    await setModelReasoningEffort("gpt-5.6", "low");
+    expect(storeMock.setReasoningEffortByModel).not.toHaveBeenCalled();
   });
 });

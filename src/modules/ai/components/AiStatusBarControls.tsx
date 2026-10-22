@@ -60,6 +60,7 @@ import { ACCEPTED_FILES, useComposer } from "../lib/composer";
 import { toggleFavoriteModel } from "../lib/modelPrefs";
 import { useChatStore } from "../store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { ReasoningEffortPicker } from "./ReasoningEffortPicker";
 
 const PROVIDER_ICON = {
   openai: ChatGptIcon,
@@ -158,6 +159,7 @@ export function AiStatusBarControls() {
       )}
 
       <ModelDropdown />
+      <SelectedModelReasoning />
 
       <span className="mx-1 h-8 w-px bg-border" aria-hidden />
       <Button
@@ -206,6 +208,15 @@ export function AiStatusBarControls() {
       )}
     </div>
   );
+}
+
+function SelectedModelReasoning() {
+  const selected = useChatStore((s) => s.selectedModelId);
+  const customEndpoints = usePreferencesStore((s) => s.customEndpoints);
+  const model = isCompatModelId(selected)
+    ? getCompatModelInfo(selected, customEndpoints)
+    : getModel(selected as ModelId);
+  return <ReasoningEffortPicker model={model} />;
 }
 
 type Tab = "all" | "favorites" | "recent";

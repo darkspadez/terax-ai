@@ -22,6 +22,10 @@ import {
   type ApprovalMode,
   normalizeApprovalMode,
 } from "@/modules/ai/lib/approvalMode";
+import {
+  normalizeReasoningEffortByModel,
+  type ReasoningEffort,
+} from "@/modules/ai/lib/reasoningEffort";
 import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
 import { parseFontFeatures } from "@/modules/terminal/lib/fontFeatures";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -143,6 +147,8 @@ export type Preferences = {
   customInstructions: string;
   /** How new AI conversations start: gated tools ask, or run unasked. */
   aiApprovalMode: ApprovalMode;
+  /** The reasoning effort last chosen for each model; absent is its default. */
+  reasoningEffortByModel: Record<string, ReasoningEffort>;
   autostart: boolean;
   restoreWindowState: boolean;
   autocompleteEnabled: boolean;
@@ -256,6 +262,7 @@ const KEY_EDITOR_THEME = "editorTheme";
 const KEY_EDITOR_FONT_SIZE = "editorFontSize";
 const KEY_CUSTOM_INSTRUCTIONS = "customInstructions";
 const KEY_AI_APPROVAL_MODE = "aiApprovalMode";
+const KEY_REASONING_EFFORT_BY_MODEL = "reasoningEffortByModel";
 const KEY_AUTOSTART = "autostart";
 const KEY_RESTORE_WINDOW = "restoreWindowState";
 export type AutocompleteTrigger = "auto" | "manual";
@@ -416,6 +423,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   editorFontSize: EDITOR_FONT_SIZE_DEFAULT,
   customInstructions: "",
   aiApprovalMode: "ask",
+  reasoningEffortByModel: {},
   autostart: false,
   // Off by default: a translucent window keeps the compositor blending the
   // whole frame every present. An explicitly stored choice (either value)
@@ -549,6 +557,9 @@ export async function loadPreferences(): Promise<Preferences> {
       get<string>(KEY_CUSTOM_INSTRUCTIONS) ??
       DEFAULT_PREFERENCES.customInstructions,
     aiApprovalMode: normalizeApprovalMode(get<unknown>(KEY_AI_APPROVAL_MODE)),
+    reasoningEffortByModel: normalizeReasoningEffortByModel(
+      get<unknown>(KEY_REASONING_EFFORT_BY_MODEL),
+    ),
     autostart: get<boolean>(KEY_AUTOSTART) ?? DEFAULT_PREFERENCES.autostart,
     restoreWindowState:
       get<boolean>(KEY_RESTORE_WINDOW) ??
@@ -805,6 +816,15 @@ export async function setCustomInstructions(value: string): Promise<void> {
 
 export async function setAiApprovalMode(value: ApprovalMode): Promise<void> {
   await writePref(KEY_AI_APPROVAL_MODE, normalizeApprovalMode(value));
+}
+
+export async function setReasoningEffortByModel(
+  value: Record<string, ReasoningEffort>,
+): Promise<void> {
+  await writePref(
+    KEY_REASONING_EFFORT_BY_MODEL,
+    normalizeReasoningEffortByModel(value),
+  );
 }
 
 export async function setAutostart(value: boolean): Promise<void> {
@@ -1186,6 +1206,7 @@ export async function onPreferencesChange(
     [KEY_EDITOR_FONT_SIZE]: "editorFontSize",
     [KEY_CUSTOM_INSTRUCTIONS]: "customInstructions",
     [KEY_AI_APPROVAL_MODE]: "aiApprovalMode",
+    [KEY_REASONING_EFFORT_BY_MODEL]: "reasoningEffortByModel",
     [KEY_AUTOSTART]: "autostart",
     [KEY_RESTORE_WINDOW]: "restoreWindowState",
     [KEY_AUTOCOMPLETE_ENABLED]: "autocompleteEnabled",
