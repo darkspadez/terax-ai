@@ -950,3 +950,36 @@ fn commit_on_remote_names_a_remote_branch_that_contains_it() {
     assert_eq!(on_remote(&local).unwrap(), None);
     assert!(on_remote("not-a-sha").is_err());
 }
+
+#[test]
+fn switching_to_a_missing_branch_never_restores_a_file_of_that_name() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    commit_file(&fx, "notes");
+    fx.run_git(&["branch", "feature"]);
+    // The branch is deleted after the list was loaded, and a file has its name.
+    fx.run_git(&["branch", "-D", "feature"]);
+    fx.write_file("feature", "more work\n");
+    fx.run_git(&["add", "feature"]);
+    fx.write_file("feature", "unstaged work\n");
+
+    assert!(
+        operations::checkout_branch(&fx.registry, &fx.repo_str(), "feature", &fx.workspace)
+            .is_err()
+    );
+    assert_eq!(
+        std::fs::read_to_string(fx.repo_path.join("feature")).unwrap(),
+        "unstaged work\n",
+        "the file's changes must survive"
+    );
+
+    fx.run_git(&["branch", "other"]);
+    operations::checkout_branch(&fx.registry, &fx.repo_str(), "other", &fx.workspace)
+        .expect("an existing branch still switches");
+    assert_eq!(
+        git_stdout(&fx, &["rev-parse", "--abbrev-ref", "HEAD"]),
+        vec!["other"]
+    );
+}

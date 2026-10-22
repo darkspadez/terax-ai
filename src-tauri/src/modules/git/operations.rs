@@ -1307,13 +1307,16 @@ pub fn checkout_branch(
     if branch_name.starts_with('-') || branch_name.is_empty() {
         return Err(GitError::InvalidPath(branch_name.into()));
     }
+    // `git checkout <name>` falls back to restoring a file of that name when no such branch
+    // exists (one deleted since the list was loaded), discarding its changes. `switch` only
+    // ever switches branches.
     let output = run_git(
         &repo_root.workspace,
         Some(&repo_root.git_path),
-        ["checkout", branch_name],
+        ["switch", branch_name],
         DEFAULT_TIMEOUT_SECS,
     )?;
-    ensure_success(&output, "git checkout failed")
+    ensure_success(&output, "git switch failed")
 }
 
 #[cfg(test)]
