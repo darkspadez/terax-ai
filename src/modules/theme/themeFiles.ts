@@ -1,4 +1,4 @@
-import { currentWorkspaceEnv } from "@/modules/workspace";
+import { LOCAL_WORKSPACE } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { appConfigDir, join } from "@tauri-apps/api/path";
@@ -16,6 +16,9 @@ export function isThemeFilePath(path: string): boolean {
   return path.toLowerCase().endsWith(THEME_FILE_EXT);
 }
 
+// Theme files live in the app's own config folder on the host, so they are
+// read and written there (`LOCAL_WORKSPACE`) whatever environment the window
+// works in: a WSL window's would send the backend looking inside the distro.
 async function themesDir(): Promise<string> {
   return join(await appConfigDir(), "themes");
 }
@@ -26,18 +29,18 @@ export async function themeFilePath(id: string): Promise<string> {
 
 export async function writeThemeFile(theme: Theme): Promise<string> {
   const dir = await themesDir();
-  const ws = currentWorkspaceEnv();
-  const dirExists = await invoke("fs_stat", { path: dir, workspace: ws })
+  const workspace = LOCAL_WORKSPACE;
+  const dirExists = await invoke("fs_stat", { path: dir, workspace })
     .then(() => true)
     .catch(() => false);
   if (!dirExists) {
-    await invoke("fs_create_dir", { path: dir, workspace: ws });
+    await invoke("fs_create_dir", { path: dir, workspace });
   }
   const path = await join(dir, `${theme.id}${THEME_FILE_EXT}`);
   await invoke("fs_write_file", {
     path,
     content: JSON.stringify(theme, null, 2),
-    workspace: ws,
+    workspace,
     source: "theme",
   });
   return path;
@@ -46,7 +49,7 @@ export async function writeThemeFile(theme: Theme): Promise<string> {
 export async function deleteThemeFile(id: string): Promise<void> {
   try {
     const path = await themeFilePath(id);
-    await invoke("fs_delete", { path, workspace: currentWorkspaceEnv() });
+    await invoke("fs_delete", { path, workspace: LOCAL_WORKSPACE });
   } catch {
     /* file may not exist yet — nothing to clean up */
   }

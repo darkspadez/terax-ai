@@ -3,6 +3,7 @@ import type { Theme } from "@/modules/theme/types";
 
 const core = vi.hoisted(() => ({
   invoke: vi.fn(),
+  convertFileSrc: (path: string) => path,
 }));
 
 vi.mock("@tauri-apps/api/core", () => core);
@@ -14,7 +15,7 @@ const paths = vi.hoisted(() => ({
 
 vi.mock("@tauri-apps/api/path", () => paths);
 
-vi.mock("@/modules/workspace", () => ({ currentWorkspaceEnv: () => "local" }));
+vi.mock("@/modules/settings/store", () => ({ setLastWslDistro: vi.fn() }));
 
 const events = vi.hoisted(() => {
   const listeners: ((payload: unknown) => void)[] = [];
@@ -30,7 +31,10 @@ const events = vi.hoisted(() => {
 
 vi.mock("@tauri-apps/api/event", () => events);
 
+import { useWorkspaceEnvStore } from "@/modules/workspace";
 import { deleteThemeFile, onThemeEdit, writeThemeFile } from "./themeFiles";
+
+const host = { kind: "local" };
 
 function theme(id = "my-theme"): Theme {
   return {
@@ -48,6 +52,8 @@ describe("theme file persistence", () => {
     core.invoke.mockReset();
     core.invoke.mockResolvedValue(undefined);
     paths.appConfigDir.mockClear();
+    // A WSL window: theme files still live in the host's app config folder.
+    useWorkspaceEnvStore.setState({ env: { kind: "wsl", distro: "Ubuntu" } });
   });
 
   it("writes pretty-printed JSON into the themes dir without recreating it", async () => {
@@ -56,14 +62,14 @@ describe("theme file persistence", () => {
     expect(path).toBe("/config/themes/my-theme.terax-theme");
     expect(core.invoke).toHaveBeenCalledWith("fs_stat", {
       path: "/config/themes",
-      workspace: "local",
+      workspace: host,
     });
     const calls = core.invoke.mock.calls.filter((c) => c[0] === "fs_create_dir");
     expect(calls).toHaveLength(0);
     expect(core.invoke).toHaveBeenLastCalledWith("fs_write_file", {
       path: "/config/themes/my-theme.terax-theme",
       content: JSON.stringify(theme(), null, 2),
-      workspace: "local",
+      workspace: host,
       source: "theme",
     });
   });
@@ -77,7 +83,7 @@ describe("theme file persistence", () => {
 
     expect(core.invoke).toHaveBeenCalledWith("fs_create_dir", {
       path: "/config/themes",
-      workspace: "local",
+      workspace: host,
     });
   });
 
@@ -85,7 +91,7 @@ describe("theme file persistence", () => {
     await deleteThemeFile("my-theme");
     expect(core.invoke).toHaveBeenCalledWith("fs_delete", {
       path: "/config/themes/my-theme.terax-theme",
-      workspace: "local",
+      workspace: host,
     });
 
     core.invoke.mockRejectedValueOnce(new Error("enoent"));

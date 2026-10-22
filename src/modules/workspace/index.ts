@@ -12,6 +12,7 @@ export {
   LOCAL_WORKSPACE,
   parseWorkspaceScopeKey,
   useWorkspaceEnvStore,
+  workspaceEnvForPath,
   workspaceScopeKey,
   type WorkspaceEnv,
 } from "./env";

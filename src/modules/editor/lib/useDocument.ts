@@ -1,6 +1,6 @@
 import { notifyDocumentSaved } from "@/modules/lsp";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { currentWorkspaceEnv } from "@/modules/workspace";
+import { workspaceEnvForPath } from "@/modules/workspace";
 import { authorizationSettled } from "@/modules/workspace/authorize";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
@@ -22,19 +22,19 @@ type Options = {
 };
 
 // A tab opened a moment ago may still be waiting for its folder's authorization.
-const tauriDocumentIo: DocumentIo = {
-  read: (path, force) =>
-    authorizationSettled(path).then(() =>
-      invoke<ReadResult>("fs_read_file", {
-        path,
-        workspace: currentWorkspaceEnv(),
-        force,
-      }),
-    ),
+// A document is read and written in the environment its path names, so a host
+// file (a custom theme in the app's config folder) opens in a WSL window too.
+export const tauriDocumentIo: DocumentIo = {
+  read: (path, force) => {
+    const workspace = workspaceEnvForPath(path);
+    return authorizationSettled(path, workspace).then(() =>
+      invoke<ReadResult>("fs_read_file", { path, workspace, force }),
+    );
+  },
   mtime: (path) =>
     invoke<{ mtime: number }>("fs_stat", {
       path,
-      workspace: currentWorkspaceEnv(),
+      workspace: workspaceEnvForPath(path),
     }).then(
       (stat) => stat.mtime,
       () => null,
@@ -43,7 +43,7 @@ const tauriDocumentIo: DocumentIo = {
     invoke<number>("fs_write_file", {
       path,
       content,
-      workspace: currentWorkspaceEnv(),
+      workspace: workspaceEnvForPath(path),
       source: "editor",
     }),
 };

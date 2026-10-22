@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { setThemeId as persistThemeId } from "@/modules/settings/store";
 import type { Tab } from "@/modules/tabs";
-import { currentWorkspaceEnv } from "@/modules/workspace";
+import { workspaceEnvForPath } from "@/modules/workspace";
 import { listCustomThemes, saveCustomTheme } from "./customThemes";
 import {
   isThemeFilePath,
@@ -35,9 +35,12 @@ export function useThemeFileEditing({ tabsRef, openFileTab }: Params) {
           if (!isThemeFilePath(event.payload.path)) return;
           void (async () => {
             try {
+              // Where the editor saved it: a theme file in the app's config
+              // folder is a host file in a WSL window too.
+              const { path } = event.payload;
               const res = await invoke<{ kind: string; content?: string }>(
                 "fs_read_file",
-                { path: event.payload.path, workspace: currentWorkspaceEnv() },
+                { path, workspace: workspaceEnvForPath(path) },
               );
               if (res.kind !== "text" || typeof res.content !== "string")
                 return;
