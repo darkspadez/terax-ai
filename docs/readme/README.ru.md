@@ -5,8 +5,8 @@
   <p><a href="https://terax.app">Сайт</a> · <a href="https://terax.app/docs">Документация</a> · <a href="https://github.com/crynta/Terax-website">Исходный код сайта</a></p>
 
   <p>
-    <img src="https://img.shields.io/github/v/release/crynta/terax-ai?label=version&color=blue" alt="версия" />
-    <img src="https://img.shields.io/github/downloads/crynta/terax-ai/total?label=downloads&color=blue" alt="загрузки" />
+    <img src="https://img.shields.io/github/v/release/darkspadez/terax-ai?label=version&color=blue" alt="версия" />
+    <img src="https://img.shields.io/github/downloads/darkspadez/terax-ai/total?label=downloads&color=blue" alt="загрузки" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="платформа" />
     <a href="https://discord.gg/tyveTUyEp7"><img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
     <a href="https://www.youtube.com/@crynta"><img src="https://img.shields.io/badge/Youtube-FF0000?logo=youtube&logoColor=white" alt="YouTube" /></a>
@@ -90,7 +90,7 @@ Terax представляет собой легковесную среду ра
 
 ## Установка
 
-Последние установщики находятся на странице [Releases](https://github.com/crynta/terax-ai/releases/latest). Сборки из этого репозитория не обновляются сами, пока он не начнёт публиковать собственные релизы.
+Последние установщики находятся на странице [Releases](https://github.com/darkspadez/terax-ai/releases/latest). Сборки из этого репозитория не обновляются сами, пока он не начнёт публиковать собственные релизы.
 
 ### Примечания для Windows
 

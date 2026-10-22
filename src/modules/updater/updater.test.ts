@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { UpdaterDialog } from "./UpdaterDialog";
-import { UPDATES_ENABLED } from "./useUpdater";
+import { GITHUB_LATEST_RELEASE, UPDATES_ENABLED } from "./useUpdater";
 
 const read = (path: string) =>
   JSON.parse(
@@ -24,6 +24,9 @@ describe("updates", () => {
     for (const endpoint of endpoints) {
       expect(endpoint).not.toContain("github.com/crynta/");
     }
+    expect(GITHUB_LATEST_RELEASE).toBe(
+      "https://api.github.com/repos/darkspadez/terax-ai/releases/latest",
+    );
     expect(endpoints.length > 0).toBe(UPDATES_ENABLED);
     expect(permissions.includes("updater:default")).toBe(UPDATES_ENABLED);
   });

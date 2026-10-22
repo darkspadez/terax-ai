@@ -5,8 +5,8 @@
   <p><a href="https://terax.app">Site web</a> · <a href="https://terax.app/docs">Documentation</a> · <a href="https://github.com/crynta/Terax-website">Code source du site</a></p>
 
   <p>
-    <img src="https://img.shields.io/github/v/release/crynta/terax-ai?label=version&color=blue" alt="version" />
-    <img src="https://img.shields.io/github/downloads/crynta/terax-ai/total?label=downloads&color=blue" alt="téléchargements" />
+    <img src="https://img.shields.io/github/v/release/darkspadez/terax-ai?label=version&color=blue" alt="version" />
+    <img src="https://img.shields.io/github/downloads/darkspadez/terax-ai/total?label=downloads&color=blue" alt="téléchargements" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="plateforme" />
     <a href="https://discord.gg/tyveTUyEp7"><img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
     <a href="https://www.youtube.com/@crynta"><img src="https://img.shields.io/badge/Youtube-FF0000?logo=youtube&logoColor=white" alt="YouTube" /></a>
@@ -90,7 +90,7 @@ Terax est un environnement de développement (ADE) léger, open source, axé sur
 
 ## Installation
 
-Les installateurs récents sont disponibles sur la page [Releases](https://github.com/crynta/terax-ai/releases/latest). Les builds de ce dépôt ne se mettent pas à jour d'eux-mêmes tant qu'il ne publie pas ses propres versions.
+Les installateurs récents sont disponibles sur la page [Releases](https://github.com/darkspadez/terax-ai/releases/latest). Les builds de ce dépôt ne se mettent pas à jour d'eux-mêmes tant qu'il ne publie pas ses propres versions.
 
 ### Notes Windows
 

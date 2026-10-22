@@ -12,8 +12,8 @@
   </p>
 
   <p>
-    <img src="https://img.shields.io/github/v/release/crynta/terax-ai?label=version&color=blue" alt="version" />
-    <img src="https://img.shields.io/github/downloads/crynta/terax-ai/total?label=downloads&color=blue" alt="downloads" />
+    <img src="https://img.shields.io/github/v/release/darkspadez/terax-ai?label=version&color=blue" alt="version" />
+    <img src="https://img.shields.io/github/downloads/darkspadez/terax-ai/total?label=downloads&color=blue" alt="downloads" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="platform" />
     <a href="https://discord.gg/tyveTUyEp7"><img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
     <a href="https://www.youtube.com/@crynta"><img src="https://img.shields.io/badge/Youtube-FF0000?logo=youtube&logoColor=white" alt="YouTube" /></a>
@@ -122,7 +122,7 @@ Terax is a lightweight open-source terminal-first AI-native development environm
 
 ## Install
 
-Latest installers are on the [Releases](https://github.com/crynta/terax-ai/releases/latest) page. Builds of this repository do not update themselves until it publishes its own releases.
+Latest installers are on the [Releases](https://github.com/darkspadez/terax-ai/releases/latest) page. Builds of this repository do not update themselves until it publishes its own releases.
 
 ### Windows notes
 

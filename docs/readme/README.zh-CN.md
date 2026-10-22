@@ -13,8 +13,8 @@
   </p>
 
   <p>
-    <img src="https://img.shields.io/github/v/release/crynta/terax-ai?label=version&color=blue" alt="版本" />
-    <img src="https://img.shields.io/github/downloads/crynta/terax-ai/total?label=downloads&color=blue" alt="下载量" />
+    <img src="https://img.shields.io/github/v/release/darkspadez/terax-ai?label=version&color=blue" alt="版本" />
+    <img src="https://img.shields.io/github/downloads/darkspadez/terax-ai/total?label=downloads&color=blue" alt="下载量" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="平台" />
     <a href="https://discord.gg/tyveTUyEp7"><img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
     <a href="https://www.youtube.com/@crynta"><img src="https://img.shields.io/badge/Youtube-FF0000?logo=youtube&logoColor=white" alt="YouTube" /></a>
@@ -116,7 +116,7 @@ Terax 是一个轻量、开源、终端优先的 AI 原生开发环境（ADE）�
 
 ## 安装
 
-最新安装程序位于 [Releases](https://github.com/crynta/terax-ai/releases/latest) 页面。在本仓库发布自己的版本之前，其构建不会自动更新。
+最新安装程序位于 [Releases](https://github.com/darkspadez/terax-ai/releases/latest) 页面。在本仓库发布自己的版本之前，其构建不会自动更新。
 
 ### Windows 说明
 

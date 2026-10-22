@@ -5,18 +5,17 @@ import { useCallback, useEffect, useState } from "react";
 import { IS_LINUX } from "@/lib/platform";
 
 /**
- * Updates are off until this fork publishes its own releases: the release
- * feed below and the updater endpoint would offer upstream's builds. Turning
- * them on takes our feed in `GITHUB_LATEST_RELEASE` and `plugins.updater` in
- * `tauri.conf.json` (endpoint and signing key) and `updater:default` back in
- * the desktop capability.
+ * Updates are off until this fork publishes its own releases. Turning them on
+ * takes `plugins.updater` in `tauri.conf.json` (endpoint and signing key) and
+ * `updater:default` back in the desktop capability; the release feed below
+ * already reads this fork's releases.
  */
 export const UPDATES_ENABLED = false;
 
 const LAST_CHECK_KEY = "terax:updater:last-check";
 const CHECK_INTERVAL_MS = 30 * 60 * 1000;
-const GITHUB_LATEST_RELEASE =
-  "https://api.github.com/repos/crynta/terax-ai/releases/latest";
+export const GITHUB_LATEST_RELEASE =
+  "https://api.github.com/repos/darkspadez/terax-ai/releases/latest";
 
 export interface ManualUpdateInfo {
   version: string;

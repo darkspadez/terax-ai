@@ -5,8 +5,8 @@
   <p><a href="https://terax.app">웹사이트</a> · <a href="https://terax.app/docs">문서</a> · <a href="https://github.com/crynta/Terax-website">웹사이트 소스 코드</a></p>
 
   <p>
-    <img src="https://img.shields.io/github/v/release/crynta/terax-ai?label=version&color=blue" alt="버전" />
-    <img src="https://img.shields.io/github/downloads/crynta/terax-ai/total?label=downloads&color=blue" alt="다운로드" />
+    <img src="https://img.shields.io/github/v/release/darkspadez/terax-ai?label=version&color=blue" alt="버전" />
+    <img src="https://img.shields.io/github/downloads/darkspadez/terax-ai/total?label=downloads&color=blue" alt="다운로드" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="플랫폼" />
     <a href="https://discord.gg/tyveTUyEp7"><img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
     <a href="https://www.youtube.com/@crynta"><img src="https://img.shields.io/badge/Youtube-FF0000?logo=youtube&logoColor=white" alt="YouTube" /></a>
@@ -90,7 +90,7 @@ Terax는 Tauri 2 + Rust와 React 19로 만든 가볍고 오픈 소스이며 터�
 
 ## 설치
 
-최신 설치 프로그램은 [Releases](https://github.com/crynta/terax-ai/releases/latest) 페이지에 있습니다. 이 저장소의 빌드는 자체 릴리스를 게시하기 전까지 자동으로 업데이트되지 않습니다.
+최신 설치 프로그램은 [Releases](https://github.com/darkspadez/terax-ai/releases/latest) 페이지에 있습니다. 이 저장소의 빌드는 자체 릴리스를 게시하기 전까지 자동으로 업데이트되지 않습니다.
 
 ### Windows 참고 사항
 

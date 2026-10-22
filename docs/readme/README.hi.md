@@ -5,8 +5,8 @@
   <p><a href="https://terax.app">वेबसाइट</a> · <a href="https://terax.app/docs">दस्तावेज़</a> · <a href="https://github.com/crynta/Terax-website">वेबसाइट का सोर्स कोड</a></p>
 
   <p>
-    <img src="https://img.shields.io/github/v/release/crynta/terax-ai?label=version&color=blue" alt="संस्करण" />
-    <img src="https://img.shields.io/github/downloads/crynta/terax-ai/total?label=downloads&color=blue" alt="डाउनलोड" />
+    <img src="https://img.shields.io/github/v/release/darkspadez/terax-ai?label=version&color=blue" alt="संस्करण" />
+    <img src="https://img.shields.io/github/downloads/darkspadez/terax-ai/total?label=downloads&color=blue" alt="डाउनलोड" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="प्लेटफ़ॉर्म" />
     <a href="https://discord.gg/tyveTUyEp7"><img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
     <a href="https://www.youtube.com/@crynta"><img src="https://img.shields.io/badge/Youtube-FF0000?logo=youtube&logoColor=white" alt="YouTube" /></a>
@@ -90,7 +90,7 @@ Terax एक हल्का, ओपन-सोर्स, टर्मिनल-�
 
 ## इंस्टॉल करें
 
-नवीनतम इंस्टॉलर [Releases](https://github.com/crynta/terax-ai/releases/latest) पेज पर हैं। इस रिपॉज़िटरी के बिल्ड तब तक अपने आप अपडेट नहीं होते जब तक यह अपनी रिलीज़ प्रकाशित नहीं करती।
+नवीनतम इंस्टॉलर [Releases](https://github.com/darkspadez/terax-ai/releases/latest) पेज पर हैं। इस रिपॉज़िटरी के बिल्ड तब तक अपने आप अपडेट नहीं होते जब तक यह अपनी रिलीज़ प्रकाशित नहीं करती।
 
 ### Windows नोट्स
 
