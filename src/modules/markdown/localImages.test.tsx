@@ -9,7 +9,8 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 vi.mock("@/modules/settings/store", () => ({ setLastWslDistro: vi.fn() }));
 
-const { dirOf, joinPath, previewRehypePlugins } = await import("./localImages");
+const { dirOf, joinPath } = await import("./localImages");
+const { previewRehypePlugins } = await import("./previewPipeline");
 const { MarkdownImage } = await import("./MarkdownImage");
 
 const asset = (path: string) =>

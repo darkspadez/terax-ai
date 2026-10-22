@@ -1,0 +1,46 @@
+/* GitHub alerts in the rendered Markdown preview (githubAlerts.ts), in
+   GitHub's own colours. */
+.markdown-alert {
+  --markdown-alert: #0969da;
+  margin: 1rem 0;
+  padding: 0.5rem 1rem;
+  border-left: 0.25em solid var(--markdown-alert);
+}
+.markdown-alert > :first-child {
+  margin-top: 0;
+}
+.markdown-alert > :last-child {
+  margin-bottom: 0;
+}
+.markdown-alert > .markdown-alert-title {
+  margin-bottom: 0.25rem;
+  font-weight: 500;
+  color: var(--markdown-alert);
+}
+.markdown-alert-tip {
+  --markdown-alert: #1a7f37;
+}
+.markdown-alert-important {
+  --markdown-alert: #8250df;
+}
+.markdown-alert-warning {
+  --markdown-alert: #9a6700;
+}
+.markdown-alert-caution {
+  --markdown-alert: #d1242f;
+}
+.dark .markdown-alert-note {
+  --markdown-alert: #4493f8;
+}
+.dark .markdown-alert-tip {
+  --markdown-alert: #3fb950;
+}
+.dark .markdown-alert-important {
+  --markdown-alert: #ab7df8;
+}
+.dark .markdown-alert-warning {
+  --markdown-alert: #d29922;
+}
+.dark .markdown-alert-caution {
+  --markdown-alert: #f85149;
+}

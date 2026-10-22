@@ -1,14 +1,5 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { defaultRehypePlugins, type StreamdownProps } from "streamdown";
-
-type HastNode = {
-  type: string;
-  tagName?: string;
-  properties?: Record<string, unknown>;
-  children?: HastNode[];
-};
-
-type RehypePlugins = NonNullable<StreamdownProps["rehypePlugins"]>;
+import type { HNode } from "./hast";
 
 /** Attribute naming the workspace file an image resolved to. */
 export const LOCAL_IMAGE_PATH = "data-local-path";
@@ -69,8 +60,8 @@ function decodeSrc(src: string): string {
  * the Markdown itself is still stripped, and before harden, which would
  * otherwise turn "./img.png" into "/img.png" on the app's own origin.
  */
-function rehypeLocalImages(baseDir: string) {
-  const visit = (node: HastNode) => {
+export function rehypeLocalImages(baseDir: string) {
+  const visit = (node: HNode) => {
     if (node.type === "element" && node.tagName === "img") {
       const src = node.properties?.src;
       if (typeof src === "string" && isDocumentRelative(src)) {
@@ -84,22 +75,7 @@ function rehypeLocalImages(baseDir: string) {
     }
     for (const child of node.children ?? []) visit(child);
   };
-  return (tree: HastNode) => {
+  return (tree: HNode) => {
     if (baseDir) visit(tree);
   };
-}
-
-/** Streamdown's own chain with relative images resolved against `baseDir`. */
-export function previewRehypePlugins(baseDir: string): RehypePlugins {
-  const plugins: RehypePlugins = [];
-  let placed = false;
-  for (const [name, plugin] of Object.entries(defaultRehypePlugins)) {
-    if (name === "harden") {
-      plugins.push([rehypeLocalImages, baseDir]);
-      placed = true;
-    }
-    plugins.push(plugin);
-  }
-  if (!placed) plugins.push([rehypeLocalImages, baseDir]);
-  return plugins;
 }

@@ -7,10 +7,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useEffect, useMemo, useState } from "react";
 import { Streamdown } from "streamdown";
+import { splitFrontmatter } from "./frontmatter";
 import { MarkdownImage } from "./MarkdownImage";
-import { MarkdownLink } from "./MarkdownLink";
+import "./markdownPreview.css";
 import { MarkdownViewToggle } from "./MarkdownViewToggle";
-import { dirOf, previewRehypePlugins } from "./localImages";
+import { dirOf } from "./localImages";
+import { PreviewLink } from "./PreviewLink";
+import { previewRehypePlugins } from "./previewPipeline";
 import {
   type PreviewReadResult,
   type PreviewStatus,
@@ -23,7 +26,7 @@ type Props = {
   onSetView: (mode: "rendered" | "raw") => void;
 };
 
-const components = { a: MarkdownLink, code: MarkdownCode, img: MarkdownImage };
+const components = { a: PreviewLink, code: MarkdownCode, img: MarkdownImage };
 
 // Re-renders when the file changes on disk: the watcher reports it (the
 // watch set covers Markdown tabs), and writes made through Terax (AI edits,
@@ -101,7 +104,7 @@ export function MarkdownPreviewPane({ path, visible, onSetView }: Props) {
     >
       <MarkdownViewToggle mode="rendered" onChange={onSetView} />
       <div className="flex-1 overflow-auto">
-        <div className="px-8 py-6">
+        <div className="markdown-body px-8 py-6">
           {status.kind === "loading" && (
             <p className="text-[12px] text-muted-foreground">Loading…</p>
           )}
@@ -121,18 +124,58 @@ export function MarkdownPreviewPane({ path, visible, onSetView }: Props) {
             </p>
           )}
           {status.kind === "ready" && (
-            <Streamdown
-              className="select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
-              components={components}
+            <RenderedFile
+              content={status.content}
               rehypePlugins={rehypePlugins}
-              mode="static"
-              parseIncompleteMarkdown={false}
-            >
-              {status.content}
-            </Streamdown>
+            />
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+// A leading YAML frontmatter block shows as a key/value table, as on
+// GitHub; values render as plain text.
+function RenderedFile({
+  content,
+  rehypePlugins,
+}: {
+  content: string;
+  rehypePlugins: ReturnType<typeof previewRehypePlugins>;
+}) {
+  const { entries, body } = splitFrontmatter(content);
+  return (
+    <>
+      {entries.length > 0 && (
+        <table className="mb-6 w-full border-collapse text-[13px]">
+          <tbody>
+            {entries.map(([key, value], i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: keys may repeat; the list never reorders
+              <tr key={`${key}-${i}`}>
+                <th
+                  scope="row"
+                  className="w-1/4 border border-border px-3 py-1.5 text-left align-top font-medium"
+                >
+                  {key}
+                </th>
+                <td className="whitespace-pre-wrap border border-border px-3 py-1.5 align-top">
+                  {value}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <Streamdown
+        className="select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+        components={components}
+        rehypePlugins={rehypePlugins}
+        mode="static"
+        parseIncompleteMarkdown={false}
+      >
+        {body}
+      </Streamdown>
+    </>
   );
 }
