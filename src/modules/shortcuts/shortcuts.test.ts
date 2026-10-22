@@ -115,6 +115,52 @@ describe("matchBinding", () => {
     ).toBe(false);
   });
 
+  // crynta/terax-ai#270: previous tab on Linux.
+  it("matches Ctrl+Shift+Tab however the platform names the key", () => {
+    const prev: KeyBinding = { key: "Tab", ctrl: true, shift: true };
+    expect(
+      matchBinding(
+        event({ key: "Tab", code: "Tab", ctrlKey: true, shiftKey: true }),
+        prev,
+      ),
+    ).toBe(true);
+    expect(
+      matchBinding(
+        event({
+          key: "ISO_Left_Tab",
+          code: "Tab",
+          ctrlKey: true,
+          shiftKey: true,
+        }),
+        prev,
+      ),
+    ).toBe(true);
+    // ISO_Left_Tab is itself the shifted key.
+    expect(
+      matchBinding(
+        event({ key: "ISO_Left_Tab", code: "Tab", ctrlKey: true }),
+        prev,
+      ),
+    ).toBe(true);
+    expect(
+      matchBinding(
+        event({
+          key: "Unidentified",
+          code: "Tab",
+          ctrlKey: true,
+          shiftKey: true,
+        }),
+        prev,
+      ),
+    ).toBe(true);
+    expect(
+      matchBinding(event({ key: "ISO_Left_Tab", code: "Tab", ctrlKey: true }), {
+        key: "Tab",
+        ctrl: true,
+      }),
+    ).toBe(false);
+  });
+
   it("does not fall back to the physical code without alt or shift", () => {
     expect(
       matchBinding(event({ key: "ç", code: "KeyC", metaKey: true }), {

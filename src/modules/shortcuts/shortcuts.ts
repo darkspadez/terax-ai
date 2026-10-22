@@ -529,6 +529,7 @@ const CODE_TO_KEY: Record<string, string> = {
   Minus: "-",
   Equal: "=",
   Space: " ",
+  Tab: "tab",
 };
 
 // Option and Shift combinations rewrite e.key (macOS Option gives "«", "…",
@@ -544,7 +545,9 @@ export function matchBinding(
   binding: KeyBinding,
   id?: ShortcutId
 ): boolean {
-  const eventKey = e.key.toLowerCase();
+  // X11 names Shift+Tab ISO_Left_Tab, which WebKitGTK can pass through.
+  const backTab = e.key === "ISO_Left_Tab";
+  const eventKey = backTab ? "tab" : e.key.toLowerCase();
   const bindingKey = binding.key.toLowerCase();
 
   // Special case for Jump to Tab 1-9
@@ -557,7 +560,7 @@ export function matchBinding(
 
   return (
     !!e.ctrlKey === !!binding.ctrl &&
-    !!e.shiftKey === !!binding.shift &&
+    (!!e.shiftKey || backTab) === !!binding.shift &&
     !!e.altKey === !!binding.alt &&
     !!e.metaKey === !!binding.meta
   );
