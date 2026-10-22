@@ -308,9 +308,11 @@ export function AiComposerProvider({ children }: ProviderProps) {
     store.patchAgentMeta({ hitStepCap: false, compactionNotice: null });
     if (!store.mini.open) store.openMini();
     void (async () => {
-      const { getOrCreateChat } = await import("../store/chatRuntime");
+      const { getOrCreateChat, sendUserMessage } = await import(
+        "../store/chatRuntime"
+      );
       const chat = getOrCreateChat(sessionId);
-      void chat.sendMessage({ role: "user", parts } as Parameters<
+      void sendUserMessage(chat, { role: "user", parts } as Parameters<
         typeof chat.sendMessage
       >[0]);
     })();

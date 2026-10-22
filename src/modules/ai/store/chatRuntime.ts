@@ -8,6 +8,7 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import { BUILTIN_AGENTS } from "../lib/agents";
 import { useAgentsStore } from "./agentsStore";
 import { usePlanStore } from "./planStore";
+import { denyUnansweredApprovals } from "../lib/toolApprovals";
 import { createContextAwareTransport } from "../lib/transport";
 import type { ToolContext } from "../tools/tools";
 import {
@@ -128,6 +129,20 @@ export function getOrCreateChat(sessionId: string): Chat<UIMessage> {
   return c;
 }
 
+type OutgoingMessage = Parameters<Chat<UIMessage>["sendMessage"]>[0];
+
+/** Every user message goes through here: it supersedes approvals still
+ *  waiting, which are settled as denied first so the request carries a result
+ *  for each call. */
+export function sendUserMessage(
+  chat: Chat<UIMessage>,
+  message: OutgoingMessage,
+): Promise<void> {
+  const settled = denyUnansweredApprovals(chat.messages);
+  if (settled !== chat.messages) chat.messages = settled;
+  return chat.sendMessage(message);
+}
+
 export async function sendMessage(text: string): Promise<boolean> {
   const state = useChatStore.getState();
   const sessionId = state.activeSessionId;
@@ -137,7 +152,6 @@ export async function sendMessage(text: string): Promise<boolean> {
     !getActiveProviderKey()
   )
     return false;
-  const c = getOrCreateChat(sessionId);
-  await c.sendMessage({ text });
+  await sendUserMessage(getOrCreateChat(sessionId), { text });
   return true;
 }

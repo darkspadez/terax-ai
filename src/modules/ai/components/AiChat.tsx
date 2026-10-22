@@ -231,7 +231,7 @@ export function AiChatView({
           <RenderedMessage
             key={m.id}
             message={m}
-            onApproval={onApproval}
+            onApproval={i === messages.length - 1 ? onApproval : null}
             streaming={m.id === streamingMessageId}
             deferOffscreen={i < messages.length - LIVE_TAIL_MESSAGES}
           />
@@ -340,7 +340,8 @@ const RenderedMessage = memo(function RenderedMessage({
   deferOffscreen,
 }: {
   message: UIMessage;
-  onApproval: (id: string, approved: boolean) => void;
+  /** Only the newest message's approvals can still be answered. */
+  onApproval: ((id: string, approved: boolean) => void) | null;
   streaming: boolean;
   deferOffscreen: boolean;
 }) {
@@ -636,7 +637,7 @@ const RenderedPart = memo(function RenderedPart({
   streaming,
 }: {
   part: AnyPart;
-  onApproval: (id: string, approved: boolean) => void;
+  onApproval: ((id: string, approved: boolean) => void) | null;
   streaming: boolean;
 }) {
   if (part.type === "text") {
@@ -678,14 +679,14 @@ const RenderedTool = memo(function RenderedTool({
   onApproval,
 }: {
   part: AnyToolPart;
-  onApproval: (id: string, approved: boolean) => void;
+  onApproval: ((id: string, approved: boolean) => void) | null;
 }) {
   const toolName =
     part.type === "dynamic-tool"
       ? part.toolName
       : part.type.replace(/^tool-/, "");
 
-  if (part.state === "approval-requested") {
+  if (part.state === "approval-requested" && onApproval) {
     return (
       <AiToolApproval
         part={part as Extract<ToolUIPart, { state: "approval-requested" }>}
@@ -698,7 +699,8 @@ const RenderedTool = memo(function RenderedTool({
   return (
     <Tool
       toolName={toolName}
-      state={part.state}
+      // A later message superseded it: the next request settles it as denied.
+      state={part.state === "approval-requested" ? "output-denied" : part.state}
       input={part.input}
       output={"output" in part ? part.output : undefined}
       errorText={"errorText" in part ? part.errorText : undefined}
