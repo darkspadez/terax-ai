@@ -1113,7 +1113,9 @@ mod windows {
                 }
             }
         }
-        None
+        // A portable or custom-located Git on PATH.
+        super::which_in_path("git.exe")
+            .and_then(|git| super::git_bash_beside(&git, |path| path.is_file()))
     }
 
     fn write_if_changed(path: &Path, content: &str) -> Result<(), String> {
@@ -1364,6 +1366,22 @@ pub fn windows_shell_path() -> PathBuf {
     system32.join("cmd.exe")
 }
 
+/// Git for Windows' bash.exe for its git.exe (`<root>\cmd\git.exe`,
+/// `<root>\bin\git.exe` or `<root>\mingw64\bin\git.exe`): `<root>\bin\bash.exe`.
+#[cfg(any(windows, test))]
+fn git_bash_beside(
+    git_exe: &std::path::Path,
+    is_file: impl Fn(&std::path::Path) -> bool,
+) -> Option<PathBuf> {
+    git_exe
+        .parent()?
+        .ancestors()
+        .skip(1)
+        .take(2)
+        .map(|root| root.join("bin").join("bash.exe"))
+        .find(|bash| is_file(bash))
+}
+
 #[cfg(windows)]
 fn which_in_path(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
@@ -1470,6 +1488,26 @@ mod tests {
                 .and_then(|path| std::env::split_paths(path).next()),
             Some(std::path::PathBuf::from("/app/bin"))
         );
+    }
+
+    #[test]
+    fn git_bash_is_found_beside_a_git_on_path() {
+        // crynta/terax-ai#1120: a portable Git was never offered.
+        let root = std::path::PathBuf::from("PortableGit");
+        let bash = root.join("bin").join("bash.exe");
+        let present = |path: &std::path::Path| path == bash;
+        for git in [
+            root.join("cmd").join("git.exe"),
+            root.join("bin").join("git.exe"),
+            root.join("mingw64").join("bin").join("git.exe"),
+        ] {
+            assert_eq!(super::git_bash_beside(&git, present), Some(bash.clone()));
+        }
+        // A shim directory has no bash beside it.
+        let shim = std::path::PathBuf::from("scoop")
+            .join("shims")
+            .join("git.exe");
+        assert_eq!(super::git_bash_beside(&shim, present), None);
     }
 
     #[test]
