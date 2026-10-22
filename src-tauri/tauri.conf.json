@@ -42,7 +42,8 @@
       "../packages/ghostty-core/LICENSE": "licenses/terminal/ghostty-web.txt",
       "../packages/ghostty-core/adapted/LICENSE.ghostty": "licenses/terminal/ghostty.txt",
       "../packages/ghostty-core/adapted/LICENSE.restty": "licenses/terminal/restty.txt",
-      "../src/modules/terminal/ghostty/webgl/LICENSE.xterm-js": "licenses/terminal/xterm-js.txt"
+      "../src/modules/terminal/ghostty/webgl/LICENSE.xterm-js": "licenses/terminal/xterm-js.txt",
+      "../src/assets/fonts/symbols/NOTICE.txt": "licenses/fonts/terax-symbols.txt"
     },
     "targets": "all",
     "createUpdaterArtifacts": true,

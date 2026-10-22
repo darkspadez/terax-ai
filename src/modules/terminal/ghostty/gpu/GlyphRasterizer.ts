@@ -3,6 +3,11 @@ import {
   builtinGlyphSpec,
   isBuiltinGlyph,
 } from "./BuiltinGlyphs";
+import {
+  documentGlyphFontGate,
+  type GlyphFontGate,
+  hasPrivateUseCodepoint,
+} from "./GlyphFontGate";
 import { hasIntrinsicColor } from "./glyphColor";
 import { fontCss, type TerminalFontMetrics } from "./terminalVisuals";
 
@@ -53,7 +58,10 @@ export class GlyphRasterizer {
   private readonly coverage = new Uint8Array(RASTER_SIZE * RASTER_SIZE);
   private builtin: BuiltinGlyphRenderer | null = null;
 
-  constructor(private readonly metrics: TerminalFontMetrics) {
+  constructor(
+    private readonly metrics: TerminalFontMetrics,
+    private readonly fontGate: GlyphFontGate = documentGlyphFontGate(),
+  ) {
     const font = {
       ...metrics.font,
       size: metrics.font.size * metrics.scale,
@@ -74,11 +82,20 @@ export class GlyphRasterizer {
     );
   }
 
-  rasterize(text: string, style: number): RasterizedGlyph {
+  /**
+   * Null while the font for an icon is still loading (`GlyphFontGate`): the
+   * caller keeps nothing and retries once the gate reports the load settled.
+   */
+  rasterize(text: string, style: number): RasterizedGlyph | null {
     const builtin = this.rasterizeBuiltin(text);
     if (builtin) return builtin;
+    // Icons ignore bold and italic, like procedural glyphs: no synthesized
+    // weight or slant on a symbol.
+    const fontStyle = hasPrivateUseCodepoint(text)
+      ? 0
+      : style & (GLYPH_STYLE_BOLD | GLYPH_STYLE_ITALIC);
+    if (!this.fontGate.ready(this.fonts[fontStyle], text)) return null;
     const context = this.ensureContext();
-    const fontStyle = style & (GLYPH_STYLE_BOLD | GLYPH_STYLE_ITALIC);
     if (fontStyle !== this.activeStyle) {
       context.font = this.fonts[fontStyle];
       this.activeStyle = fontStyle;

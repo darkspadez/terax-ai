@@ -16,7 +16,12 @@ const NERD_FONT_CANDIDATES = [
   "Hasklug Nerd Font",
 ];
 
-const FALLBACK_CHAIN = '"JetBrains Mono", SFMono-Regular, Menlo, monospace';
+// "Terax Symbols" (src/styles/symbols.css) covers only the Private Use Area,
+// where engines never fall back to fonts the stack does not name: it draws
+// Nerd Font icons the fonts before it lack, and loads a segment only when one
+// of its icons is first drawn.
+const FALLBACK_CHAIN =
+  '"JetBrains Mono", "Terax Symbols", SFMono-Regular, Menlo, monospace';
 
 let detected: string | null = null;
 let monoReady: Promise<void> | null = null;

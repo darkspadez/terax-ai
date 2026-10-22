@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { GlyphFontGate } from "./GlyphFontGate";
 import {
   GLYPH_STYLE_BOLD,
   GLYPH_STYLE_ITALIC,
   GlyphRasterizer,
+  type RasterizedGlyph,
 } from "./GlyphRasterizer";
 import { deriveFontMetrics } from "./terminalVisuals";
 
@@ -63,12 +65,41 @@ function stub(color = false) {
   return { fonts, clears, created: () => created, texts };
 }
 
+function drawn(glyph: RasterizedGlyph | null): RasterizedGlyph {
+  if (!glyph) throw new Error("glyph was deferred");
+  return glyph;
+}
+
+/** A font set whose fonts load only when `settle` is called. */
+function loadingFonts() {
+  let loaded = false;
+  const pending: Array<() => void> = [];
+  const loader = {
+    check: vi.fn(() => loaded),
+    load: vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          pending.push(resolve);
+        }),
+    ),
+  };
+  return {
+    loader,
+    async settle() {
+      loaded = true;
+      for (const resolve of pending.splice(0)) resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    },
+  };
+}
+
 describe("GlyphRasterizer", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("measures and positions glyphs in device pixels at the cell baseline", () => {
     stub();
-    const glyph = new GlyphRasterizer(METRICS).rasterize("a", 0);
+    const glyph = drawn(new GlyphRasterizer(METRICS).rasterize("a", 0));
     expect(glyph.width).toBe(1 + 9 + 4);
     expect(glyph.height).toBe(12 + 4 + 4);
     expect(glyph.bearingX).toBe(-1 - 2);
@@ -80,7 +111,7 @@ describe("GlyphRasterizer", () => {
 
   it("returns RGBA for intrinsic-colour glyphs", () => {
     stub(true);
-    const glyph = new GlyphRasterizer(METRICS).rasterize("x", 0);
+    const glyph = drawn(new GlyphRasterizer(METRICS).rasterize("x", 0));
     expect(glyph.intrinsicColor).toBe(true);
     expect(glyph.pixels).toHaveLength(glyph.width * glyph.height * 4);
   });
@@ -114,7 +145,7 @@ describe("GlyphRasterizer", () => {
   it("draws box and block glyphs at exactly the cell size without the canvas", () => {
     const s = stub();
     const rasterizer = new GlyphRasterizer(METRICS);
-    const regular = rasterizer.rasterize("┼", 0);
+    const regular = drawn(rasterizer.rasterize("┼", 0));
     expect(regular.width).toBe(METRICS.deviceCellWidth);
     expect(regular.height).toBe(METRICS.deviceCellHeight);
     expect(regular.bearingX).toBe(0);
@@ -129,13 +160,14 @@ describe("GlyphRasterizer", () => {
       regular.pixels[Math.floor(METRICS.deviceCellHeight / 2) * regular.width];
     expect(middle).toBe(255);
     const regularPixels = regular.pixels.slice();
-    const styled = rasterizer.rasterize(
-      "┼",
-      GLYPH_STYLE_BOLD | GLYPH_STYLE_ITALIC,
+    const styled = drawn(
+      rasterizer.rasterize("┼", GLYPH_STYLE_BOLD | GLYPH_STYLE_ITALIC),
     );
     expect(styled.pixels).toEqual(regularPixels);
     expect(
-      rasterizer.rasterize("█", 0).pixels.every((value) => value === 255),
+      drawn(rasterizer.rasterize("█", 0)).pixels.every(
+        (value) => value === 255,
+      ),
     ).toBe(true);
     expect(s.created()).toBe(0);
     expect(s.texts).toEqual([]);
@@ -148,10 +180,10 @@ describe("GlyphRasterizer", () => {
   it("leaves text and sequences that merely start with a box character to the font", () => {
     const s = stub();
     const rasterizer = new GlyphRasterizer(METRICS);
-    const sequence = rasterizer.rasterize("┼\u0301", 0);
+    const sequence = drawn(rasterizer.rasterize("┼\u0301", 0));
     expect(sequence.exact).toBe(false);
-    expect(rasterizer.rasterize("a", 0).exact).toBe(false);
-    expect(rasterizer.rasterize("■", 0).exact).toBe(false);
+    expect(drawn(rasterizer.rasterize("a", 0)).exact).toBe(false);
+    expect(drawn(rasterizer.rasterize("■", 0)).exact).toBe(false);
     expect(s.texts).toEqual(["┼\u0301", "a", "■"]);
   });
 
@@ -167,5 +199,44 @@ describe("GlyphRasterizer", () => {
     expect(rasterizer.cpuBytes).toBe(0);
     rasterizer.rasterize("a", 0);
     expect(s.created()).toBe(2);
+  });
+
+  // A canvas draws a loading web font's characters with the next font (an
+  // empty box for an icon); the atlas would keep that box for good.
+  it("defers an icon until its font has loaded, then draws it unstyled", async () => {
+    const s = stub();
+    const fonts = loadingFonts();
+    const gate = new GlyphFontGate(fonts.loader);
+    const rasterizer = new GlyphRasterizer(METRICS, gate);
+
+    expect(rasterizer.rasterize("\uf013", GLYPH_STYLE_BOLD)).toBeNull();
+    expect(rasterizer.rasterize("\u{f0001}", 0)).toBeNull();
+    expect(s.texts).toEqual([]);
+    expect(fonts.loader.load).toHaveBeenCalledTimes(2);
+    // Still loading: no second load for the same glyph.
+    expect(rasterizer.rasterize("\uf013", GLYPH_STYLE_BOLD)).toBeNull();
+    expect(fonts.loader.load).toHaveBeenCalledTimes(2);
+
+    const settled = vi.fn();
+    gate.subscribe(settled);
+    await fonts.settle();
+    expect(settled).toHaveBeenCalledTimes(1);
+
+    drawn(rasterizer.rasterize("\uf013", GLYPH_STYLE_BOLD));
+    expect(s.texts).toEqual(["\uf013"]);
+    // Icons take no synthesized weight or slant.
+    expect(s.fonts[s.fonts.length - 1]).not.toMatch(/^(italic )?700 /);
+  });
+
+  it("never gates ordinary text on font loading", () => {
+    stub();
+    const fonts = loadingFonts();
+    const rasterizer = new GlyphRasterizer(
+      METRICS,
+      new GlyphFontGate(fonts.loader),
+    );
+    drawn(rasterizer.rasterize("a", GLYPH_STYLE_BOLD));
+    drawn(rasterizer.rasterize("\u2500", 0));
+    expect(fonts.loader.check).not.toHaveBeenCalled();
   });
 });

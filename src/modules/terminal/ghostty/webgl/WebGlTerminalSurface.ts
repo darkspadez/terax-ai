@@ -16,6 +16,7 @@ import { TerminalResizeSync } from "@/modules/terminal/lib/terminalResizeSync";
 import type { GhosttyTerminalModelApi } from "../GhosttyTerminalModel";
 import type { GestureGrowth } from "../gpu/CanvasBackingStore";
 import { DevicePixelRatioMonitor } from "../gpu/DevicePixelRatioMonitor";
+import { documentGlyphFontGate } from "../gpu/GlyphFontGate";
 import {
   type CssSize,
   gestureBackingBound,
@@ -92,6 +93,7 @@ export class WebGlTerminalSurface
   private readonly scrollbarContent = document.createElement("div");
   private readonly resizeObserver: ResizeObserver;
   private readonly unsubscribeDamage: () => void;
+  private readonly unsubscribeGlyphFonts: () => void;
   private readonly unsubscribeResizeInteraction: () => void;
   private readonly unsubscribeInteraction: () => void;
   private readonly selection: TerminalSelectionController;
@@ -220,6 +222,12 @@ export class WebGlTerminalSurface
       this.search.invalidate();
       if (!this.applyingFit) this.runtime.schedule(this);
       this.armCursorBlink();
+    });
+    // Icons skipped while their font loaded are drawn by a full redraw.
+    this.unsubscribeGlyphFonts = documentGlyphFontGate().subscribe(() => {
+      if (!this.renderer?.retryDeferredGlyphs()) return;
+      if (!this.visible || this.documentSuspended || !this.host) return;
+      this.runtime.schedule(this);
     });
     this.unsubscribeResizeInteraction = subscribeTerminalResizeInteraction(
       (active) => {
@@ -522,6 +530,7 @@ export class WebGlTerminalSurface
     this.detach();
     this.disposed = true;
     this.unsubscribeDamage();
+    this.unsubscribeGlyphFonts();
     this.unsubscribeResizeInteraction();
     this.search.dispose();
     this.selection.dispose();

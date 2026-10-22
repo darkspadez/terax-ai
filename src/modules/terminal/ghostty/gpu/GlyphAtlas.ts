@@ -1,4 +1,10 @@
 import { isBuiltinGlyph } from "./BuiltinGlyphs";
+import {
+  documentGlyphFontGate,
+  type GlyphFontGate,
+  hasPrivateUseCodepoint,
+  isPrivateUseCodepoint,
+} from "./GlyphFontGate";
 import { GlyphRasterizer } from "./GlyphRasterizer";
 import { SkylineAtlasAllocator } from "./SkylineAtlasAllocator";
 import type { TerminalFontMetrics } from "./terminalVisuals";
@@ -11,6 +17,8 @@ export const GLYPH_ENTRY_FLAG_COLOR = 1;
 export const GLYPH_ENTRY_FLAG_EXACT = 2;
 /** `resolve()` result when nothing more fits even at the largest atlas. */
 export const ATLAS_FULL = -1;
+/** `resolve()` result while the glyph's font loads; retry when it settles. */
+export const GLYPH_DEFERRED = -2;
 
 const COVERAGE_SIZES = [1_024, 2_048, 4_096] as const;
 const COLOR_SIZES = [512, 1_024, 2_048] as const;
@@ -67,8 +75,9 @@ export class GlyphAtlas {
   constructor(
     private device: GPUDevice,
     readonly metrics: TerminalFontMetrics,
+    fontGate: GlyphFontGate = documentGlyphFontGate(),
   ) {
-    this.rasterizer = new GlyphRasterizer(metrics);
+    this.rasterizer = new GlyphRasterizer(metrics, fontGate);
     this.activate();
   }
 
@@ -146,14 +155,19 @@ export class GlyphAtlas {
   /**
    * Returns the table index for `text` in `style`, rasterizing on first use.
    * `ATLAS_FULL` means even the largest atlas is exhausted; the caller flushes
-   * between frames and tries again.
+   * between frames and tries again. `GLYPH_DEFERRED` means the glyph's font
+   * is still loading; nothing is cached and the caller retries later.
    */
   resolve(text: string, style: number): number {
     this.assertActive();
     const codepoint = text.codePointAt(0) ?? 0;
     const single = text.length === (codepoint > 0xffff ? 2 : 1);
-    // Procedural glyphs ignore bold and italic, so all four styles share one.
-    const keyStyle = single && isBuiltinGlyph(codepoint) ? 0 : style & 3;
+    // Procedural glyphs and icons ignore bold and italic, so all four styles
+    // share one.
+    const styleless = single
+      ? isBuiltinGlyph(codepoint) || isPrivateUseCodepoint(codepoint)
+      : hasPrivateUseCodepoint(text);
+    const keyStyle = styleless ? 0 : style & 3;
     const simpleKey = codepoint * 4 + keyStyle;
     const complexKey = single ? "" : `${keyStyle}\u0000${text}`;
     const cached = single
@@ -166,6 +180,7 @@ export class GlyphAtlas {
     }
 
     const glyph = this.rasterizer.rasterize(text, style);
+    if (!glyph) return GLYPH_DEFERRED;
     const plane = glyph.intrinsicColor
       ? (this.color ?? this.createColorPlane())
       : this.requirePlane(this.coverage);

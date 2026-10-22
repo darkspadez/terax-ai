@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ATLAS_FULL } from "./GlyphAtlas";
+import { ATLAS_FULL, GLYPH_DEFERRED } from "./GlyphAtlas";
 import {
   BACKLOG_THRESHOLD,
   GLYPH_EVICTED,
@@ -11,10 +11,13 @@ import {
 class FakeAtlas implements GlyphResolver {
   epoch = 1;
   capacity = Number.POSITIVE_INFINITY;
+  /** Texts whose font is still loading. */
+  readonly loading = new Set<string>();
   readonly resolved: string[] = [];
   private readonly indices = new Map<string, number>();
 
   resolve(text: string, style: number): number {
+    if (this.loading.has(text)) return GLYPH_DEFERRED;
     const key = `${style}:${text}`;
     const existing = this.indices.get(key);
     if (existing !== undefined) return existing;
@@ -304,5 +307,44 @@ describe("TerminalGlyphMap", () => {
     expect(atlas.resolved).toHaveLength(40);
     expect(map.entries[1]).toBe(GLYPH_EVICTED);
     expect(map.entries[601]).toBeLessThan(GLYPH_EVICTED);
+  });
+
+  it("parks glyphs whose font is loading without blocking or spinning, then retries them first", () => {
+    const map = new TerminalGlyphMap();
+    const atlas = new FakeAtlas();
+    map.ensureCapacity(3);
+    map.resetForEpoch(1);
+    map.adoptAtlasEpoch(atlas.epoch);
+    atlas.loading.add("\uf013");
+    map.add(glyphs("a", "\uf013", "b"));
+
+    expect(map.process(atlas, unlimited)).toEqual({ resolved: 2, full: false });
+    expect(map.entries[2]).toBe(GLYPH_PENDING);
+    expect(map.entries[3]).toBe(1);
+    // Nothing left to do until the font settles, so no follow-up frames.
+    expect(map.pending).toBe(0);
+    // Re-announcing the glyph while it waits parks it once, not twice.
+    map.add(glyphs("a", "\uf013"));
+    map.process(atlas, unlimited);
+
+    atlas.loading.clear();
+    expect(map.retryDeferred()).toBe(1);
+    expect(map.pending).toBe(1);
+    expect(map.retryDeferred()).toBe(0);
+    expect(map.process(atlas, unlimited)).toEqual({ resolved: 1, full: false });
+    expect(map.entries[2]).toBe(2);
+    expect(atlas.resolved).toEqual(["0:a", "0:b", "0:\uf013"]);
+  });
+
+  it("forgets parked glyphs on a new Ghostty epoch", () => {
+    const map = new TerminalGlyphMap();
+    const atlas = new FakeAtlas();
+    map.ensureCapacity(1);
+    map.resetForEpoch(1);
+    atlas.loading.add("\uf013");
+    map.add(glyphs("\uf013"));
+    map.process(atlas, unlimited);
+    map.resetForEpoch(2);
+    expect(map.retryDeferred()).toBe(0);
   });
 });

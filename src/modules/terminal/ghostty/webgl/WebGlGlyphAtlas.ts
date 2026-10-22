@@ -9,6 +9,12 @@ import {
   builtinLineThickness,
   isBuiltinGlyph,
 } from "../gpu/BuiltinGlyphs";
+import {
+  documentGlyphFontGate,
+  type GlyphFontGate,
+  hasPrivateUseCodepoint,
+  isPrivateUseCodepoint,
+} from "../gpu/GlyphFontGate";
 import { hasIntrinsicColor } from "../gpu/glyphColor";
 import { SkylineAtlasAllocator } from "../gpu/SkylineAtlasAllocator";
 import { fontCss, type TerminalFontMetrics } from "../gpu/terminalVisuals";
@@ -84,13 +90,24 @@ export class WebGlGlyphAtlas {
   private uploadCountValue = 0;
   private uploadedBytesValue = 0;
   private generationValue = 1;
+  private deferredValue = false;
   private disposed = false;
+  private readonly fonts: string[];
 
   constructor(
     private readonly gl: WebGL2RenderingContext,
     private readonly metrics: TerminalFontMetrics,
     private readonly scale: number,
+    private readonly fontGate: GlyphFontGate = documentGlyphFontGate(),
   ) {
+    const font = { ...metrics.font, size: metrics.font.size * scale };
+    this.fonts = [0, 1, 2, 3].map((style) =>
+      fontCss(
+        font,
+        (style & CellFlags.BOLD) !== 0,
+        (style & CellFlags.ITALIC) !== 0,
+      ),
+    );
     this.rasterCanvas.width = RASTER_SIZE;
     this.rasterCanvas.height = RASTER_SIZE;
     const context = this.rasterCanvas.getContext("2d", {
@@ -197,12 +214,20 @@ export class WebGlGlyphAtlas {
         return entry;
       }
     }
-    const style = flags & (CellFlags.BOLD | CellFlags.ITALIC);
+    // Icons ignore bold and italic, like procedural glyphs: no synthesized
+    // weight or slant on a symbol.
+    const icon =
+      grapheme === null
+        ? isPrivateUseCodepoint(codepoint)
+        : hasPrivateUseCodepoint(grapheme);
+    const style = icon ? 0 : flags & (CellFlags.BOLD | CellFlags.ITALIC);
     if (grapheme === null) {
       const key = codepoint * 4 + style;
       const cached = this.simpleGlyphs.get(key);
       if (cached) return cached;
-      const entry = this.rasterize(String.fromCodePoint(codepoint), flags);
+      const text = String.fromCodePoint(codepoint);
+      if (!this.fontReady(text, style)) return NULL_GLYPH;
+      const entry = this.rasterize(text, style);
       this.simpleGlyphs.set(key, entry);
       return entry;
     }
@@ -210,7 +235,8 @@ export class WebGlGlyphAtlas {
     let styledGlyphs = this.complexGlyphs.get(style);
     const cached = styledGlyphs?.get(grapheme);
     if (cached) return cached;
-    const entry = this.rasterize(grapheme, flags);
+    if (!this.fontReady(grapheme, style)) return NULL_GLYPH;
+    const entry = this.rasterize(grapheme, style);
     if (!styledGlyphs) {
       styledGlyphs = new Map();
       this.complexGlyphs.set(style, styledGlyphs);
@@ -295,19 +321,27 @@ export class WebGlGlyphAtlas {
     this.colorDirty = null;
   }
 
-  private rasterize(text: string, flags: number): WebGlGlyphEntry {
+  /**
+   * Whether any glyph was skipped since the last call because its font was
+   * still loading (`GlyphFontGate`). Nothing was cached for it: the owner
+   * redraws in full once the gate reports the load settled.
+   */
+  takeDeferred(): boolean {
+    const deferred = this.deferredValue;
+    this.deferredValue = false;
+    return deferred;
+  }
+
+  private fontReady(text: string, style: number): boolean {
+    if (this.fontGate.ready(this.fonts[style], text)) return true;
+    this.deferredValue = true;
+    return false;
+  }
+
+  private rasterize(text: string, style: number): WebGlGlyphEntry {
     const context = this.rasterContext;
-    const bold = (flags & CellFlags.BOLD) !== 0;
-    const italic = (flags & CellFlags.ITALIC) !== 0;
     context.clearRect(0, 0, RASTER_SIZE, RASTER_SIZE);
-    context.font = fontCss(
-      {
-        ...this.metrics.font,
-        size: this.metrics.font.size * this.scale,
-      },
-      bold,
-      italic,
-    );
+    context.font = this.fonts[style];
     context.textAlign = "left";
     context.textBaseline = "alphabetic";
     context.fillStyle = "white";

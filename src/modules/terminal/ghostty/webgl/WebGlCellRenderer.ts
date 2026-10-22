@@ -142,6 +142,8 @@ export class WebGlCellRenderer {
   private cols = 0;
   private rows = 0;
   private forceFullRedraw = true;
+  /** A drawn frame skipped glyphs whose font was still loading. */
+  private awaitingGlyphFonts = false;
   private contextLost = false;
   private viewportDirty = true;
   private contextRestoreTimer: number | null = null;
@@ -270,7 +272,10 @@ export class WebGlCellRenderer {
     const damage = this.forceFullRedraw
       ? { kind: "full" as const }
       : frame.damage;
-    if (damage.kind !== "none") this.updateModel(frame, damage);
+    if (damage.kind !== "none") {
+      this.updateModel(frame, damage);
+      if (this.atlas.takeDeferred()) this.awaitingGlyphFonts = true;
+    }
     const cursorChanged = this.updateCursor(frame);
     const blinkChanged =
       this.hasBlinkingCells &&
@@ -292,6 +297,17 @@ export class WebGlCellRenderer {
 
   requestPresentation(): void {
     this.forcePresent = true;
+  }
+
+  /**
+   * After a glyph font load settles: redraws everything if a frame skipped
+   * glyphs for it. True when the owner should schedule a frame.
+   */
+  retryDeferredGlyphs(): boolean {
+    if (!this.awaitingGlyphFonts) return false;
+    this.awaitingGlyphFonts = false;
+    this.forceFullRedraw = true;
+    return true;
   }
 
   resetModel(): void {

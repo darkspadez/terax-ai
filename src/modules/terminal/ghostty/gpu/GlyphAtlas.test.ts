@@ -3,9 +3,11 @@ import {
   ATLAS_FULL,
   GLYPH_ENTRY_FLAG_COLOR,
   GLYPH_ENTRY_FLAG_EXACT,
+  GLYPH_DEFERRED,
   GLYPH_ENTRY_WORDS,
   GlyphAtlas,
 } from "./GlyphAtlas";
+import { GlyphFontGate } from "./GlyphFontGate";
 import { deriveFontMetrics } from "./terminalVisuals";
 
 const METRICS = deriveFontMetrics(
@@ -397,5 +399,32 @@ describe("GlyphAtlas", () => {
       "allocation failed",
     );
     expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  it("caches nothing for an icon whose font is loading and shares one entry across styles", async () => {
+    const h = createHarness();
+    let loaded = false;
+    let settle = () => {};
+    const gate = new GlyphFontGate({
+      check: () => loaded,
+      load: () =>
+        new Promise<void>((resolve) => {
+          settle = resolve;
+        }),
+    });
+    const atlas = new GlyphAtlas(h.device, METRICS, gate);
+
+    expect(atlas.resolve("\uf013", 0)).toBe(GLYPH_DEFERRED);
+    expect(atlas.glyphCount).toBe(0);
+    expect(h.writeTexture).not.toHaveBeenCalled();
+
+    loaded = true;
+    settle();
+    await Promise.resolve();
+    const icon = atlas.resolve("\uf013", 0);
+    expect(icon).toBeGreaterThanOrEqual(0);
+    expect(atlas.resolve("\uf013", 3)).toBe(icon);
+    expect(atlas.glyphCount).toBe(1);
+    atlas.dispose();
   });
 });

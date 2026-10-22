@@ -1,0 +1,44 @@
+Terax Symbols is Symbols Nerd Font 3.5.1 (https://github.com/ryanoasis/nerd-fonts),
+split into one WOFF2 file per icon set and stripped of hinting by
+scripts/symbols-font/build.py. Glyph outlines are unchanged.
+
+The glyphs come from these projects, under these licences:
+
+| Icon set               | Upstream                                              | Licence     |
+|------------------------|-------------------------------------------------------|-------------|
+| Codicons               | https://github.com/microsoft/vscode-codicons          | CC BY 4.0   |
+| Devicons               | https://github.com/devicons/devicon                   | MIT         |
+| Font Awesome           | https://github.com/FortAwesome/Font-Awesome           | CC BY 4.0   |
+| Font Awesome Extension | https://github.com/AndreLZGava/font-awesome-extension | MIT         |
+| Font Logos             | https://github.com/lukas-w/font-logos                 | Unlicense   |
+| Material Design Icons  | https://github.com/Templarian/MaterialDesign-Font     | Apache 2.0  |
+| Octicons               | https://github.com/primer/octicons                    | MIT         |
+| Seti-UI and original   | https://github.com/jesseweed/seti-ui                  | MIT         |
+| Pomicons               | https://github.com/gabrielelana/pomicons              | OFL 1.1 RFN |
+| Powerline Extra        | https://github.com/ryanoasis/powerline-extra-symbols  | MIT         |
+| Powerline Symbols      | https://github.com/powerline/powerline                | MIT         |
+| Weather Icons          | https://github.com/erikflowers/weather-icons          | OFL 1.1     |
+
+Nerd Fonts licence:
+
+The MIT License (MIT)
+
+Copyright (c) 2014 Ryan L McIntyre
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

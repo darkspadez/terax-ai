@@ -18,6 +18,7 @@ import type {
 import { GhosttySearchController } from "../search/GhosttySearchController";
 import { TerminalSelectionController } from "../selection/TerminalSelectionController";
 import { DevicePixelRatioMonitor } from "./DevicePixelRatioMonitor";
+import { documentGlyphFontGate } from "./GlyphFontGate";
 import { TerminalGlyphMap, type RasterBudget } from "./GlyphMap";
 import { type DeviceRect, deviceRectsEqual } from "./PaneRects";
 import { ScreenUniform, type ScreenUniformState } from "./ScreenUniform";
@@ -130,6 +131,7 @@ export class WebGpuTerminalSurface
   private readonly scrollbarContent = document.createElement("div");
   private readonly resizeObserver: ResizeObserver;
   private readonly unsubscribeDamage: () => void;
+  private readonly unsubscribeGlyphFonts: () => void;
   private readonly unsubscribeResizeInteraction: () => void;
   private readonly unsubscribeInteraction: () => void;
   private readonly selection: TerminalSelectionController;
@@ -285,6 +287,12 @@ export class WebGpuTerminalSurface
       this.search.invalidate();
       if (!this.applyingFit) this.runtime.schedule(this);
       this.armCursorBlink();
+    });
+    // Icons parked while their font loaded rasterize on the next frame.
+    this.unsubscribeGlyphFonts = documentGlyphFontGate().subscribe(() => {
+      if (this.glyphMap.retryDeferred() === 0) return;
+      if (!this.visible || this.documentSuspended || !this.host) return;
+      this.runtime.schedule(this);
     });
     this.unsubscribeResizeInteraction = subscribeTerminalResizeInteraction(
       (active) => {
@@ -789,6 +797,7 @@ export class WebGpuTerminalSurface
     this.detach();
     this.disposed = true;
     this.unsubscribeDamage();
+    this.unsubscribeGlyphFonts();
     this.unsubscribeResizeInteraction();
     this.search.dispose();
     this.selection.dispose();

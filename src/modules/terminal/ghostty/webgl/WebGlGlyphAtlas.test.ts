@@ -1,5 +1,6 @@
 import { CellFlags } from "@terax/ghostty-core/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { GlyphFontGate } from "../gpu/GlyphFontGate";
 import { hasIntrinsicColor, WebGlGlyphAtlas } from "./WebGlGlyphAtlas";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -56,6 +57,39 @@ describe("WebGlGlyphAtlas uploads", () => {
     expect(pixelStorei).toHaveBeenCalledWith(gl.UNPACK_ROW_LENGTH, 0);
     expect(atlas.uploadCount).toBe(1);
     expect(atlas.uploadedBytes).toBeGreaterThan(0);
+    atlas.dispose();
+  });
+});
+
+describe("WebGlGlyphAtlas icon fonts", () => {
+  it("skips an icon whose font is loading without caching it, then draws it unstyled", async () => {
+    const fillText = vi.fn();
+    const gl = createWebGlHarness(vi.fn(), vi.fn(), fillText);
+    let loaded = false;
+    let settle = () => {};
+    const gate = new GlyphFontGate({
+      check: () => loaded,
+      load: () =>
+        new Promise<void>((resolve) => {
+          settle = resolve;
+        }),
+    });
+    const atlas = new WebGlGlyphAtlas(gl, METRICS, 1, gate);
+
+    expect(atlas.glyph(0xf013, null, 0).width).toBe(0);
+    expect(atlas.glyph(0xf0001, null, 0).width).toBe(0);
+    expect(atlas.glyphCount).toBe(0);
+    expect(fillText).not.toHaveBeenCalled();
+    expect(atlas.takeDeferred()).toBe(true);
+    expect(atlas.takeDeferred()).toBe(false);
+
+    loaded = true;
+    settle();
+    await Promise.resolve();
+    const icon = atlas.glyph(0xf013, null, CellFlags.BOLD);
+    expect(icon.width).toBeGreaterThan(0);
+    expect(atlas.glyph(0xf013, null, CellFlags.ITALIC)).toBe(icon);
+    expect(atlas.takeDeferred()).toBe(false);
     atlas.dispose();
   });
 });
