@@ -40,6 +40,10 @@ const MAIN_ACTIVE_CHAT_KEY: &str = "activeId";
 /// Far above any real use; a runaway loop cannot open windows without bound.
 const MAX_WINDOWS: usize = 32;
 
+/// Where an app window's traffic lights sit on macOS, centred on its 40 px
+/// header: what `trafficLightPosition` gives `main` in `tauri.conf.json`.
+pub const TRAFFIC_LIGHTS: (f64, f64) = (14.0, 22.0);
+
 const QUIT_REQUESTED_EVENT: &str = "terax:quit-requested";
 const NEW_WINDOW_EVENT: &str = "terax:new-window-requested";
 #[cfg(target_os = "macos")]
@@ -320,6 +324,10 @@ fn build(
     #[cfg(target_os = "macos")]
     let builder = builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .traffic_light_position(tauri::LogicalPosition::new(
+            TRAFFIC_LIGHTS.0,
+            TRAFFIC_LIGHTS.1,
+        ))
         .hidden_title(true);
     #[cfg(target_os = "linux")]
     let builder = builder.decorations(false).transparent(true);
@@ -742,6 +750,15 @@ mod tests {
 
     fn labels(items: &[&str]) -> Vec<String> {
         items.iter().map(|item| (*item).to_owned()).collect()
+    }
+
+    #[test]
+    fn new_windows_put_their_traffic_lights_where_main_does() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+        let position = &config["app"]["windows"][0]["trafficLightPosition"];
+        assert_eq!(position["x"].as_f64(), Some(TRAFFIC_LIGHTS.0));
+        assert_eq!(position["y"].as_f64(), Some(TRAFFIC_LIGHTS.1));
     }
 
     #[test]

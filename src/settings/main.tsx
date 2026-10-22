@@ -2,6 +2,7 @@ import "../styles/globals.css";
 
 import { installNativeContextMenuGuard } from "@/lib/nativeContextMenu";
 import { USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
+import { installWindowFrame } from "@/lib/windowFrame";
 import { ThemeProvider } from "@/modules/theme";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import ReactDOM from "react-dom/client";
@@ -11,6 +12,7 @@ if (USE_CUSTOM_WINDOW_CONTROLS) {
   document.documentElement.dataset.chrome = "borderless";
 }
 installNativeContextMenuGuard();
+installWindowFrame();
 
 ReactDOM.createRoot(
   document.getElementById("settings-root") as HTMLElement,

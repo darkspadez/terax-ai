@@ -120,9 +120,15 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
     };
     windows::set_settings_parent(&app, parent.as_ref().map(|w| w.label().to_owned()));
 
+    // The traffic lights sit centred on the Settings header, 4 px taller
+    // than an app window's.
     #[cfg(target_os = "macos")]
     let builder = builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .traffic_light_position(tauri::LogicalPosition::new(
+            windows::TRAFFIC_LIGHTS.0,
+            windows::TRAFFIC_LIGHTS.1 + 2.0,
+        ))
         .hidden_title(true);
 
     // On Linux/Windows we render our own titlebar, so drop native chrome
