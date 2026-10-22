@@ -32,9 +32,11 @@ export function ensureMonoFontsLoaded(): Promise<void> {
     monoReady = Promise.resolve();
     return monoReady;
   }
+  // One variable file per style holds every weight; these load the Latin
+  // segments (the rest load on first use, see GlyphFontGate).
   monoReady = Promise.allSettled([
     document.fonts.load('400 14px "JetBrains Mono"'),
-    document.fonts.load('700 14px "JetBrains Mono"'),
+    document.fonts.load('italic 400 14px "JetBrains Mono"'),
   ]).then(() => undefined);
   return monoReady;
 }

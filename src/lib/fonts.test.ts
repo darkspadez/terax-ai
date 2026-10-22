@@ -57,7 +57,8 @@ describe("terminal font availability", () => {
     expect(ensureMonoFontsLoaded()).toBe(first);
     await first;
     expect(load).toHaveBeenCalledWith('400 14px "JetBrains Mono"');
-    expect(load).toHaveBeenCalledWith('700 14px "JetBrains Mono"');
+    // Upright and italic Latin segments; each variable file has every weight.
+    expect(load).toHaveBeenCalledWith('italic 400 14px "JetBrains Mono"');
     expect(load).toHaveBeenCalledTimes(2);
   });
 });

@@ -29,14 +29,28 @@ export function hasPrivateUseCodepoint(text: string): boolean {
 }
 
 /**
+ * Text that may need a font segment loaded on demand: anything beyond ASCII.
+ * ASCII is in the segments loaded before a terminal starts
+ * (`ensureMonoFontsLoaded`: JetBrains Mono's Latin, upright and italic).
+ */
+export function needsFontGate(text: string): boolean {
+  for (let index = 0; index < text.length; index += 1) {
+    if (text.charCodeAt(index) > 0x7f) return true;
+  }
+  return false;
+}
+
+/**
  * Keeps glyph atlases from caching a glyph drawn before its font arrived. A
  * canvas draws a not-yet-loaded web font's characters with the next font (for
- * an icon, an empty box) and atlases keep what they rasterize, so a Private
- * Use Area glyph is rasterized only once `document.fonts` reports its font
- * ready. Until then `ready()` starts one load and answers false; subscribers
- * hear when it settles and retry. A failed load counts as settled, so a glyph
- * is deferred at most once per font. Other text is never gated: its fonts are
- * local or loaded before the terminal starts (`ensureMonoFontsLoaded`).
+ * an icon, an empty box; for text, another typeface) and atlases keep what
+ * they rasterize. Bundled fonts are split by Unicode range and load a segment
+ * on first use (Terax Symbols' icon sets, JetBrains Mono's scripts and
+ * symbols), so non-ASCII text is rasterized only once `document.fonts`
+ * reports its fonts ready; text no bundled face covers checks ready at once.
+ * Until then `ready()` starts one load and answers false; subscribers hear
+ * when it settles and retry. A failed load counts as settled, so a glyph is
+ * deferred at most once per font.
  */
 export class GlyphFontGate {
   private readonly loading = new Set<string>();
@@ -48,7 +62,7 @@ export class GlyphFontGate {
 
   /** True when `text` may be rasterized in `font` now. */
   ready(font: string, text: string): boolean {
-    if (!this.fonts || !hasPrivateUseCodepoint(text)) return true;
+    if (!this.fonts || !needsFontGate(text)) return true;
     const key = `${font}\u0000${text}`;
     if (this.settled.has(key)) return true;
     try {

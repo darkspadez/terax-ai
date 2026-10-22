@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { GlyphFontGate, hasPrivateUseCodepoint } from "./GlyphFontGate";
+import {
+  GlyphFontGate,
+  hasPrivateUseCodepoint,
+  needsFontGate,
+} from "./GlyphFontGate";
 
 const FONT = '400 28px "JetBrains Mono", "Terax Symbols", monospace';
 
@@ -39,12 +43,40 @@ describe("hasPrivateUseCodepoint", () => {
   });
 });
 
+describe("needsFontGate", () => {
+  it("leaves ASCII alone and gates everything a lazy segment may hold", () => {
+    expect(needsFontGate("")).toBe(false);
+    expect(needsFontGate("a")).toBe(false);
+    expect(needsFontGate("~")).toBe(false);
+    for (const text of ["", "é", "λ", "Ж", "→", "≠", "😀"])
+      expect(needsFontGate(text), text).toBe(true);
+  });
+});
+
 describe("GlyphFontGate", () => {
-  it("is always ready without a font set or for ordinary text", () => {
+  it("is always ready without a font set or for ASCII", () => {
     expect(new GlyphFontGate(null).ready(FONT, "")).toBe(true);
     const { loader } = deferredLoader();
     expect(new GlyphFontGate(loader).ready(FONT, "a")).toBe(true);
     expect(loader.check).not.toHaveBeenCalled();
+  });
+
+  // JetBrains Mono's Greek, Cyrillic and symbol segments load on first use
+  // like the icon sets: text drawn before them would keep a fallback face.
+  it("defers non-ASCII text until its segment has loaded", async () => {
+    const { loads, loader } = deferredLoader();
+    const gate = new GlyphFontGate(loader);
+    expect(gate.ready(FONT, "λ")).toBe(false);
+    expect(loader.load).toHaveBeenCalledWith(FONT, "λ");
+    loads[0].resolve();
+    await flush();
+    expect(gate.ready(FONT, "λ")).toBe(true);
+  });
+
+  it("does not wait for text whose fonts are already there", () => {
+    const loader = { check: vi.fn(() => true), load: vi.fn() };
+    expect(new GlyphFontGate(loader).ready(FONT, "→")).toBe(true);
+    expect(loader.load).not.toHaveBeenCalled();
   });
 
   it("starts one load per glyph and font and notifies once per batch", async () => {

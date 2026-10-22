@@ -44,6 +44,7 @@
       "../packages/ghostty-core/adapted/LICENSE.restty": "licenses/terminal/restty.txt",
       "../src/modules/terminal/ghostty/webgl/LICENSE.xterm-js": "licenses/terminal/xterm-js.txt",
       "../src/assets/fonts/symbols/NOTICE.txt": "licenses/fonts/terax-symbols.txt",
+      "../src/assets/fonts/jetbrains-mono/OFL.txt": "licenses/fonts/jetbrains-mono.txt",
       "../src/modules/theme/themes/NOTICE.txt": "licenses/themes/terminal-themes.txt"
     },
     "targets": "all",
