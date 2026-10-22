@@ -1,5 +1,6 @@
 import {
   isLeaf,
+  leafIds,
   type PaneNode,
   type SplitDir,
 } from "@/modules/terminal/lib/panes";
@@ -12,8 +13,15 @@ import type {
 } from "@/modules/tabs/lib/useTabs";
 
 type SerializedNode =
-  | { kind: "leaf"; cwd?: string; active?: boolean }
+  | { kind: "leaf"; cwd?: string; active?: boolean; scrollback?: string }
   | { kind: "split"; dir: SplitDir; children: SerializedNode[] };
+
+/** The saved-scrollback key of a live leaf, if it has one. */
+export type ScrollbackKeyOf = (leafId: number) => string | undefined;
+/** Hands a restored leaf the scrollback key its pane had before. */
+export type AdoptScrollbackKey = (leafId: number, key: string) => void;
+
+const noScrollbackKey: ScrollbackKeyOf = () => undefined;
 
 export type SerializedTab =
   | {
@@ -39,18 +47,26 @@ function titleFromUrl(url: string): string {
   }
 }
 
-function serializeNode(node: PaneNode, activeLeafId: number): SerializedNode {
+function serializeNode(
+  node: PaneNode,
+  activeLeafId: number,
+  scrollbackKeyOf: ScrollbackKeyOf,
+): SerializedNode {
   if (isLeaf(node)) {
+    const scrollback = scrollbackKeyOf(node.id);
     return {
       kind: "leaf",
       ...(node.cwd !== undefined && { cwd: node.cwd }),
       ...(node.id === activeLeafId && { active: true }),
+      ...(scrollback !== undefined && { scrollback }),
     };
   }
   return {
     kind: "split",
     dir: node.dir,
-    children: node.children.map((c) => serializeNode(c, activeLeafId)),
+    children: node.children.map((c) =>
+      serializeNode(c, activeLeafId, scrollbackKeyOf),
+    ),
   };
 }
 
@@ -67,13 +83,27 @@ export function isSerializableTab(tab: Tab): boolean {
   }
 }
 
-function serializeTab(tab: Tab): SerializedTab | null {
+/** Leaves of every terminal whose tabs persist; private tabs never do. */
+export function persistedTerminalLeafIds(tabs: readonly Tab[]): number[] {
+  const out: number[] = [];
+  for (const tab of tabs) {
+    if (tab.kind === "terminal" && isSerializableTab(tab)) {
+      out.push(...leafIds(tab.paneTree));
+    }
+  }
+  return out;
+}
+
+function serializeTab(
+  tab: Tab,
+  scrollbackKeyOf: ScrollbackKeyOf,
+): SerializedTab | null {
   if (!isSerializableTab(tab)) return null;
   switch (tab.kind) {
     case "terminal":
       return {
         kind: "terminal",
-        tree: serializeNode(tab.paneTree, tab.activeLeafId),
+        tree: serializeNode(tab.paneTree, tab.activeLeafId, scrollbackKeyOf),
         ...(tab.blocks && { blocks: true }),
         ...(tab.customTitle !== undefined && { customTitle: tab.customTitle }),
       };
@@ -88,10 +118,13 @@ function serializeTab(tab: Tab): SerializedTab | null {
   }
 }
 
-export function serializeTabs(tabs: Tab[]): SerializedTab[] {
+export function serializeTabs(
+  tabs: Tab[],
+  scrollbackKeyOf: ScrollbackKeyOf = noScrollbackKey,
+): SerializedTab[] {
   const out: SerializedTab[] = [];
   for (const tab of tabs) {
-    const s = serializeTab(tab);
+    const s = serializeTab(tab, scrollbackKeyOf);
     if (s) out.push(s);
   }
   return out;
@@ -101,16 +134,25 @@ type HydratedTree = {
   tree: PaneNode;
   activeLeafId: number;
   firstLeafCwd?: string;
+  scrollback: HydrateAcc["scrollback"];
+};
+
+type HydrateAcc = {
+  activeLeafId: number | null;
+  scrollback: Array<{ leafId: number; key: string }>;
 };
 
 function hydrateNode(
   node: SerializedNode,
   allocId: () => number,
-  acc: { activeLeafId: number | null },
+  acc: HydrateAcc,
 ): PaneNode {
   if (node.kind === "leaf") {
     const id = allocId();
     if (node.active && acc.activeLeafId === null) acc.activeLeafId = id;
+    if (typeof node.scrollback === "string") {
+      acc.scrollback.push({ leafId: id, key: node.scrollback });
+    }
     return {
       kind: "leaf",
       id,
@@ -127,13 +169,18 @@ function hydrateTree(
   tree: SerializedNode,
   allocId: () => number,
 ): HydratedTree {
-  const acc: { activeLeafId: number | null } = { activeLeafId: null };
+  const acc: HydrateAcc = { activeLeafId: null, scrollback: [] };
   const paneTree = hydrateNode(tree, allocId, acc);
   const leaves = collectLeaves(paneTree);
   const activeLeafId = acc.activeLeafId ?? leaves[0]?.id ?? allocId();
   const firstLeafCwd =
     leaves.find((l) => l.id === activeLeafId)?.cwd ?? leaves[0]?.cwd;
-  return { tree: paneTree, activeLeafId, firstLeafCwd };
+  return {
+    tree: paneTree,
+    activeLeafId,
+    firstLeafCwd,
+    scrollback: acc.scrollback,
+  };
 }
 
 function collectLeaves(node: PaneNode): Array<{ id: number; cwd?: string }> {
@@ -145,10 +192,17 @@ function hydrateTab(
   s: SerializedTab,
   spaceId: string,
   allocId: () => number,
+  adoptScrollback: AdoptScrollbackKey | undefined,
 ): Tab | null {
   switch (s.kind) {
     case "terminal": {
-      const { tree, activeLeafId, firstLeafCwd } = hydrateTree(s.tree, allocId);
+      const { tree, activeLeafId, firstLeafCwd, scrollback } = hydrateTree(
+        s.tree,
+        allocId,
+      );
+      if (adoptScrollback) {
+        for (const { leafId, key } of scrollback) adoptScrollback(leafId, key);
+      }
       const title =
         s.customTitle ??
         (firstLeafCwd ? basename(firstLeafCwd) : s.blocks ? "blocks" : "shell");
@@ -221,12 +275,13 @@ export function hydrateTabs(
   serialized: SerializedTab[],
   spaceId: string,
   allocId: () => number,
+  adoptScrollback?: AdoptScrollbackKey,
 ): Tab[] {
   if (!Array.isArray(serialized)) return [];
   const out: Tab[] = [];
   for (const s of serialized) {
     try {
-      const tab = hydrateTab(s, spaceId, allocId);
+      const tab = hydrateTab(s, spaceId, allocId, adoptScrollback);
       if (tab) out.push(tab);
     } catch {
       // Skip corrupted entries rather than failing the whole restore.

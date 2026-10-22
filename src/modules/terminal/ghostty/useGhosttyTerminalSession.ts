@@ -13,6 +13,11 @@ import { initializeSessionGeneration as startSessionInitialization } from "@/mod
 import { LatestClipboardWrite } from "@/modules/terminal/lib/LatestClipboardWrite";
 import { setLeafPresentation } from "@/modules/terminal/lib/ptyPresentation";
 import { PtyResizeDelivery } from "@/modules/terminal/lib/ptyResizeDelivery";
+import {
+  ScrollbackRestoreGate,
+  setScrollbackModelSource,
+  terminalScrollback,
+} from "@/modules/terminal/lib/terminalScrollbackRestore";
 import { useTerminalFont } from "@/modules/terminal/lib/useTerminalFont";
 import type { TerminalSearchController } from "@/modules/terminal/search/TerminalSearchController";
 import { currentWorkspaceEnv } from "@/modules/workspace/env";
@@ -115,6 +120,11 @@ type GhosttyStartupTimings = {
 };
 
 const sessions = new Map<number, GhosttySession>();
+
+setScrollbackModelSource((leafId) => {
+  const session = sessions.get(leafId);
+  return session && !session.disposed ? session.model : null;
+});
 
 // Bells rung while the window was in the background clear once it is back in
 // front for the panes on screen.
@@ -685,6 +695,10 @@ async function initializeSessionGeneration(
   session: GhosttySession,
   generation: number,
 ): Promise<void> {
+  // Starts loading saved history now; it is written before any shell output.
+  const scrollback = new ScrollbackRestoreGate(
+    terminalScrollback.takeRestore(session.leafId),
+  );
   const preferences = usePreferencesStore.getState();
   const startup = createStartupTimings();
   session.startup = startup;
@@ -785,6 +799,11 @@ async function initializeSessionGeneration(
     model.dispose();
     return;
   }
+  scrollback.connect((bytes) => {
+    if (!alive() || model.isDisposed?.()) return;
+    model.write(bytes);
+    ghosttyBlocks(session.leafId)?.changed();
+  });
   session.model = model;
   session.callbacks.onModel?.(model);
   const blockSession = ghosttyBlocks(session.leafId);
@@ -904,8 +923,7 @@ async function initializeSessionGeneration(
       onData: (bytes) => {
         if (!session.disposed && generation === session.generation) {
           mark("firstOutputMs");
-          model.write(bytes);
-          ghosttyBlocks(session.leafId)?.changed();
+          scrollback.write(bytes);
         }
       },
       onExit: (code) => {

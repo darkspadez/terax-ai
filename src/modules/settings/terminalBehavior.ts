@@ -35,6 +35,8 @@ export type TerminalBehavior = {
   readonly bellSound: boolean;
   /** Lines per mouse-wheel notch; trackpads scroll by distance. */
   readonly scrollMultiplier: number;
+  /** Save each pane's recent history and show it again after a restart. */
+  readonly restoreScrollback: boolean;
 };
 
 export const NOTIFY_AFTER_SECONDS_MIN = 1;
@@ -55,6 +57,7 @@ export function defaultTerminalBehavior(
     notifyAfterSeconds: 10,
     bellSound: false,
     scrollMultiplier: 3,
+    restoreScrollback: true,
   };
 }
 
@@ -132,6 +135,10 @@ export function normalizeTerminalBehavior(
       SCROLL_MULTIPLIER_MAX,
       defaults.scrollMultiplier,
     ),
+    restoreScrollback:
+      typeof raw.restoreScrollback === "boolean"
+        ? raw.restoreScrollback
+        : defaults.restoreScrollback,
   };
 }
 

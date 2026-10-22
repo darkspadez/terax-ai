@@ -253,6 +253,7 @@ pub fn run() {
         .manage(pty::PtyState::default())
         .manage(net::AiStreamState::default())
         .manage(modules::ai_sessions::SessionFilesState::default())
+        .manage(modules::terminal_scrollback::ScrollbackState::default())
         .manage(modules::window_presentation::WindowPresentationState::default())
         .manage(control_state)
         .manage(shell::ShellState::default())
@@ -367,6 +368,9 @@ pub fn run() {
             modules::ai_sessions::ai_session_delete,
             modules::ai_sessions::ai_session_finish_migration,
             modules::ai_sessions::ai_session_prune_backup,
+            modules::terminal_scrollback::terminal_scrollback_save,
+            modules::terminal_scrollback::terminal_scrollback_load,
+            modules::terminal_scrollback::terminal_scrollback_retain,
             history::history_suggest,
             history::history_commands,
             history::history_record,

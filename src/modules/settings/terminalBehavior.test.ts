@@ -17,6 +17,7 @@ describe("terminal behaviour preferences", () => {
       notifyAfterSeconds: 10,
       bellSound: false,
       scrollMultiplier: 3,
+      restoreScrollback: true,
     });
   });
 
@@ -33,6 +34,7 @@ describe("terminal behaviour preferences", () => {
           clipboardRead: "allow",
           notifyAfterSeconds: 0,
           scrollMultiplier: 99.6,
+          restoreScrollback: "no",
           extra: true,
         },
         defaults,
@@ -44,5 +46,18 @@ describe("terminal behaviour preferences", () => {
       notifyAfterSeconds: 1,
       scrollMultiplier: 20,
     });
+  });
+
+  it("restores scrollback unless it was turned off", () => {
+    const defaults = defaultTerminalBehavior("linux");
+    expect(defaults.restoreScrollback).toBe(true);
+    expect(
+      normalizeTerminalBehavior({ restoreScrollback: false }, defaults)
+        .restoreScrollback,
+    ).toBe(false);
+    expect(
+      normalizeTerminalBehavior({ restoreScrollback: 0 }, defaults)
+        .restoreScrollback,
+    ).toBe(true);
   });
 });

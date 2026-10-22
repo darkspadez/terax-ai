@@ -15,6 +15,7 @@ import {
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { Tab } from "@/modules/tabs";
 import { leafHasForegroundProcess, leafIds } from "@/modules/terminal";
+import { flushTerminalScrollback } from "@/modules/terminal/lib/terminalScrollbackRestore";
 
 async function anyTerminalBusy(tabs: Tab[]): Promise<boolean> {
   const leaves = tabs.flatMap((t) =>
@@ -27,6 +28,11 @@ async function anyTerminalBusy(tabs: Tab[]): Promise<boolean> {
 
 /** How long closing waits for chat history to reach the disk. */
 export const CLOSE_FLUSH_TIMEOUT_MS = 4_000;
+/**
+ * How long closing waits for terminal scrollback, saved alongside chat
+ * history. Scrollback is a convenience, so it gets less time.
+ */
+export const CLOSE_SCROLLBACK_TIMEOUT_MS = 1_500;
 
 /**
  * Failing to save chat history must never make the window impossible to close.
@@ -75,9 +81,10 @@ export function useAppCloseGuard(tabsRef: RefObject<Tab[]>) {
     closing.current = true;
     try {
       flushPersist();
-      const flush = await flushSessionWrites({
-        timeoutMs: CLOSE_FLUSH_TIMEOUT_MS,
-      });
+      const [flush] = await Promise.all([
+        flushSessionWrites({ timeoutMs: CLOSE_FLUSH_TIMEOUT_MS }),
+        flushTerminalScrollback(CLOSE_SCROLLBACK_TIMEOUT_MS),
+      ]);
       if (closeAfterFlush(flush, warned.current) === "warn") {
         warned.current = true;
         toast.error("Could not save chat history", {

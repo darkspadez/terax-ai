@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { Tab } from "@/modules/tabs";
-import { isSerializableTab, serializeTabs } from "./serialize";
+import {
+  scrollbackKeyForLeaf,
+  terminalScrollback,
+} from "@/modules/terminal/lib/terminalScrollbackRestore";
+import {
+  isSerializableTab,
+  persistedTerminalLeafIds,
+  serializeTabs,
+} from "./serialize";
 import { saveState } from "./store";
 import { useSpaces } from "./useSpaces";
 
@@ -40,6 +48,8 @@ export function useSpacePersistence({
   }
 
   const flush = useCallback((snap: Snapshot) => {
+    // Assigns new panes their scrollback keys before the tabs are serialized.
+    void terminalScrollback.persist(persistedTerminalLeafIds(snap.tabs));
     const groups = new Map<string, Tab[]>();
     for (const t of snap.tabs) {
       const arr = groups.get(t.spaceId);
@@ -48,7 +58,7 @@ export function useSpacePersistence({
     }
 
     for (const [spaceId, group] of groups) {
-      const serialized = serializeTabs(group);
+      const serialized = serializeTabs(group, scrollbackKeyForLeaf);
       const prev = last.current.get(spaceId);
       let activeTabIndex = prev?.activeTabIndex ?? 0;
       if (spaceId === snap.activeSpaceId) {
@@ -82,6 +92,13 @@ export function useSpacePersistence({
       if (timer.current) clearTimeout(timer.current);
     };
   }, [tabs, activeId, activeSpaceId, enabled, flush]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    return terminalScrollback.attachLeafSource(() =>
+      persistedTerminalLeafIds(latest.current.tabs),
+    );
+  }, [enabled]);
 
   useEffect(() => {
     if (!enabled) return;

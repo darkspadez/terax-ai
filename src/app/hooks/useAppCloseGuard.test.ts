@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CLOSE_FLUSH_TIMEOUT_MS,
+  CLOSE_SCROLLBACK_TIMEOUT_MS,
   canOptOutOfAppClosePrompt,
   closeAfterFlush,
 } from "./useAppCloseGuard";
@@ -38,5 +39,13 @@ describe("closeAfterFlush", () => {
   it("bounds how long closing waits for the disk", () => {
     expect(CLOSE_FLUSH_TIMEOUT_MS).toBeGreaterThan(0);
     expect(CLOSE_FLUSH_TIMEOUT_MS).toBeLessThanOrEqual(5_000);
+  });
+
+  it("never lets terminal scrollback make closing slower than chat history", () => {
+    // Both are saved in parallel, so the shorter wait adds nothing.
+    expect(CLOSE_SCROLLBACK_TIMEOUT_MS).toBeGreaterThan(0);
+    expect(CLOSE_SCROLLBACK_TIMEOUT_MS).toBeLessThanOrEqual(
+      CLOSE_FLUSH_TIMEOUT_MS,
+    );
   });
 });

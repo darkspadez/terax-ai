@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { PaneNode } from "@/modules/terminal/lib/panes";
 import type { Tab } from "@/modules/tabs/lib/useTabs";
-import { hydrateTabs, serializeTabs, type SerializedTab } from "./serialize";
+import {
+  hydrateTabs,
+  persistedTerminalLeafIds,
+  serializeTabs,
+  type SerializedTab,
+} from "./serialize";
 
 function counter(start = 100): () => number {
   let n = start;
@@ -156,5 +161,104 @@ describe("hydrateTabs", () => {
       "localhost:5173",
       "README.md",
     ]);
+  });
+});
+
+describe("scrollback keys", () => {
+  const tree: PaneNode = {
+    kind: "split",
+    id: 10,
+    dir: "row",
+    children: [
+      { kind: "leaf", id: 11, cwd: "/a" },
+      { kind: "leaf", id: 12, cwd: "/b" },
+    ],
+  };
+  const keys = new Map([
+    [11, "sb-a"],
+    [21, "sb-private"],
+  ]);
+
+  it("are stored with the leaves that have one, never for private tabs", () => {
+    const [s, ...rest] = serializeTabs(
+      [
+        term({ paneTree: tree, activeLeafId: 12 }),
+        term({
+          id: 20,
+          private: true,
+          paneTree: { kind: "leaf", id: 21, cwd: "/p" },
+          activeLeafId: 21,
+        }),
+      ],
+      (leafId) => keys.get(leafId),
+    );
+    expect(rest).toEqual([]);
+    const node = s as Extract<SerializedTab, { kind: "terminal" }>;
+    if (node.tree.kind !== "split") throw new Error("expected a split");
+    expect(node.tree.children[0]).toEqual({
+      kind: "leaf",
+      cwd: "/a",
+      scrollback: "sb-a",
+    });
+    expect(node.tree.children[1]).not.toHaveProperty("scrollback");
+    expect(
+      JSON.stringify(serializeTabs([term({ paneTree: tree })])),
+    ).not.toContain("scrollback");
+  });
+
+  it("are handed to the restored leaves under their new ids", () => {
+    const serialized = serializeTabs([term({ paneTree: tree })], (leafId) =>
+      keys.get(leafId),
+    );
+    const adopted: Array<[number, string]> = [];
+    const [restored] = hydrateTabs(serialized, "s1", counter(100), (id, key) =>
+      adopted.push([id, key]),
+    );
+    if (restored.kind !== "terminal" || restored.paneTree.kind !== "split") {
+      throw new Error("expected a restored split");
+    }
+    const [first, second] = restored.paneTree.children;
+    expect(first).toMatchObject({ kind: "leaf", cwd: "/a" });
+    expect(adopted).toEqual([[first.id, "sb-a"]]);
+    expect(adopted.some(([id]) => id === second.id)).toBe(false);
+    // Without a callback the key is ignored, and odd values never adopt.
+    expect(hydrateTabs(serialized, "s1", counter())).toHaveLength(1);
+    const odd = [
+      {
+        kind: "terminal",
+        tree: { kind: "leaf", scrollback: 7 },
+      },
+    ] as unknown as SerializedTab[];
+    hydrateTabs(odd, "s1", counter(), (id, key) => adopted.push([id, key]));
+    expect(adopted).toHaveLength(1);
+  });
+
+  it("belong to the leaves of persisted terminal tabs only", () => {
+    const tabs: Tab[] = [
+      term({ id: 1, paneTree: tree, activeLeafId: 11 }),
+      term({
+        id: 20,
+        private: true,
+        paneTree: { kind: "leaf", id: 21 },
+        activeLeafId: 21,
+      }),
+      {
+        id: 30,
+        kind: "editor",
+        spaceId: "s1",
+        title: "x",
+        path: "/a/x.ts",
+        dirty: false,
+        preview: false,
+      },
+      term({
+        id: 40,
+        spaceId: "s2",
+        cold: true,
+        paneTree: { kind: "leaf", id: 41 },
+        activeLeafId: 41,
+      }),
+    ];
+    expect(persistedTerminalLeafIds(tabs)).toEqual([11, 12, 41]);
   });
 });
