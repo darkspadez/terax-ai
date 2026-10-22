@@ -104,7 +104,12 @@ export async function buildLanguageModel(
     }
     case "anthropic": {
       const { createAnthropic } = await import("@ai-sdk/anthropic");
-      built = createAnthropic({ apiKey: key })(resolvedModelId);
+      // The request leaves from the webview, and Anthropic refuses the CORS
+      // preflight of a browser origin unless the client opts in.
+      built = createAnthropic({
+        apiKey: key,
+        headers: { "anthropic-dangerous-direct-browser-access": "true" },
+      })(resolvedModelId);
       break;
     }
     case "google": {

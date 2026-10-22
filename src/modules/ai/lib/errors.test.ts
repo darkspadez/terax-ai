@@ -1,3 +1,4 @@
+import { createOpenAI } from "@ai-sdk/openai";
 import { streamText } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
@@ -96,5 +97,45 @@ describe("formatAiError", () => {
       errorText:
         "Model unavailable: The model `gpt-5.6-luna` is in limited preview and is not available on this account.",
     });
+  });
+
+  it("explains a request the webview could not read a reply to", async () => {
+    // WebKit's fetch rejection for a dropped connection, and for an error
+    // reply without CORS headers (OpenAI's 401 for a bad key).
+    const model = createOpenAI({
+      apiKey: "sk-test",
+      fetch: async () => {
+        throw new TypeError("Load failed");
+      },
+    })("gpt-5.4-mini");
+    const result = streamText({ model, prompt: "hello", onError: () => {} });
+    const chunks = [];
+    for await (const chunk of result.toUIMessageStream({
+      onError: formatAiError,
+    })) {
+      chunks.push(chunk);
+    }
+
+    const error = chunks.find((chunk) => chunk.type === "error");
+    expect(error?.errorText).toMatch(
+      /^No readable reply from the AI provider \(Load failed\)\. .*invalid API key.*Settings → Models/,
+    );
+  });
+
+  it("recognises each webview's network failure, including as a cause", () => {
+    for (const message of [
+      "Failed to fetch",
+      "Load failed",
+      "NetworkError when attempting to fetch resource.",
+    ]) {
+      expect(formatAiError(new TypeError(message))).toContain(
+        `No readable reply from the AI provider (${message}).`,
+      );
+    }
+    const wrapped = Object.assign(new Error("Cannot connect to API"), {
+      cause: new TypeError("Failed to fetch"),
+    });
+    expect(formatAiError(wrapped)).toContain("(Failed to fetch)");
+    expect(formatAiError(new Error("Load failed"))).toBe("Load failed");
   });
 });

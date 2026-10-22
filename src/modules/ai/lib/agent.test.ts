@@ -1,5 +1,5 @@
-import type { UIMessage } from "ai";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { generateText, type UIMessage } from "ai";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ToolContext } from "../tools/context";
 
 const streamTextMock = vi.hoisted(() =>
@@ -20,7 +20,7 @@ vi.mock("@/modules/workspace", () => ({
 
 import { MAX_AGENT_STEPS } from "../config";
 import { TOOL_APPROVAL } from "../tools/tools";
-import { runAgentStream } from "./agent";
+import { buildLanguageModel, runAgentStream } from "./agent";
 import { EMPTY_PROVIDER_KEYS } from "./keyring";
 
 const toolContext = {
@@ -130,5 +130,40 @@ describe("runAgentStream", () => {
       hitStepCap: true,
       finishReason: "tool-calls",
     });
+  });
+});
+
+describe("buildLanguageModel", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("opts Anthropic requests into browser access so the webview's preflight passes", async () => {
+    const webviewFetch = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            id: "msg_1",
+            type: "message",
+            role: "assistant",
+            model: "claude-haiku-4-5",
+            content: [{ type: "text", text: "hi" }],
+            stop_reason: "end_turn",
+            usage: { input_tokens: 1, output_tokens: 1 },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", webviewFetch);
+    const model = await buildLanguageModel(
+      "anthropic",
+      { ...EMPTY_PROVIDER_KEYS, anthropic: "sk-ant-test" },
+      "claude-haiku-4-5",
+    );
+    await generateText({ model, prompt: "hello" });
+
+    const request = new Request(...webviewFetch.mock.calls[0]);
+    expect(request.url).toBe("https://api.anthropic.com/v1/messages");
+    expect(request.headers.get("anthropic-dangerous-direct-browser-access")).toBe(
+      "true",
+    );
   });
 });
