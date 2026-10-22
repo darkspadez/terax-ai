@@ -495,6 +495,198 @@ mod unix {
                 ]
             );
         }
+
+        /// A zsh started the way `apply_shell_init` starts it (login and
+        /// interactive, ZDOTDIR at the integration scripts) in a scratch home,
+        /// without the system's startup files. None when zsh is not installed.
+        struct ZshLaunch {
+            _tmp: tempfile::TempDir,
+            home: PathBuf,
+            wrapper: PathBuf,
+        }
+
+        impl ZshLaunch {
+            fn new() -> Option<Self> {
+                let installed = std::process::Command::new("zsh")
+                    .arg("--version")
+                    .output()
+                    .is_ok_and(|out| out.status.success());
+                if !installed {
+                    eprintln!("skipping zsh integration test: zsh not found");
+                    return None;
+                }
+                let tmp = tempfile::tempdir().unwrap();
+                let home = tmp.path().join("home");
+                let wrapper = home.join(".cache/terax/shell-integration/zsh");
+                fs::create_dir_all(&wrapper).unwrap();
+                for (name, script) in [
+                    (".zshenv", ZSHENV),
+                    (".zprofile", ZPROFILE),
+                    (".zshrc", ZSHRC),
+                    (".zlogin", ZLOGIN),
+                ] {
+                    fs::write(wrapper.join(name), script).unwrap();
+                }
+                Some(Self {
+                    _tmp: tmp,
+                    home,
+                    wrapper,
+                })
+            }
+
+            fn write(&self, rel: &str, content: &str) {
+                let path = self.home.join(rel);
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, content).unwrap();
+            }
+
+            fn read(&self, rel: &str) -> String {
+                fs::read_to_string(self.home.join(rel)).unwrap_or_default()
+            }
+
+            /// Feeds `input` to the shell as typed commands (so zsh loads its
+            /// history first) and returns stderr.
+            fn run(&self, env: &[(&str, &Path)], input: &str) -> String {
+                use std::io::Write;
+                use std::process::{Command, Stdio};
+
+                let mut child = Command::new("zsh")
+                    .args(["-d", "-l", "-i"])
+                    .env_clear()
+                    .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+                    .env("HOME", &self.home)
+                    .env("TERM", "dumb")
+                    .env("ZDOTDIR", &self.wrapper)
+                    .envs(env.iter().copied())
+                    .current_dir(&self.home)
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .unwrap();
+                child
+                    .stdin
+                    .take()
+                    .unwrap()
+                    .write_all(input.as_bytes())
+                    .unwrap();
+                let out = child.wait_with_output().unwrap();
+                assert!(out.status.success(), "zsh exited with {}", out.status);
+                String::from_utf8_lossy(&out.stderr).into_owned()
+            }
+        }
+
+        #[test]
+        fn zsh_user_files_run_under_the_users_zdotdir() {
+            // crynta/terax-ai#526: a conf.d loader in the user's .zshenv.
+            let Some(zsh) = ZshLaunch::new() else { return };
+            let user = zsh.home.join(".config/zsh");
+            zsh.write(
+                ".config/zsh/.zshenv",
+                "for f in \"$ZDOTDIR\"/conf.d/*.zsh; do source \"$f\"; done\n",
+            );
+            zsh.write(".config/zsh/conf.d/a.zsh", "TERAX_TEST_CONF_D=1\n");
+            for name in ["zprofile", "zshrc", "zlogin"] {
+                zsh.write(
+                    &format!(".config/zsh/.{name}"),
+                    &format!("print -r -- \"{name} $ZDOTDIR\" >> \"$HOME/seen\"\n"),
+                );
+            }
+
+            let stderr = zsh.run(
+                &[("TERAX_USER_ZDOTDIR", &user)],
+                "print -r -- \"$TERAX_TEST_CONF_D $ZDOTDIR\" > \"$HOME/result\"\n",
+            );
+
+            assert!(!stderr.contains("no matches found"), "{stderr}");
+            assert_eq!(
+                zsh.read("result").trim(),
+                format!("1 {}", zsh.wrapper.display())
+            );
+            let user = user.display();
+            assert_eq!(
+                zsh.read("seen"),
+                format!("zprofile {user}\nzshrc {user}\nzlogin {user}\n")
+            );
+        }
+
+        #[test]
+        fn zsh_zdotdir_set_by_the_users_zshenv_keeps_the_integration() {
+            // The XDG layout: ~/.zshenv moves the rest of the config.
+            let Some(zsh) = ZshLaunch::new() else { return };
+            zsh.write(".zshenv", "export ZDOTDIR=\"$HOME/.config/zsh\"\n");
+            zsh.write(".config/zsh/.zshrc", "TERAX_TEST_USER_RC=1\n");
+
+            zsh.run(
+                &[],
+                "print -r -- \"$TERAX_TEST_USER_RC $(whence -w _terax_precmd) \
+                 $ZDOTDIR $TERAX_USER_ZDOTDIR\" > \"$HOME/result\"\n",
+            );
+
+            assert_eq!(
+                zsh.read("result").trim(),
+                format!(
+                    "1 _terax_precmd: function {} {}",
+                    zsh.wrapper.display(),
+                    zsh.home.join(".config/zsh").display()
+                )
+            );
+        }
+
+        #[test]
+        fn zsh_history_file_derived_from_zdotdir_is_the_users() {
+            // macOS /etc/zshrc sets HISTFILE=${ZDOTDIR:-$HOME}/.zsh_history
+            // between the wrapper's .zprofile and .zshrc, with ZDOTDIR here.
+            let Some(zsh) = ZshLaunch::new() else { return };
+            let mut zprofile = ZPROFILE.to_string();
+            zprofile.push_str("HISTFILE=${ZDOTDIR:-$HOME}/.zsh_history\n");
+            fs::write(zsh.wrapper.join(".zprofile"), zprofile).unwrap();
+            // oh-my-zsh keeps a HISTFILE that is already set.
+            zsh.write(
+                ".zshrc",
+                "[ -z \"$HISTFILE\" ] && HISTFILE=\"$HOME/.zsh_history\"\n",
+            );
+            zsh.write(
+                ".zsh_history",
+                ": 1700000000:0;terax-test-earlier-command\n",
+            );
+
+            zsh.run(
+                &[],
+                "{ print -r -- \"$HISTFILE\"; fc -ln 1 } > \"$HOME/result\"\n",
+            );
+
+            let result = zsh.read("result");
+            let mut lines = result.lines();
+            assert_eq!(
+                lines.next(),
+                Some(zsh.home.join(".zsh_history").to_string_lossy().as_ref())
+            );
+            // Read once, by zsh itself: an extra `fc -R` would list it twice.
+            assert_eq!(
+                lines
+                    .filter(|line| *line == "terax-test-earlier-command")
+                    .count(),
+                1,
+                "{result}"
+            );
+        }
+
+        #[test]
+        fn zsh_history_file_chosen_by_the_user_is_kept() {
+            let Some(zsh) = ZshLaunch::new() else { return };
+            zsh.write(".zshrc", "HISTFILE=\"$HOME/.local/state/zsh/history\"\n");
+
+            zsh.run(&[], "print -r -- \"$HISTFILE\" > \"$HOME/result\"\n");
+
+            assert_eq!(
+                zsh.read("result").trim(),
+                zsh.home
+                    .join(".local/state/zsh/history")
+                    .display()
+                    .to_string()
+            );
+        }
     }
 }
 

@@ -71,7 +71,7 @@ Integration scripts live in `src-tauri/src/modules/pty/scripts/`:
 - `bashrc.bash` for bash
 - `init.fish` for fish, installed to `~/.config/fish/conf.d/terax.fish`
 
-Zsh is launched with `ZDOTDIR` pointing at a temp directory that sources our scripts and then the user's real configs. Bash uses `--rcfile` with a wrapper that sources the user's `~/.bashrc` after Terax's. Fish uses `conf.d` so no user file is replaced.
+Zsh is launched as a login shell with `ZDOTDIR` pointing at `~/.cache/terax/shell-integration/zsh`, whose four files each source the user's matching file (`.zshrc` then installs Terax's hooks). While a user file runs, `ZDOTDIR` is the user's own (`TERAX_USER_ZDOTDIR`, or unset), so `$ZDOTDIR/conf.d/*` loaders and `${ZDOTDIR:-$HOME}/.zsh_history` resolve as in any terminal; a `ZDOTDIR` the user's `.zshenv` sets (the XDG layout) is carried to the later files in `TERAX_USER_ZDOTDIR`, and `ZDOTDIR` points back at the wrapper so zsh keeps loading it. A `HISTFILE` derived from the wrapper directory (macOS `/etc/zshrc` runs before our `.zshrc`) is moved to the user's directory before their `.zshrc`; zsh then reads it once, as usual. The scenarios run against a real zsh in `shell_init.rs` tests (skipped when zsh is missing). Bash uses `--rcfile` with a wrapper that sources the user's `~/.bashrc` after Terax's. Fish uses `conf.d` so no user file is replaced.
 
 All integrated shells emit **OSC 7** (cwd) and **OSC 133 A/B/C/D** (prompt boundaries and exit code) so Terax can track cwd and detect command boundaries without parsing the user's prompt.
 
