@@ -39,10 +39,14 @@ describe("opening terminal links", () => {
       () => {},
     );
 
-    expect(native.invoke).toHaveBeenCalledWith("fs_stat", {
-      path: "/etc/hosts",
-      workspace: { kind: "local" },
-    });
+    // The click authorizes the file's folder, before anything reads it.
+    expect(native.invoke.mock.calls).toEqual([
+      [
+        "workspace_authorize",
+        { path: "/etc/hosts", workspace: { kind: "local" }, opened: "file" },
+      ],
+      ["fs_stat", { path: "/etc/hosts", workspace: { kind: "local" } }],
+    ]);
     expect(opened).toHaveBeenCalledWith("/etc/hosts", null, null);
     expect(native.revealItemInDir).not.toHaveBeenCalled();
   });

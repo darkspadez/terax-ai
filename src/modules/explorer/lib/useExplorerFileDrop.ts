@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { nativeDropPoint } from "@/lib/nativeDropPoint";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import {
+  authorizeSources,
   parentDir,
   reportCopyFailures,
   type CopyResult,
@@ -70,12 +71,15 @@ export function useExplorerFileDrop({
           setTargetDir(null);
           if (!rootPath || !dir || p.paths.length === 0) return;
           const workspace = currentWorkspaceEnv();
-          void invoke<CopyResult>("fs_copy", {
-            sources: p.paths,
-            destDir: dir,
-            root: rootPath,
-            workspace,
-          })
+          void authorizeSources(p.paths)
+            .then(() =>
+              invoke<CopyResult>("fs_copy", {
+                sources: p.paths,
+                destDir: dir,
+                root: rootPath,
+                workspace,
+              }),
+            )
             .then(reportCopyFailures)
             .catch((err) => toast.error(`Copy failed: ${String(err)}`))
             .finally(() => {

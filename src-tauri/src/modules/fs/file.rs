@@ -60,13 +60,17 @@ fn mtime_millis(meta: &fs::Metadata) -> u64 {
 
 #[tauri::command]
 pub async fn fs_read_file(
+    app: tauri::AppHandle,
     path: String,
     workspace: Option<WorkspaceEnv>,
     force: Option<bool>,
 ) -> Result<ReadResult, String> {
     blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
-        read_file_sync(&resolve_path(&path, &workspace), force.unwrap_or(false))
+        let real = app
+            .state::<WorkspaceRegistry>()
+            .authorized_existing(&resolve_path(&path, &workspace))?;
+        read_file_sync(&real, force.unwrap_or(false))
     })
     .await
 }
@@ -176,7 +180,9 @@ pub async fn fs_write_file(
     let watcher = app.clone();
     let (path, mtime) = blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
-        let target = resolve_path(&path, &workspace);
+        let target = watcher
+            .state::<WorkspaceRegistry>()
+            .authorized_write_target(&resolve_path(&path, &workspace))?;
         let (real, existed) = write_file_sync(&target, content.as_bytes()).map_err(|e| {
             log::warn!("fs_write_file({}) failed: {e}", target.display());
             e.to_string()
@@ -197,29 +203,42 @@ pub async fn fs_write_file(
 
 #[tauri::command]
 pub async fn fs_canonicalize(
+    app: tauri::AppHandle,
     path: String,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<String, String> {
     blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
-        let p = resolve_path(&path, &workspace);
-        let canon = std::fs::canonicalize(&p).map_err(|e| e.to_string())?;
-        Ok(super::to_canon(&canon))
+        let real = app
+            .state::<WorkspaceRegistry>()
+            .authorized_existing(&resolve_path(&path, &workspace))?;
+        Ok(super::to_canon(&real))
     })
     .await
 }
 
 /// The host path a workspace file is read through. The asset protocol (media
 /// and Markdown image previews) opens host paths, so a WSL path must become
-/// its share or drvfs drive path first; local paths come back unchanged.
+/// its share or drvfs drive path first; local paths come back unchanged,
+/// without touching the disk.
 #[tauri::command]
-pub async fn fs_host_path(path: String, workspace: Option<WorkspaceEnv>) -> Result<String, String> {
+pub async fn fs_host_path(
+    app: tauri::AppHandle,
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<String, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if !workspace.is_wsl() {
         return Ok(path);
     }
     // Mapping a WSL path probes the share, which can stall.
-    blocking(move || Ok(host_path(&path, &workspace))).await
+    blocking(move || {
+        let host = host_path(&path, &workspace);
+        app.state::<WorkspaceRegistry>()
+            .authorized_existing(Path::new(&host))?;
+        Ok(host)
+    })
+    .await
 }
 
 fn host_path(path: &str, workspace: &WorkspaceEnv) -> String {
@@ -230,12 +249,9 @@ fn host_path(path: &str, workspace: &WorkspaceEnv) -> String {
 /// inside an authorized workspace (a link pointing out of it is refused). A folder goes to the
 /// file manager through Reveal instead.
 fn default_app_target(registry: &WorkspaceRegistry, path: &Path) -> Result<PathBuf, String> {
-    let canonical = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
+    let canonical = registry.authorized_existing(path)?;
     if !canonical.is_file() {
         return Err("only files open in their default app".into());
-    }
-    if !registry.is_authorized(&canonical) {
-        return Err("path is outside the authorized workspace".into());
     }
     // Applications get the path in its ordinary spelling, not `\\?\`-prefixed.
     #[cfg(windows)]
@@ -306,16 +322,25 @@ pub async fn fs_open_default(
 }
 
 #[tauri::command]
-pub async fn fs_stat(path: String, workspace: Option<WorkspaceEnv>) -> Result<FileStat, String> {
-    blocking(move || stat_path(path, workspace)).await
+pub async fn fs_stat(
+    app: tauri::AppHandle,
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<FileStat, String> {
+    blocking(move || {
+        let workspace = WorkspaceEnv::from_option(workspace);
+        let p = resolve_path(&path, &workspace);
+        let real = app.state::<WorkspaceRegistry>().authorized_existing(&p)?;
+        stat_path(&p, &real)
+    })
+    .await
 }
 
-fn stat_path(path: String, workspace: Option<WorkspaceEnv>) -> Result<FileStat, String> {
-    let workspace = WorkspaceEnv::from_option(workspace);
-    let p = resolve_path(&path, &workspace);
-    let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
+/// `path` as the page named it (a link reports itself), `real` where it leads.
+fn stat_path(p: &Path, real: &Path) -> Result<FileStat, String> {
+    let meta = std::fs::metadata(real).map_err(|e| e.to_string())?;
     // fs::metadata follows symlinks, so the link check needs symlink_metadata.
-    let kind = if std::fs::symlink_metadata(&p)
+    let kind = if std::fs::symlink_metadata(p)
         .map(|m| m.file_type().is_symlink())
         .unwrap_or(false)
     {

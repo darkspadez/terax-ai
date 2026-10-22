@@ -36,7 +36,6 @@ import {
   useSelectionAskAi,
 } from "@/modules/ai";
 import { AiComposerProvider } from "@/modules/ai/lib/composer";
-import { native } from "@/modules/ai/lib/native";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
 import { useControlBridge } from "@/modules/control";
 import {
@@ -85,6 +84,7 @@ import {
   useSourceControlContext,
 } from "@/modules/source-control";
 import {
+  grantDeferredSpace,
   SpaceSwitcher,
   useSpacePersistence,
   useSpaces,
@@ -140,6 +140,8 @@ import {
 } from "@/modules/theme";
 import { UpdaterDialog } from "@/modules/updater";
 import {
+  authorizeFileFolder,
+  authorizeRoot,
   currentWorkspaceEnv,
   useWorkspaceEnvStore,
   workspaceScopeKey,
@@ -331,6 +333,7 @@ export default function App() {
       .getState()
       .spaces.find((s) => s.id === activeSpaceId);
     if (meta) void adoptWorkspaceEnv(meta.env);
+    grantDeferredSpace(activeSpaceId);
     const inSpace = tabsRef.current.filter((t) => t.spaceId === activeSpaceId);
     if (inSpace.length === 0) return;
     // Keep the active tab if it already belongs to the newly active space (a
@@ -756,6 +759,8 @@ export default function App() {
       // Markdown opens in its rendered view by default; a per-tab toggle flips
       // it to the raw editor. Other files default to preview (pin=false);
       // explicit actions like context-menu "Open" pass pin=true to persist.
+      // The tab's reads wait for its folder's authorization.
+      void authorizeFileFolder(path);
       if (isMarkdownPath(path)) newMarkdownTab(path);
       else openFileTab(path, pin ?? false);
     },
@@ -1272,16 +1277,11 @@ export default function App() {
     [updateTab],
   );
 
-  const authorizedCwds = useRef(new Set<string>());
   const handleTerminalCwd = useCallback(
     (leafId: number, cwd: string) => {
+      // First, so the explorer's listing of the new folder waits for it.
+      if (cwd) void authorizeRoot(cwd);
       setLeafCwd(leafId, cwd);
-      if (cwd && !authorizedCwds.current.has(cwd)) {
-        authorizedCwds.current.add(cwd);
-        native.workspaceAuthorize(cwd).catch(() => {
-          authorizedCwds.current.delete(cwd);
-        });
-      }
     },
     [setLeafCwd],
   );
@@ -1529,6 +1529,7 @@ export default function App() {
   >(new Map());
   const openContentHit = useCallback(
     (path: string, line: number) => {
+      void authorizeFileFolder(path);
       const id = openFileTab(path, true);
       if (id == null) return;
       const h = editorRefs.current.get(id);

@@ -9,7 +9,7 @@ Terax runs shells, reads and writes files, and sends data to AI providers. The s
 The main trust boundaries are:
 
 1. **IPC boundary** - commands registered in `src-tauri/src/lib.rs`, gated by `src-tauri/capabilities/default.json`.
-2. **File-system boundary** - AI tools go through `src/modules/ai/lib/security.ts`; PTY spawn goes through the workspace authorization registry.
+2. **File-system boundary** - every file command, PTY and shell spawn, git and the AI tools go through the workspace authorization registry; AI tools also go through `src/modules/ai/lib/security.ts`.
 3. **Network boundary** - AI HTTP proxy in `src-tauri/src/modules/net.rs` with SSRF and DNS-rebinding defenses.
 4. **Secret-storage boundary** - keys live in the OS keychain, never on disk or in `localStorage`.
 5. **Terminal escape-sequence boundary** - OSC sequences are parsed and acted on, but never blindly trusted to mutate state.
@@ -31,15 +31,30 @@ The comparison surface normalizes paths: backslashes to forward slashes, strips 
 
 ## Workspace authorization registry
 
-`WorkspaceRegistry` (`src-tauri/src/modules/workspace.rs`) tracks directories that PTY spawn, git commands, and AI tools are allowed to operate in.
+`WorkspaceRegistry` (`src-tauri/src/modules/workspace.rs`) tracks the folders that file commands, PTY spawn, git commands, and AI tools are allowed to operate in.
 
-- `workspace_authorize` adds a directory.
+- `workspace_authorize` adds a root, or with `opened` lets the file commands reach a folder the user browses or the folder a file they open is really in (`authorize_opened`; nothing is added when an authorized folder already covers it).
 - `authorize_spawn_cwd` rejects a spawn cwd outside an authorized root.
 - `authorize_user_spawn_cwd` registers the user's chosen cwd as a new root instead of rejecting it.
 - The registry is bootstrapped with the launch directory and the user's home directory (`bootstrap_registry`).
-- A later launch of Terax handed over by `tauri-plugin-single-instance` authorizes its folder (or its files' folder, or its usable directory) before a window opens there (`second_launch.rs`). Only the user's own processes reach it (the session D-Bus on Linux, a window message on Windows, a socket in `/tmp` the user owns on macOS), and those could start Terax with the same arguments anyway.
+- A launch (arguments, a later launch handed over by `tauri-plugin-single-instance`, macOS Open With) authorizes its folder and the folder each of its files is in before a window opens them (`second_launch::authorize_launch`). Only the user's own processes reach a running Terax (the session D-Bus on Linux, a window message on Windows, a socket in `/tmp` the user owns on macOS), and those could start Terax with the same arguments anyway.
 
-This is the allow side of the file-system boundary. Any new feature that spawns a shell or mutates files outside the current workspace must interact with this registry.
+### File commands
+
+Every Tauri command that reads, writes, lists, stats, searches or watches a path the page sends is refused outside the authorized folders. The check is on the real path, through one of four gates:
+
+- `authorized_existing`: the path, links followed and `..` resolved, lies in an authorized folder (`fs_read_file`, `fs_read_dir`, `list_subdirs`, `fs_stat`, `fs_canonicalize`, `fs_host_path` for WSL, the roots of `fs_search`, `fs_list_files`, `fs_grep`, `fs_grep_interactive` and `fs_glob`, `fs_open_default`, `lsp_resolve_root`).
+- `authorized_write_target`: `fs_write_file` writes through a link only to an authorized file, a dangling link is an error, a new file needs an authorized folder.
+- `authorized_new`: `fs_create_file` and `fs_create_dir` need the nearest existing ancestor authorized and plain names below it, so neither a link nor `..` leads out.
+- `authorized_entry`: `fs_rename`, `fs_delete` and the sources of `fs_copy` act on the entry itself (a link, not what it points to) in an authorized folder; `..` and an authorized folder itself are refused. `fs_move` and `fs_delete_batch` also keep both ends under the explorer's authorized root.
+
+A missing path outside reads as outside, so a refusal never says whether something exists there, and relative paths are refused. A WSL path is judged by its host path (the `\\wsl.localhost` share or the drive of `/mnt/<drive>`). `fs_watch_add` drops folders and files outside; `lsp_resolve_root` only looks into authorized folders, for markers that are plain names. Searches walk without following links, so a link inside a root never leads a search out.
+
+The page authorizes only what the user chose (`src/modules/workspace/authorize.ts`): a file opened from the explorer, its search, the content search, a terminal link, LSP navigation or the New File dialog (its real folder); a folder expanded in the explorer; files dropped or pasted into the explorer (their folders, as host paths); the roots, terminal folders and open files of the spaces a window restores. It never authorizes a path a terminal program or an AI reply named on its own, so the AI tools (`read_file`, `list_directory`, `grep`, `glob`, writes) are refused outside the authorized folders, and `terax open` from a terminal already requires an authorized file. Path completion in the block input lists only authorized folders.
+
+Two limits remain. `workspace_authorize` is itself a command the page can call, so the registry contains what the app's own flows do, not a fully compromised page. And a terminal's cwd reported by OSC 7 is authorized as a root, which keeps the explorer and Source Control following `cd` anywhere, but is terminal output: a program that prints an OSC 7 sequence can authorize a folder.
+
+This is the allow side of the file-system boundary. Any new command that takes a path must pass it through one of these gates.
 
 ## Asset protocol scope
 
@@ -105,7 +120,8 @@ The agent detector (`src-tauri/src/modules/pty/agent_detect.rs`) is armed by `OS
 ## Invariants
 
 - The deny-list in `security.ts` applies on both read and write. Never bypass it.
-- New file-system-touching commands must respect the workspace authorization registry.
+- New file-system-touching commands must pass every path the page sends through a registry gate (`authorized_existing`, `authorized_write_target`, `authorized_new`, `authorized_entry`).
+- The page authorizes a path only for what the user chose, never for a path a terminal program or an AI reply named.
 - The asset protocol's configured scope stays empty; files are granted at runtime (`asset_scope.rs`), never with `**`.
 - New network-facing commands must go through the `net.rs` proxy or reimplement the same classification and DNS pinning.
 - New plugin APIs must be added to `src-tauri/capabilities/default.json`.

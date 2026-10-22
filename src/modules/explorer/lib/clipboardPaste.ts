@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import type { WorkspaceEnv } from "@/modules/workspace";
+import { authorizeFolder } from "@/modules/workspace/authorize";
+import { parentDir as hostParentDir } from "./watch";
 
 export function parentDir(path: string, fallback: string): string {
   const i = path.lastIndexOf("/");
@@ -40,6 +42,17 @@ type PasteOptions = {
   refresh: (destDir: string) => Promise<boolean>;
 };
 
+/**
+ * Files the user drops or pastes are copied from where they are: their folders
+ * are authorized first. They are host paths, whatever the workspace.
+ */
+export async function authorizeSources(sources: string[]): Promise<void> {
+  const folders = new Set(sources.map(hostParentDir));
+  await Promise.all(
+    [...folders].map((folder) => authorizeFolder(folder, { kind: "local" })),
+  );
+}
+
 export function reportCopyFailures(result: CopyResult): void {
   if (result.failed.length === 0) return;
   const first = result.failed[0];
@@ -62,6 +75,7 @@ export async function pasteClipboardFiles(
       return [];
     }
     copyStarted = true;
+    await authorizeSources(sources);
     const result = await invoke<CopyResult>("fs_copy", {
       sources,
       destDir,

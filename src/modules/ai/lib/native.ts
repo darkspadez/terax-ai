@@ -177,11 +177,6 @@ export type GitBranchListResult = {
 
 export const native = {
   workspaceCurrentDir: () => invoke<string>("workspace_current_dir"),
-  workspaceAuthorize: (path: string) =>
-    invoke<string>("workspace_authorize", {
-      path,
-      workspace: currentWorkspaceEnv(),
-    }),
   readFile: (path: string) =>
     invoke<ReadResult>("fs_read_file", {
       path,
