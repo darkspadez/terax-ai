@@ -462,7 +462,7 @@ export class GhosttyInputController {
     const data = {
       action: event.repeat ? KeyAction.REPEAT : KeyAction.PRESS,
       key,
-      mods: keyModifiers(event),
+      mods: modifiers(event),
       consumedMods: consumedModifiers(event, utf8),
       utf8,
       unshiftedCodepoint: unshiftedCodepoint(event),
@@ -510,7 +510,7 @@ export class GhosttyInputController {
     const data = {
       action: event.repeat ? KeyAction.REPEAT : KeyAction.PRESS,
       key,
-      mods: keyModifiers(event),
+      mods: modifiers(event),
       consumedMods: consumedModifiers(event, text),
       utf8: text,
       unshiftedCodepoint:
@@ -536,7 +536,7 @@ export class GhosttyInputController {
     const encoded = this.options.model.encodeKey({
       ...pressed,
       action: KeyAction.RELEASE,
-      mods: keyModifiers(event),
+      mods: modifiers(event),
       utf8: undefined,
     });
     if (encoded.byteLength > 0) {
@@ -894,21 +894,6 @@ function modifiers(
   if (event.getModifierState?.("CapsLock")) result |= Mods.CAPSLOCK;
   if (event.getModifierState?.("NumLock")) result |= Mods.NUMLOCK;
   return result;
-}
-
-/**
- * Modifiers reported with a key. Num Lock only goes with keypad keys, where
- * it decides what the key types: it is on by default on most Windows and
- * Linux keyboards, and Kitty mode would otherwise send every arrow as
- * `CSI 1;129A`, an unknown key to programs that compare modifiers exactly.
- */
-function keyModifiers(
-  event: Pick<KeyboardEvent, "code" | "shiftKey" | "ctrlKey" | "altKey" | "metaKey"> & {
-    readonly getModifierState?: (key: string) => boolean;
-  },
-): Mods {
-  const mods = modifiers(event);
-  return event.code.startsWith("Numpad") ? mods : mods & ~Mods.NUMLOCK;
 }
 
 function consume(event: Event): void {

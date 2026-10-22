@@ -809,7 +809,7 @@ describe.each(["ghostty-vt.wasm", "ghostty-vt-scalar.wasm"])(
       dispose();
     });
 
-    it("reports Num Lock only with keypad keys", () => {
+    it("reports the lock keys with every key, as Ghostty and Kitty do", () => {
       const { input, sent, write, dispose } = setup();
       const numLock = (key: string) => key === "NumLock";
       write("\x1b[>9u");
@@ -823,7 +823,8 @@ describe.each(["ghostty-vt.wasm", "ghostty-vt-scalar.wasm"])(
       input.dispatchEvent(
         keyboardEvent({ key: "1", code: "Numpad1", getModifierState: numLock }),
       );
-      expect(sent).toEqual(["\x1b[A", "\x1b[57400;129u"]);
+      // Programs speaking the protocol mask the lock bits (pi, Neovim).
+      expect(sent).toEqual(["\x1b[1;129A", "\x1b[57400;129u"]);
       dispose();
     });
 

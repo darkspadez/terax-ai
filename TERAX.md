@@ -260,7 +260,8 @@ program cannot turn on Kitty report-events or report-alternates
 (`supportedKittyKeyboardFlags`, applied by the core to every push and set, so
 queries report what is in force): the inbox ConPTY drops any input CSI with a
 `:` sub-parameter, which those flags put in arrows, releases and shifted keys.
-Num Lock is reported only with keypad keys.
+Caps Lock and Num Lock are reported with every key, as Ghostty and Kitty do;
+programs speaking the protocol mask them.
 Keydowns an input method owns (during a composition, dead keys, keyCode 229
 on character keys) are left to the webview, whose input and composition
 events carry the text (`isInputMethodKeyDown`); arrows, Home, End, Page keys,
