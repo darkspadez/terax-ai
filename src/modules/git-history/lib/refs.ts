@@ -16,3 +16,17 @@ export function splitRefs(
 export function refsMatch(refs: readonly GitLogRef[], query: string): boolean {
   return refs.some((ref) => ref.name.toLowerCase().includes(query));
 }
+
+/**
+ * The branch a commit can be undone on: the commit HEAD's branch points at,
+ * with a parent to go back to. `null` for anything else, a detached HEAD
+ * included.
+ */
+export function undoableBranch(commit: {
+  refs: readonly GitLogRef[];
+  parents: readonly string[];
+}): string | null {
+  if (commit.parents.length === 0) return null;
+  const head = commit.refs.find((ref) => ref.head && ref.kind === "branch");
+  return head?.name ?? null;
+}

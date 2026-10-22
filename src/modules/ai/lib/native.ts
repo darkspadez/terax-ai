@@ -360,6 +360,20 @@ export const native = {
       sha,
       workspace: currentWorkspaceEnv(),
     }),
+  /** `git reset --soft` to the parent, only while HEAD is still `expectedHead`. */
+  gitUndoCommit: (repoRoot: string, expectedHead: string) =>
+    invoke<void>("git_undo_commit", {
+      repoRoot,
+      expectedHead,
+      workspace: currentWorkspaceEnv(),
+    }),
+  /** The first remote-tracking branch already containing `sha`, if any. */
+  gitCommitOnRemote: (repoRoot: string, sha: string) =>
+    invoke<string | null>("git_commit_on_remote", {
+      repoRoot,
+      sha,
+      workspace: currentWorkspaceEnv(),
+    }),
   gitCommitFiles: (repoRoot: string, sha: string) =>
     invoke<GitCommitFileChange[]>("git_commit_files", {
       repoRoot,

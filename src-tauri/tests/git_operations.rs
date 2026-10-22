@@ -857,3 +857,96 @@ fn log_reports_the_branches_and_tags_on_each_commit() {
     fx.run_git(&["checkout", "-q", "--detach", "HEAD~1"]);
     assert_eq!(refs(&log()[0])[0], owned("head", "HEAD", true));
 }
+
+fn commit_file(fx: &GitRepoFixture, name: &str) {
+    fx.write_file(&format!("{name}.txt"), "x\n");
+    fx.run_git(&["add", "."]);
+    fx.run_git(&["commit", "-q", "-m", name]);
+}
+
+fn head_sha(fx: &GitRepoFixture) -> String {
+    git_stdout(fx, &["rev-parse", "HEAD"]).remove(0)
+}
+
+#[test]
+fn undo_last_commit_moves_its_changes_back_to_the_index() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    commit_file(&fx, "first");
+    let first = head_sha(&fx);
+    commit_file(&fx, "second");
+    let second = head_sha(&fx);
+
+    operations::undo_last_commit(&fx.registry, &fx.repo_str(), &second, &fx.workspace)
+        .expect("undo");
+    assert_eq!(head_sha(&fx), first);
+    assert_eq!(git_stdout(&fx, &["rev-parse", "ORIG_HEAD"]), vec![second]);
+    let snap = operations::status(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
+    let entry = snap
+        .changed_files
+        .iter()
+        .find(|f| f.path == "second.txt")
+        .expect("the undone change is back");
+    assert!(entry.staged);
+}
+
+#[test]
+fn undo_last_commit_refuses_a_commit_that_is_no_longer_head() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    commit_file(&fx, "first");
+    commit_file(&fx, "second");
+    let chosen = head_sha(&fx);
+    // A commit lands after the history was loaded.
+    commit_file(&fx, "third");
+    let third = head_sha(&fx);
+
+    let err = operations::undo_last_commit(&fx.registry, &fx.repo_str(), &chosen, &fx.workspace)
+        .expect_err("a stale HEAD must not be undone");
+    assert!(err.to_string().contains("HEAD moved"));
+    assert_eq!(head_sha(&fx), third, "history is untouched");
+
+    for bad in ["not-a-sha", "abc123", ""] {
+        assert!(
+            operations::undo_last_commit(&fx.registry, &fx.repo_str(), bad, &fx.workspace).is_err()
+        );
+    }
+    assert_eq!(head_sha(&fx), third);
+}
+
+#[test]
+fn undo_last_commit_refuses_the_first_commit() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    commit_file(&fx, "first");
+    let first = head_sha(&fx);
+    let err = operations::undo_last_commit(&fx.registry, &fx.repo_str(), &first, &fx.workspace)
+        .expect_err("the root commit has no parent to go back to");
+    assert!(err.to_string().contains("first commit"));
+    assert_eq!(head_sha(&fx), first);
+}
+
+#[test]
+fn commit_on_remote_names_a_remote_branch_that_contains_it() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    commit_file(&fx, "first");
+    let pushed = head_sha(&fx);
+    commit_file(&fx, "second");
+    let local = head_sha(&fx);
+    fx.run_git(&["update-ref", "refs/remotes/origin/main", &pushed]);
+
+    let on_remote =
+        |sha: &str| operations::commit_on_remote(&fx.registry, &fx.repo_str(), sha, &fx.workspace);
+    assert_eq!(on_remote(&pushed).unwrap().as_deref(), Some("origin/main"));
+    assert_eq!(on_remote(&local).unwrap(), None);
+    assert!(on_remote("not-a-sha").is_err());
+}

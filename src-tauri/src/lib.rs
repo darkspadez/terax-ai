@@ -335,6 +335,8 @@ pub fn run() {
             git::commands::git_unstage,
             git::commands::git_discard,
             git::commands::git_commit,
+            git::commands::git_undo_commit,
+            git::commands::git_commit_on_remote,
             git::commands::git_fetch,
             git::commands::git_pull_ff_only,
             git::commands::git_push,

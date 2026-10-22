@@ -1,6 +1,6 @@
 import type { GitLogRef } from "@/modules/ai/lib/native";
 import { describe, expect, it } from "vitest";
-import { refsMatch, splitRefs } from "./refs";
+import { refsMatch, splitRefs, undoableBranch } from "./refs";
 
 const ref = (name: string, kind: GitLogRef["kind"] = "branch"): GitLogRef => ({
   kind,
@@ -34,5 +34,30 @@ describe("refsMatch", () => {
     expect(refsMatch(refs, "release")).toBe(true);
     expect(refsMatch(refs, "main")).toBe(true);
     expect(refsMatch(refs, "feature")).toBe(false);
+  });
+});
+
+describe("undoableBranch", () => {
+  const head = (name: string): GitLogRef => ({
+    kind: "branch",
+    name,
+    head: true,
+  });
+
+  it("is the branch HEAD is on when the commit has a parent", () => {
+    expect(undoableBranch({ refs: [head("main")], parents: ["p"] })).toBe(
+      "main",
+    );
+  });
+
+  it("is nothing for the first commit, another commit or a detached HEAD", () => {
+    expect(undoableBranch({ refs: [head("main")], parents: [] })).toBeNull();
+    expect(undoableBranch({ refs: [ref("main")], parents: ["p"] })).toBeNull();
+    expect(
+      undoableBranch({
+        refs: [{ kind: "head", name: "HEAD", head: true }],
+        parents: ["p"],
+      }),
+    ).toBeNull();
   });
 });

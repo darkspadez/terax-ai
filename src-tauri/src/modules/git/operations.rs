@@ -490,6 +490,100 @@ pub fn commit(
     })
 }
 
+/// Undoes the newest commit the way `git reset --soft HEAD~1` does: the branch moves back to
+/// the commit's first parent and its changes stay staged, so nothing is lost. `expected_head`
+/// is the commit the user chose: the move is a compare-and-swap on HEAD, so a commit made in
+/// the meantime fails it instead of being undone in its place.
+pub fn undo_last_commit(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    expected_head: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<()> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    if expected_head.len() != 40 || !sha_is_safe(expected_head) {
+        return Err(GitError::command(
+            "undo commit",
+            "expected a full commit sha",
+        ));
+    }
+    // The parent comes from the chosen commit, not from HEAD, so a racing commit cannot
+    // change which commit is undone.
+    let parent = git_stdout_line_opt(
+        &repo_root.workspace,
+        &repo_root.git_path,
+        [
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{expected_head}^"),
+        ],
+    )?
+    .ok_or_else(|| GitError::command("undo commit", "the first commit cannot be undone"))?;
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        [
+            "update-ref",
+            "-m",
+            "reset: moving to HEAD~1",
+            "HEAD",
+            &parent,
+            expected_head,
+        ],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    if output.timed_out || output.exit_code != Some(0) {
+        return Err(GitError::command(
+            "undo commit",
+            "HEAD moved since the history was loaded; refresh and try again",
+        ));
+    }
+    // As `git reset` does; it is also what tells Source Control's watcher HEAD moved.
+    let _ = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        ["update-ref", "ORIG_HEAD", expected_head],
+        DEFAULT_TIMEOUT_SECS,
+    );
+    Ok(())
+}
+
+/// The first remote-tracking branch that already contains `sha`, if any: undoing such a commit
+/// rewrites history that was shared.
+pub fn commit_on_remote(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    sha: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<Option<String>> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    if !sha_is_safe(sha) {
+        return Err(GitError::command(
+            "git for-each-ref",
+            "invalid commit identifier",
+        ));
+    }
+    let contains = format!("--contains={sha}");
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        [
+            "for-each-ref",
+            "--count=1",
+            contains.as_str(),
+            "--format=%(refname:short)",
+            "refs/remotes",
+        ],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git for-each-ref failed")?;
+    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok((!name.is_empty()).then_some(name))
+}
+
 pub fn push(
     registry: &WorkspaceRegistry,
     repo_root: &str,
