@@ -68,6 +68,43 @@ export function localPathKey(path: string): string {
   return /^[A-Za-z]:(\/|$)/.test(trimmed) ? trimmed.toLowerCase() : trimmed;
 }
 
+export type FolderPlan = {
+  /** The local space rooted at the folder, else a new one to add. */
+  space:
+    | { kind: "existing"; id: string }
+    | { kind: "new"; name: string; root: string };
+  /** A terminal of that space whose active pane is in the folder. */
+  tabId: number | null;
+};
+
+/**
+ * Where a folder Terax is asked to open goes (command line, Open in Terax,
+ * Open Folder): the local space rooted at it, else a new one named after it,
+ * on a terminal whose active pane is there, else a new terminal there.
+ */
+export function planOpenFolder(
+  spaces: SpaceMeta[],
+  tabs: Tab[],
+  folder: string,
+): FolderPlan {
+  const key = localPathKey(folder);
+  const space = spaces.find(
+    (s) => s.env.kind === "local" && s.root && localPathKey(s.root) === key,
+  );
+  if (!space) {
+    return {
+      space: { kind: "new", name: basename(folder), root: folder },
+      tabId: null,
+    };
+  }
+  const tab = tabs.find((t) => {
+    if (t.kind !== "terminal" || t.spaceId !== space.id) return false;
+    const cwd = findLeafCwd(t.paneTree, t.activeLeafId);
+    return cwd !== undefined && localPathKey(cwd) === key;
+  });
+  return { space: { kind: "existing", id: space.id }, tabId: tab?.id ?? null };
+}
+
 type ExplicitLaunchDir = {
   spaces: SpaceMeta[];
   tabs: Tab[];
@@ -79,9 +116,8 @@ type ExplicitLaunchDir = {
 };
 
 /**
- * Where a folder Terax was asked to open goes among restored spaces: the
- * local space rooted at it (else a new one named after it), on a terminal
- * whose active pane is there (else a new tab at the end of that space).
+ * Applies `planOpenFolder` to the restored spaces and tabs at boot: a new
+ * space joins the end of the list and a new terminal the end of its space.
  */
 export function applyExplicitLaunchDir({
   spaces,
@@ -96,35 +132,32 @@ export function applyExplicitLaunchDir({
   tabs: Tab[];
   activeTabId: number;
 } {
-  const key = localPathKey(launchDir);
-  let target = spaces.find(
-    (s) => s.env.kind === "local" && s.root && localPathKey(s.root) === key,
-  );
+  const plan = planOpenFolder(spaces, tabs, launchDir);
   let nextSpaces = spaces;
-  if (!target) {
+  let spaceId: string;
+  if (plan.space.kind === "existing") {
+    spaceId = plan.space.id;
+  } else {
     const timestamp = now();
-    target = {
-      id: makeSpaceId(),
-      name: basename(launchDir),
-      root: launchDir,
-      env: { kind: "local" },
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-    nextSpaces = [...spaces, target];
+    spaceId = makeSpaceId();
+    nextSpaces = [
+      ...spaces,
+      {
+        id: spaceId,
+        name: plan.space.name,
+        root: plan.space.root,
+        env: { kind: "local" },
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      },
+    ];
   }
-  const spaceId = target.id;
-  const existing = tabs.find((t) => {
-    if (t.kind !== "terminal" || t.spaceId !== spaceId) return false;
-    const cwd = findLeafCwd(t.paneTree, t.activeLeafId);
-    return cwd !== undefined && localPathKey(cwd) === key;
-  });
-  if (existing) {
+  if (plan.tabId !== null) {
     return {
       spaces: nextSpaces,
       activeSpaceId: spaceId,
       tabs,
-      activeTabId: existing.id,
+      activeTabId: plan.tabId,
     };
   }
   const tab = freshTerminalTab(spaceId, launchDir, allocId);

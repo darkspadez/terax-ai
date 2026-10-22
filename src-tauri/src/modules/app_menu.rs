@@ -3,7 +3,7 @@ use tauri::{
         AboutMetadata, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu,
         HELP_SUBMENU_ID, WINDOW_SUBMENU_ID,
     },
-    AppHandle, Runtime,
+    AppHandle, Emitter, Runtime,
 };
 
 use super::windows;
@@ -12,6 +12,8 @@ const GUARDED_QUIT_MENU_ID: &str = "terax.quit";
 const QUIT_ACCELERATOR: &str = "Command+Q";
 const NEW_WINDOW_MENU_ID: &str = "terax.new-window";
 const NEW_WINDOW_ACCELERATOR: &str = "Command+Shift+N";
+const OPEN_FOLDER_MENU_ID: &str = "terax.open-folder";
+const OPEN_FOLDER_EVENT: &str = "terax:open-folder-requested";
 const CLOSE_TAB_MENU_ID: &str = "terax.close-tab";
 const CLOSE_TAB_ACCELERATOR: &str = "Command+W";
 const CLOSE_WINDOW_MENU_ID: &str = "terax.close-window";
@@ -24,7 +26,8 @@ fn is_guarded_quit(id: &MenuId) -> bool {
 /// The macOS menu bar, built whole rather than by editing `Menu::default` in
 /// place: the app menu, the one whose predefined Quit used to be removed and
 /// replaced, stayed open after Escape or a click elsewhere. Quit, New Window,
-/// Close Tab and Close Window are ours; the rest are AppKit's own items.
+/// Open Folder, Close Tab and Close Window are ours; the rest are AppKit's own
+/// items.
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let package = app.package_info();
     let config = app.config();
@@ -75,6 +78,13 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
                 "New Window",
                 true,
                 Some(NEW_WINDOW_ACCELERATOR),
+            )?,
+            &MenuItem::with_id(
+                app,
+                OPEN_FOLDER_MENU_ID,
+                "Open Folder\u{2026}",
+                true,
+                None::<&str>,
             )?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(
@@ -148,6 +158,11 @@ pub fn handle_event(app: &AppHandle, event: MenuEvent) {
         windows::request_quit(app);
     } else if id == NEW_WINDOW_MENU_ID {
         windows::request_new_window(app);
+    } else if id == OPEN_FOLDER_MENU_ID {
+        // The window in front picks the folder and opens it in its spaces.
+        if let Some(window) = windows::target_window(app) {
+            let _ = window.emit_to(window.label(), OPEN_FOLDER_EVENT, ());
+        }
     } else if id == CLOSE_TAB_MENU_ID {
         windows::request_close_tab(app);
     } else if id == CLOSE_WINDOW_MENU_ID {

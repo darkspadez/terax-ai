@@ -166,6 +166,7 @@ import {
 } from "./hooks/tabCloseGuards";
 import { aiToggleAction } from "./hooks/aiToggle";
 import { useAppCloseGuard } from "./hooks/useAppCloseGuard";
+import { useOpenFolder } from "./hooks/useOpenFolder";
 import { useTabCloseGuards } from "./hooks/useTabCloseGuards";
 import { useWorkspaceSwitcher } from "./hooks/useWorkspaceSwitcher";
 
@@ -241,6 +242,7 @@ export default function App() {
   // (e.g. cdInNewTab) read the latest pane state instead of a stale closure.
   const tabsRef = useRef(tabs);
   const activeIdRef = useRef(activeId);
+  const openFolder = useOpenFolder({ tabsRef, newTabInSpace, setActiveId });
 
   const activeTerminalTab = useMemo(() => {
     const t = tabs.find((x) => x.id === activeId);
@@ -1413,6 +1415,7 @@ export default function App() {
       onOpenChange={setSwitcherOpen}
       tabs={tabs}
       onNewSpace={() => void handleNewSpace()}
+      onOpenFolder={openFolder}
       onDeleteSpace={handleDeleteSpace}
       onNewTabInSpace={handleNewTabInSpace}
       onJumpTab={jumpToTab}
@@ -1434,6 +1437,7 @@ export default function App() {
             home,
             openNewTab,
             openNewWindow: openWindow,
+            openFolder,
             quit: () => void quitApp(),
             openNewBlock: openNewBlockTab,
             openNewPrivate: openNewPrivateTab,
@@ -1462,6 +1466,7 @@ export default function App() {
         : [],
     [
       openWindow,
+      openFolder,
       commandPaletteOpen,
       tabs,
       activeId,
@@ -1701,6 +1706,7 @@ export default function App() {
                           }
                           onOpenGitHistory={handleOpenGitHistoryForPath}
                           onAttachToAgent={handleAttachFileToAgent}
+                          onOpenFolder={openFolder}
                           pathDropTarget={terminalPathDropTarget}
                           visible={!sidebarCollapsed}
                         />

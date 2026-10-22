@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "dialog",
+  "description": "The native folder picker behind Open Folder, in app windows only: open, never save or message dialogs.",
+  "windows": [
+    "main",
+    "w-*"
+  ],
+  "permissions": [
+    "dialog:allow-open"
+  ]
+}

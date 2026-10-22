@@ -12,6 +12,7 @@ import {
   ArrowRight01Icon,
   Cancel01Icon,
   Delete02Icon,
+  FolderOpenIcon,
   PencilEdit02Icon,
   PlusSignIcon,
 } from "@hugeicons/core-free-icons";
@@ -29,6 +30,7 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   tabs: Tab[];
   onNewSpace: () => void;
+  onOpenFolder: () => void;
   onDeleteSpace: (id: string) => void;
   onNewTabInSpace: (spaceId: string) => void;
   onJumpTab: (id: number) => void;
@@ -76,6 +78,7 @@ export function SpaceSwitcher({
   onOpenChange,
   tabs,
   onNewSpace,
+  onOpenFolder,
   onDeleteSpace,
   onNewTabInSpace,
   onJumpTab,
@@ -327,6 +330,17 @@ export function SpaceSwitcher({
           >
             <HugeiconsIcon icon={PlusSignIcon} size={14} strokeWidth={1.75} />
             <span className="flex-1">New space</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onOpenChange(false);
+              onOpenFolder();
+            }}
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+          >
+            <HugeiconsIcon icon={FolderOpenIcon} size={14} strokeWidth={1.75} />
+            <span className="flex-1">Open folder…</span>
           </button>
         </div>
       </PopoverContent>
