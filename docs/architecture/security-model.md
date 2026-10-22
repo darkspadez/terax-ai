@@ -48,7 +48,7 @@ Asset URLs (`asset://localhost/...`, `http(s)://asset.localhost/...` on Windows)
 - every root the workspace registry authorizes, recursively, through `WorkspaceRegistry::watch_roots` (roots authorized before the app existed are replayed). The editor's media and PDF previews and the Markdown preview's images load from there. A WSL root is registered by its host path (the `\\wsl.localhost` share or the drive of a `/mnt/<drive>` path), which is also what `fs_host_path` maps a WSL file to for its URL. A root inside one already granted adds nothing, unless the way down passes a dot folder the wildcard skips.
 - each installed font face `system_font_faces` returns, as a single file, for the terminal's font features.
 
-Tauri canonicalizes every requested path before matching, so a link pointing out of a granted root is refused. On Unix the wildcards never enter names starting with a dot (Tauri's default), so a granted home folder does not serve `~/.ssh`. Never widen the configured scope (no `**`); grant what a feature needs where it needs it.
+Tauri canonicalizes every requested path before matching, so a link pointing out of a granted root is refused. The configured scope sets `requireLiteralLeadingDot`, so on every platform the wildcards never enter names starting with a dot and a granted home folder does not serve `~/.ssh` (Tauri's default does this only on Unix, which on Windows would serve `C:\Users\<me>\.ssh`). Never widen the configured scope (no `**`); grant what a feature needs where it needs it.
 
 ## Opening files in their default app
 

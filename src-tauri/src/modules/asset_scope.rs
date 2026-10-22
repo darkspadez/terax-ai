@@ -8,8 +8,9 @@
 //!   `fs_host_path` turns a WSL file into for its asset URL.
 //! - each installed font face `system_font_faces` hands the terminal, as a single file.
 //!
-//! Wildcards follow the scope's dot rule (Tauri's default: on Unix `**` never enters a name
-//! starting with a dot), so a granted home folder does not expose `~/.ssh`.
+//! The configured scope sets `requireLiteralLeadingDot`, so on every platform `**` never enters
+//! a name starting with a dot and a granted home folder does not expose `~/.ssh`. Tauri's
+//! default skips dot names only on Unix, which on Windows would serve `C:\Users\me\.ssh`.
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
@@ -173,6 +174,11 @@ mod tests {
             &granted,
             false
         ));
+        assert!(needs_grant(
+            Path::new(r"\\?\C:\Users\me\.ssh"),
+            &granted,
+            true
+        ));
         assert!(needs_grant(Path::new(r"\\?\D:\photos"), &granted, false));
     }
 
@@ -204,5 +210,15 @@ mod tests {
             let scope: FsScope = serde_json::from_value(scope.clone()).unwrap();
             assert!(scope.allowed_paths().is_empty(), "{scope:?}");
         }
+    }
+
+    #[test]
+    fn wildcards_skip_dot_names_on_every_platform() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+        let scope: FsScope =
+            serde_json::from_value(config["app"]["security"]["assetProtocol"]["scope"].clone())
+                .unwrap();
+        assert!(literal_leading_dot(&scope));
     }
 }
