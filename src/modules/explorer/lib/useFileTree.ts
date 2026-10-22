@@ -19,6 +19,7 @@ import {
   type FsMoveResult,
 } from "./batchMove";
 import { refreshTargets } from "./refreshTargets";
+import { dirname } from "./treePaths";
 import { listenFsChanged, watchAdd, watchRemove } from "./watch";
 import { createWatchRegistry, planVisibilityEdge } from "./watchRegistry";
 
@@ -48,12 +49,6 @@ export type PendingCreate = {
 export function joinPath(parent: string, name: string): string {
   if (parent.endsWith("/")) return `${parent}${name}`;
   return `${parent}/${name}`;
-}
-
-function dirname(path: string): string {
-  const i = path.lastIndexOf("/");
-  if (i <= 0) return "/";
-  return path.slice(0, i);
 }
 
 const EXPANSION_CACHE_LIMIT = 8;
@@ -483,7 +478,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       if (!renaming) return;
       const trimmed = newName.trim();
       const parent = dirname(renaming);
-      const oldName = renaming.slice(parent === "/" ? 1 : parent.length + 1);
+      const oldName = renaming.slice(renaming.lastIndexOf("/") + 1);
       if (!trimmed || trimmed === oldName) {
         setRenaming(null);
         return;

@@ -38,8 +38,10 @@ export function listenFsChanged(
   );
 }
 
+/** The folder holding `path`; a drive root keeps its slash (`D:/`, not `D:`). */
 export function parentDir(path: string): string {
   const i = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   if (i <= 0) return path.slice(0, i + 1) || path;
+  if (i === 2 && /^[A-Za-z]:[\\/]/.test(path)) return path.slice(0, 3);
   return path.slice(0, i);
 }

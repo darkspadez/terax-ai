@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { excludeNestedSources } from "./batchMove";
+import { dirname } from "./treePaths";
 
 export type ExplorerPathDropTarget = {
   updateTarget: (clientX: number, clientY: number) => boolean;
@@ -25,11 +26,6 @@ type Options = {
 
 const THRESHOLD = 5;
 
-function parentDir(path: string): string {
-  const i = path.lastIndexOf("/");
-  return i > 0 ? path.slice(0, i) : path;
-}
-
 export function resolveExplorerMoveTarget(
   sources: string[],
   rootPath: string,
@@ -41,10 +37,10 @@ export function resolveExplorerMoveTarget(
   const target = hoveredPath
     ? isDir(hoveredPath)
       ? hoveredPath
-      : parentDir(hoveredPath)
+      : dirname(hoveredPath)
     : rootPath;
   const allAlreadyInTarget = sources.every(
-    (source) => parentDir(source) === target,
+    (source) => dirname(source) === target,
   );
   if (allAlreadyInTarget) return null;
   for (const source of sources) {

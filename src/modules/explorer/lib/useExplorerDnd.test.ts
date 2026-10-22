@@ -56,6 +56,22 @@ describe("resolveExplorerMoveTarget", () => {
     ).toBeNull();
   });
 
+  it("drops onto a file at a drive root into the root itself", () => {
+    const noDirs = () => false;
+    expect(
+      resolveExplorerMoveTarget(
+        ["D:/src/a.ts"],
+        "D:/",
+        "D:/b.ts",
+        true,
+        noDirs,
+      ),
+    ).toBe("D:/");
+    expect(
+      resolveExplorerMoveTarget(["D:/a.ts"], "D:/", "D:/b.ts", true, noDirs),
+    ).toBeNull();
+  });
+
   it("rejects no-op and recursive directory moves", () => {
     expect(
       resolveExplorerMoveTarget(
