@@ -5,6 +5,8 @@ pub mod app_menu;
 #[cfg(feature = "bench")]
 pub mod bench;
 pub mod clipboard_image;
+#[cfg(target_os = "linux")]
+pub mod color_scheme;
 pub mod control;
 pub mod fs;
 pub mod git;

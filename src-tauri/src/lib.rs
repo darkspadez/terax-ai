@@ -243,6 +243,8 @@ pub fn run() {
             modules::bench::guard(_app.handle())?;
             #[cfg(target_os = "macos")]
             modules::window_presentation::macos::install(_app.handle());
+            #[cfg(target_os = "linux")]
+            modules::color_scheme::follow();
             if let Err(error) = control::start(_app.handle().clone(), control_for_setup.clone()) {
                 log::warn!("could not start Terax control server: {error}");
             }
