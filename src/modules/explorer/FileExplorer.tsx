@@ -293,11 +293,10 @@ export const FileExplorer = memo(
     const rowActions = useMemo<RowActions>(
       () => ({
         toggle: tree.toggle,
-        beginRename: tree.beginRename,
         commitRename: tree.commitRename,
         cancelRename: tree.cancelRename,
       }),
-      [tree.toggle, tree.beginRename, tree.commitRename, tree.cancelRename],
+      [tree.toggle, tree.commitRename, tree.cancelRename],
     );
     const renameInProgress =
       tree.renaming !== null || tree.pendingCreate !== null;
@@ -610,6 +609,12 @@ export const FileExplorer = memo(
           }
           break;
         }
+        case "F2": {
+          if (currentIdx < 0 || selectedPaths.size > 1) return;
+          e.preventDefault();
+          tree.beginRename(entryPaths[currentIdx]);
+          break;
+        }
         case "Enter": {
           if (currentIdx < 0) return;
           e.preventDefault();
@@ -641,7 +646,6 @@ export const FileExplorer = memo(
               isSelected={selectedPaths.has(row.path)}
               isRenaming={row.kind === "rename"}
               isDropTarget={dropTargetDir === row.path}
-              multiSelectActive={selectedPaths.size > 1}
               onOpenFile={onOpenFile}
               onSelectPath={handleEntrySelect}
               gitStatusCode={row.gitStatusCode}
@@ -986,6 +990,13 @@ export const FileExplorer = memo(
                     Attach to Agent
                   </ContextMenuItem>
                   <ContextMenuSeparator />
+                  <ContextMenuItem
+                    className={COMPACT_ITEM}
+                    onSelect={() => tree.beginRename(menuTarget.path)}
+                  >
+                    Rename
+                    <ContextMenuShortcut>F2</ContextMenuShortcut>
+                  </ContextMenuItem>
                   <ContextMenuItem
                     className={COMPACT_ITEM}
                     variant="destructive"
