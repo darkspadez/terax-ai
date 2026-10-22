@@ -314,6 +314,10 @@ preserve primary block history. Block scrollbar status dots are removed along
 with their timers and history scans.
 
 The shared command bar activates after shell integration confirms prompt input.
+Its completion list moves with the arrows or Ctrl+N / Ctrl+P and accepts with
+Tab or Ctrl+Y while it shows; with no list those keys do what they did before
+(`completionKeys.ts`), and off macOS the list claims the three Ctrl chords from
+the app's shortcuts (Ctrl+P is the palette) only while it shows.
 Bare shells keep direct terminal input. Bash before 4.4 reports
 `OSC 133;B;terax_blocks=0` and keeps its native prompt because it lacks PS0.
 

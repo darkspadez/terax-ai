@@ -67,7 +67,10 @@ export function isModChord(e: ModChord, key: string, isMac: boolean): boolean {
   return mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === key;
 }
 
-/** Marks a text box that handles one modifier chord itself (`mod+<key>`). */
+/**
+ * Marks a text box that handles modifier chords itself (`mod+<key>`; several
+ * keys separated by spaces).
+ */
 export const CLAIMS_MOD_KEY_ATTR = "data-claims-mod-key";
 
 /**
@@ -81,5 +84,7 @@ export function focusClaimsChord(
   claimed: string | null | undefined,
   isMac: boolean,
 ): boolean {
-  return !!claimed && isModChord(e, claimed, isMac);
+  return (
+    !!claimed && claimed.split(" ").some((key) => isModChord(e, key, isMac))
+  );
 }
