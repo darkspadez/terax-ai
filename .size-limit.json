@@ -15,7 +15,7 @@
     "path": [
       "dist/assets/*.js"
     ],
-    "limit": "1615 KB",
+    "limit": "1700 KB",
     "gzip": true
   },
   {
@@ -25,7 +25,7 @@
       "dist/assets/TerminalFitQueue-*.js",
       "dist/assets/ghostty-vt-*.js"
     ],
-    "limit": "71 KB",
+    "limit": "76 KB",
     "gzip": true
   },
   {
@@ -34,7 +34,7 @@
       "dist/assets/WebGlTerminalSurface-*.js",
       "dist/assets/WebGlTerminalRuntime-*.js"
     ],
-    "limit": "15 KB",
+    "limit": "16 KB",
     "gzip": true
   },
   {

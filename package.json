@@ -117,9 +117,7 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
-    "@babel/core": "^7.29.7",
     "@biomejs/biome": "^2.5.15",
-    "@rolldown/plugin-babel": "^0.2.4",
     "@size-limit/file": "^14.2.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "^2.12.3",
@@ -128,8 +126,8 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "@webgpu/types": "^0.1.74",
-    "babel-plugin-react-compiler": "^1.0.0",
     "knip": "^6.42.0",
+    "oxc-transform-react": "^0.154.0",
     "react-compiler-healthcheck": "^1.0.0",
     "react-scan": "^0.5.7",
     "rollup-plugin-visualizer": "^7.1.1",

@@ -1,6 +1,5 @@
-import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
-import react, { reactCompilerPreset } from "@vitejs/plugin-react";
+import react from "@vitejs/plugin-react";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { defineConfig, type PluginOption, type UserConfig } from "vite";
@@ -131,10 +130,10 @@ function lazyChunk(id: string): string | null {
 // https://vite.dev/config/
 export default defineConfig(async ({ mode }): Promise<UserConfig> => ({
   plugins: [
-    babel({
-      presets: [reactCompilerPreset({ target: "19" })],
-    }),
-    react(),
+    // React Compiler runs natively (oxc-transform-react, a Rust port) inside
+    // the React plugin: no Babel pass, and it also compiles the components
+    // whose try/catch value blocks babel-plugin-react-compiler skips.
+    react({ compiler: { target: "19" } }),
     tailwindcss(),
     // Module-graph inspector at /__inspect (who-imports-what, per-plugin
     // transforms). Opt-in via `bun run dev:inspect`, never in a production build.
