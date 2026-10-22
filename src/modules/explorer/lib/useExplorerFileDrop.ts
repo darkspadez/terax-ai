@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { nativeDropPoint } from "@/lib/nativeDropPoint";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import {
   parentDir,
@@ -17,22 +18,13 @@ type Options = {
   onCopied: (destDir: string) => void;
 };
 
-// Tauri reports the drop point in physical pixels on some platforms; scale down
-// only when it overflows the logical viewport (mirrors the terminal drop).
 function dirAt(
-  x: number,
-  y: number,
+  position: { x: number; y: number },
   rootPath: string | null,
   isDir: (p: string) => boolean | undefined,
 ): string | null {
-  let lx = x;
-  let ly = y;
-  if (x > window.innerWidth || y > window.innerHeight) {
-    const dpr = window.devicePixelRatio || 1;
-    lx = x / dpr;
-    ly = y / dpr;
-  }
-  const el = document.elementFromPoint(lx, ly) as HTMLElement | null;
+  const { x, y } = nativeDropPoint(position);
+  const el = document.elementFromPoint(x, y) as HTMLElement | null;
   if (!el) return null;
   const row = el.closest<HTMLElement>("[data-fs-path]");
   if (row) {
@@ -66,7 +58,7 @@ export function useExplorerFileDrop({
         const p = e.payload;
         const { rootPath, isDir, onCopied } = optsRef.current;
         if (p.type === "enter" || p.type === "over") {
-          setTargetDir(dirAt(p.position.x, p.position.y, rootPath, isDir));
+          setTargetDir(dirAt(p.position, rootPath, isDir));
           return;
         }
         if (p.type === "leave") {
@@ -74,7 +66,7 @@ export function useExplorerFileDrop({
           return;
         }
         if (p.type === "drop") {
-          const dir = dirAt(p.position.x, p.position.y, rootPath, isDir);
+          const dir = dirAt(p.position, rootPath, isDir);
           setTargetDir(null);
           if (!rootPath || !dir || p.paths.length === 0) return;
           const workspace = currentWorkspaceEnv();
