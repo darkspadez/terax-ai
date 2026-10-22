@@ -1098,7 +1098,7 @@ export default function App() {
           : null;
       if (shouldDisablePaneSwapShortcut(id, terminalPaneCount)) return true;
       if (
-        shouldDeferShortcutToTerminal(id, e, {
+        shouldDeferShortcutToTerminal(e, {
           isMac: IS_MAC,
           inTerminal: isTerminalSurfaceTarget(
             (e.target as HTMLElement | null) ?? document.activeElement,
@@ -1159,8 +1159,8 @@ export default function App() {
       }
       if (id === "sidebar.toggle") {
         // Ctrl+B is also Claude Code's "run in background" key. While a terminal
-        // is focused, let Ctrl+B reach the shell/Claude instead of toggling the
-        // sidebar. Ctrl+Shift+B (second binding) still toggles it from anywhere.
+        // is focused, let Cmd/Ctrl+B reach the shell/Claude instead of toggling
+        // the sidebar. Cmd/Ctrl+Shift+B still toggles it from anywhere.
         const target =
           (e.target as HTMLElement | null) ?? document.activeElement;
         const inTerminal = isTerminalSurfaceTarget(target);

@@ -3,7 +3,10 @@ import {
   shouldDeferShortcutToTerminal,
   shouldDisablePaneSwapShortcut,
 } from "@/modules/shortcuts/lib/shortcutScope";
-import { SHORTCUTS, type ShortcutId } from "@/modules/shortcuts/shortcuts";
+import {
+  defaultShortcuts,
+  type KeyBinding,
+} from "@/modules/shortcuts/shortcuts";
 
 describe("shouldDisablePaneSwapShortcut", () => {
   it.each([
@@ -46,84 +49,64 @@ describe("shouldDeferShortcutToTerminal", () => {
   const terminal = { isMac: false, inTerminal: true };
 
   it("gives a focused terminal Ctrl+<letter> and Ctrl+[ off macOS", () => {
-    for (const [id, key] of [
-      ["commandPalette.open", "p"],
-      ["pane.splitRight", "d"],
-      ["tab.newPrivate", "r"],
-      ["tab.close", "w"],
-      ["tab.newEditor", "e"],
-      ["search.focus", "f"],
-      ["tab.new", "t"],
-      ["pane.source", "g"],
-      ["ai.toggle", "i"],
-      ["pane.focusPrev", "["],
-      ["pane.focusNext", "]"],
-    ] as const) {
-      expect(shouldDeferShortcutToTerminal(id, chord(key), terminal)).toBe(
-        true,
-      );
+    for (const key of ["p", "d", "r", "w", "e", "f", "t", "g", "i", "j", "["]) {
+      expect(shouldDeferShortcutToTerminal(chord(key), terminal)).toBe(true);
     }
     // A Cyrillic layout types "з" on the P key.
     expect(
-      shouldDeferShortcutToTerminal(
-        "commandPalette.open",
-        chord("з", { code: "KeyP" }),
-        terminal,
-      ),
+      shouldDeferShortcutToTerminal(chord("з", { code: "KeyP" }), terminal),
     ).toBe(true);
   });
 
   it("keeps the app's other chords, macOS and focus elsewhere", () => {
-    const keep: [ShortcutId, ReturnType<typeof chord>][] = [
-      ["commandPalette.content", chord("P", { shift: true })],
-      ["tab.newBlock", chord("T", { shift: true })],
-      ["pane.swapLeft", chord("ArrowLeft", { alt: true })],
-      ["tab.next", chord("Tab")],
-      ["tab.selectByIndex", chord("1")],
-      ["settings.open", chord(",", { code: "Comma" })],
-      ["view.zoomIn", chord("=", { code: "Equal" })],
-      ["blocks.prev", chord("ArrowUp")],
-    ];
-    for (const [id, event] of keep) {
-      expect(shouldDeferShortcutToTerminal(id, event, terminal)).toBe(false);
+    for (const event of [
+      chord("P", { shift: true }),
+      chord("T", { shift: true, alt: true }),
+      chord("ArrowLeft", { alt: true }),
+      chord("Tab"),
+      chord("1"),
+      chord(",", { code: "Comma" }),
+      chord("=", { code: "Equal" }),
+      chord("ArrowUp"),
+    ]) {
+      expect(shouldDeferShortcutToTerminal(event, terminal)).toBe(false);
     }
     expect(
-      shouldDeferShortcutToTerminal("tab.close", chord("w"), {
+      shouldDeferShortcutToTerminal(chord("w"), {
         isMac: false,
         inTerminal: false,
       }),
     ).toBe(false);
     expect(
-      shouldDeferShortcutToTerminal("tab.close", chord("w"), {
+      shouldDeferShortcutToTerminal(chord("w"), {
         isMac: true,
         inTerminal: true,
       }),
     ).toBe(false);
-    // Only fires with terminal text selected.
-    expect(
-      shouldDeferShortcutToTerminal("ai.askSelection", chord("j"), terminal),
-    ).toBe(false);
   });
 
-  it("leaves every default Ctrl+Shift binding to the app", () => {
-    for (const shortcut of SHORTCUTS) {
-      for (const binding of shortcut.defaultBindings) {
-        if (!binding.shift) continue;
-        expect(
-          shouldDeferShortcutToTerminal(
-            shortcut.id,
-            {
-              ctrlKey: true,
-              shiftKey: true,
-              altKey: binding.alt ?? false,
-              metaKey: false,
-              key: binding.key,
-              code: "",
-            },
-            terminal,
-          ),
-        ).toBe(false);
+  // Every app shortcut works from a focused terminal through its first
+  // binding; editor shortcuts only run in editor tabs.
+  it.each(["windows", "linux"] as const)(
+    "reaches every %s shortcut from a focused terminal by its first binding",
+    (platform) => {
+      const deferred = (binding: KeyBinding) =>
+        shouldDeferShortcutToTerminal(
+          {
+            ctrlKey: binding.ctrl ?? false,
+            shiftKey: binding.shift ?? false,
+            altKey: binding.alt ?? false,
+            metaKey: binding.meta ?? false,
+            key: binding.key,
+            code: "",
+          },
+          terminal,
+        );
+      for (const shortcut of defaultShortcuts(platform)) {
+        if (shortcut.group === "Editor") continue;
+        const [first] = shortcut.defaultBindings;
+        if (first) expect(deferred(first), shortcut.id).toBe(false);
       }
-    }
-  });
+    },
+  );
 });
