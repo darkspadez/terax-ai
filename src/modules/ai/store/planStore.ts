@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { native } from "../lib/native";
+import { checkWritableCanonical } from "../lib/security";
 
 export type QueuedEdit = {
   id: string;
@@ -25,7 +26,8 @@ type PlanState = {
   enqueue: (q: QueuedEdit) => void;
   removeOne: (id: string) => void;
   clear: () => void;
-  /** Apply queued edits in order. Returns per-edit results. */
+  /** Apply the edits queued when called, in order, and drain only those;
+   * edits queued meanwhile stay for the next apply. Returns per-edit results. */
   applyAll: () => Promise<{ id: string; ok: boolean; error?: string }[]>;
 };
 
@@ -46,21 +48,35 @@ export const usePlanStore = create<PlanState>((set, get) => ({
     set((s) => ({ queue: s.queue.filter((q) => q.id !== id) })),
   clear: () => set({ queue: [] }),
   async applyAll() {
-    const items = get().queue;
     const results: { id: string; ok: boolean; error?: string }[] = [];
-    for (const q of items) {
+    const processed = new Set<string>();
+    for (const q of get().queue) {
+      // Rejected or discarded while earlier writes were running.
+      if (!get().queue.some((x) => x.id === q.id)) continue;
+      processed.add(q.id);
       try {
+        // Checked again where the write happens: a link on the path may
+        // have changed since the edit was queued.
+        const safety = await checkWritableCanonical(
+          q.path,
+          native.canonicalize,
+        );
+        if (!safety.ok) {
+          results.push({ id: q.id, ok: false, error: safety.reason });
+          continue;
+        }
         if (q.kind === "create_directory") {
-          await native.createDir(q.path);
+          await native.createDir(safety.canonical);
         } else {
-          await native.writeFile(q.path, q.proposedContent);
+          await native.writeFile(safety.canonical, q.proposedContent);
         }
         results.push({ id: q.id, ok: true });
       } catch (e) {
         results.push({ id: q.id, ok: false, error: String(e) });
       }
     }
-    set({ queue: [] });
+    // Edits the agent queued during the writes were not reviewed: keep them.
+    set((s) => ({ queue: s.queue.filter((q) => !processed.has(q.id)) }));
     return results;
   },
 }));

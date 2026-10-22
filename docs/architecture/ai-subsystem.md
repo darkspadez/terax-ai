@@ -70,7 +70,7 @@ Tool definitions live under `src/modules/ai/tools/`:
 - Read-only tools (`read_file`, `list_directory`, `grep`, `glob`) auto-execute after passing the security deny-list.
 - Mutating tools (`write_file`, `edit`, `multi_edit`, `create_directory`, `bash_run`, `bash_background`) set `needsApproval: true`. The AI SDK pauses and the UI renders an approval card.
 - `edit` / `multi_edit` enforce a read-before-edit invariant: the model must have read the file earlier in the session.
-- In plan mode, mutating tools queue edits for batch review instead of applying them immediately.
+- In plan mode, mutating tools queue edits for batch review instead of applying them immediately. Apply (`planStore.applyAll`) writes the edits queued when it was pressed, re-checks each path against the deny-list (canonicalized) at write time, skips edits rejected meanwhile, and leaves edits queued during the writes for the next review.
 
 Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalResponses`.
 
