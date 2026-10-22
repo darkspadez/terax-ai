@@ -1,4 +1,5 @@
 import { quoteShellArg } from "@/lib/shellQuote";
+import { parentDir } from "@/modules/explorer/lib/watch";
 import type { EditorFormatter } from "@/modules/settings/store";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
@@ -92,12 +93,6 @@ export function resolveFormatter(
   return langId && FORMATTERS[global].langs.includes(langId) ? global : "lsp";
 }
 
-function dirname(path: string): string {
-  const segs = path.split(/[\\/]/);
-  segs.pop();
-  return segs.join("/") || "/";
-}
-
 function buildCommand(
   formatter: ExternalFormatter,
   path: string,
@@ -127,7 +122,7 @@ export async function runExternalFormatter(
   try {
     const out = await invoke<CommandOutput>("shell_run_command", {
       command,
-      cwd: dirname(path),
+      cwd: parentDir(path),
       timeoutSecs: 20,
       workspace: currentWorkspaceEnv(),
     });

@@ -69,6 +69,26 @@ describe("runExternalFormatter", () => {
     );
   });
 
+  // `C:` alone is the current folder on drive C, not its root.
+  it("runs a file at a drive root in that root", async () => {
+    core.invoke.mockResolvedValue({
+      stdout: "",
+      stderr: "",
+      exit_code: 0,
+      timed_out: false,
+    });
+
+    await runExternalFormatter("biome", "C:\\a.ts");
+    await runExternalFormatter("biome", "C:\\src\\b.ts");
+    await runExternalFormatter("biome", "/a.ts");
+
+    expect(core.invoke.mock.calls.map(([, args]) => args.cwd)).toEqual([
+      "C:\\",
+      "C:\\src",
+      "/",
+    ]);
+  });
+
   it("reports a timeout and a failing stderr tail", async () => {
     core.invoke.mockResolvedValueOnce({
       stdout: "",
