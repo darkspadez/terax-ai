@@ -1,3 +1,4 @@
+export { useWorkspaceAssetUrl } from "./assetUrl";
 export {
   currentWorkspaceScopeKey,
   currentWorkspaceEnv,

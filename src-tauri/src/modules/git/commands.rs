@@ -99,6 +99,19 @@ pub async fn git_diff_content(
 }
 
 #[tauri::command]
+pub async fn git_file_base(
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<Option<String>, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        operations::file_base(r, &path, &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn git_stage(
     repo_root: String,
     paths: Vec<String>,

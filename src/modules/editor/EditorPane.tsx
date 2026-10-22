@@ -1,8 +1,13 @@
 import { endpointIdFromCompatModel } from "@/modules/ai/config";
 import { getCustomEndpointKey, getKey } from "@/modules/ai/lib/keyring";
+import { native } from "@/modules/ai/lib/native";
 import { lspFormatDocument, useLspExtension } from "@/modules/lsp";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { onKeysChanged } from "@/modules/settings/store";
+import {
+  type EditorDefaultIndent,
+  onKeysChanged,
+} from "@/modules/settings/store";
+import { useWorkspaceAssetUrl } from "@/modules/workspace";
 import { acceptCompletion, startCompletion } from "@codemirror/autocomplete";
 import { redo, undo } from "@codemirror/commands";
 import {
@@ -16,11 +21,14 @@ import {
 import { Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { vim } from "@replit/codemirror-vim";
-import { convertFileSrc } from "@tauri-apps/api/core";
-import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
+import CodeMirror, {
+  type ReactCodeMirrorProps,
+  type ReactCodeMirrorRef,
+} from "@uiw/react-codemirror";
 import {
   forwardRef,
   memo,
+  type Ref,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -48,15 +56,18 @@ import {
   wrapCompartment,
 } from "./lib/extensions";
 import {
-  applyFormattedContent,
   readFileText,
   resolveFormatter,
   runExternalFormatter,
 } from "./lib/externalFormat";
-import { detectIndentUnit } from "./lib/indent";
+import { normalizeToLf } from "./lib/eol";
+import { gitChangeGutter, setGitBase } from "./lib/gitGutter";
+import { onHeadMoved } from "./lib/gitSignals";
+import { defaultIndentUnit, detectIndentUnit } from "./lib/indent";
 import { type LanguageResult, resolveLanguage } from "./lib/languageResolver";
 import { FORCE_READ_LIMIT, useDocument } from "./lib/useDocument";
 import { useEditorThemeExt } from "./lib/useEditorThemeExt";
+import { applyFormattedContent, syncViewText } from "./lib/viewSync";
 import { initVimGlobals, vimHandlersExtension } from "./lib/vim";
 import { mediaPreviewKind } from "./lib/mediaPreview";
 import { MediaPreview } from "./MediaPreview";
@@ -73,8 +84,11 @@ export type EditorPaneHandle = {
   focus: () => void;
   getSelection: () => string | null;
   getPath: () => string;
-  /** Re-read the file from disk. Skips silently if the buffer is dirty. */
-  reload: () => boolean;
+  /**
+   * Re-read the file from disk. Skips silently if the buffer is dirty,
+   * unless `force` (the user discarded those edits).
+   */
+  reload: (options?: { force?: boolean }) => boolean;
   /** Move the cursor to a 1-based line and center it, once content is ready. */
   gotoLine: (line: number, options?: { focus?: boolean }) => void;
   /** Apply CodeMirror's undo/redo commands. */
@@ -101,6 +115,21 @@ type Props = {
 // parse tree and a didOpen of that size cost far more than they give.
 const SYNTAX_MAX_BYTES = 4 * 1024 * 1024;
 
+// CodeMirror replaces its document whenever `value` changes identity, so a
+// reload whose text equals the previous value never reached the view, and
+// typing that landed before the commit was clobbered. It takes the text it
+// mounts with; the pane pushes later text itself (syncViewText).
+function MountedCodeMirror({
+  initialValue,
+  ...props
+}: Omit<ReactCodeMirrorProps, "value"> & {
+  initialValue: string;
+  ref?: Ref<ReactCodeMirrorRef>;
+}) {
+  const [value] = useState(initialValue);
+  return <CodeMirror {...props} value={value} />;
+}
+
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -120,7 +149,7 @@ export const EditorPane = memo(
       mediaActive = true,
     } = props;
 
-    const { doc, onChange, save, reload, adoptDiskText, openAnyway } =
+    const { doc, onChange, save, reload, text, adoptDiskText, openAnyway } =
       useDocument({
         path,
         onDirtyChange,
@@ -286,32 +315,39 @@ export const EditorPane = memo(
       [],
     );
 
-    const applyPendingGoto = useCallback(() => {
-      const view = cmRef.current?.view;
-      const pending = pendingLineRef.current;
-      if (!view || pending == null || statusRef.current !== "ready") return;
-      if (pending.path !== path) {
+    const applyPendingGoto = useCallback(
+      (view = cmRef.current?.view) => {
+        const pending = pendingLineRef.current;
+        if (!view || pending == null || statusRef.current !== "ready") return;
+        if (pending.path !== path) {
+          pendingLineRef.current = null;
+          return;
+        }
+        const target = Math.max(
+          1,
+          Math.min(pending.line, view.state.doc.lines),
+        );
+        const at = view.state.doc.line(target).from;
+        view.dispatch({
+          selection: { anchor: at },
+          effects: EditorView.scrollIntoView(at, { y: "center" }),
+        });
+        if (pending.focus) focusWhenRendered(view, pending.path);
         pendingLineRef.current = null;
-        return;
-      }
-      const target = Math.max(1, Math.min(pending.line, view.state.doc.lines));
-      const at = view.state.doc.line(target).from;
-      view.dispatch({
-        selection: { anchor: at },
-        effects: EditorView.scrollIntoView(at, { y: "center" }),
-      });
-      if (pending.focus) focusWhenRendered(view, pending.path);
-      pendingLineRef.current = null;
-    }, [focusWhenRendered, path]);
+      },
+      [focusWhenRendered, path],
+    );
 
-    const applyPendingFocus = useCallback(() => {
-      const view = cmRef.current?.view;
-      const pendingPath = pendingFocusRef.current;
-      if (!view || pendingPath === null || statusRef.current !== "ready")
-        return;
-      pendingFocusRef.current = null;
-      if (pendingPath === path) focusWhenRendered(view, pendingPath);
-    }, [focusWhenRendered, path]);
+    const applyPendingFocus = useCallback(
+      (view = cmRef.current?.view) => {
+        const pendingPath = pendingFocusRef.current;
+        if (!view || pendingPath === null || statusRef.current !== "ready")
+          return;
+        pendingFocusRef.current = null;
+        if (pendingPath === path) focusWhenRendered(view, pendingPath);
+      },
+      [focusWhenRendered, path],
+    );
 
     useEffect(() => {
       if (doc.status !== "ready") return;
@@ -343,6 +379,7 @@ export const EditorPane = memo(
         indentCompartment.of(DEFAULT_INDENT),
         languageCompartment.of([]),
         lspCompartment.of([]),
+        gitChangeGutter,
         diagnosticsReporter(() => pathRef.current),
         // Before inlineCompletion so an open popup wins Tab over the ghost.
         Prec.highest(keymap.of([{ key: "Tab", run: acceptCompletion }])),
@@ -417,16 +454,74 @@ export const EditorPane = memo(
       });
     }, [wordWrapColumn]);
 
+    // Shows text adopted from disk (reload, discard) before paint. text() is
+    // the session's buffer, so anything typed since the read is kept.
+    useLayoutEffect(() => {
+      if (doc.status !== "ready") return;
+      const view = cmRef.current?.view;
+      if (view) syncViewText(view, text());
+    }, [doc, text]);
+
+    // Detected from the buffer; the setting covers files with nothing to
+    // detect (new or unindented).
+    const editorDefaultIndent = usePreferencesStore(
+      (s) => s.editorDefaultIndent,
+    );
+    const applyIndent = useCallback(
+      (view: EditorView, setting: EditorDefaultIndent) => {
+        const unit = detectIndentUnit(text(), defaultIndentUnit(setting));
+        view.dispatch({
+          effects: indentCompartment.reconfigure(indentExtension(unit)),
+        });
+      },
+      [text],
+    );
+
     useEffect(() => {
       if (doc.status !== "ready") return;
       const view = cmRef.current?.view;
-      if (!view) return;
-      view.dispatch({
-        effects: indentCompartment.reconfigure(
-          indentExtension(detectIndentUnit(doc.content)),
-        ),
-      });
-    }, [doc]);
+      if (view) applyIndent(view, editorDefaultIndent);
+    }, [doc, editorDefaultIndent, applyIndent]);
+
+    // CodeMirror creates its view a few renders after the document turned
+    // ready, after this pane's effects for that document already ran
+    // without one: apply what they could not (indent unit, a pending go-to
+    // line or focus from opening the file at a location).
+    const handleCreateEditor = (view: EditorView) => {
+      applyIndent(view, editorDefaultIndent);
+      applyPendingGoto(view);
+      applyPendingFocus(view);
+    };
+
+    // The change gutter's base is the committed text, fetched when the file
+    // is (re)loaded, when the pane comes into view, and after a commit or
+    // pull in Source Control. Hidden panes catch up when shown.
+    const [headMoves, setHeadMoves] = useState(0);
+    const mediaActiveRef = useRef(mediaActive);
+    mediaActiveRef.current = mediaActive;
+    useEffect(
+      () =>
+        onHeadMoved(() => {
+          if (mediaActiveRef.current) setHeadMoves((n) => n + 1);
+        }),
+      [],
+    );
+    useEffect(() => {
+      if (doc.status !== "ready" || doc.size > SYNTAX_MAX_BYTES) return;
+      if (!mediaActive) return;
+      void headMoves;
+      let cancelled = false;
+      const apply = (base: string | null) => {
+        if (cancelled) return;
+        cmRef.current?.view?.dispatch({
+          effects: setGitBase.of(base === null ? null : normalizeToLf(base)),
+        });
+      };
+      native.gitFileBase(path).then(apply, () => apply(null));
+      return () => {
+        cancelled = true;
+      };
+    }, [doc, path, mediaActive, headMoves]);
 
     const lspExt = useLspExtension(path, langId, doc.status === "ready");
     useEffect(() => {
@@ -529,7 +624,7 @@ export const EditorPane = memo(
           return view.state.sliceDoc(from, to);
         },
         getPath: () => path,
-        reload: () => reloadRef.current(),
+        reload: (options) => reloadRef.current(options),
         gotoLine: (line: number, options) => {
           pendingLineRef.current = {
             path,
@@ -561,6 +656,12 @@ export const EditorPane = memo(
       [path, applyPendingFocus, applyPendingGoto],
     );
 
+    const mediaKind =
+      doc.status === "binary" || doc.status === "toolarge"
+        ? mediaPreviewKind(path)
+        : null;
+    const assetUrl = useWorkspaceAssetUrl(mediaKind ? path : null);
+
     if (doc.status === "loading") {
       return (
         <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
@@ -576,14 +677,13 @@ export const EditorPane = memo(
       );
     }
     if (doc.status === "binary" || doc.status === "toolarge") {
-      const kind = mediaPreviewKind(path);
+      const kind = mediaKind;
       const isImage = kind === "image";
-      const isVideo = kind === "video";
-      const isAudio = kind === "audio";
       const isPdf = kind === "pdf";
 
-      if (isImage || isVideo || isAudio || isPdf) {
-        const assetUrl = convertFileSrc(path);
+      if (kind) {
+        // A WSL path is still being mapped to its host path.
+        if (assetUrl === null) return null;
         return (
           <div className="flex h-full min-h-0 flex-col items-center justify-center bg-background p-4 overflow-auto">
             {isImage && (
@@ -597,7 +697,7 @@ export const EditorPane = memo(
                     "conic-gradient(var(--muted) 0.25turn, transparent 0.25turn 0.5turn, var(--muted) 0.5turn 0.75turn, transparent 0.75turn)",
                   backgroundSize: "20px 20px",
                 }}
-                alt={path.split("/").pop()}
+                alt={path.split(/[\\/]/).pop()}
               />
             )}
             {(kind === "video" || kind === "audio") && (
@@ -607,7 +707,7 @@ export const EditorPane = memo(
               <iframe
                 src={assetUrl}
                 className="w-full h-full border-none"
-                title={path.split("/").pop()}
+                title={path.split(/[\\/]/).pop()}
               />
             )}
           </div>
@@ -640,9 +740,10 @@ export const EditorPane = memo(
 
     return (
       <div className="flex h-full min-h-0 flex-col zoom-exempt">
-        <CodeMirror
+        <MountedCodeMirror
           ref={cmRef}
-          value={doc.content}
+          initialValue={doc.content}
+          onCreateEditor={handleCreateEditor}
           onChange={onChange}
           theme={themeExt}
           extensions={extensions}

@@ -81,6 +81,23 @@ export function joinPath(base: string, relative: string): string {
   return root.replace(/[\\/]$/, separator) + segments.join(separator);
 }
 
+let previewOpener: ((url: string) => boolean) | null = null;
+
+/**
+ * The app decides whether a URL clicked in a terminal opens in its preview
+ * tab (returning true) or goes to the system browser.
+ */
+export function setTerminalPreviewOpener(
+  opener: ((url: string) => boolean) | null,
+): void {
+  previewOpener = opener;
+}
+
+/** Opens a link in the preview; false when it belongs in the browser. */
+export function openTerminalPreview(url: string): boolean {
+  return previewOpener?.(url) ?? false;
+}
+
 type FileOpener = (
   path: string,
   line: number | null,

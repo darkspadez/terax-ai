@@ -22,6 +22,7 @@ import {
   setConfirmCloseRunningTerminal,
   setDefaultWorkspaceEnv,
   setExplorerGitDecorations,
+  setTerminalLinksInPreview,
   setRestoreWindowState,
   setShowHidden,
   setTerminalCursorBlink,
@@ -105,6 +106,9 @@ export function GeneralSection() {
   const showHidden = usePreferencesStore((s) => s.showHidden);
   const explorerGitDecorations = usePreferencesStore(
     (s) => s.explorerGitDecorations,
+  );
+  const terminalLinksInPreview = usePreferencesStore(
+    (s) => s.terminalLinksInPreview,
   );
   const terminalRenderer = usePreferencesStore((s) => s.terminalRenderer);
   const terminalCustomShader = usePreferencesStore(
@@ -286,6 +290,19 @@ export function GeneralSection() {
           <Switch
             checked={explorerGitDecorations}
             onCheckedChange={(v) => void setExplorerGitDecorations(v)}
+          />
+        </SettingRow>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label>Web preview</Label>
+        <SettingRow
+          title="Open localhost links in the preview"
+          description="Clicking a localhost or 127.0.0.1 link in a terminal opens it in a preview tab instead of the system browser."
+        >
+          <Switch
+            checked={terminalLinksInPreview}
+            onCheckedChange={(v) => void setTerminalLinksInPreview(v)}
           />
         </SettingRow>
       </div>

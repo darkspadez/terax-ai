@@ -20,3 +20,25 @@ export function loopbackPreviewOrigin(rawUrl: string): string | null {
     return null;
   }
 }
+
+/**
+ * The preview tab a link clicked in a terminal should land in: null when the
+ * link goes to the browser (the setting is off, or it is not a local dev
+ * server), otherwise the id of a preview tab of this space already showing
+ * it (0 when a new one is needed).
+ */
+export function terminalLinkPreviewTarget(
+  url: string,
+  enabled: boolean,
+  tabs: readonly { id: number; kind: string; spaceId?: string; url?: string }[],
+  spaceId: string | null,
+): number | null {
+  if (!enabled || loopbackPreviewOrigin(url) === null) return null;
+  const open = tabs.find(
+    (tab) =>
+      tab.kind === "preview" &&
+      tab.url === url &&
+      (spaceId === null || tab.spaceId === spaceId),
+  );
+  return open?.id ?? 0;
+}

@@ -1,3 +1,4 @@
+import { pathKey } from "@/lib/pathKey";
 import { isMarkdownPath } from "@/lib/utils";
 import {
   type AgentInstanceCount,
@@ -180,12 +181,12 @@ export function planMarkdownTabOpen(
   spaceId: string,
   allocId: () => number,
 ): { tabs: Tab[]; tabId: number } {
-  const pathKey = path.replace(/\\/g, "/");
+  const key = pathKey(path);
   const existing = tabs.find(
     (tab) =>
       tab.kind === "markdown" &&
       tab.spaceId === spaceId &&
-      tab.path.replace(/\\/g, "/") === pathKey,
+      pathKey(tab.path) === key,
   );
   if (existing) return { tabs, tabId: existing.id };
 
@@ -212,10 +213,15 @@ export function planFileTabOpen(
   spaceId: string,
   allocId: () => number,
 ): { tabs: Tab[]; tabId: number } {
+  // One file, one tab: paths from language servers, git and the OS spell
+  // separators and the drive letter differently.
+  const key = pathKey(path);
   if (pin) {
     const existing = tabs.find(
       (tab) =>
-        tab.kind === "editor" && tab.spaceId === spaceId && tab.path === path,
+        tab.kind === "editor" &&
+        tab.spaceId === spaceId &&
+        pathKey(tab.path) === key,
     );
     if (existing?.kind === "editor") {
       return {
@@ -250,7 +256,7 @@ export function planFileTabOpen(
     (tab) =>
       tab.kind === "editor" &&
       tab.spaceId === spaceId &&
-      tab.path === path &&
+      pathKey(tab.path) === key &&
       !tab.preview,
   );
   if (persistent) return { tabs, tabId: persistent.id };
@@ -259,7 +265,7 @@ export function planFileTabOpen(
     (tab) =>
       tab.kind === "editor" &&
       tab.spaceId === spaceId &&
-      tab.path === path &&
+      pathKey(tab.path) === key &&
       tab.preview,
   );
   if (existingPreview) return { tabs, tabId: existingPreview.id };

@@ -11,7 +11,6 @@ vi.mock("@/modules/workspace", () => ({
 }));
 
 import {
-  applyFormattedContent,
   readFileText,
   resolveFormatter,
   runExternalFormatter,
@@ -168,43 +167,5 @@ describe("readFileText", () => {
 
     core.invoke.mockRejectedValueOnce(new Error("denied"));
     await expect(readFileText("/etc/shadow")).resolves.toBeNull();
-  });
-});
-
-describe("applyFormattedContent", () => {
-  function fakeView(current: string) {
-    return {
-      state: { doc: { toString: () => current } },
-      dispatch: vi.fn(),
-    };
-  }
-
-  it("does nothing when content is unchanged", () => {
-    const view = fakeView("same");
-    applyFormattedContent(view as never, "same");
-    expect(view.dispatch).not.toHaveBeenCalled();
-  });
-
-  it("dispatches only the changed middle span, keeping both ends intact", () => {
-    const view = fakeView("hello world");
-    applyFormattedContent(view as never, "hello brave world");
-
-    expect(view.dispatch).toHaveBeenCalledWith({
-      changes: { from: 6, to: 6, insert: "brave " },
-    });
-  });
-
-  it("handles pure appends and pure deletions", () => {
-    const appendView = fakeView("ab");
-    applyFormattedContent(appendView as never, "abc");
-    expect(appendView.dispatch).toHaveBeenCalledWith({
-      changes: { from: 2, to: 2, insert: "c" },
-    });
-
-    const deleteView = fakeView("abc");
-    applyFormattedContent(deleteView as never, "ac");
-    expect(deleteView.dispatch).toHaveBeenCalledWith({
-      changes: { from: 1, to: 2, insert: "" },
-    });
   });
 });

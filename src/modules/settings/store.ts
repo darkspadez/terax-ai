@@ -162,8 +162,13 @@ export type Preferences = {
   vimMode: boolean;
   editorWordWrap: boolean;
   editorWordWrapColumn: number;
+  diffViewMode: DiffViewMode;
+  /** Indentation of new files and of files that have none to detect. */
+  editorDefaultIndent: EditorDefaultIndent;
   showHidden: boolean;
   explorerGitDecorations: boolean;
+  /** Clicked localhost links in terminals open in the preview tab. */
+  terminalLinksInPreview: boolean;
   terminalRenderer: "auto" | "webgl";
   terminalScreenReader: boolean;
   terminalCursorBlink: boolean;
@@ -271,9 +276,12 @@ const KEY_RECENT_MODELS = "recentModelIds";
 const KEY_VIM_MODE = "vimMode";
 const KEY_EDITOR_WORD_WRAP = "editorWordWrap";
 const KEY_EDITOR_WORD_WRAP_COLUMN = "editorWordWrapColumn";
+const KEY_DIFF_VIEW_MODE = "diffViewMode";
+const KEY_EDITOR_DEFAULT_INDENT = "editorDefaultIndent";
 const KEY_SHOW_HIDDEN = "showHidden";
 const LEGACY_KEY_SHOW_HIDDEN_DIRS = "showHiddenDirectories";
 const KEY_EXPLORER_GIT_DECORATIONS = "explorerGitDecorations";
+const KEY_TERMINAL_LINKS_IN_PREVIEW = "terminalLinksInPreview";
 const KEY_TERMINAL_RENDERER = "terminalRenderer";
 const KEY_TERMINAL_SCREEN_READER = "terminalScreenReader";
 const KEY_TERMINAL_CURSOR_BLINK = "terminalCursorBlink";
@@ -429,8 +437,11 @@ export const DEFAULT_PREFERENCES: Preferences = {
   vimMode: false,
   editorWordWrap: false,
   editorWordWrapColumn: EDITOR_WORD_WRAP_COLUMN_DEFAULT,
+  diffViewMode: "inline",
+  editorDefaultIndent: "spaces2",
   showHidden: false,
   explorerGitDecorations: true,
+  terminalLinksInPreview: false,
   terminalRenderer: "auto",
   terminalScreenReader: false,
   terminalCursorBlink: false,
@@ -590,6 +601,10 @@ export async function loadPreferences(): Promise<Preferences> {
       get<number>(KEY_EDITOR_WORD_WRAP_COLUMN) ??
         DEFAULT_PREFERENCES.editorWordWrapColumn,
     ),
+    diffViewMode: parseDiffViewMode(get<unknown>(KEY_DIFF_VIEW_MODE)),
+    editorDefaultIndent: parseEditorDefaultIndent(
+      get<unknown>(KEY_EDITOR_DEFAULT_INDENT),
+    ),
     showHidden:
       get<boolean>(KEY_SHOW_HIDDEN) ??
       get<boolean>(LEGACY_KEY_SHOW_HIDDEN_DIRS) ??
@@ -597,6 +612,9 @@ export async function loadPreferences(): Promise<Preferences> {
     explorerGitDecorations:
       get<boolean>(KEY_EXPLORER_GIT_DECORATIONS) ??
       DEFAULT_PREFERENCES.explorerGitDecorations,
+    terminalLinksInPreview:
+      get<boolean>(KEY_TERMINAL_LINKS_IN_PREVIEW) ??
+      DEFAULT_PREFERENCES.terminalLinksInPreview,
     terminalRenderer:
       get<string>(KEY_TERMINAL_RENDERER) === "webgl" ? "webgl" : "auto",
     terminalScreenReader: get<boolean>(KEY_TERMINAL_SCREEN_READER) === true,
@@ -883,6 +901,28 @@ export async function setVimMode(value: boolean): Promise<void> {
   await writePref(KEY_VIM_MODE, value);
 }
 
+export type DiffViewMode = "inline" | "split";
+
+export function parseDiffViewMode(value: unknown): DiffViewMode {
+  return value === "split" ? "split" : "inline";
+}
+
+export async function setDiffViewMode(value: DiffViewMode): Promise<void> {
+  await writePref(KEY_DIFF_VIEW_MODE, value);
+}
+
+export type EditorDefaultIndent = "spaces2" | "spaces4" | "tab";
+
+export function parseEditorDefaultIndent(value: unknown): EditorDefaultIndent {
+  return value === "spaces4" || value === "tab" ? value : "spaces2";
+}
+
+export async function setEditorDefaultIndent(
+  value: EditorDefaultIndent,
+): Promise<void> {
+  await writePref(KEY_EDITOR_DEFAULT_INDENT, value);
+}
+
 export async function setEditorWordWrap(value: boolean): Promise<void> {
   await writePref(KEY_EDITOR_WORD_WRAP, value);
 }
@@ -904,6 +944,10 @@ export async function setEditorWordWrapColumn(value: number): Promise<void> {
 
 export async function setShowHidden(value: boolean): Promise<void> {
   await writePref(KEY_SHOW_HIDDEN, value);
+}
+
+export async function setTerminalLinksInPreview(value: boolean): Promise<void> {
+  await writePref(KEY_TERMINAL_LINKS_IN_PREVIEW, value);
 }
 
 export async function setExplorerGitDecorations(value: boolean): Promise<void> {
@@ -1153,8 +1197,11 @@ export async function onPreferencesChange(
     [KEY_VIM_MODE]: "vimMode",
     [KEY_EDITOR_WORD_WRAP]: "editorWordWrap",
     [KEY_EDITOR_WORD_WRAP_COLUMN]: "editorWordWrapColumn",
+    [KEY_DIFF_VIEW_MODE]: "diffViewMode",
+    [KEY_EDITOR_DEFAULT_INDENT]: "editorDefaultIndent",
     [KEY_SHOW_HIDDEN]: "showHidden",
     [KEY_EXPLORER_GIT_DECORATIONS]: "explorerGitDecorations",
+    [KEY_TERMINAL_LINKS_IN_PREVIEW]: "terminalLinksInPreview",
     [KEY_TERMINAL_RENDERER]: "terminalRenderer",
     [KEY_TERMINAL_SCREEN_READER]: "terminalScreenReader",
     [KEY_TERMINAL_CURSOR_BLINK]: "terminalCursorBlink",

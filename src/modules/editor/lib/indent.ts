@@ -1,3 +1,5 @@
+import type { EditorDefaultIndent } from "@/modules/settings/store";
+
 const MAX_SCAN_LINES = 1000;
 
 // Histogram of positive indent-width deltas between consecutive lines; the
@@ -46,4 +48,10 @@ export function detectIndentUnit(text: string, fallback = "  "): string {
     }
   }
   return best > 0 ? " ".repeat(best) : fallback;
+}
+
+/** The indent unit of the "Default indentation" setting. */
+export function defaultIndentUnit(setting: EditorDefaultIndent): string {
+  if (setting === "tab") return "\t";
+  return setting === "spaces4" ? "    " : "  ";
 }

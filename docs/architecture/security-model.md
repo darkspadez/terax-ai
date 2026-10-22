@@ -63,6 +63,8 @@ Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalRespons
 
 Local LLM endpoints are explicitly allowed because the user opted in by pointing Terax at them, but they are still classified and logged.
 
+The Markdown preview's remote images go through the same checks (`net/image.rs`): https only, public addresses only, and redirects are followed by hand so every hop is validated, classified and pinned again. The webview's CSP loads no remote images at all, because AI chat Markdown renders in the same webview and an image URL in a prompt-injected answer would send data out without a click; only the preview of a file the user opened asks the backend for its images.
+
 ## Secret storage
 
 API keys are stored via `secrets_*` commands (`src-tauri/src/modules/secrets.rs`):

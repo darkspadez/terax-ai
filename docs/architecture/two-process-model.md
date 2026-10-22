@@ -54,6 +54,7 @@ Output streams over the `terax-pty` custom URI scheme (one held `poll` request p
 - `fs_write_file` - write file contents
 - `fs_stat` - file metadata
 - `fs_canonicalize` - canonical path
+- `fs_host_path` - host path of a workspace file (WSL share or drive), for asset URLs
 
 #### Mutate
 
@@ -86,6 +87,7 @@ All git commands are gated through the workspace authorization registry.
 - `git_resolve_repo` / `git_panel_snapshot`
 - `git_status`
 - `git_diff` / `git_diff_content`
+- `git_file_base` - a file's committed (HEAD) text, for the editor's change gutter
 - `git_stage` / `git_unstage` / `git_discard`
 - `git_commit`
 - `git_fetch` / `git_pull_ff_only` / `git_push`
@@ -110,6 +112,7 @@ Three distinct surfaces:
 
 - `ai_http_stream` / `ai_http_cancel` / `ai_http_ack` - AI HTTP proxy with SSRF guard
 - `lm_ping` - local-model ping
+- `markdown_remote_image` - one https image for the Markdown preview (public hosts only, redirects re-validated, images only, 16 MiB)
 
 ### AI sessions (`src-tauri/src/modules/ai_sessions.rs`)
 

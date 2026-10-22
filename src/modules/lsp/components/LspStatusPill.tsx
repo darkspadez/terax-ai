@@ -16,7 +16,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState } from "react";
 import { redetectBinary } from "../lib/detect";
-import type { LspPreset } from "../lib/presets";
+import { type LspPreset, rootMarkersOf } from "../lib/presets";
 import { restartPresetSessions } from "../lib/sessionManager";
 import { useLspHint } from "../lib/useLspHint";
 
@@ -51,6 +51,12 @@ export function LspStatusPill({ filePath }: Props) {
   if (hint.kind === "install") {
     return (
       <InstallPill key={`install-${hint.preset.id}`} preset={hint.preset} />
+    );
+  }
+
+  if (hint.kind === "no-root") {
+    return (
+      <NoRootPill key={`no-root-${hint.preset.id}`} preset={hint.preset} />
     );
   }
 
@@ -112,6 +118,52 @@ function ErrorPill({ preset, reason }: { preset: LspPreset; reason: string }) {
             Disable
           </button>
         </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function NoRootPill({ preset }: { preset: LspPreset }) {
+  const markers = rootMarkersOf(preset);
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={PILL_CLASS}
+          title="No project found for this file"
+        >
+          <span className="size-1.5 rounded-full bg-muted-foreground/60" />
+          <span>{preset.name} LSP</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="top"
+        align="start"
+        className="w-72 p-3 text-xs [&_button]:cursor-pointer"
+      >
+        <div className="mb-1 font-medium text-foreground">
+          No {preset.name} project for this file
+        </div>
+        <p className="mb-2 text-muted-foreground">
+          The language server starts in the nearest folder above this file,
+          below your home folder, that contains{" "}
+          {markers.length > 1 ? "one of " : ""}
+          {markers.map((marker, i) => (
+            <span key={marker}>
+              {i > 0 ? ", " : ""}
+              <code className="text-foreground">{marker}</code>
+            </span>
+          ))}
+          . There is none, so it is not running here.
+        </p>
+        <button
+          type="button"
+          className="rounded-md border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+          onClick={() => void setLspActivation(preset.id, "dismissed")}
+        >
+          Disable
+        </button>
       </PopoverContent>
     </Popover>
   );

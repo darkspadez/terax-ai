@@ -41,7 +41,11 @@ import {
   writeTerminalClipboardContent,
 } from "../lib/terminalClipboard";
 import { useTerminalFontOffsets } from "../lib/terminalFontOffsets";
-import { openTerminalFile, resolveTerminalLink } from "../lib/terminalLinkOpen";
+import {
+  openTerminalFile,
+  openTerminalPreview,
+  resolveTerminalLink,
+} from "../lib/terminalLinkOpen";
 import { requestTerminalPrompt } from "../lib/terminalPrompts";
 import { useTerminalStatusStore } from "../lib/terminalStatus";
 import { GhosttySemanticEventRouter } from "./core/GhosttySemanticEventRouter";
@@ -1071,6 +1075,7 @@ async function openGhosttyLink(
   );
   if (!target) return;
   if (target.kind === "external") {
+    if (openTerminalPreview(target.url)) return;
     void openExternalUrl(target.url, () => focusGhosttySession(session.leafId));
     return;
   }

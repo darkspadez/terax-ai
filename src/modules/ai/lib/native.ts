@@ -280,6 +280,11 @@ export const native = {
       staged,
       workspace: currentWorkspaceEnv(),
     }),
+  gitFileBase: (path: string) =>
+    invoke<string | null>("git_file_base", {
+      path,
+      workspace: currentWorkspaceEnv(),
+    }),
   gitDiffContent: (
     repoRoot: string,
     path: string,

@@ -368,7 +368,7 @@ fn classify_auth_error(stderr: &str) -> Option<GitError> {
     None
 }
 
-fn decode_text(bytes: Vec<u8>) -> TextSource {
+pub(crate) fn decode_text(bytes: Vec<u8>) -> TextSource {
     let sniff_len = bytes.len().min(8192);
     if bytes[..sniff_len].contains(&0) {
         return TextSource::Binary;

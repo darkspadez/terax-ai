@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loopbackPreviewOrigin } from "./previewUrl";
+import { loopbackPreviewOrigin, terminalLinkPreviewTarget } from "./previewUrl";
 
 describe("loopbackPreviewOrigin", () => {
   it.each([
@@ -24,5 +24,36 @@ describe("loopbackPreviewOrigin", () => {
     "",
   ])("rejects non-loopback or unusable URL %s", (url) => {
     expect(loopbackPreviewOrigin(url)).toBeNull();
+  });
+});
+
+describe("terminalLinkPreviewTarget", () => {
+  const tabs = [
+    { id: 4, kind: "preview", spaceId: "a", url: "http://localhost:5173/" },
+    { id: 5, kind: "preview", spaceId: "b", url: "http://localhost:3000/" },
+  ];
+
+  it("leaves links to the browser while the setting is off", () => {
+    expect(
+      terminalLinkPreviewTarget("http://localhost:5173/", false, tabs, "a"),
+    ).toBeNull();
+  });
+
+  it("only previews local dev servers", () => {
+    expect(
+      terminalLinkPreviewTarget("https://example.com/", true, tabs, "a"),
+    ).toBeNull();
+  });
+
+  it("reuses the space's preview of the same page, or asks for a new one", () => {
+    expect(
+      terminalLinkPreviewTarget("http://localhost:5173/", true, tabs, "a"),
+    ).toBe(4);
+    expect(
+      terminalLinkPreviewTarget("http://localhost:3000/", true, tabs, "a"),
+    ).toBe(0);
+    expect(
+      terminalLinkPreviewTarget("http://127.0.0.1:8000/", true, tabs, "a"),
+    ).toBe(0);
   });
 });

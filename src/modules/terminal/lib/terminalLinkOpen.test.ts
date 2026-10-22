@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { joinPath, resolveTerminalLink } from "./terminalLinkOpen";
+import {
+  joinPath,
+  openTerminalPreview,
+  resolveTerminalLink,
+  setTerminalPreviewOpener,
+} from "./terminalLinkOpen";
 
 describe("terminal link targets", () => {
   it("sends URLs with a scheme to the browser", () => {
@@ -61,5 +66,21 @@ describe("terminal link targets", () => {
     expect(joinPath("/a/b", "../c/./d")).toBe("/a/c/d");
     expect(joinPath("C:\\work", "src\\x.cs")).toBe("C:\\work\\src\\x.cs");
     expect(joinPath("/", "etc")).toBe("/etc");
+  });
+});
+
+describe("terminal link preview routing", () => {
+  it("sends links to the browser unless the app takes them", () => {
+    expect(openTerminalPreview("http://localhost:5173")).toBe(false);
+    const seen: string[] = [];
+    setTerminalPreviewOpener((url) => {
+      seen.push(url);
+      return url.includes("localhost");
+    });
+    expect(openTerminalPreview("http://localhost:5173")).toBe(true);
+    expect(openTerminalPreview("https://terax.app")).toBe(false);
+    setTerminalPreviewOpener(null);
+    expect(openTerminalPreview("http://localhost:5173")).toBe(false);
+    expect(seen).toEqual(["http://localhost:5173", "https://terax.app"]);
   });
 });

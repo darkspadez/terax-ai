@@ -16,6 +16,10 @@ import {
   invalidateRepoDiffs,
   workingDiffKey,
 } from "@/modules/editor/lib/diffCache";
+import {
+  notifyFilesDiscarded,
+  notifyHeadMoved,
+} from "@/modules/editor/lib/gitSignals";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SourceControlSummary } from "./useSourceControl";
 
@@ -709,7 +713,10 @@ export function useSourceControlPanel(
         ? `discard:${list[0].path}`
         : "discard:all",
       (s) => optimisticDiscard(s, paths),
-      () => native.gitDiscard(repo.repoRoot, entries),
+      async () => {
+        await native.gitDiscard(repo.repoRoot, entries);
+        notifyFilesDiscarded(repo.repoRoot, [...paths]);
+      },
       [...paths],
     );
   }, [pendingDiscard, repo, runMutation]);
@@ -878,6 +885,7 @@ export function useSourceControlPanel(
     setActionError(null);
     try {
       const result = await native.gitCommit(repo.repoRoot, commitMessage);
+      notifyHeadMoved();
       setCommitMessage("");
       setActionMessage(
         `Committed ${result.commitSha.slice(0, 7)} ${result.summary}`,
