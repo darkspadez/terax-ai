@@ -48,6 +48,7 @@ import {
   COMPACT_ITEM,
 } from "@/modules/explorer/lib/menuItemClass";
 import { joinPath } from "@/modules/explorer/lib/useFileTree";
+import { isModChord } from "@/modules/shortcuts/lib/shortcutScope";
 import {
   AiContentGenerator02Icon,
   Alert02Icon,
@@ -491,11 +492,7 @@ export const SourceControlPanel = memo(function SourceControlPanel({
       void scm.commit();
       return;
     }
-    if (
-      event.key.toLowerCase() === "g" &&
-      (event.metaKey || event.ctrlKey) &&
-      scm.canGenerateCommitMessage
-    ) {
+    if (isModChord(event, "g", IS_MAC) && scm.canGenerateCommitMessage) {
       event.preventDefault();
       void scm.generateCommitMessage();
     }
@@ -849,6 +846,7 @@ export const SourceControlPanel = memo(function SourceControlPanel({
                 )}
               >
                 <Textarea
+                  data-claims-mod-key="g"
                   value={scm.commitMessage}
                   onChange={(event) => scm.setCommitMessage(event.target.value)}
                   onKeyDown={handleCommitShortcut}
