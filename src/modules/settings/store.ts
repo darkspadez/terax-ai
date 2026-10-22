@@ -1,4 +1,9 @@
 import {
+  type AgentLaunchCommands,
+  DEFAULT_AGENT_LAUNCH_COMMANDS,
+  normalizeAgentLaunchCommands,
+} from "@/modules/agents/lib/launcher";
+import {
   type AutocompleteProviderId,
   type CustomEndpoint,
   DEFAULT_AUTOCOMPLETE_MODEL,
@@ -14,20 +19,15 @@ import {
   type SttProvider,
   WHISPERCPP_DEFAULT_BASE_URL,
 } from "@/modules/ai/config";
-import {
-  type AgentLaunchCommands,
-  DEFAULT_AGENT_LAUNCH_COMMANDS,
-  normalizeAgentLaunchCommands,
-} from "@/modules/agents/lib/launcher";
 import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
+import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { LazyStore } from "@tauri-apps/plugin-store";
 import {
   currentPlatform,
   defaultTerminalBehavior,
   normalizeTerminalBehavior,
   type TerminalBehavior,
 } from "./terminalBehavior";
-import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { LazyStore } from "@tauri-apps/plugin-store";
 
 export type ThemePref = "system" | "light" | "dark";
 
@@ -173,6 +173,8 @@ export type Preferences = {
   terminalLetterSpacing: number;
   /** Cell height as a multiple of the font size. */
   terminalLineHeight: number;
+  /** Ghostty's minimum contrast for terminal text (1 is off). */
+  terminalMinimumContrast: number;
   terminalFontSize: number;
   terminalScrollback: number;
   terminalBehavior: TerminalBehavior;
@@ -271,6 +273,7 @@ const KEY_TERMINAL_FONT_WEIGHT = "terminalFontWeight";
 const KEY_TERMINAL_SHELL = "terminalShell";
 const KEY_TERMINAL_LETTER_SPACING = "terminalLetterSpacing";
 const KEY_TERMINAL_LINE_HEIGHT = "terminalLineHeight";
+const KEY_TERMINAL_MINIMUM_CONTRAST = "terminalMinimumContrast";
 const KEY_TERMINAL_FONT_SIZE = "terminalFontSize";
 const KEY_TERMINAL_SCROLLBACK = "terminalScrollback";
 const KEY_TERMINAL_BEHAVIOR = "terminalBehavior";
@@ -302,6 +305,16 @@ export function clampTerminalLineHeight(value: unknown): number {
     ? Math.min(2, Math.max(1, Math.round(value * 100) / 100))
     : TERMINAL_LINE_HEIGHT_DEFAULT;
 }
+/** Off, then WCAG's thresholds: large text, AA, AAA. */
+export const TERMINAL_MINIMUM_CONTRASTS = [1, 1.5, 3, 4.5, 7] as const;
+
+/** A WCAG contrast ratio, 1 (off) to 21. */
+export function clampMinimumContrast(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(21, Math.max(1, value))
+    : 1;
+}
+
 const TERMINAL_FONT_SIZE_MIN = 8;
 const TERMINAL_FONT_SIZE_MAX = 32;
 
@@ -380,6 +393,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   terminalShell: "",
   terminalLetterSpacing: 0,
   terminalLineHeight: TERMINAL_LINE_HEIGHT_DEFAULT,
+  terminalMinimumContrast: 1,
   terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT,
   terminalScrollback: TERMINAL_SCROLLBACK_DEFAULT,
   terminalBehavior: defaultTerminalBehavior(currentPlatform()),
@@ -553,6 +567,9 @@ export async function loadPreferences(): Promise<Preferences> {
       DEFAULT_PREFERENCES.terminalLetterSpacing,
     terminalLineHeight: clampTerminalLineHeight(
       get<number>(KEY_TERMINAL_LINE_HEIGHT),
+    ),
+    terminalMinimumContrast: clampMinimumContrast(
+      get<number>(KEY_TERMINAL_MINIMUM_CONTRAST),
     ),
     terminalFontSize:
       get<number>(KEY_TERMINAL_FONT_SIZE) ??
@@ -885,6 +902,10 @@ export async function setTerminalLineHeight(value: number): Promise<void> {
   await writePref(KEY_TERMINAL_LINE_HEIGHT, clampTerminalLineHeight(value));
 }
 
+export async function setTerminalMinimumContrast(value: number): Promise<void> {
+  await writePref(KEY_TERMINAL_MINIMUM_CONTRAST, clampMinimumContrast(value));
+}
+
 export async function setTerminalFontSize(value: number): Promise<void> {
   const clamped = Number.isFinite(value)
     ? Math.min(
@@ -1060,6 +1081,7 @@ export async function onPreferencesChange(
     [KEY_TERMINAL_SHELL]: "terminalShell",
     [KEY_TERMINAL_LETTER_SPACING]: "terminalLetterSpacing",
     [KEY_TERMINAL_LINE_HEIGHT]: "terminalLineHeight",
+    [KEY_TERMINAL_MINIMUM_CONTRAST]: "terminalMinimumContrast",
     [KEY_TERMINAL_FONT_SIZE]: "terminalFontSize",
     [KEY_TERMINAL_SCROLLBACK]: "terminalScrollback",
     [KEY_TERMINAL_BEHAVIOR]: "terminalBehavior",

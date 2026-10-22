@@ -31,13 +31,15 @@ import {
   setTerminalFontWeight,
   setTerminalLetterSpacing,
   setTerminalLineHeight,
-  TERMINAL_LINE_HEIGHTS,
-  setTerminalScrollback,
-  setTerminalShell,
+  setTerminalMinimumContrast,
   setTerminalRenderer,
   setTerminalScreenReader,
+  setTerminalScrollback,
+  setTerminalShell,
   setZoomLevel,
   TERMINAL_FONT_SIZES,
+  TERMINAL_LINE_HEIGHTS,
+  TERMINAL_MINIMUM_CONTRASTS,
   TERMINAL_SCROLLBACK_PRESETS,
 } from "@/modules/settings/store";
 import { useTheme } from "@/modules/theme";
@@ -116,6 +118,9 @@ export function GeneralSection() {
   );
   const terminalFontSize = usePreferencesStore((s) => s.terminalFontSize);
   const terminalLineHeight = usePreferencesStore((s) => s.terminalLineHeight);
+  const terminalMinimumContrast = usePreferencesStore(
+    (s) => s.terminalMinimumContrast,
+  );
   const terminalScrollback = usePreferencesStore((s) => s.terminalScrollback);
   const confirmCloseRunningTerminal = usePreferencesStore(
     (s) => s.confirmCloseRunningTerminal,
@@ -458,6 +463,26 @@ export function GeneralSection() {
               {TERMINAL_LINE_HEIGHTS.map((v) => (
                 <SelectItem key={v} value={String(v)} className="text-[12px]">
                   {v.toFixed(2)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingRow>
+        <SettingRow
+          title="Minimum contrast"
+          description="Draw text that is hard to read against its background in white or black instead (WCAG contrast ratio)."
+        >
+          <Select
+            value={String(terminalMinimumContrast)}
+            onValueChange={(v) => void setTerminalMinimumContrast(Number(v))}
+          >
+            <SelectTrigger size="sm" className="h-8 w-28 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TERMINAL_MINIMUM_CONTRASTS.map((v) => (
+                <SelectItem key={v} value={String(v)} className="text-[12px]">
+                  {v === 1 ? "Off" : `${v}:1`}
                 </SelectItem>
               ))}
             </SelectContent>

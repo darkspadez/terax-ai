@@ -13,11 +13,11 @@ import {
 } from "react";
 import type { TerminalBackendKind } from "./backend/contracts";
 import { resolvedTerminalBackend } from "./backend/selection";
-import {
-  useGhosttyTerminalSession,
-  ghosttyBlockGeometry,
-} from "./ghostty/useGhosttyTerminalSession";
 import { ghosttyBlocks } from "./ghostty/ghosttyBlockSessions";
+import {
+  ghosttyBlockGeometry,
+  useGhosttyTerminalSession,
+} from "./ghostty/useGhosttyTerminalSession";
 
 export type TerminalPaneHandle = {
   write: (data: string) => void;
@@ -72,6 +72,9 @@ const GhosttyTerminalPane = memo(
     const containerRef = useRef<HTMLDivElement>(null);
     const down = useRef<{ x: number; y: number } | null>(null);
     const { resolvedMode, activeTheme } = useTheme();
+    const minimumContrast = usePreferencesStore(
+      (state) => state.terminalMinimumContrast,
+    );
     const session = useGhosttyTerminalSession({
       leafId,
       backend,
@@ -88,9 +91,10 @@ const GhosttyTerminalPane = memo(
     useEffect(() => {
       void resolvedMode;
       void activeTheme;
+      void minimumContrast;
       const id = requestAnimationFrame(() => session.applyTheme());
       return () => cancelAnimationFrame(id);
-    }, [resolvedMode, activeTheme, session]);
+    }, [resolvedMode, activeTheme, minimumContrast, session]);
 
     useImperativeHandle(
       ref,

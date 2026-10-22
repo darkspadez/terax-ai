@@ -1,3 +1,4 @@
+import type { LinkCellRange } from "./linkUnderline";
 import {
   SCREEN_FLAG_SEARCH_ACTIVE,
   SCREEN_FLAG_SELECTION_ACTIVE,
@@ -6,7 +7,6 @@ import {
   SCREEN_OFFSET,
   SCREEN_UNIFORM_BYTES,
 } from "./shaders";
-import type { LinkCellRange } from "./linkUnderline";
 import type {
   CursorRect,
   DecorationMetrics,
@@ -45,6 +45,8 @@ export type ScreenUniformState = {
   readonly decoration: DecorationMetrics;
   readonly leftOverhangPadding: number;
   readonly contrast: TextContrast;
+  /** Ghostty's minimum contrast ratio for text (1, the default, is off). */
+  readonly minimumContrast?: number;
   /** Cells of the hovered link to underline; absent or null for none. */
   readonly link?: LinkCellRange | null;
 };
@@ -113,6 +115,7 @@ export class ScreenUniform {
     uints[SCREEN_OFFSET.decoration / 4 + 3] = state.leftOverhangPadding;
     floats[SCREEN_OFFSET.contrast / 4] = state.contrast.enhancedContrast;
     floats[SCREEN_OFFSET.contrast / 4 + 1] = state.contrast.alphaCorrection;
+    floats[SCREEN_OFFSET.contrast / 4 + 2] = state.minimumContrast ?? 1;
     for (let index = 0; index < DWRITE_GAMMA_RATIOS.length; index += 1) {
       floats[SCREEN_OFFSET.gamma / 4 + index] = DWRITE_GAMMA_RATIOS[index];
     }

@@ -1,20 +1,21 @@
-import { loadSessionRenderer } from "@/modules/terminal/ghostty/loadSessionRenderer";
-import {
-  ensureGhosttyBlocks,
-  ghosttyBlocks,
-  disposeGhosttyBlocks,
-} from "@/modules/terminal/ghostty/ghosttyBlockSessions";
-import { initializeSessionGeneration as startSessionInitialization } from "@/modules/terminal/ghostty/sessionInitialization";
-import { replaceSessionSurface } from "@/modules/terminal/ghostty/replaceSessionSurface";
 import { openExternalUrl } from "@/lib/external-link";
 import { ensureMonoFontsLoaded, resolveFontFamily } from "@/lib/fonts";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { currentWorkspaceEnv } from "@/modules/workspace/env";
 import type { TerminalBackendKind } from "@/modules/terminal/backend/contracts";
+import {
+  disposeGhosttyBlocks,
+  ensureGhosttyBlocks,
+  ghosttyBlocks,
+} from "@/modules/terminal/ghostty/ghosttyBlockSessions";
+import { loadSessionRenderer } from "@/modules/terminal/ghostty/loadSessionRenderer";
+import { replaceSessionSurface } from "@/modules/terminal/ghostty/replaceSessionSurface";
+import { initializeSessionGeneration as startSessionInitialization } from "@/modules/terminal/ghostty/sessionInitialization";
+import { LatestClipboardWrite } from "@/modules/terminal/lib/LatestClipboardWrite";
 import { setLeafPresentation } from "@/modules/terminal/lib/ptyPresentation";
 import { PtyResizeDelivery } from "@/modules/terminal/lib/ptyResizeDelivery";
 import { useTerminalFont } from "@/modules/terminal/lib/useTerminalFont";
 import type { TerminalSearchController } from "@/modules/terminal/search/TerminalSearchController";
+import { currentWorkspaceEnv } from "@/modules/workspace/env";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { openPty, type PtySession } from "../lib/pty-bridge";
@@ -23,11 +24,10 @@ import {
   writePrimarySelection,
   writeTerminalClipboard,
 } from "../lib/terminalClipboard";
+import { useTerminalFontOffsets } from "../lib/terminalFontOffsets";
 import { openTerminalFile, resolveTerminalLink } from "../lib/terminalLinkOpen";
 import { requestTerminalPrompt } from "../lib/terminalPrompts";
-import { useTerminalFontOffsets } from "../lib/terminalFontOffsets";
 import { useTerminalStatusStore } from "../lib/terminalStatus";
-import { LatestClipboardWrite } from "@/modules/terminal/lib/LatestClipboardWrite";
 import { GhosttySemanticEventRouter } from "./core/GhosttySemanticEventRouter";
 import { getGhosttyCoreRuntime } from "./GhosttyCoreRuntime";
 import type { GhosttyTerminalModelApi } from "./GhosttyTerminalModel";
@@ -37,8 +37,10 @@ import {
   rgbToInt,
   type TerminalFontSpec,
 } from "./gpu/terminalVisuals";
-import { getWebGpuTerminalRuntime } from "./gpu/WebGpuTerminalRuntime";
-import { webGpuTerminalRuntimeDiagnostics } from "./gpu/WebGpuTerminalRuntime";
+import {
+  getWebGpuTerminalRuntime,
+  webGpuTerminalRuntimeDiagnostics,
+} from "./gpu/WebGpuTerminalRuntime";
 import { WebGpuTerminalSurface } from "./gpu/WebGpuTerminalSurface";
 import { GhosttyInputController } from "./input/GhosttyInputController";
 import { encodeTerminalSubmission } from "./input/terminalInputEncoding";
@@ -283,7 +285,9 @@ export function useGhosttyTerminalSession({
   const applyTheme = useCallback(() => {
     const session = sessions.get(leafId);
     if (!session?.model || !session.surface) return;
-    const theme = readTerminalGpuTheme();
+    const theme = readTerminalGpuTheme(
+      usePreferencesStore.getState().terminalMinimumContrast,
+    );
     session.model.setColors(
       rgbToInt(theme.foreground),
       rgbToInt(theme.background),
@@ -690,7 +694,9 @@ async function initializeSessionGeneration(
       startup[key] = performance.now() - startup.startedAt;
     }
   };
-  const theme = readTerminalGpuTheme();
+  const theme = readTerminalGpuTheme(
+    usePreferencesStore.getState().terminalMinimumContrast,
+  );
   const coreRuntime = getGhosttyCoreRuntime();
   const metricsPromise = (async () => {
     await ensureMonoFontsLoaded();
@@ -1009,10 +1015,14 @@ function createGhosttyInput(
       const text = mode === "off" ? null : surface.getSelection();
       if (!text) return;
       void writePrimarySelection(text);
-      if (mode === "clipboard") void writeTerminalClipboard(text).catch(() => {});
+      if (mode === "clipboard")
+        void writeTerminalClipboard(text).catch(() => {});
     },
     onMiddleClick: () => {
-      if (!/Linux|X11/.test(navigator.userAgent) || /Android/.test(navigator.userAgent))
+      if (
+        !/Linux|X11/.test(navigator.userAgent) ||
+        /Android/.test(navigator.userAgent)
+      )
         return false;
       void readPrimarySelection().then((text) => {
         if (text) session.input?.paste(text);

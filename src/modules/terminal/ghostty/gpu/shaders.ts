@@ -53,6 +53,9 @@ export const SCREEN_FLAG_SELECTION_RECTANGULAR = 8;
  * - A glyph that overhangs to the left is clipped where the neighbour's background differs,
  *   so it cannot paint over a selection or a coloured cell.
  * - Cell-exact shapes (box drawing, shades) keep their coverage as drawn, without contrast.
+ * - `contrast.z` is Ghostty's minimum contrast (1 off): text below that WCAG ratio against its
+ *   displayed background is drawn white or black (`minimumContrast.ts`); colour glyphs and
+ *   cell-exact shapes keep their colours.
  * - `shade` modes (Kitty images, Ghostty's layering): 0 draws the whole pane opaque; 1 draws the
  *   cells over images placed under the backgrounds, leaving out the slack and every cell that shows
  *   the default background (Ghostty draws those transparent); 2 draws only the cursor and the
@@ -269,6 +272,25 @@ struct VertexOutput {
   @interpolate(flat) @location(3) glyph_flags: u32,
 }
 
+fn srgb_to_linear(color: vec3f) -> vec3f {
+  return select(pow((color + 0.055) / 1.055, vec3f(2.4)), color / 12.92, color <= vec3f(0.04045));
+}
+
+fn contrast_ratio(a: vec3f, b: vec3f) -> f32 {
+  let weights = vec3f(0.2126, 0.7152, 0.0722);
+  let first = dot(srgb_to_linear(a), weights);
+  let second = dot(srgb_to_linear(b), weights);
+  return (max(first, second) + 0.05) / (min(first, second) + 0.05);
+}
+
+fn contrasted_color(minimum: f32, foreground: vec4f, background: vec3f) -> vec4f {
+  if (contrast_ratio(foreground.rgb, background) >= minimum) { return foreground; }
+  if (contrast_ratio(vec3f(0.0), background) > contrast_ratio(vec3f(1.0), background)) {
+    return vec4f(0.0, 0.0, 0.0, foreground.a);
+  }
+  return vec4f(1.0, 1.0, 1.0, foreground.a);
+}
+
 fn degenerate() -> VertexOutput {
   var output: VertexOutput;
   output.position = vec4f(2.0, 2.0, 2.0, 1.0);
@@ -344,6 +366,13 @@ fn vertex_main(
   output.texel_origin = vec2i(i32(entry.x & 0xffffu) + skipped, i32(entry.x >> 16u));
   output.quad_origin = origin;
   output.color = unpack4x8unorm(record.y);
+  if (screen.contrast.z > 1.0 && (entry.w & 3u) == 0u) {
+    output.color = contrasted_color(
+      screen.contrast.z,
+      output.color,
+      cell_background(instance, row, col),
+    );
+  }
   output.glyph_flags = entry.w;
   return output;
 }

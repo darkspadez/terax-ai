@@ -113,6 +113,10 @@ describe("ScreenUniform", () => {
     ]).toEqual([16, 1, 10, 1]);
     expect(f[at(SCREEN_OFFSET.contrast)]).toBe(0.5);
     expect(f[at(SCREEN_OFFSET.contrast, 1)]).toBe(0.25);
+    // Minimum contrast: absent means off (1), which the text shader skips.
+    expect(f[at(SCREEN_OFFSET.contrast, 2)]).toBe(1);
+    uniform.pack({ ...STATE, minimumContrast: 4.5 });
+    expect(view(uniform).f[at(SCREEN_OFFSET.contrast, 2)]).toBe(4.5);
     expect([
       ...f.slice(at(SCREEN_OFFSET.gamma), at(SCREEN_OFFSET.gamma) + 4),
     ]).toEqual(DWRITE_GAMMA_RATIOS.map(Math.fround));

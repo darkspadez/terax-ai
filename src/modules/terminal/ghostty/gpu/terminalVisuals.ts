@@ -41,6 +41,8 @@ export type TerminalGpuTheme = {
     readonly alpha: number;
   };
   readonly palette: readonly Rgb[];
+  /** Ghostty's minimum contrast ratio for text; 1 or absent is off. */
+  readonly minimumContrast?: number;
 };
 
 let colorCanvas: HTMLCanvasElement | null = null;
@@ -162,10 +164,11 @@ export function fontCss(
   return `${italic ? "italic " : ""}${weight} ${font.size}px ${font.family}`;
 }
 
-export function readTerminalGpuTheme(): TerminalGpuTheme {
+export function readTerminalGpuTheme(minimumContrast = 1): TerminalGpuTheme {
   const tokens = readTerminalTokens();
   const selection = cssColorToRgba(tokens.selection);
   return {
+    minimumContrast,
     background: cssColorToRgb(tokens.background),
     foreground: cssColorToRgb(tokens.foreground),
     cursor: cssColorToRgb(tokens.cursor),

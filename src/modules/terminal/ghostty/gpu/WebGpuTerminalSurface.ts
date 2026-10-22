@@ -1548,6 +1548,7 @@ export class WebGpuTerminalSurface
         this.metrics.scale,
       ),
       contrast: this.contrast,
+      minimumContrast: theme.minimumContrast,
       link: this.hoveredLinkCells,
     };
     const shiftY = this.gridShift(state, cursor);

@@ -7,12 +7,14 @@ import type { TerminalDamage } from "@/modules/terminal/backend/contracts";
 import { CellFlags } from "@terax/ghostty-core/protocol";
 import type { Rgb, TerminalCellReader } from "../core/packedCells";
 import type { GhosttyTerminalModelApi } from "../GhosttyTerminalModel";
+import { isBuiltinGlyph } from "../gpu/BuiltinGlyphs";
 import {
   CanvasBackingStore,
   type GestureGrowth,
 } from "../gpu/CanvasBackingStore";
 import { constraintCells } from "../gpu/glyphConstraint";
 import { type LinkCellRange, linkRangesEqual } from "../gpu/linkUnderline";
+import { contrastedColor } from "../gpu/minimumContrast";
 import type {
   TerminalFontMetrics,
   TerminalGpuTheme,
@@ -605,6 +607,7 @@ export class WebGlCellRenderer {
     const canvasWidth = this.canvas.width;
     const canvasHeight = this.canvas.height;
     const viewportOrigin = frame.model.viewportOriginLine();
+    const minimumContrast = this.profile.theme.minimumContrast ?? 1;
 
     for (let row = first; row <= last; row += 1) {
       let rowHasBlinkingCell = false;
@@ -696,10 +699,18 @@ export class WebGlCellRenderer {
               column + 1 < this.cols ? cells.codepoint(cellIndex + 1) : null,
             ),
           );
+          // Ghostty's minimum contrast applies to text, not to colour glyphs or
+          // procedural shapes (and never to decorations).
+          const textColor =
+            minimumContrast > 1 &&
+            !glyph.intrinsicColor &&
+            !(grapheme === null && isBuiltinGlyph(codepoint))
+              ? contrastedColor(minimumContrast, foreground, background)
+              : foreground;
           this.writeGlyph(
             glyphIndex,
             glyph,
-            foreground,
+            textColor,
             ((flags & CellFlags.FAINT) !== 0 ? 0.5 : 1) *
               ((flags & CellFlags.BLINK) !== 0 ? -1 : 1),
             previousBackground !== background,

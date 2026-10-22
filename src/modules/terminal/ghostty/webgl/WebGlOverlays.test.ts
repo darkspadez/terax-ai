@@ -88,6 +88,9 @@ function image(
 function setup(
   options: {
     underlinedCell?: number;
+    minimumContrast?: number;
+    /** Foreground by cell index; white elsewhere. */
+    foregrounds?: ReadonlyMap<number, number>;
     /** Code points by cell index; every other cell is empty. */
     codepoints?: ReadonlyMap<number, number>;
   } = {},
@@ -131,6 +134,7 @@ function setup(
         cursor: [255, 255, 255],
         selection: { color: [50, 50, 50], alpha: 0.5 },
         palette: [],
+        minimumContrast: options.minimumContrast,
       },
       scale: 1,
     },
@@ -159,7 +163,8 @@ function setup(
         graphemeLength: () => 0,
         // An explicit background on the first column, so the cell pass draws rectangles.
         backgroundPacked: (index: number) => (index % 80 === 0 ? 0x334455 : 0),
-        foregroundPacked: () => 0xffffff,
+        foregroundPacked: (index: number) =>
+          options.foregrounds?.get(index) ?? 0xffffff,
         underlineColorPacked: () => 0,
         underlineStyle: (index: number) =>
           index === options.underlinedCell ? 1 : 0,
@@ -245,6 +250,63 @@ describe("WebGL glyph cells", () => {
       glyph.mockRestore();
       h.renderer.dispose();
     }
+  });
+});
+
+describe("WebGL minimum contrast", () => {
+  const glyphEntry = (intrinsicColor: boolean): WebGlGlyphEntry => ({
+    originOffsetX: 0,
+    originOffsetY: 0,
+    width: 8,
+    height: 16,
+    uvMinX: 0,
+    uvMinY: 0,
+    uvMaxX: 0.01,
+    uvMaxY: 0.01,
+    intrinsicColor,
+  });
+
+  /** Renders cells 1 (text), 2 (a colour glyph) and 3 (box drawing) in dark grey. */
+  function colours(minimumContrast: number) {
+    const glyph = vi
+      .spyOn(WebGlGlyphAtlas.prototype, "glyph")
+      .mockImplementation((codepoint) => glyphEntry(codepoint === 0x1f600));
+    const dark = 0x202020;
+    const h = setup({
+      minimumContrast,
+      codepoints: new Map([
+        [1, 0x41],
+        [2, 0x1f600],
+        [3, 0x2500],
+      ]),
+      foregrounds: new Map([
+        [1, dark],
+        [2, dark],
+        [3, dark],
+      ]),
+    });
+    try {
+      h.renderer.render(h.frame());
+      const attributes = (
+        h.renderer as unknown as { glyphAttributes: Float32Array }
+      ).glyphAttributes;
+      // 15 floats per glyph; the colour is RGBA at 8..11.
+      const rgb = (cell: number) =>
+        [8, 9, 10].map((offset) =>
+          Math.round(attributes[cell * 15 + offset] * 255),
+        );
+      return [rgb(1), rgb(2), rgb(3)];
+    } finally {
+      glyph.mockRestore();
+      h.renderer.dispose();
+    }
+  }
+
+  it("draws unreadable text white or black, but not colour glyphs or shapes", () => {
+    const dark = [0x20, 0x20, 0x20];
+    // Cells 1-3 sit on black (only column 0 has a background of its own).
+    expect(colours(1)).toEqual([dark, dark, dark]);
+    expect(colours(4.5)).toEqual([[255, 255, 255], dark, dark]);
   });
 });
 
