@@ -38,10 +38,10 @@ export const ADAPTED_GHOSTTY_COMMIT =
 export const ADAPTED_RESTTY_COMMIT =
   "7700b14a7643ba9240818209ef1e0aa90d83ad77";
 export const ADAPTED_GHOSTTY_WASM_SHA256 =
-  "4665c5f151ab5b3b19ec19251bfd15a95d4b02328d24b29750cee278b5dc4262";
+  "d1f340dd853a20890da36c2f2a219163b5f90c1fdc2f8ced198fbfb64cc985f9";
 
 export const ADAPTED_GHOSTTY_SCALAR_WASM_SHA256 =
-  "6caa49c17ea16d9ee8b7ec466b3c9e510baed8a5054d96a0ad9cbd148a433333";
+  "4551745880269c49ad90a119f0f6415273e0a46deb47ca420c41680a74697d1d";
 
 let wasmSimdAvailable: boolean | undefined;
 
@@ -73,6 +73,9 @@ const EVENT_HEADER_BYTES = 5;
 const SEARCH_STATUS_BYTES = 16;
 const SEARCH_VIEWPORT_SPAN_BYTES = 8;
 const MAX_EVENT_PAYLOAD_BYTES = 256 * 1024;
+/** Clipboard events (OSC 52, Kitty writes) carry the data, up to Ghostty's 64 MiB write cap. */
+const MAX_CLIPBOARD_EVENT_BYTES = 64 * 1024 * 1024 + 64 * 1024;
+const CLIPBOARD_EVENTS = new Set([4, 16]);
 const LINE_CHUNK_LINES = 64;
 const RECLAIM_DELAY_MS = 250;
 
@@ -807,10 +810,10 @@ export class TeraxGhosttyTerminal {
         const type = bytes[offset];
         const payloadLength = view.getUint32(offset + 1, true);
         offset += EVENT_HEADER_BYTES;
-        if (
-          payloadLength > MAX_EVENT_PAYLOAD_BYTES ||
-          offset + payloadLength > bytes.byteLength
-        ) {
+        const limit = CLIPBOARD_EVENTS.has(type)
+          ? MAX_CLIPBOARD_EVENT_BYTES
+          : MAX_EVENT_PAYLOAD_BYTES;
+        if (payloadLength > limit || offset + payloadLength > bytes.byteLength) {
           throw new Error("Invalid Ghostty semantic event payload");
         }
         const event = decodeTerminalEvent(
@@ -2270,14 +2273,33 @@ function decodeTerminalEvent(
         mimes: mimes ? mimes.split("\n") : [],
       };
     }
-    case 16:
-      if (payload.byteLength < 2) return null;
+    case 16: {
+      if (payload.byteLength < 4) return null;
+      const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+      const count = view.getUint16(2, true);
+      const contents: { mime: string; data: Uint8Array<ArrayBuffer> }[] = [];
+      let at = 4;
+      for (let index = 0; index < count; index += 1) {
+        if (payload.byteLength - at < 2) return null;
+        const mimeLength = view.getUint16(at, true);
+        at += 2;
+        if (payload.byteLength - at < mimeLength + 4) return null;
+        const mime = textDecoder.decode(payload.subarray(at, at + mimeLength));
+        at += mimeLength;
+        const dataLength = view.getUint32(at, true);
+        at += 4;
+        if (payload.byteLength - at < dataLength) return null;
+        // Copied out: WebAssembly memory is reused once events are drained.
+        contents.push({ mime, data: payload.slice(at, at + dataLength) });
+        at += dataLength;
+      }
       return {
         type: "kitty-clipboard-write",
         primary: payload[0] === 1,
         clear: payload[1] === 1,
-        text: textDecoder.decode(payload.subarray(2)),
+        contents,
       };
+    }
     case 17: {
       const code = payload[0];
       if (code === 0) return { type: "drag-and-drop", change: "registration" };

@@ -60,7 +60,9 @@ const TerminalEvent = enum(u8) {
     /// separated by "\n".
     kitty_clipboard_read = 15,
     /// A Kitty clipboard write the host allows: 1 for the primary selection,
-    /// 1 when the write clears the clipboard, then the text written.
+    /// 1 when the write clears the clipboard, u16 count, then per
+    /// representation (the first text one and the first image one) u16 MIME
+    /// length, MIME, u32 data length and the data.
     kitty_clipboard_write = 16,
     /// Kitty drag and drop (OSC 72) changed: one byte, 0 the program
     /// registered or unregistered for drops (`restty_dnd_active`), 1 it
@@ -72,8 +74,12 @@ const TerminalEvent = enum(u8) {
 /// Kitty clipboard reads held for the host at once; more are answered busy.
 const max_pending_kitty_reads: usize = 4;
 /// A held read's answer is replayed through Ghostty's encoder in one call,
-/// so the reply queue may hold this much while it is.
-const max_kitty_answer_output: usize = 4 * 1024 * 1024;
+/// so the reply queue may hold this much while it is: the host serves at
+/// most 32 MiB, which base64 and packet framing grow by a third.
+const max_kitty_answer_output: usize = 48 * 1024 * 1024;
+/// Clipboard events (OSC 52 and Kitty writes) carry the data written, up to
+/// Ghostty's own cap on a Kitty write; other events stay small.
+const max_clipboard_event_bytes: usize = ghostty.kitty.clipboard.max_write_size + 64 * 1024;
 
 const PendingKittyRead = struct {
     id: u32,
@@ -488,31 +494,66 @@ const StreamHandler = struct {
         read.reply(self.kitty_read_answer orelse .denied);
     }
 
-    /// A completed Kitty clipboard write: handed to the host when allowed.
-    /// The host writes text only, so a write without a text representation
-    /// is refused as unsupported, and one too large for the event queue as
-    /// an I/O error rather than lost. The host writes the clipboard
-    /// afterwards; the program hears success once the text is with it.
+    /// A completed Kitty clipboard write: handed to the host when allowed,
+    /// with its first text and first image representation (the host writes
+    /// text and images); a write with neither is refused as unsupported, one
+    /// the event queue cannot take as an I/O error rather than lost. The host
+    /// writes the clipboard afterwards; the program hears success once the
+    /// data is with it.
     fn effectClipboardWrite(
         readonly: *ReadonlyHandler,
         write: ghostty.clipboard.Write,
     ) void {
         const self = fromReadonly(readonly);
         if (!self.kitty_writes_allowed) return write.reply(.denied);
-        const text: []const u8 = for (write.contents) |content| {
-            if (ghostty.clipboard.isTextMime(content.mime)) break content.data;
-        } else if (write.contents.len == 0) "" else return write.reply(.unsupported);
-        const flags = [_]u8{
-            @intFromBool(write.location == .primary),
-            @intFromBool(write.contents.len == 0),
-        };
+        var text: ?ghostty.clipboard.Content = null;
+        var image: ?ghostty.clipboard.Content = null;
+        for (write.contents) |content| {
+            if (text == null and ghostty.clipboard.isTextMime(content.mime)) text = content;
+            if (image == null and std.mem.startsWith(u8, content.mime, "image/")) image = content;
+        }
+        if (write.contents.len > 0 and text == null and image == null) {
+            return write.reply(.unsupported);
+        }
         const before = self.dropped_events.*;
-        self.emitEvent(.kitty_clipboard_write, &.{ &flags, text }) catch |err| {
+        self.emitKittyClipboardWrite(write, text, image) catch |err| {
             log.warn("dropping kitty clipboard write err={}", .{err});
             return write.reply(.io_error);
         };
         if (self.dropped_events.* != before) return write.reply(.io_error);
         write.reply(.{ .success = .{} });
+    }
+
+    fn emitKittyClipboardWrite(
+        self: *StreamHandler,
+        write: ghostty.clipboard.Write,
+        text: ?ghostty.clipboard.Content,
+        image: ?ghostty.clipboard.Content,
+    ) !void {
+        var header: [4]u8 = undefined;
+        header[0] = @intFromBool(write.location == .primary);
+        header[1] = @intFromBool(write.contents.len == 0);
+        const count: u16 = @as(u16, @intFromBool(text != null)) + @intFromBool(image != null);
+        std.mem.writeInt(u16, header[2..4], count, .little);
+        var chunks: [9][]const u8 = undefined;
+        var lengths: [2][6]u8 = undefined;
+        chunks[0] = &header;
+        var n: usize = 1;
+        for ([_]?ghostty.clipboard.Content{ text, image }, 0..) |maybe, i| {
+            const content = maybe orelse continue;
+            if (content.mime.len > std.math.maxInt(u16) or content.data.len > std.math.maxInt(u32)) {
+                return error.TooLarge;
+            }
+            std.mem.writeInt(u16, lengths[i][0..2], @intCast(content.mime.len), .little);
+            std.mem.writeInt(u32, lengths[i][2..6], @intCast(content.data.len), .little);
+            chunks[n] = lengths[i][0..2];
+            chunks[n + 1] = content.mime;
+            chunks[n + 2] = lengths[i][2..6];
+            n += 3;
+            chunks[n] = content.data;
+            n += 1;
+        }
+        try self.emitEventLimit(.kitty_clipboard_write, chunks[0..n], max_clipboard_event_bytes);
     }
 
     fn effectDragAndDrop(
@@ -974,6 +1015,17 @@ const StreamHandler = struct {
         event: TerminalEvent,
         chunks: []const []const u8,
     ) !void {
+        return self.emitEventLimit(event, chunks, max_event_payload_bytes);
+    }
+
+    /// `emitEvent` for an event that may carry up to `limit` bytes; the
+    /// queue takes it on top of what it holds.
+    fn emitEventLimit(
+        self: *StreamHandler,
+        event: TerminalEvent,
+        chunks: []const []const u8,
+        limit: usize,
+    ) !void {
         var payload_len: usize = 0;
         for (chunks) |chunk| payload_len = std.math.add(usize, payload_len, chunk.len) catch {
             self.dropped_events.* +|= 1;
@@ -983,9 +1035,8 @@ const StreamHandler = struct {
             self.dropped_events.* +|= 1;
             return;
         };
-        if (payload_len > max_event_payload_bytes or
-            record_len > max_event_buffer_bytes -| self.events.items.len)
-        {
+        const room = @max(max_event_buffer_bytes, limit + 64 * 1024);
+        if (payload_len > limit or record_len > room -| self.events.items.len) {
             self.dropped_events.* +|= 1;
             return;
         }
@@ -1203,7 +1254,7 @@ const StreamHandler = struct {
                     return;
                 }
                 const kind = [_]u8{value.kind};
-                try self.emitEvent(.clipboard, &.{ &kind, value.data });
+                try self.emitEventLimit(.clipboard, &.{ &kind, value.data }, max_clipboard_event_bytes);
             },
             .show_desktop_notification => {
                 self.readonly.vt(action, value);

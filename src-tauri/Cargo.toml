@@ -74,6 +74,7 @@ tokio = { version = "1", default-features = false, features = ["macros", "rt", "
 tempfile = "3"
 which = "8.0.4"
 fontdb = "0.24"
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 [dev-dependencies]
 proptest = "1"

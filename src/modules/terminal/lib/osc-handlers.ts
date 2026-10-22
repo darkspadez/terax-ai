@@ -1,6 +1,7 @@
 import { IS_WINDOWS } from "@/lib/platform";
 
-const MAX_OSC52_CLIPBOARD_BYTES = 1024 * 1024;
+/** What one OSC 52 write carries at most: Ghostty takes 8 MiB per OSC. */
+const MAX_OSC52_CLIPBOARD_BYTES = 6 * 1024 * 1024;
 
 export function parseOsc7(data: string): string | null {
   const m = data.match(/^file:\/\/[^/]*(\/.*)$/);

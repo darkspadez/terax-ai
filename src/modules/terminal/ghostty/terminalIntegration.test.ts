@@ -16,8 +16,12 @@ describe("terminal integration", () => {
       "\x1b]52;c;aMOpbGxv\x07",
     );
     expect(clipboardReadReply("p", "", "st")).toBe("\x1b]52;p;\x1b\\");
-    // Oversized clipboards are answered empty rather than flooding the PTY.
-    expect(clipboardReadReply("c", "x".repeat(1024 * 1024 + 1), "st")).toBe(
+    // Megabytes are answered; larger clipboards are answered empty rather
+    // than flooding the PTY.
+    expect(clipboardReadReply("c", "x".repeat(3 * 1024 * 1024), "st")).toHaveLength(
+      4 * 1024 * 1024 + 9,
+    );
+    expect(clipboardReadReply("c", "x".repeat(8 * 1024 * 1024 + 1), "st")).toBe(
       "\x1b]52;c;\x1b\\",
     );
   });
@@ -44,7 +48,46 @@ describe("terminal integration", () => {
       status: "unsupported",
     });
     expect(
-      kittyClipboardAnswer(["text/plain"], "x".repeat(2 * 1024 * 1024 + 1)),
+      kittyClipboardAnswer(["text/plain"], "x".repeat(32 * 1024 * 1024 + 1)),
+    ).toEqual({ status: "io-error" });
+  });
+
+  it("serves the clipboard's image as PNG, and lists it", () => {
+    const png = Uint8Array.of(0x89, 0x50, 0x4e, 0x47);
+    const hi = new TextEncoder().encode("hi");
+    expect(
+      kittyClipboardAnswer(["image/png", "image/jpeg", "text/plain"], "hi", png),
+    ).toEqual({
+      status: "success",
+      available: ["text/plain", "image/png"],
+      contents: [
+        { mime: "image/png", data: png },
+        { mime: "text/plain", data: hi },
+      ],
+    });
+    // An image alone; no image (an empty read) is not on offer.
+    expect(kittyClipboardAnswer([], "", png)).toEqual({
+      status: "success",
+      available: ["image/png"],
+      contents: [],
+    });
+    expect(kittyClipboardAnswer(["image/png"], "hi", new Uint8Array(0))).toEqual({
+      status: "success",
+      available: ["text/plain"],
+      contents: [],
+    });
+    // Everything served counts toward the limit.
+    const half = new Uint8Array(16 * 1024 * 1024 + 1);
+    expect(
+      kittyClipboardAnswer(["image/png"], "x".repeat(16 * 1024 * 1024), half)
+        .status,
+    ).toBe("success");
+    expect(
+      kittyClipboardAnswer(
+        ["image/png", "text/plain"],
+        "x".repeat(16 * 1024 * 1024),
+        half,
+      ),
     ).toEqual({ status: "io-error" });
   });
 

@@ -11,10 +11,10 @@ per-terminal frame loop, or per-pane GPU lifecycle.
 - Restty commit: `7700b14a7643ba9240818209ef1e0aa90d83ad77`
 - Zig: `0.16.0`
 - Optimization: `ReleaseFast`, WebAssembly SIMD and scalar variants
-- SIMD artifact size: `1071872` bytes
-- Scalar artifact size: `1012835` bytes
-- SIMD SHA-256: `4665c5f151ab5b3b19ec19251bfd15a95d4b02328d24b29750cee278b5dc4262`
-- Scalar SHA-256: `6caa49c17ea16d9ee8b7ec466b3c9e510baed8a5054d96a0ad9cbd148a433333`
+- SIMD artifact size: `1072395` bytes
+- Scalar artifact size: `1013358` bytes
+- SIMD SHA-256: `d1f340dd853a20890da36c2f2a219163b5f90c1fdc2f8ced198fbfb64cc985f9`
+- Scalar SHA-256: `4551745880269c49ad90a119f0f6415273e0a46deb47ca420c41680a74697d1d`
 
 Terax-specific changes include:
 
@@ -158,11 +158,14 @@ XTVERSION, OSC 9;4 progress), instead of answering only a hand-picked set:
   (`kitty_clipboard_read`: id, location, listing flag, the program's name and
   MIME types) and, when the host answers (`restty_kitty_clipboard_answer`),
   replays the packet through Ghostty with the answer, letting Ghostty encode
-  the response (the reply queue may hold 4 MiB while it does). Turning reads
-  off refuses those still held. Writes run Ghostty's write state machine and
-  reach the host as text (`kitty_clipboard_write`); one without a text
-  representation is answered unsupported. OSC 52 stays the bridge's own, so
-  Ghostty's handler never sees it.
+  the response (the reply queue may hold 48 MiB while it does, the base64
+  framing of the 32 MiB the host serves). Turning reads off refuses those
+  still held. Writes run Ghostty's write state machine (up to its 64 MiB) and
+  reach the host as its first text and first `image/*` representation
+  (`kitty_clipboard_write`: location, clear flag, then each MIME type with its
+  data); one with neither is answered unsupported. Clipboard events (this and
+  OSC 52) may carry Ghostty's write limit; other events stay within 256 KiB.
+  OSC 52 stays the bridge's own, so Ghostty's handler never sees it.
 - Mode 5522 paste events (`restty_kitty_paste_event`): for a user's paste
   from a clipboard the bridge mints Kitty's one-time password from host
   entropy (Ghostty's alphabet and rejection sampling; a freestanding target

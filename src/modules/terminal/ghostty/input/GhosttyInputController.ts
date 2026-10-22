@@ -14,8 +14,6 @@ import { TerminalInputProxy } from "@/modules/terminal/ghostty/input/TerminalInp
 import { TerminalNativeSelection } from "@/modules/terminal/ghostty/input/TerminalNativeSelection";
 
 const DUPLICATE_INPUT_WINDOW_MS = 75;
-/** What a paste event offers: the host serves its clipboards as text. */
-const PASTE_EVENT_MIMES: readonly string[] = ["text/plain"];
 
 /** `WheelEvent.deltaMode` values (the constructor is not available everywhere). */
 const DOM_DELTA_PIXEL = 0;
@@ -168,6 +166,11 @@ export type GhosttyInputControllerOptions = {
   readonly onSelectionFinished?: () => void;
   /** Middle click the program does not track; true when handled (a paste). */
   readonly onMiddleClick?: () => boolean;
+  /**
+   * Whether the clipboard holds an image, which a Kitty paste event then
+   * offers as `image/png`; asked only when the program takes paste events.
+   */
+  readonly clipboardHasImage?: () => Promise<boolean>;
   readonly isMac?: boolean;
   /** Selected-placeholder input proxy (a macOS WebKit fix); defaults to `isMac`. */
   readonly inputPlaceholder?: boolean;
@@ -241,14 +244,38 @@ export class GhosttyInputController {
   }
 
   private deliverPaste(text: string, clipboard: boolean | null): void {
-    if (this.disposed || !text) return;
+    if (this.disposed) return;
+    // A clipboard holding only an image is pasted as a paste event alone.
+    const event =
+      clipboard !== null && this.options.model.pasteEventsWanted?.() === true;
+    if (!text && !event) return;
     this.nativeSelection?.reset();
-    if (this.options.onPaste?.(text)) return;
-    if (
-      clipboard !== null &&
-      this.options.model.sendPasteEvent?.(clipboard, PASTE_EVENT_MIMES)
-    )
+    if (text && this.options.onPaste?.(text)) return;
+    if (clipboard !== null && event) {
+      void this.sendPasteEvent(text, clipboard);
       return;
+    }
+    this.pasteText(text);
+  }
+
+  /**
+   * Mode 5522: the program is sent a Kitty paste event listing what the
+   * clipboard holds, an image included, and reads it itself; the text is
+   * pasted when no event could be sent.
+   */
+  private async sendPasteEvent(text: string, primary: boolean): Promise<void> {
+    const image =
+      !primary &&
+      (await this.options.clipboardHasImage?.().catch(() => false)) === true;
+    if (this.disposed || this.options.model.isDisposed?.()) return;
+    const mimes = text ? ["text/plain"] : [];
+    if (image) mimes.push("image/png");
+    if (mimes.length > 0 && this.options.model.sendPasteEvent?.(primary, mimes))
+      return;
+    if (text) this.pasteText(text);
+  }
+
+  private pasteText(text: string): void {
     const bracketed = this.options.model.modes().bracketedPaste;
     if (this.options.confirmPaste && isUnsafePaste(text, bracketed)) {
       void this.options.confirmPaste(text).then((confirmed) => {
@@ -502,7 +529,17 @@ export class GhosttyInputController {
 
   private readonly handlePaste = (event: ClipboardEvent): void => {
     const text = event.clipboardData?.getData("text/plain") ?? "";
-    if (!text) return;
+    // An image alone is pasted only as a paste event (mode 5522).
+    if (
+      !text &&
+      !(
+        this.options.model.pasteEventsWanted?.() &&
+        event.clipboardData?.types?.some((type) =>
+          type.toLowerCase().startsWith("image/"),
+        )
+      )
+    )
+      return;
     consume(event);
     this.pasteFromClipboard(text);
   };

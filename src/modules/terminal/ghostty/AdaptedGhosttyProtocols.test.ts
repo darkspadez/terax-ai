@@ -79,6 +79,13 @@ function base64(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString("base64");
 }
 
+/** `length` bytes of a repeating, not merely constant, pattern. */
+function patterned(length: number): Uint8Array {
+  const bytes = new Uint8Array(length);
+  for (let index = 0; index < length; index += 1) bytes[index] = (index * 31) % 251;
+  return bytes;
+}
+
 describe.each([
   ["SIMD", "ghostty-vt.wasm"],
   ["scalar", "ghostty-vt-scalar.wasm"],
@@ -367,6 +374,11 @@ describe.each([
           { type: "clipboard-read", selection: "p", terminator: "st" },
           { type: "clipboard", selection: "c", data: "aGk=" },
         ]);
+        // Writes of megabytes arrive whole, up to what one OSC holds.
+        const text = base64(patterned(5 * 1024 * 1024));
+        write(`\x1b]52;c;${text}\x07`);
+        const [event] = terminal.drainEvents();
+        expect(event?.type === "clipboard" && event.data === text).toBe(true);
       });
     });
   });
@@ -460,13 +472,95 @@ describe.each([
         expect(write(kittyWrite(null))).toBe(
           "\x1b]5522;type=write:status=DONE\x1b\\",
         );
-        expect(write(kittyWrite("image/png", "png"))).toBe(
+        expect(write(kittyWrite("application/x-terax", "?"))).toBe(
           "\x1b]5522;type=write:status=ENOSYS\x1b\\",
         );
         expect(terminal.drainEvents()).toEqual([
-          { type: "kitty-clipboard-write", primary: false, clear: false, text: "hi" },
-          { type: "kitty-clipboard-write", primary: false, clear: true, text: "" },
+          {
+            type: "kitty-clipboard-write",
+            primary: false,
+            clear: false,
+            contents: [{ mime: "text/plain", data: encoder.encode("hi") }],
+          },
+          { type: "kitty-clipboard-write", primary: false, clear: true, contents: [] },
         ]);
+      });
+    });
+
+    /** A write of `parts`, each sent as wdata chunks of `chunk` bytes. */
+    const kittyWriteParts = (
+      parts: { mime: string; data: Uint8Array }[],
+      chunk = 3 * 16 * 1024,
+    ) => {
+      let sequence = "\x1b]5522;type=write\x1b\\";
+      for (const { mime, data } of parts) {
+        for (let at = 0; at < data.byteLength; at += chunk) {
+          sequence += `\x1b]5522;type=wdata:mime=${b64(mime)};${base64(data.subarray(at, at + chunk))}\x1b\\`;
+        }
+      }
+      return `${sequence}\x1b]5522;type=wdata\x1b\\`;
+    };
+
+    it("hands images, with their text, and writes of megabytes to the host", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        terminal.setClipboardPolicy({ readsToHost: false, writesAllowed: true });
+        const png = Uint8Array.from({ length: 300 }, (_, index) => index & 0xff);
+        // The first text and the first image are taken, the rest dropped.
+        expect(
+          write(
+            kittyWriteParts([
+              { mime: "text/plain", data: encoder.encode("alt") },
+              { mime: "image/png", data: png },
+              { mime: "image/jpeg", data: png.subarray(0, 3) },
+            ]),
+          ),
+        ).toBe("\x1b]5522;type=write:status=DONE\x1b\\");
+        expect(terminal.drainEvents()).toEqual([
+          {
+            type: "kitty-clipboard-write",
+            primary: false,
+            clear: false,
+            contents: [
+              { mime: "text/plain", data: encoder.encode("alt") },
+              { mime: "image/png", data: png },
+            ],
+          },
+        ]);
+
+        // Far past the 256 KiB other events may carry.
+        const large = patterned(3 * 1024 * 1024);
+        expect(write(kittyWriteParts([{ mime: "image/png", data: large }]))).toBe(
+          "\x1b]5522;type=write:status=DONE\x1b\\",
+        );
+        const [event] = terminal.drainEvents();
+        const data = event?.type === "kitty-clipboard-write" ? event.contents[0]?.data : null;
+        expect(data && Buffer.from(large).equals(data)).toBe(true);
+      });
+    });
+
+    it("answers a read with megabytes of image", () => {
+      withTerminal(80, 24, (terminal, write) => {
+        terminal.setClipboardPolicy({ readsToHost: true, writesAllowed: false });
+        write(`\x1b]5522;type=read;${b64("image/png")}\x1b\\`);
+        const [read] = terminal.drainEvents();
+        expect(read).toMatchObject({ type: "kitty-clipboard-read", mimes: ["image/png"] });
+        // More than the 4 MiB a reply could once take.
+        const image = patterned(6 * 1024 * 1024);
+        expect(
+          terminal.answerKittyClipboardRead(1, {
+            status: "success",
+            available: ["image/png"],
+            contents: [{ mime: "image/png", data: image }],
+          }),
+        ).toBe(true);
+        const reply = decoder.decode(terminal.drainOutputBytes());
+        const chunks = [
+          ...reply.matchAll(
+            new RegExp(`\x1b\\]5522;type=read:status=DATA:mime=${b64("image/png")};([^\x1b]*)\x1b\\\\`, "g"),
+          ),
+        ].map((match) => Buffer.from(match[1], "base64"));
+        expect(Buffer.concat(chunks).equals(image)).toBe(true);
+        expect(reply.endsWith("\x1b]5522;type=read:status=DONE\x1b\\")).toBe(true);
       });
     });
 

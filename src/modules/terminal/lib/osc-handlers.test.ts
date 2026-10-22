@@ -38,6 +38,12 @@ describe("terminal semantic boundaries", () => {
     expect(parseOsc52Clipboard(payload)).toBe(expected),
   );
 
-  it("rejects oversized clipboard writes", () =>
-    expect(parseOsc52Clipboard(`c;${"A".repeat(1_398_110)}`)).toBeNull());
+  it("takes clipboard writes of megabytes and rejects larger ones", () => {
+    const text = "terax ".repeat(512 * 1024);
+    expect(
+      parseOsc52Clipboard(`c;${Buffer.from(text).toString("base64")}`),
+    ).toBe(text);
+    // Past 6 MiB, about the 8 MiB of base64 Ghostty takes per OSC.
+    expect(parseOsc52Clipboard(`c;${"A".repeat(8_388_616)}`)).toBeNull();
+  });
 });

@@ -10,6 +10,7 @@ import {
 import { loadSessionRenderer } from "@/modules/terminal/ghostty/loadSessionRenderer";
 import { replaceSessionSurface } from "@/modules/terminal/ghostty/replaceSessionSurface";
 import { initializeSessionGeneration as startSessionInitialization } from "@/modules/terminal/ghostty/sessionInitialization";
+import { BoundedPtyWriter } from "@/modules/terminal/lib/BoundedPtyWriter";
 import { LatestClipboardWrite } from "@/modules/terminal/lib/LatestClipboardWrite";
 import { setLeafPresentation } from "@/modules/terminal/lib/ptyPresentation";
 import { PtyResizeDelivery } from "@/modules/terminal/lib/ptyResizeDelivery";
@@ -31,9 +32,12 @@ import {
   terminalDragPosition,
 } from "../lib/programDrop";
 import {
+  readClipboardImage,
   readPrimarySelection,
+  type TerminalClipboardContent,
   writePrimarySelection,
   writeTerminalClipboard,
+  writeTerminalClipboardContent,
 } from "../lib/terminalClipboard";
 import { useTerminalFontOffsets } from "../lib/terminalFontOffsets";
 import { openTerminalFile, resolveTerminalLink } from "../lib/terminalLinkOpen";
@@ -78,8 +82,6 @@ type GhosttySessionFailure = {
 
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
-const MAX_PENDING_INPUT_BYTES = 256 * 1024;
-const MAX_WRITE_BATCH_BYTES = 64 * 1024;
 
 type Callbacks = {
   onModel?: (model: GhosttyTerminalModelApi | null) => void;
@@ -156,7 +158,10 @@ if (typeof window !== "undefined") {
   });
 }
 const textEncoder = new TextEncoder();
-const oscClipboard = new LatestClipboardWrite(writeTerminalClipboard);
+/** Program clipboard writes (OSC 52, Kitty), the latest of a burst kept. */
+const programClipboard = new LatestClipboardWrite<TerminalClipboardContent>(
+  writeTerminalClipboardContent,
+);
 
 type Options = {
   leafId: number;
@@ -824,7 +829,7 @@ async function initializeSessionGeneration(
     ...terminalIntegrationCallbacks({
       leafId: session.leafId,
       userIsLooking: () => session.visible && document.hasFocus(),
-      reply: (bytes) => session.writer.enqueue(bytes),
+      reply: (bytes) => session.writer.enqueue(bytes, true),
       answerKittyClipboardRead: (id, answer) => {
         if (eventModel && !eventModel.isDisposed?.())
           eventModel.answerClipboardRead?.(id, answer);
@@ -837,11 +842,11 @@ async function initializeSessionGeneration(
       session.callbacks.onCwd?.(cwd);
     },
     onClipboard: (text) => {
-      oscClipboard.enqueue(text);
+      programClipboard.enqueue(text);
     },
-    onKittyClipboardWrite: (text, primary) => {
-      if (primary) void writePrimarySelection(text);
-      else oscClipboard.enqueue(text);
+    onKittyClipboardWrite: (content, primary) => {
+      if (!primary) programClipboard.enqueue(content);
+      else if (typeof content === "string") void writePrimarySelection(content);
     },
     onOverflow: (dropped) => {
       console.warn(
@@ -866,7 +871,7 @@ async function initializeSessionGeneration(
       cursorStyle: preferences.terminalCursorStyle,
       cursorBlink: preferences.terminalCursorBlink,
     },
-    onReply: (bytes) => session.writer.enqueue(bytes),
+    onReply: (bytes) => session.writer.enqueue(bytes, true),
     onEvent: (event) => {
       semanticEvents.handle(event);
       ghosttyBlocks(session.leafId)?.controller?.handle(
@@ -1136,6 +1141,7 @@ function createGhosttyInput(
       });
       return true;
     },
+    clipboardHasImage: async () => (await readClipboardImage()) !== null,
     getSelection: () => surface.getSelection(),
     onCopy: () => {
       const text = surface.getSelection();
@@ -1417,103 +1423,6 @@ function fontSpecKey(font: TerminalFontSpec): string {
     font.letterSpacing,
     font.weight,
   ].join("|");
-}
-
-class BoundedPtyWriter {
-  private readonly queue: Uint8Array[] = [];
-  private pty: PtySession | null = null;
-  private flushing = false;
-  private disposed = false;
-  pendingBytes = 0;
-
-  constructor(private readonly onError: (error: unknown) => void) {}
-
-  attach(pty: PtySession): void {
-    if (this.disposed) return;
-    this.pty = pty;
-    void this.flush();
-  }
-
-  detach(): void {
-    this.pty = null;
-  }
-
-  clear(): void {
-    this.queue.length = 0;
-    this.pendingBytes = 0;
-  }
-
-  enqueue(bytes: Uint8Array): boolean {
-    if (
-      this.disposed ||
-      bytes.byteLength === 0 ||
-      this.pendingBytes + bytes.byteLength > MAX_PENDING_INPUT_BYTES
-    ) {
-      return false;
-    }
-    this.queue.push(bytes);
-    this.pendingBytes += bytes.byteLength;
-    void this.flush();
-    return true;
-  }
-
-  dispose(): void {
-    this.disposed = true;
-    this.pty = null;
-    this.queue.length = 0;
-    this.pendingBytes = 0;
-  }
-
-  private async flush(): Promise<void> {
-    if (this.flushing || this.disposed || !this.pty) return;
-    this.flushing = true;
-    try {
-      while (!this.disposed && this.pty && this.queue.length > 0) {
-        const pty = this.pty;
-        const batch = this.takeBatch();
-        try {
-          await pty.write(batch);
-        } catch (error) {
-          this.onError(error);
-          return;
-        }
-      }
-    } finally {
-      this.flushing = false;
-      if (!this.disposed && this.pty && this.queue.length > 0) {
-        queueMicrotask(() => void this.flush());
-      }
-    }
-  }
-
-  private takeBatch(): Uint8Array {
-    let length = 0;
-    let count = 0;
-    while (count < this.queue.length) {
-      const nextLength = this.queue[count].byteLength;
-      if (count > 0 && length + nextLength > MAX_WRITE_BATCH_BYTES) break;
-      length += nextLength;
-      count += 1;
-      if (length >= MAX_WRITE_BATCH_BYTES) break;
-    }
-
-    if (count === 1) {
-      const single = this.queue.shift();
-      if (!single) return new Uint8Array(0);
-      this.pendingBytes -= single.byteLength;
-      return single;
-    }
-    const batch = new Uint8Array(length);
-    let offset = 0;
-    for (let index = 0; index < count; index += 1) {
-      const chunk = this.queue[index];
-      batch.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-    this.queue.splice(0, count);
-    this.pendingBytes -= length;
-    return batch;
-  }
 }
 
 if (import.meta.hot) {

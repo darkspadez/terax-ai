@@ -536,14 +536,18 @@ export type GhosttyTerminalEvent =
       readonly mimes: readonly string[];
     }
   /**
-   * Kitty clipboard write the policy allows: the text to put on the
-   * clipboard (or the primary selection), or a request to clear it.
+   * Kitty clipboard write the policy allows, for the clipboard (or the
+   * primary selection): its first text and first image representation, or
+   * none when it clears the clipboard.
    */
   | {
       readonly type: "kitty-clipboard-write";
       readonly primary: boolean;
       readonly clear: boolean;
-      readonly text: string;
+      readonly contents: readonly {
+        readonly mime: string;
+        readonly data: Uint8Array<ArrayBuffer>;
+      }[];
     }
   /**
    * Kitty drag and drop (OSC 72): the program registered or unregistered

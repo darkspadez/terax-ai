@@ -286,6 +286,11 @@ export interface GhosttyTerminalModelApi extends TerminalModel {
    */
   setClipboardPolicy?(policy: GhosttyClipboardPolicy): void;
   /**
+   * Whether a paste would go to the program as a Kitty paste event: it set
+   * mode 5522 and its reads come to the host.
+   */
+  pasteEventsWanted?(): boolean;
+  /**
    * A paste the user made from a clipboard holding `mimes`: true when the
    * program set mode 5522 and was sent a Kitty paste event instead of the
    * text (it reads the clipboard itself, with a grant that skips the prompt).

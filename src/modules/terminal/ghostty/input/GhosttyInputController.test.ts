@@ -609,22 +609,48 @@ describe.each(["ghostty-vt.wasm", "ghostty-vt-scalar.wasm"])(
       dispose();
     });
 
-    it("tells a program with Kitty paste events of clipboard pastes, not their text", () => {
-      const { controller, model, sent, replies, write, dispose } = setup();
+    it("tells a program with Kitty paste events of clipboard pastes, not their text", async () => {
+      let image = true;
+      const clipboardHasImage = vi.fn(async () => image);
+      const { controller, model, sent, replies, write, dispose } = setup({
+        clipboardHasImage,
+      });
+      /** The MIME types the next paste event lists. */
+      const listed = async () => {
+        await vi.waitFor(() => expect(replies.length).toBeGreaterThan(0));
+        const event = replies.splice(0).join("");
+        expect(event).toMatch(
+          /^\x1b\]5522;type=read:status=OK(:loc=primary)?:pw=[A-Za-z0-9+/]+=*\x1b\\/,
+        );
+        const listing = /status=DATA:mime=Lg==(?::loc=primary)?:pw=[^;]+;([^\x1b]*)/.exec(event)?.[1];
+        return listing === undefined ? null : atob(listing);
+      };
       model.setClipboardPolicy({ readsToHost: true, writesAllowed: true });
       controller.pasteFromClipboard("one");
       expect(sent.splice(0)).toEqual(["one"]);
+      // The clipboard is looked at only for a program taking paste events.
+      expect(clipboardHasImage).not.toHaveBeenCalled();
 
       write("\x1b[?5522h");
       controller.pasteFromClipboard("two", true);
       // Text that did not come from a clipboard is still typed.
       controller.paste("dropped");
       expect(sent.splice(0)).toEqual(["dropped"]);
-      const event = replies.splice(0).join("");
-      expect(event).toMatch(
-        /^\x1b\]5522;type=read:status=OK:loc=primary:pw=[A-Za-z0-9+/]+=*\x1b\\/,
-      );
-      expect(event).not.toContain(btoa("two"));
+      // The primary selection holds text only.
+      expect(await listed()).toBe("text/plain\n");
+      // A clipboard image is offered as PNG, alone when there is no text.
+      controller.pasteFromClipboard("");
+      expect(await listed()).toBe("image/png\n");
+      controller.pasteFromClipboard("four");
+      expect(await listed()).toBe("text/plain image/png\n");
+      expect(sent).toEqual([]);
+      // An empty clipboard pastes nothing.
+      image = false;
+      controller.pasteFromClipboard("");
+      await vi.waitFor(() => expect(clipboardHasImage).toHaveBeenCalledTimes(3));
+      await Promise.resolve();
+      expect(replies).toEqual([]);
+      expect(sent).toEqual([]);
 
       // Without the host serving reads the program could not fetch it.
       model.setClipboardPolicy({ readsToHost: false, writesAllowed: true });

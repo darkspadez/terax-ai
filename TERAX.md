@@ -276,18 +276,28 @@ Settings offer Automatic or WebGL for new terminals, plus opt-in screen reader
 output. Accessible text is limited to 256 rows / 64 KiB and refreshes at most four
 times per second while visible. Ordinary URL detection runs on pointer demand;
 OSC 8 links take precedence. OSC 52 side effects retain one in-flight write and
-only the latest pending value across the window.
+only the latest pending value across the window. OSC 52 writes carry up to
+6 MiB of text (about the 8 MiB of base64 Ghostty takes per OSC) and reads are
+answered with up to 8 MiB. Terminal replies have a PTY budget of their own,
+apart from what the user types: one larger reply (up to 64 MiB, a clipboard
+answer) is taken while no backlog beyond it is queued.
 
 Kitty clipboard reads (OSC 5522) follow the clipboard-read setting: denied ones
 the core refuses itself, others are held in the core until the user answers
 the same prompt OSC 52 uses (naming the program as it names itself) and then
-answered with the clipboard text under each requested text type; a listing of
-the types on offer is served unasked, as Kitty does. A program that sets mode
-5522 is told of a paste from a clipboard (shortcut, menu, middle click) by a
-Kitty paste event instead of the text, and its follow-up read, covered by the
-event's one-time password, is served without the prompt. Writes are allowed like
-OSC 52 writes and share its latest-value queue (the primary selection where
-asked). Files dragged over a pane whose program registered for drops (Kitty
+answered with the clipboard text under each requested text type and the
+clipboard image as `image/png` (32 MiB at most per answer, all types
+together); a listing of the types on offer is served unasked, as Kitty does.
+The image is read and encoded only when asked for or listed, and reads within
+a second share one. A program that sets mode 5522 is told of a paste from a
+clipboard (shortcut, menu, middle click) by a Kitty paste event instead of the
+text, listing `image/png` too when the clipboard holds an image (a clipboard
+holding only an image is pasted this way alone), and its follow-up read,
+covered by the event's one-time password, is served without the prompt.
+Writes are allowed like OSC 52 writes and share its latest-value queue (the
+primary selection, text only, where asked); a write with an image puts the
+image on the clipboard (types other than PNG converted through a canvas), its
+text written instead should the image not decode. Files dragged over a pane whose program registered for drops (Kitty
 OSC 72) go to the program as a copy, offered as `text/uri-list` and
 `text/plain`; elsewhere a drop pastes shell-quoted paths as before.
 
@@ -418,6 +428,7 @@ establish production readiness, platform parity, or multi-day resource stability
 - `shell::shell_session_*`: persistent agent shell with state across calls. `shell::shell_bg_*` (`spawn`, `logs`, `kill`, `list`): long-running background processes (dev servers etc.) with bounded ring-buffer log capture.
 - `workspace::*`: `workspace_authorize` / `workspace_current_dir` (the spawn/git/AI cwd authorization registry) plus the WSL bridge (`wsl_list_distros`, `wsl_default_distro`, `wsl_home`).
 - `lsp::*` (`lsp_detect`, `lsp_host_pid`, `lsp_resolve_root`, `lsp_spawn`, `lsp_send`, `lsp_kill`): language server process host. Dumb JSON-RPC pipe: Content-Length framing + process lifecycle in Rust (`lsp/framing.rs`, pure + tested), protocol intelligence on the frontend. Spawn cwd gated through the workspace registry; binaries resolve via the captured login-shell env (`lsp/env.rs`, GUI apps get a bare PATH on macOS); root detection walks up to markers but never to or above `$HOME`. Servers run in their own process group on Unix and are group-killed (cargo check / proc-macro children die with the server); Windows children get a `proc::job::ProcessJob` (kill-on-close, shared with pty). All sessions killed on `RunEvent::Exit`.
+- `clipboard_image::*` (`clipboard_image_read`, `clipboard_image_write`): clipboard images for the Kitty clipboard protocol, as PNG both ways (raw IPC bodies, 64 MiB cap), through the clipboard plugin's long-lived clipboard so a written image stays served on X11 like text. A read with no image answers an empty body; a written PNG is decoded with limits (16,384 pixels a side, 512 MiB decoded) before it reaches the clipboard. Both run on blocking workers.
 - `system_fonts::system_font_faces`: an installed family's faces (file, weight, style, stretch) for terminal font features, from a `fontdb` database built on first use and rebuilt when a family is missing (at most every 10 s); collection members past the first are left out, at most 64 faces.
 - `primary_selection::*` (`terminal_primary_selection_write`, `terminal_primary_selection_read`): the Linux PRIMARY selection for copy-on-select and middle-click paste, through `arboard` (X11, or Wayland data-control). Two long-lived clipboards, created on first use: the writer keeps the X11 selection served after the call returns and drops a write overtaken by a newer one, the reader is separate so a read stuck on an unresponsive owner never blocks writes (one read at a time). 4 MiB cap both ways; an empty write leaves PRIMARY alone. macOS/Windows: write is a no-op, read returns `None`.
 - `terminal_scrollback::*` (`terminal_scrollback_save`, `terminal_scrollback_load`, `terminal_scrollback_retain`): saved terminal scrollback, one file per pane key (`[A-Za-z0-9_-]{1,128}`) under the calling window's data root (the app data dir for `main`, `windows/<label>/` for another), so a window's `retain` never sees another's files. Raw UTF-8 bodies (key in the `x-terax-scrollback` header, 8 MiB cap, empty deletes), replaced atomically through a temp file (0600 on Unix) and never through a link; `retain` deletes every file it is not given, temp files included, and refuses an implausibly long list rather than truncate it. One gate serializes all three. See spaces/ below.

@@ -4,6 +4,7 @@ pub mod ai_sessions;
 pub mod app_menu;
 #[cfg(feature = "bench")]
 pub mod bench;
+pub mod clipboard_image;
 pub mod control;
 pub mod fs;
 pub mod git;

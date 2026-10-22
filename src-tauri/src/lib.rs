@@ -304,6 +304,8 @@ pub fn run() {
             fs::mutate::fs_delete_batch,
             fs::copy::fs_copy,
             fs::clipboard::fs_clipboard_paths,
+            modules::clipboard_image::clipboard_image_read,
+            modules::clipboard_image::clipboard_image_write,
             primary_selection::terminal_primary_selection_write,
             primary_selection::terminal_primary_selection_read,
             modules::quick_terminal::quick_terminal_toggle,

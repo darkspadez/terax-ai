@@ -101,25 +101,42 @@ describe("GhosttySemanticEventRouter", () => {
       mimes: ["text/plain"],
     } as const;
 
+    const bytes = (text: string) => new TextEncoder().encode(text);
+    const png = Uint8Array.of(0x89, 0x50, 0x4e, 0x47);
+    const write = (
+      primary: boolean,
+      contents: { mime: string; data: Uint8Array<ArrayBuffer> }[],
+    ) =>
+      router.handle({
+        type: "kitty-clipboard-write",
+        primary,
+        clear: contents.length === 0,
+        contents,
+      });
+
     router.handle(read);
-    router.handle({
-      type: "kitty-clipboard-write",
-      primary: true,
-      clear: false,
-      text: "hi",
-    });
-    router.handle({
-      type: "kitty-clipboard-write",
-      primary: false,
-      clear: true,
-      text: "",
-    });
+    write(true, [{ mime: "text/plain", data: bytes("hi") }]);
+    write(false, []);
+    // The image wins, its text kept should it not decode.
+    write(false, [
+      { mime: "text/plain", data: bytes("alt") },
+      { mime: "image/png", data: png },
+    ]);
+    write(false, [{ mime: "image/jpeg", data: png }]);
+    // The primary selection takes the text only.
+    write(true, [
+      { mime: "image/png", data: png },
+      { mime: "UTF8_STRING", data: bytes("sel") },
+    ]);
     router.handle({ type: "drag-and-drop", change: "registration" });
 
     expect(onKittyClipboardRead).toHaveBeenCalledWith(read);
     expect(onKittyClipboardWrite.mock.calls).toEqual([
       ["hi", true],
       ["", false],
+      [{ mime: "image/png", data: png, text: "alt" }, false],
+      [{ mime: "image/jpeg", data: png }, false],
+      ["sel", true],
     ]);
   });
 });

@@ -5,8 +5,12 @@ import type {
   TerminalNotifyOnFinish,
 } from "@/modules/settings/terminalBehavior";
 import type { GhosttyPointerShape } from "@terax/ghostty-core/protocol";
-import type { TeraxGhosttyKittyClipboardAnswer } from "@terax/ghostty-core/adapted";
+import type {
+  TeraxGhosttyKittyClipboardAnswer,
+  TeraxGhosttyMimeData,
+} from "@terax/ghostty-core/adapted";
 import {
+  readClipboardImage,
   readPrimarySelection,
   readTerminalClipboard,
 } from "../lib/terminalClipboard";
@@ -23,12 +27,15 @@ import type { Rgb } from "./core/packedCells";
 import type { GhosttyClipboardPolicy } from "./GhosttyTerminalModel";
 
 /** OSC 52 clipboard reads are answered with at most this much text. */
-const MAX_CLIPBOARD_REPLY_BYTES = 1024 * 1024;
+const MAX_CLIPBOARD_REPLY_BYTES = 8 * 1024 * 1024;
 /**
- * Kitty clipboard reads serve at most this much text: its base64 framing
- * stays within the 4 MiB the core lets one answer queue.
+ * Kitty clipboard reads serve at most this much, all representations
+ * together: its base64 framing stays within the 48 MiB the core lets one
+ * answer queue (`max_kitty_answer_output`).
  */
-const MAX_KITTY_CLIPBOARD_BYTES = 2 * 1024 * 1024;
+const MAX_KITTY_CLIPBOARD_BYTES = 32 * 1024 * 1024;
+/** The image type clipboard images are served as. */
+const IMAGE_MIME = "image/png";
 /** MIME types that name plain text, as Ghostty's `isTextMime` lists them. */
 const TEXT_MIMES = new Set([
   "text/plain",
@@ -57,25 +64,37 @@ export function clipboardReadReply(
 
 /**
  * The answer to a Kitty clipboard read once the user allowed it: the text
- * under each requested text MIME type (Ghostty serves four at most), the
- * types on offer when listed. Null text means there is no such clipboard.
+ * under each requested text MIME type and the image (PNG) under
+ * `image/png` (Ghostty serves four at most), the types on offer when
+ * listed. Null text means there is no such clipboard.
  */
 export function kittyClipboardAnswer(
   mimes: readonly string[],
   text: string | null,
+  image: Uint8Array | null = null,
 ): TeraxGhosttyKittyClipboardAnswer {
   if (text === null) return { status: "unsupported" };
   const data = encoder.encode(text);
-  if (data.byteLength > MAX_KITTY_CLIPBOARD_BYTES) return { status: "io-error" };
-  if (data.byteLength === 0) return { status: "success", available: [], contents: [] };
-  return {
-    status: "success",
-    available: ["text/plain"],
-    contents: mimes
-      .filter((mime) => TEXT_MIMES.has(mime))
-      .slice(0, 4)
-      .map((mime) => ({ mime, data })),
-  };
+  const png = image && image.byteLength > 0 ? image : null;
+  const available: string[] = [];
+  if (data.byteLength > 0) available.push("text/plain");
+  if (png) available.push(IMAGE_MIME);
+  const contents: TeraxGhosttyMimeData[] = [];
+  let size = 0;
+  for (const mime of mimes) {
+    if (contents.length === 4) break;
+    const served =
+      TEXT_MIMES.has(mime) && data.byteLength > 0
+        ? data
+        : mime === IMAGE_MIME
+          ? png
+          : null;
+    if (!served) continue;
+    contents.push({ mime, data: served });
+    size += served.byteLength;
+  }
+  if (size > MAX_KITTY_CLIPBOARD_BYTES) return { status: "io-error" };
+  return { status: "success", available, contents };
 }
 
 /** Whether a finished command deserves a notification. */
@@ -284,12 +303,16 @@ async function answerKittyClipboardRead(
     context.answerKittyClipboardRead(request.id, { status: "denied" });
     return;
   }
-  const text = request.primary
-    ? await readPrimarySelection()
-    : await readTerminalClipboard();
+  // The image is read (and encoded) only when it is asked for or listed.
+  const image =
+    !request.primary && (request.list || request.mimes.includes(IMAGE_MIME));
+  const [text, png] = await Promise.all([
+    request.primary ? readPrimarySelection() : readTerminalClipboard(),
+    image ? readClipboardImage() : null,
+  ]);
   context.answerKittyClipboardRead(
     request.id,
-    kittyClipboardAnswer(request.mimes, text),
+    kittyClipboardAnswer(request.mimes, text, png),
   );
 }
 

@@ -68,6 +68,8 @@ const NO_RANGES: readonly TerminalRowRange[] = Object.freeze([]);
 const NO_PLACEMENTS: readonly GhosttyImagePlacement[] = Object.freeze([]);
 /** A link is followed across at most this many rows from the hovered cell. */
 const MAX_LINK_ROWS = 8;
+/** DEC private mode a program sets for Kitty clipboard paste events. */
+const KITTY_PASTE_EVENTS_MODE = 5522;
 
 /** Inclusive viewport cell range [start, end] as per-row spans. */
 function viewportSpans(
@@ -150,6 +152,7 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
   /** Record changes (GPU format) accumulated across updates since the last frame. */
   private pendingCellDamage: TerminalDamage = FULL_DAMAGE;
   private renderStateCurrent = false;
+  private clipboardReadsToHost = false;
   private packedViewport = new Uint8Array(0);
   private packedRenderVersion = -1;
   private renderVersion = 0;
@@ -479,8 +482,14 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
   setClipboardPolicy(policy: GhosttyClipboardPolicy): void {
     this.assertLive();
     this.terminal.setClipboardPolicy(policy);
+    this.clipboardReadsToHost = policy.readsToHost;
     // Reads held when reads stop are refused now.
     this.drainReplies();
+  }
+
+  pasteEventsWanted(): boolean {
+    this.assertLive();
+    return this.clipboardReadsToHost && this.terminal.mode(KITTY_PASTE_EVENTS_MODE);
   }
 
   sendPasteEvent(primary: boolean, mimes: readonly string[]): boolean {
