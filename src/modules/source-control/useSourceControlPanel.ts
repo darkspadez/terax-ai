@@ -16,6 +16,7 @@ import {
   invalidateRepoDiffs,
   workingDiffKey,
 } from "@/modules/editor/lib/diffCache";
+import { notifyFilesDiscarded } from "@/modules/editor/lib/discardSignal";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SourceControlSummary } from "./useSourceControl";
@@ -758,7 +759,10 @@ export function useSourceControlPanel(
         ? `discard:${list[0].path}`
         : "discard:all",
       (s) => optimisticDiscard(s, paths),
-      () => native.gitDiscard(repo.repoRoot, entries),
+      async () => {
+        await native.gitDiscard(repo.repoRoot, entries);
+        notifyFilesDiscarded(repo.repoRoot, [...paths]);
+      },
       [...paths],
     );
   }, [pendingDiscard, repo, runMutation]);

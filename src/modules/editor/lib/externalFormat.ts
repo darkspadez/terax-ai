@@ -1,7 +1,6 @@
 import { quoteShellArg } from "@/lib/shellQuote";
 import type { EditorFormatter } from "@/modules/settings/store";
 import { currentWorkspaceEnv } from "@/modules/workspace";
-import type { EditorView } from "@codemirror/view";
 import { invoke } from "@tauri-apps/api/core";
 
 type ReadResult = { kind: string; content?: string; mtime?: number };
@@ -151,27 +150,4 @@ export async function readFileText(
   }).catch(() => null);
   if (res?.kind !== "text" || res.content == null) return null;
   return { text: res.content, mtime: res.mtime ?? 0 };
-}
-
-// Minimal change dispatch: trimming the common prefix/suffix keeps the
-// cursor in place through CodeMirror's position mapping.
-export function applyFormattedContent(view: EditorView, next: string): void {
-  const current = view.state.doc.toString();
-  if (current === next) return;
-  let start = 0;
-  const minLen = Math.min(current.length, next.length);
-  while (start < minLen && current[start] === next[start]) start += 1;
-  let endCur = current.length;
-  let endNext = next.length;
-  while (
-    endCur > start &&
-    endNext > start &&
-    current[endCur - 1] === next[endNext - 1]
-  ) {
-    endCur -= 1;
-    endNext -= 1;
-  }
-  view.dispatch({
-    changes: { from: start, to: endCur, insert: next.slice(start, endNext) },
-  });
 }

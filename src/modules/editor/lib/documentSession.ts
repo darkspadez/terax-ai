@@ -48,7 +48,9 @@ export class DocumentSession {
   // The path the buffer's text was read from; null while loading or non-text.
   private loadedPath: string | null = null;
   private saved = "";
-  private text = "";
+  private buffer = "";
+  // Bumped on every edit, so a forced read can tell whether it raced one.
+  private revision = 0;
   private eol: Eol = "\n";
   private isDirty = false;
   private diskMtime: number | null = null;
@@ -93,7 +95,8 @@ export class DocumentSession {
   };
 
   change = (text: string): void => {
-    this.text = text;
+    this.buffer = text;
+    this.revision += 1;
     this.setDirty(text !== this.saved);
     this.clearTimer();
     this.armAutoSave();
@@ -102,19 +105,37 @@ export class DocumentSession {
   // Never rejects: a failed write is reported through the host.
   save = async (): Promise<boolean> => {
     this.clearTimer();
-    if (this.text === this.saved) return true;
+    if (this.buffer === this.saved) return true;
     return this.saveNow();
   };
 
+  /** The text the editor view must show. */
+  text = (): string => this.buffer;
+
   // Skipped while dirty: never clobber unsaved edits. Re-checked when the
-  // read resolves, since typing can start while it is in flight.
-  reload = (): boolean => {
+  // read resolves, since typing can start while it is in flight. `force`
+  // replaces unsaved edits the user threw away on purpose (git discard);
+  // edits typed while that read is in flight still win.
+  reload = (options?: { force?: boolean }): boolean => {
     const path = this.path;
-    if (!this.active || path === null || this.isDirty) return false;
+    const force = options?.force === true;
+    if (!this.active || path === null || (this.isDirty && !force)) {
+      return false;
+    }
+    // A pending autosave would write the discarded text back.
+    if (force) this.clearTimer();
     const epoch = this.epoch;
+    const revision = this.revision;
     this.io.read(path, this.force).then(
       (res) => {
-        if (epoch === this.epoch && !this.isDirty) this.adopt(res, true);
+        if (epoch !== this.epoch) return;
+        if (!force) {
+          if (!this.isDirty) this.adopt(res, true);
+        } else if (this.revision === revision) {
+          this.adopt(res);
+        } else if (res.kind === "text") {
+          this.adoptDiskText(res.content, res.mtime);
+        }
       },
       // Transient failures (e.g. ENOENT mid atomic-rename) must not replace
       // a healthy buffer with an error screen.
@@ -132,7 +153,7 @@ export class DocumentSession {
     this.diskMtime = mtime;
     const content = normalizeToLf(diskText);
     this.saved = content;
-    this.setDirty(this.text !== content);
+    this.setDirty(this.buffer !== content);
     return content;
   };
 
@@ -143,7 +164,7 @@ export class DocumentSession {
     this.force = force;
     this.loadedPath = null;
     this.saved = "";
-    this.text = "";
+    this.buffer = "";
     this.clearTimer();
     this.setDirty(false);
     this.host.state({ status: "loading" });
@@ -183,7 +204,7 @@ export class DocumentSession {
     }
     this.loadedPath = this.path;
     this.saved = content;
-    this.text = content;
+    this.buffer = content;
     this.setDirty(false);
     this.host.state({ status: "ready", content, size: res.size });
   }
@@ -225,7 +246,7 @@ export class DocumentSession {
   private async write(epoch: number): Promise<boolean> {
     const path = this.path;
     if (epoch !== this.epoch || path === null) return false;
-    const content = this.text;
+    const content = this.buffer;
     let mtime: number;
     try {
       mtime = await this.io.write(path, restoreEol(content, this.eol));
@@ -240,7 +261,7 @@ export class DocumentSession {
     this.diskMtime = mtime;
     this.saved = content;
     // Edits typed while the write was in flight must stay dirty.
-    this.setDirty(this.text !== content);
+    this.setDirty(this.buffer !== content);
     this.host.saved(path);
     return true;
   }

@@ -374,3 +374,111 @@ describe("DocumentSession save conflicts (crynta/terax-ai#1375)", () => {
     expect(t.host.saveFailed).toHaveBeenCalledOnce();
   });
 });
+
+describe("DocumentSession reload after git discard (crynta/terax-ai#988)", () => {
+  it("skips a dirty buffer on a plain reload", async () => {
+    const t = setup({ "/p/a.ts": "head\n" });
+    t.session.open("/p/a.ts");
+    await flush();
+    t.session.change("edit\n");
+    t.touch("/p/a.ts", "other\n");
+    expect(t.session.reload()).toBe(false);
+    await flush();
+    expect(t.session.text()).toBe("edit\n");
+  });
+
+  it("replaces discarded unsaved edits when forced", async () => {
+    const t = setup({ "/p/a.ts": "head\n" });
+    t.session.open("/p/a.ts");
+    await flush();
+    t.session.change("saved edit\n");
+    await t.session.save();
+    t.session.change("saved edit\nunsaved\n");
+    t.touch("/p/a.ts", "head\n");
+    expect(t.session.reload({ force: true })).toBe(true);
+    await flush();
+    expect(t.session.text()).toBe("head\n");
+    expect(t.doc()).toEqual({ status: "ready", content: "head\n", size: 5 });
+    expect(t.dirty()).toBe(false);
+    t.session.change("head\nnext\n");
+    expect(await t.session.save()).toBe(true);
+    expect(t.host.conflict).not.toHaveBeenCalled();
+  });
+
+  it("publishes the discarded state even when disk equals the saved text", async () => {
+    const t = setup({ "/p/a.ts": "head\n" });
+    t.session.open("/p/a.ts");
+    await flush();
+    t.session.change("unsaved\n");
+    const published = t.host.state.mock.calls.length;
+    t.session.reload({ force: true });
+    await flush();
+    expect(t.host.state.mock.calls.length).toBe(published + 1);
+    expect(t.session.text()).toBe("head\n");
+    expect(t.dirty()).toBe(false);
+  });
+
+  it("cancels a pending autosave of the discarded edits", async () => {
+    vi.useFakeTimers();
+    const t = setup({ "/p/a.ts": "head\n" }, { enabled: true, delay: 500 });
+    t.session.open("/p/a.ts");
+    await vi.advanceTimersByTimeAsync(0);
+    t.session.change("discarded\n");
+    t.session.reload({ force: true });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(t.log.filter((l) => l.startsWith("write"))).toEqual([]);
+    expect(t.disk.get("/p/a.ts")?.content).toBe("head\n");
+  });
+
+  it("keeps edits typed while the forced read is in flight", async () => {
+    const t = setup({ "/p/a.ts": "head\n" });
+    t.session.open("/p/a.ts");
+    await flush();
+    t.session.change("discarded\n");
+    t.hold("read");
+    t.session.reload({ force: true });
+    t.session.change("typed after discard\n");
+    t.release("read");
+    await flush();
+    expect(t.session.text()).toBe("typed after discard\n");
+    expect(t.dirty()).toBe(true);
+    t.touch("/p/a.ts");
+    expect(await t.session.save()).toBe(true);
+    expect(t.host.conflict).not.toHaveBeenCalled();
+  });
+
+  it("keeps the buffer when the discarded file is gone", async () => {
+    const t = setup({ "/p/new.ts": "untracked\n" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    t.session.open("/p/new.ts");
+    await flush();
+    t.disk.delete("/p/new.ts");
+    t.session.reload({ force: true });
+    await flush();
+    expect(t.session.text()).toBe("untracked\n");
+    expect(t.doc()).toEqual({
+      status: "ready",
+      content: "untracked\n",
+      size: 10,
+    });
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
+
+describe("DocumentSession reload of a reverted file", () => {
+  it("publishes text that equals what was first loaded", async () => {
+    const t = setup({ "/p/a.ts": "v0\n" });
+    t.session.open("/p/a.ts");
+    await flush();
+    t.session.change("v1\n");
+    await t.session.save();
+    t.touch("/p/a.ts", "v0\n");
+    const published = t.host.state.mock.calls.length;
+    expect(t.session.reload()).toBe(true);
+    await flush();
+    expect(t.host.state.mock.calls.length).toBe(published + 1);
+    expect(t.doc()).toEqual({ status: "ready", content: "v0\n", size: 3 });
+    expect(t.session.text()).toBe("v0\n");
+  });
+});

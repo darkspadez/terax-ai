@@ -17,10 +17,14 @@ import { Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { vim } from "@replit/codemirror-vim";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
+import CodeMirror, {
+  type ReactCodeMirrorProps,
+  type ReactCodeMirrorRef,
+} from "@uiw/react-codemirror";
 import {
   forwardRef,
   memo,
+  type Ref,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -48,7 +52,6 @@ import {
   wrapCompartment,
 } from "./lib/extensions";
 import {
-  applyFormattedContent,
   readFileText,
   resolveFormatter,
   runExternalFormatter,
@@ -57,6 +60,7 @@ import { detectIndentUnit } from "./lib/indent";
 import { type LanguageResult, resolveLanguage } from "./lib/languageResolver";
 import { FORCE_READ_LIMIT, useDocument } from "./lib/useDocument";
 import { useEditorThemeExt } from "./lib/useEditorThemeExt";
+import { applyFormattedContent, syncViewText } from "./lib/viewSync";
 import { initVimGlobals, vimHandlersExtension } from "./lib/vim";
 import { mediaPreviewKind } from "./lib/mediaPreview";
 import { MediaPreview } from "./MediaPreview";
@@ -73,8 +77,11 @@ export type EditorPaneHandle = {
   focus: () => void;
   getSelection: () => string | null;
   getPath: () => string;
-  /** Re-read the file from disk. Skips silently if the buffer is dirty. */
-  reload: () => boolean;
+  /**
+   * Re-read the file from disk. Skips silently if the buffer is dirty,
+   * unless `force` (the user discarded those edits).
+   */
+  reload: (options?: { force?: boolean }) => boolean;
   /** Move the cursor to a 1-based line and center it, once content is ready. */
   gotoLine: (line: number, options?: { focus?: boolean }) => void;
   /** Apply CodeMirror's undo/redo commands. */
@@ -101,6 +108,21 @@ type Props = {
 // parse tree and a didOpen of that size cost far more than they give.
 const SYNTAX_MAX_BYTES = 4 * 1024 * 1024;
 
+// CodeMirror replaces its document whenever `value` changes identity, so a
+// reload whose text equals the previous value never reached the view, and
+// typing that landed before the commit was clobbered. It takes the text it
+// mounts with; the pane pushes later text itself (syncViewText).
+function MountedCodeMirror({
+  initialValue,
+  ...props
+}: Omit<ReactCodeMirrorProps, "value"> & {
+  initialValue: string;
+  ref?: Ref<ReactCodeMirrorRef>;
+}) {
+  const [value] = useState(initialValue);
+  return <CodeMirror {...props} value={value} />;
+}
+
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -120,7 +142,7 @@ export const EditorPane = memo(
       mediaActive = true,
     } = props;
 
-    const { doc, onChange, save, reload, adoptDiskText, openAnyway } =
+    const { doc, onChange, save, reload, text, adoptDiskText, openAnyway } =
       useDocument({
         path,
         onDirtyChange,
@@ -417,6 +439,14 @@ export const EditorPane = memo(
       });
     }, [wordWrapColumn]);
 
+    // Shows text adopted from disk (reload, discard) before paint. text() is
+    // the session's buffer, so anything typed since the read is kept.
+    useLayoutEffect(() => {
+      if (doc.status !== "ready") return;
+      const view = cmRef.current?.view;
+      if (view) syncViewText(view, text());
+    }, [doc, text]);
+
     useEffect(() => {
       if (doc.status !== "ready") return;
       const view = cmRef.current?.view;
@@ -529,7 +559,7 @@ export const EditorPane = memo(
           return view.state.sliceDoc(from, to);
         },
         getPath: () => path,
-        reload: () => reloadRef.current(),
+        reload: (options) => reloadRef.current(options),
         gotoLine: (line: number, options) => {
           pendingLineRef.current = {
             path,
@@ -640,9 +670,9 @@ export const EditorPane = memo(
 
     return (
       <div className="flex h-full min-h-0 flex-col zoom-exempt">
-        <CodeMirror
+        <MountedCodeMirror
           ref={cmRef}
-          value={doc.content}
+          initialValue={doc.content}
           onChange={onChange}
           theme={themeExt}
           extensions={extensions}

@@ -8,6 +8,7 @@ import type { Tab } from "@/modules/tabs";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { type RefObject, useEffect, useRef } from "react";
 import type { EditorPaneHandle } from "./EditorPane";
+import { editorTabsUnder, onFilesDiscarded } from "./lib/discardSignal";
 
 type Params = {
   tabs: Tab[];
@@ -17,8 +18,8 @@ type Params = {
 
 /**
  * Keeps open editor tabs in sync with on-disk changes: reloads on applied AI
- * diffs, external writes, and fs-watch events, and maintains the watch set for
- * the directories of open editor files.
+ * diffs, external writes, fs-watch events and git discards, and maintains the
+ * watch set for the directories of open editor files.
  */
 export function useEditorFileSync({ tabs, tabsRef, editorRefs }: Params) {
   // When an AI diff is approved (write_file applied to disk), reload any
@@ -61,6 +62,17 @@ export function useEditorFileSync({ tabs, tabsRef, editorRefs }: Params) {
       void unlistenPromise.then((un) => un());
     };
   }, [tabsRef, editorRefs]);
+
+  // A discard is the user throwing edits away: reload even dirty buffers.
+  useEffect(
+    () =>
+      onFilesDiscarded((paths) => {
+        for (const id of editorTabsUnder(tabsRef.current, paths)) {
+          editorRefs.current.get(id)?.reload({ force: true });
+        }
+      }),
+    [tabsRef, editorRefs],
+  );
 
   const editorWatchRef = useRef<Set<string>>(new Set());
   const editorFilesRef = useRef<Set<string>>(new Set());

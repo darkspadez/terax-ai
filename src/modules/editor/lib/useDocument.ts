@@ -113,6 +113,7 @@ export function useDocument({ path, onDirtyChange }: Options) {
     onChange: session.change,
     save: session.save,
     reload: session.reload,
+    text: session.text,
     adoptDiskText: session.adoptDiskText,
     openAnyway: session.openAnyway,
   };
