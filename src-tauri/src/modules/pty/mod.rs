@@ -65,6 +65,26 @@ impl PtyState {
         session
     }
 
+    /// Removes and unregisters every terminal `label` owns, for reaping.
+    /// Other windows' terminals are left alone.
+    fn take_owned_by(&self, label: &str) -> Vec<(u32, Arc<Session>)> {
+        let drained: Vec<(u32, Arc<Session>)> = {
+            let mut sessions = self.sessions.write().unwrap();
+            let ids: Vec<u32> = sessions
+                .iter()
+                .filter(|(_, session)| &*session.owner == label)
+                .map(|(id, _)| *id)
+                .collect();
+            ids.into_iter()
+                .filter_map(|id| sessions.remove(&id).map(|session| (id, session)))
+                .collect()
+        };
+        for (id, _) in &drained {
+            self.hub.submit(Command::Unregister { id: *id });
+        }
+        drained
+    }
+
     /// The window's page navigated away (reload, HMR): its stream token dies
     /// and its terminals stop producing output until the new page's
     /// `pty_close_all` reaps them, exactly as when their channel went away.
@@ -349,16 +369,16 @@ pub fn pty_has_foreground_job(state: tauri::State<PtyState>, id: u32) -> Result<
 }
 
 // A fresh webview load orphans the previous frontend's sessions in this still
-// running process; reap them on boot before any new tab spawns.
+// running process; reap them on boot before any new tab spawns. Only the
+// calling window's: another window's shells keep running.
 #[tauri::command]
-pub fn pty_close_all(state: tauri::State<PtyState>) -> Result<usize, String> {
-    let drained: Vec<(u32, Arc<Session>)> = {
-        let mut sessions = state.sessions.write().unwrap();
-        sessions.drain().collect()
-    };
+pub fn pty_close_all(
+    webview: tauri::Webview,
+    state: tauri::State<PtyState>,
+) -> Result<usize, String> {
+    let drained = state.take_owned_by(webview.label());
     let count = drained.len();
     for (id, session) in drained {
-        state.hub.submit(Command::Unregister { id });
         reap(id, session, "close_all");
     }
     if count > 0 {
@@ -533,6 +553,29 @@ mod tests {
             if let Some(session) = state.take(id) {
                 reap(id, session, "test cleanup");
             }
+        }
+    }
+
+    #[test]
+    fn a_page_load_reaps_only_its_own_windows_terminals() {
+        let state = Arc::new(PtyState::default());
+        let _ = open(&state, 1, "main");
+        let _ = open(&state, 2, "quick");
+        let _ = open(&state, 3, "main");
+        let mut drained: Vec<u32> = state
+            .take_owned_by("main")
+            .into_iter()
+            .map(|(id, session)| {
+                reap(id, session, "test");
+                id
+            })
+            .collect();
+        drained.sort_unstable();
+        assert_eq!(drained, [1, 3]);
+        assert!(state.sessions.read().unwrap().contains_key(&2));
+        assert!(state.take_owned_by("main").is_empty());
+        if let Some(session) = state.take(2) {
+            reap(2, session, "test cleanup");
         }
     }
 
