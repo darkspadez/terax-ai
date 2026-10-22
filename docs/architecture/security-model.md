@@ -107,6 +107,10 @@ API keys are stored via `secrets_*` commands (`src-tauri/src/modules/secrets.rs`
 
 Service constant: `terax-ai`. Keys never touch disk outside the keychain/Linux secrets file, never go in `localStorage`, and never appear in logs.
 
+## Language server docs
+
+Hover and completion docs come from the language server, which takes them from comments in the project and its dependencies. The LSP library renders them with `marked.parse` into `innerHTML`, so `src/modules/lsp/lib/safeMarkdown.ts` sets that shared `marked` instance's renderer when the LSP client loads: raw HTML in the docs is shown as text (no iframes, forms or styles), links keep only `http`, `https` and `mailto` targets and open in the browser through the opener plugin (`target="_blank"`), never in the app's window, and images become their alt text.
+
 ## OSC trust gating
 
 The terminal parses OSC sequences from the PTY byte stream:

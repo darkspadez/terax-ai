@@ -23,12 +23,16 @@ import {
   locationsPanel,
   openLocationsPanel,
 } from "./locationsPanel";
+import { installSafeMarkdown } from "./safeMarkdown";
 import { fileUriToPath, sameFileUri } from "./uri";
 
 export {
   languageServerWithTransport,
   SynchronizationMethod,
 } from "codemirror-languageserver";
+
+// Hover and completion docs render through the library's `marked.parse`.
+installSafeMarkdown();
 
 type LspPos = { line: number; character: number };
 type LspRange = { start: LspPos };
