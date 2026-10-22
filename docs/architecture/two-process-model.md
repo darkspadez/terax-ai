@@ -106,6 +106,7 @@ Three distinct surfaces:
 
 - `ai_http_stream` / `ai_http_cancel` / `ai_http_ack` - AI HTTP proxy with SSRF guard
 - `lm_ping` - local-model ping
+- `markdown_remote_image` - one https image for the Markdown preview (public hosts only, redirects re-validated, images only, 16 MiB)
 
 ### Secrets (`src-tauri/src/modules/secrets.rs`)
 

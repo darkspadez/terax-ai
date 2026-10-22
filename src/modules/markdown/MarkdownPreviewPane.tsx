@@ -5,10 +5,12 @@ import { listenFsChanged } from "@/modules/explorer/lib/watch";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Streamdown } from "streamdown";
+import { MarkdownImage } from "./MarkdownImage";
 import { MarkdownLink } from "./MarkdownLink";
 import { MarkdownViewToggle } from "./MarkdownViewToggle";
+import { dirOf, previewRehypePlugins } from "./localImages";
 import {
   type PreviewReadResult,
   type PreviewStatus,
@@ -21,7 +23,7 @@ type Props = {
   onSetView: (mode: "rendered" | "raw") => void;
 };
 
-const components = { a: MarkdownLink, code: MarkdownCode };
+const components = { a: MarkdownLink, code: MarkdownCode, img: MarkdownImage };
 
 // Re-renders when the file changes on disk: the watcher reports it (the
 // watch set covers Markdown tabs), and writes made through Terax (AI edits,
@@ -57,6 +59,11 @@ export function MarkdownPreviewPane({ path, visible, onSetView }: Props) {
   const [status, setStatus] = useState<PreviewStatus>({ kind: "loading" });
   const [shownPath, setShownPath] = useState(path);
   const revision = useFileRevision(path);
+  // Stable per folder so Streamdown's processor cache keeps hitting.
+  const rehypePlugins = useMemo(
+    () => previewRehypePlugins(dirOf(path)),
+    [path],
+  );
 
   if (shownPath !== path) {
     setShownPath(path);
@@ -117,6 +124,7 @@ export function MarkdownPreviewPane({ path, visible, onSetView }: Props) {
             <Streamdown
               className="select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
               components={components}
+              rehypePlugins={rehypePlugins}
               mode="static"
               parseIncompleteMarkdown={false}
             >

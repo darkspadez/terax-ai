@@ -11,6 +11,7 @@ use tauri::ipc::{InvokeBody, JavaScriptChannelId, Request, Response};
 use tauri::{State, WebviewWindow};
 
 mod clients;
+pub mod image;
 mod ip;
 mod stream;
 use super::ipc_body;

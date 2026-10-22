@@ -368,6 +368,7 @@ pub fn run() {
             secrets::secrets_delete,
             secrets::secrets_get_all,
             net::lm_ping,
+            net::image::markdown_remote_image,
             net::ai_http_stream,
             net::ai_http_cancel,
             net::ai_http_ack,
