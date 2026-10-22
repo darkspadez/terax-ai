@@ -151,6 +151,7 @@ import {
   renamedPath,
   spacesEmptiedByTabs,
 } from "./hooks/tabCloseGuards";
+import { aiToggleAction } from "./hooks/aiToggle";
 import { useAppCloseGuard } from "./hooks/useAppCloseGuard";
 import { useTabCloseGuards } from "./hooks/useTabCloseGuards";
 import { useWorkspaceSwitcher } from "./hooks/useWorkspaceSwitcher";
@@ -570,12 +571,11 @@ export default function App() {
   }, [tabs, activeId]);
 
   const togglePanelAndFocus = useCallback(() => {
-    if (!hasComposer) {
-      void openSettingsWindow("models");
-      return;
-    }
-    if (panelOpen) {
+    const action = aiToggleAction(panelOpen, hasComposer);
+    if (action === "close") {
       useChatStore.getState().closePanel();
+    } else if (action === "connect") {
+      void openSettingsWindow("models");
     } else {
       openPanel();
       focusInput(null);
