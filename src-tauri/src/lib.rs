@@ -301,6 +301,7 @@ pub fn run() {
         .setup(move |_app| {
             #[cfg(feature = "bench")]
             modules::bench::guard(_app.handle())?;
+            modules::asset_scope::install(_app.handle());
             #[cfg(target_os = "macos")]
             modules::window_presentation::macos::install(_app.handle());
             #[cfg(target_os = "linux")]

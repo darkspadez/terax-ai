@@ -40,11 +40,11 @@ import {
 import { InlineInput } from "./InlineInput";
 import {
   copyToClipboard,
-  openInDefaultApp,
   REVEAL_LABEL,
   relativePath,
   revealInFinder,
 } from "./lib/contextActions";
+import { openInDefaultApp } from "./lib/openDefault";
 import { FileIcon, FolderIcon } from "./FileIcon";
 import {
   isPasteShortcut,

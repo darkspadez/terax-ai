@@ -46,7 +46,11 @@ import {
   useApplyEditorFontSize,
   useEditorFileSync,
 } from "@/modules/editor";
-import { FileExplorer, type FileExplorerHandle } from "@/modules/explorer";
+import {
+  FileExplorer,
+  type FileExplorerHandle,
+  RunProgramDialog,
+} from "@/modules/explorer";
 import type { GitHistorySearchHandle } from "@/modules/git-history";
 import {
   Header,
@@ -1874,6 +1878,7 @@ export default function App() {
             onConfirmAppClose={confirmAppClose}
           />
           <TerminalPromptDialog />
+          <RunProgramDialog />
         </div>
       </TooltipProvider>
     </ThemeProvider>

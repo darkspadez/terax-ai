@@ -3,6 +3,7 @@ pub mod copy;
 pub mod file;
 pub mod grep;
 pub mod index;
+pub mod launch;
 pub mod mutate;
 pub mod search;
 pub mod supersede;

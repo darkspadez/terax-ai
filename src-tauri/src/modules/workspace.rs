@@ -18,18 +18,53 @@ struct CanonicalEntry {
     inserted_at: Instant,
 }
 
+type RootListener = Box<dyn Fn(&Path) + Send + Sync>;
+
 #[derive(Default)]
 pub struct WorkspaceRegistry {
     roots: Mutex<HashSet<PathBuf>>,
     canonical_cache: Mutex<HashMap<PathBuf, CanonicalEntry>>,
+    root_listener: OnceLock<RootListener>,
 }
 
 impl WorkspaceRegistry {
     pub fn authorize<P: AsRef<Path>>(&self, path: P) -> std::io::Result<PathBuf> {
         let canonical = std::fs::canonicalize(path.as_ref())?;
-        let mut set = self.roots.lock().expect("workspace registry poisoned");
-        set.insert(canonical.clone());
+        let added = self
+            .roots
+            .lock()
+            .expect("workspace registry poisoned")
+            .insert(canonical.clone());
+        if added {
+            if let Some(listener) = self.root_listener.get() {
+                listener(&canonical);
+            }
+        }
         Ok(canonical)
+    }
+
+    /// Reports every root to `listener`: the ones authorized so far at once, then each new one
+    /// as `authorize` adds it, before that call returns. A root authorized while this runs may
+    /// be reported twice. Only the first listener is kept.
+    pub fn watch_roots(&self, listener: impl Fn(&Path) + Send + Sync + 'static) {
+        if self.root_listener.set(Box::new(listener)).is_err() {
+            log::warn!("workspace registry already has a root listener");
+            return;
+        }
+        let Some(listener) = self.root_listener.get() else {
+            return;
+        };
+        // Set before the snapshot, so a root added meanwhile is in one or the other.
+        let roots: Vec<PathBuf> = self
+            .roots
+            .lock()
+            .expect("workspace registry poisoned")
+            .iter()
+            .cloned()
+            .collect();
+        for root in &roots {
+            listener(root);
+        }
     }
 
     pub fn is_authorized(&self, target: &Path) -> bool {
@@ -1000,6 +1035,24 @@ mod auth_tests {
             user_spawn_cwd_or_home(&reg, Some("  "), &WorkspaceEnv::Local),
             None
         );
+    }
+
+    #[test]
+    fn watch_roots_reports_each_root_once_as_it_is_authorized() {
+        let first_dir = tempfile::tempdir().expect("first root");
+        let second_dir = tempfile::tempdir().expect("second root");
+        let reg = WorkspaceRegistry::default();
+        let first = reg.authorize(first_dir.path()).expect("authorize first");
+        let seen = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        reg.watch_roots(move |root| sink.lock().unwrap().push(root.to_path_buf()));
+        assert_eq!(*seen.lock().unwrap(), vec![first.clone()], "replayed");
+
+        let second = reg.authorize(second_dir.path()).expect("authorize second");
+        reg.authorize(&first).expect("authorize first again");
+        assert_eq!(*seen.lock().unwrap(), vec![first, second]);
+
+        reg.watch_roots(|_| panic!("a second listener is ignored"));
     }
 
     #[test]

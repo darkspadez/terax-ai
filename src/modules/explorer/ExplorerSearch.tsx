@@ -27,11 +27,11 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import { FileIcon } from "./FileIcon";
 import {
   copyToClipboard,
-  openInDefaultApp,
   REVEAL_LABEL,
   relativePath,
   revealInFinder,
 } from "./lib/contextActions";
+import { openInDefaultApp } from "./lib/openDefault";
 import { COMPACT_CONTENT, COMPACT_ITEM } from "./lib/menuItemClass";
 import { cn } from "@/lib/utils";
 
