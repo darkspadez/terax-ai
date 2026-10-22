@@ -412,6 +412,10 @@ const StreamHandler = struct {
     kitty_read_answer: ?ghostty.clipboard.Read.Result = null,
     /// The reply queue's bound; raised while a held read is answered.
     output_limit: usize = max_output_bytes,
+    /// Kitty keyboard flags a program may turn on
+    /// (`restty_set_kitty_keyboard_flags`). Pushes and sets keep only these,
+    /// so the flags reported to queries and used for key encoding agree.
+    kitty_keyboard_supported: u5 = std.math.maxInt(u5),
 
     pub fn init(
         alloc: Allocator,
@@ -1229,6 +1233,11 @@ const StreamHandler = struct {
             .device_attributes => try self.deviceAttributes(value),
             .device_status => try self.deviceStatusReport(value.request),
             .kitty_keyboard_query => try self.queryKittyKeyboard(),
+            .kitty_keyboard_push, .kitty_keyboard_set, .kitty_keyboard_set_or => {
+                var supported = value;
+                supported.flags = @bitCast(value.flags.int() & self.kitty_keyboard_supported);
+                self.readonly.vt(action, supported);
+            },
             .dcs_hook => try self.dcsHook(value),
             .dcs_put => try self.dcsPut(value),
             .dcs_unhook => try self.dcsUnhook(),
@@ -2837,6 +2846,15 @@ pub export fn restty_take_dropped_events(handle: ?*Restty) u32 {
 pub export fn restty_kitty_keyboard_flags(handle: ?*Restty) u32 {
     const h = handle orelse return 0;
     return h.term.screens.active.kitty_keyboard.current().int();
+}
+
+/// Limits the Kitty keyboard flags programs may turn on to `flags` (bits 0-4);
+/// flags already in force are kept, so set it before writing.
+pub export fn restty_set_kitty_keyboard_flags(handle: ?*Restty, flags: u32) u32 {
+    const h = handle orelse return @intFromEnum(ErrorCode.invalid_handle);
+    h.stream.handler.kitty_keyboard_supported = std.math.cast(u5, flags) orelse
+        return @intFromEnum(ErrorCode.invalid_arg);
+    return @intFromEnum(ErrorCode.ok);
 }
 
 /// 1 while a program has xterm's modifyOtherKeys at level 2 (`CSI > 4 ; 2 m`).

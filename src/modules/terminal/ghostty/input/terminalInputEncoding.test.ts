@@ -4,6 +4,7 @@ import {
   encodeTerminalSubmission,
   isUnsafePaste,
   normalizeTerminalPaste,
+  supportedKittyKeyboardFlags,
 } from "./terminalInputEncoding";
 
 describe("terminal input encoding", () => {
@@ -40,5 +41,13 @@ describe("terminal input encoding", () => {
     expect(encodeTerminalPaste("a\x1b[201~b", true)).toBe(
       "\x1b[200~a␛[201~b\x1b[201~",
     );
+  });
+
+  // crynta/terax-ai#1378: ConPTY drops CSI sequences with ':' sub-parameters.
+  it("withholds the Kitty flags whose sequences carry ':' on Windows", () => {
+    expect(supportedKittyKeyboardFlags("windows")).toBe(0b11001);
+    for (const platform of ["macos", "linux", "other"] as const) {
+      expect(supportedKittyKeyboardFlags(platform)).toBe(0b11111);
+    }
   });
 });

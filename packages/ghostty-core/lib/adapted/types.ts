@@ -306,6 +306,10 @@ export type TeraxGhosttyWasmExports = WebAssembly.Exports & {
   readonly restty_mode_bits: (handle: number) => number;
   readonly restty_kitty_keyboard_flags: (handle: number) => number;
   readonly restty_modify_other_keys: (handle: number) => number;
+  readonly restty_set_kitty_keyboard_flags: (
+    handle: number,
+    flags: number,
+  ) => number;
   readonly restty_set_cursor_options: (
     handle: number,
     style: number,

@@ -217,6 +217,9 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
     this.synchronizedOutputPresentation =
       new SynchronizedOutputPresentationGate(() => this.notifyDamage());
     try {
+      if (options.kittyKeyboardFlags !== undefined) {
+        this.terminal.setKittyKeyboardFlags(options.kittyKeyboardFlags);
+      }
       this.applyConfig(options.config);
     } catch (error) {
       this.terminal.dispose();

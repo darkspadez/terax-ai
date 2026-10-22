@@ -5,6 +5,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { FakeElement, FakeTextArea } from "./fakeTextArea";
 import { AdaptedGhosttyTerminalModel } from "../AdaptedGhosttyTerminalModel";
 import { baseCharacter, GhosttyInputController } from "./GhosttyInputController";
+import { supportedKittyKeyboardFlags } from "./terminalInputEncoding";
 
 describe("baseCharacter", () => {
   it("returns what a key types without Option, by physical position", () => {
@@ -423,13 +424,14 @@ describe.each(["ghostty-vt.wasm", "ghostty-vt-scalar.wasm"])(
     function setup(
       options: Partial<
         ConstructorParameters<typeof GhosttyInputController>[0]
-      > & { devicePixelRatio?: number } = {},
+      > & { devicePixelRatio?: number; kittyKeyboardFlags?: number } = {},
     ) {
       const replies: string[] = [];
       const model = new AdaptedGhosttyTerminalModel(core, {
         backend: "ghostty-webgpu",
         cols: 80,
         rows: 24,
+        kittyKeyboardFlags: options.kittyKeyboardFlags,
         onReply: (bytes) => replies.push(decoder.decode(bytes)),
       });
       const scale = options.devicePixelRatio ?? 1;
@@ -645,6 +647,49 @@ describe.each(["ghostty-vt.wasm", "ghostty-vt-scalar.wasm"])(
       write("\x1b[<u\x1b[>4;2m");
       shiftEnter();
       expect(sent).toEqual(["\x1b\r", "\x1b[13;2u", "\x1b[27;2;13~"]);
+      dispose();
+    });
+
+    // crynta/terax-ai#1378: pi asks for flags 7, and Windows' inbox ConPTY
+    // drops every input CSI with a ':' sub-parameter (its arrows, here).
+    it("withholds Kitty flags the platform cannot carry", () => {
+      const { input, sent, replies, write, dispose } = setup({
+        kittyKeyboardFlags: supportedKittyKeyboardFlags("windows"),
+      });
+      write("\x1b[>7u\x1b[?u");
+      expect(replies.splice(0)).toEqual(["\x1b[?1u"]);
+      const keys = [
+        { key: "ArrowUp", code: "ArrowUp" },
+        { key: "Home", code: "Home" },
+        { key: "A", code: "KeyA", shiftKey: true },
+        { key: "Escape", code: "Escape" },
+      ];
+      for (const values of keys) {
+        input.dispatchEvent(keyboardEvent(values));
+        input.dispatchEvent(keyboardEvent(values, "keyup"));
+      }
+      expect(sent).toEqual(["\x1b[A", "\x1b[H", "A", "\x1b[27u"]);
+      // Sets and ors are limited too; clearing needs no limit.
+      write("\x1b[=31u\x1b[?u\x1b[=6;2u\x1b[?u\x1b[=8;3u\x1b[?u");
+      expect(replies.join("")).toBe("\x1b[?25u\x1b[?25u\x1b[?17u");
+      dispose();
+    });
+
+    it("reports Num Lock only with keypad keys", () => {
+      const { input, sent, write, dispose } = setup();
+      const numLock = (key: string) => key === "NumLock";
+      write("\x1b[>9u");
+      input.dispatchEvent(
+        keyboardEvent({
+          key: "ArrowUp",
+          code: "ArrowUp",
+          getModifierState: numLock,
+        }),
+      );
+      input.dispatchEvent(
+        keyboardEvent({ key: "1", code: "Numpad1", getModifierState: numLock }),
+      );
+      expect(sent).toEqual(["\x1b[A", "\x1b[57400;129u"]);
       dispose();
     });
 

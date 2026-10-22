@@ -108,6 +108,7 @@ export class GhosttyCoreRuntime {
         cols: options.cols,
         rows: options.rows,
         config: options.config,
+        kittyKeyboardFlags: options.kittyKeyboardFlags,
         onReply: options.onReply,
         onEvent: options.onEvent,
         scrollbackByteLimit: this.grantForNewModel(options),

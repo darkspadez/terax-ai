@@ -246,7 +246,12 @@ Shift that picked a key's typed character is passed as consumed, as Ghostty's
 own apprts do, so Kitty modes below report-all send the text (Shift+; is `:`)
 and report-all names the unshifted key with Shift. Shift+Enter is ESC CR (what
 agents read as a newline) unless the program set Kitty keyboard flags or
-modifyOtherKeys 2, which get Ghostty's encoding (`CSI 13;2u`).
+modifyOtherKeys 2, which get Ghostty's encoding (`CSI 13;2u`). On Windows a
+program cannot turn on Kitty report-events or report-alternates
+(`supportedKittyKeyboardFlags`, applied by the core to every push and set, so
+queries report what is in force): the inbox ConPTY drops any input CSI with a
+`:` sub-parameter, which those flags put in arrows, releases and shifted keys.
+Num Lock is reported only with keypad keys.
 Terminal text uses the configured font, an installed Nerd Font when detected,
 or bundled JetBrains Mono: the official variable fonts, upright and italic, with
 every glyph, weight (100-800) and OpenType feature, split by Unicode range into

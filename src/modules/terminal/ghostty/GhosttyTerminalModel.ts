@@ -26,6 +26,8 @@ export type GhosttyTerminalModelOptions = {
   readonly cols: number;
   readonly rows: number;
   readonly config?: GhosttyTerminalConfig;
+  /** Kitty keyboard flags programs may turn on (default all). */
+  readonly kittyKeyboardFlags?: number;
   readonly deviceAttributeFallback?: boolean;
   readonly onReply?: (bytes: Uint8Array) => void;
   readonly onEvent?: (event: GhosttyTerminalEvent) => void;

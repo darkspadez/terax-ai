@@ -1,6 +1,7 @@
 import { openExternalUrl } from "@/lib/external-link";
 import { ensureMonoFontsLoaded, resolveFontFamily } from "@/lib/fonts";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { currentPlatform } from "@/modules/settings/terminalBehavior";
 import type { TerminalBackendKind } from "@/modules/terminal/backend/contracts";
 import {
   disposeGhosttyBlocks,
@@ -61,7 +62,10 @@ import {
 } from "./gpu/WebGpuTerminalRuntime";
 import { WebGpuTerminalSurface } from "./gpu/WebGpuTerminalSurface";
 import { GhosttyInputController } from "./input/GhosttyInputController";
-import { encodeTerminalSubmission } from "./input/terminalInputEncoding";
+import {
+  encodeTerminalSubmission,
+  supportedKittyKeyboardFlags,
+} from "./input/terminalInputEncoding";
 import {
   colorSchemeFor,
   terminalIntegrationCallbacks,
@@ -871,6 +875,7 @@ async function initializeSessionGeneration(
       cursorStyle: preferences.terminalCursorStyle,
       cursorBlink: preferences.terminalCursorBlink,
     },
+    kittyKeyboardFlags: supportedKittyKeyboardFlags(currentPlatform()),
     onReply: (bytes) => session.writer.enqueue(bytes, true),
     onEvent: (event) => {
       semanticEvents.handle(event);
