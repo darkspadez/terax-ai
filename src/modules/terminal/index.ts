@@ -14,6 +14,7 @@ export {
   disposeSession,
   leafHasForegroundProcess,
   leafIdForPty,
+  leafShellAtPrompt,
   adjustFocusedTerminalFont,
   focusedTerminalInAlternateScreen,
   navigateFocusedBlocks,

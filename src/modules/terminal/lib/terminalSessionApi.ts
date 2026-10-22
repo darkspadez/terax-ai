@@ -5,6 +5,7 @@ import {
   dropOnGhosttySession,
   focusGhosttySession,
   ghosttyFocusedLeaf,
+  ghosttyLeafHasForegroundJob,
   ghosttyLeafHasForegroundProcess,
   ghosttyLeafIdForPty,
   ghosttyCwdForLeaf,
@@ -30,6 +31,7 @@ import {
 export type { WatermarkState } from "@/modules/terminal/ghostty/ghosttyBlockSessions";
 import { forgetLeafPresentation } from "@/modules/terminal/lib/ptyPresentation";
 import { useTerminalFontOffsets } from "@/modules/terminal/lib/terminalFontOffsets";
+import { useTerminalStatusStore } from "@/modules/terminal/lib/terminalStatus";
 import type { WatermarkState } from "@/modules/terminal/ghostty/ghosttyBlockSessions";
 
 export async function whenSessionReady(
@@ -213,6 +215,19 @@ export async function leafHasForegroundProcess(
   leafId: number,
 ): Promise<boolean> {
   return ghosttyLeafHasForegroundProcess(leafId);
+}
+
+/**
+ * Whether text typed into the pane reaches its shell at the prompt rather
+ * than a running program: no command running (shell integration) and no job
+ * owning the terminal. Null when that cannot be told (no shell, check failed).
+ */
+export async function leafShellAtPrompt(
+  leafId: number,
+): Promise<boolean | null> {
+  if (useTerminalStatusStore.getState().leaves[leafId]?.running) return false;
+  const job = await ghosttyLeafHasForegroundJob(leafId);
+  return job === null ? null : !job;
 }
 
 export function disposeSession(leafId: number): void {

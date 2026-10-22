@@ -533,6 +533,20 @@ export async function ghosttyLeafHasForegroundProcess(
   }
 }
 
+/**
+ * A job owns the pane's terminal (Unix), or its shell has a child (Windows);
+ * null when that cannot be told.
+ */
+export async function ghosttyLeafHasForegroundJob(
+  leafId: number,
+): Promise<boolean | null> {
+  const session = sessions.get(leafId);
+  if (!session?.pty || session.shellExited) return null;
+  return invoke<boolean>("pty_has_foreground_job", {
+    id: session.pty.id,
+  }).catch(() => null);
+}
+
 export function disposeGhosttySession(leafId: number): boolean {
   const session = sessions.get(leafId);
   if (!session) return false;

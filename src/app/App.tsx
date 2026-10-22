@@ -99,6 +99,7 @@ import {
   hasLeaf,
   isTerminalSurfaceTarget,
   leafIds,
+  leafShellAtPrompt,
   navigateFocusedBlocks,
   type PaneBounds,
   ptyIdForLeaf,
@@ -678,30 +679,40 @@ export default function App() {
     [inheritedCwdForNewTab, newAgentGroupTab],
   );
 
+  // The new tab's shell starts there; typing a `cd` as well raced its prompt.
+  const cdInNewTab = useCallback((path: string) => void newTab(path), [newTab]);
+
+  // Typed only while the shell is at its prompt: a running program (an agent,
+  // vim) would take the `cd` as its own input.
+  const cdRequest = useRef(0);
   const sendCd = useCallback(
-    (path: string) => {
+    async (path: string) => {
       if (activeLeafId === null) return;
-      const term = terminalRefs.current.get(activeLeafId);
+      const leafId = activeLeafId;
+      const request = ++cdRequest.current;
+      const atPrompt = await leafShellAtPrompt(leafId);
+      if (request !== cdRequest.current) return;
+      const term = terminalRefs.current.get(leafId);
       if (!term) return;
+      if (atPrompt !== true) {
+        toast(
+          atPrompt === false
+            ? "A program is running in this terminal"
+            : "Could not tell whether this terminal is at its prompt",
+          {
+            description: "Its directory was left as it is.",
+            action: {
+              label: "Open in new tab",
+              onClick: () => cdInNewTab(path),
+            },
+          },
+        );
+        return;
+      }
       term.write(`cd ${quoteShellArg(path)}\r`);
       term.focus();
     },
-    [activeLeafId],
-  );
-
-  const cdInNewTab = useCallback(
-    (path: string) => {
-      const tabId = newTab(path);
-      setTimeout(() => {
-        const tab = tabsRef.current.find((x) => x.id === tabId);
-        if (!tab || tab.kind !== "terminal") return;
-        const t = terminalRefs.current.get(tab.activeLeafId);
-        if (!t) return;
-        t.write(`cd ${quoteShellArg(path)}\r`);
-        t.focus();
-      }, 80);
-    },
-    [newTab],
+    [activeLeafId, cdInNewTab],
   );
 
   const handleOpenFile = useCallback(
