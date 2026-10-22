@@ -11,10 +11,10 @@ per-terminal frame loop, or per-pane GPU lifecycle.
 - Restty commit: `7700b14a7643ba9240818209ef1e0aa90d83ad77`
 - Zig: `0.16.0`
 - Optimization: `ReleaseFast`, WebAssembly SIMD and scalar variants
-- SIMD artifact size: `1055514` bytes
-- Scalar artifact size: `996003` bytes
-- SIMD SHA-256: `b6413d48ba90b02438828a7849cdafc6615d4595b2fca228a8ccd0326bdb759b`
-- Scalar SHA-256: `b80eda8107c828d1811a847be2c97acc5bc17afc8060e0ef6097d70e30e86e9e`
+- SIMD artifact size: `1055960` bytes
+- Scalar artifact size: `996476` bytes
+- SIMD SHA-256: `e41ef491a4ce5c4e5f75af82f0b824fe18db9fc113b06fdc2a426ad804130ac8`
+- Scalar SHA-256: `7e427f3a680cb185b6ae459ee3df82f12b30879873344e75a9feb370d2d1ab4d`
 
 Terax-specific changes include:
 
@@ -128,6 +128,12 @@ XTVERSION, OSC 9;4 progress), instead of answering only a hand-picked set:
   queries are answered once by Ghostty instead of by the bridge.
 - Formatted range export as plain text, VT or HTML with soft wraps joined
   (`restty_text_range_format_prepare`), used to restore scrollback.
+- Glyph interning applies Ghostty's renderer `constraintWidth`: a wide cell, or
+  a symbol (`isSymbol`'s blocks and the Private Use Area) followed by an empty
+  cell, a space or an en space that neither ends the row nor follows another
+  symbol, gets glyph style bit 2 (`GPU_GLYPH_TWO_CELLS`). The renderer fits
+  icons, symbols and emoji to that many cells, so a Nerd Font icon before a
+  space is drawn at Ghostty's size.
 
 ## October 15 instance-per-terminal memory
 

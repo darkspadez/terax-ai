@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import {
   ADAPTED_GHOSTTY_SCALAR_WASM_SHA256,
   ADAPTED_GHOSTTY_WASM_SHA256,
+  decodeGpuCell,
   GPU_ATTR_BLINK,
   GPU_ATTR_OVERLINE,
   GPU_ATTR_SHIFT,
@@ -12,8 +13,8 @@ import {
   GPU_GLYPH_BOLD,
   GPU_GLYPH_ID_MASK,
   GPU_GLYPH_ITALIC,
+  GPU_GLYPH_TWO_CELLS,
   TeraxGhostty,
-  decodeGpuCell,
   type TeraxGhosttyGpuCell,
   type TeraxGhosttyGpuGlyph,
   type TeraxGhosttyGpuRenderState,
@@ -21,6 +22,8 @@ import {
   type TeraxGhosttyTerminal,
 } from "@terax/ghostty-core/adapted";
 import { beforeAll, describe, expect, it } from "vitest";
+import { GLYPH_STYLE_TWO_CELLS } from "./gpu/GlyphRasterizer";
+import { constraintCells } from "./gpu/glyphConstraint";
 
 const MAX_GLYPHS = 16 * 1024;
 const encoder = new TextEncoder();
@@ -256,9 +259,19 @@ function expectRecordsMatchSoa(
       }
       same(harness.map.text(actual.glyphId), expected.text, "text", where);
       if (expected.text !== null) {
+        // The core applies Ghostty's cell rule; the WebGL renderer's TypeScript
+        // port of it must agree cell for cell.
+        const codepoint = soaState.codepoints[index];
+        const twoCells =
+          constraintCells(
+            codepoint,
+            expected.width,
+            column > 0 ? soaState.codepoints[index - 1] : 0,
+            column + 1 < cols ? soaState.codepoints[index + 1] : null,
+          ) === 2;
         same(
           harness.map.style(actual.glyphId),
-          expected.glyphStyle,
+          expected.glyphStyle | (twoCells ? GPU_GLYPH_TWO_CELLS : 0),
           "glyph style",
           where,
         );
@@ -522,6 +535,40 @@ describe.each([
       }
     });
 
+    it("gives a glyph two cells exactly where Ghostty would", () => {
+      const harness = gpu(12, 7);
+      try {
+        const icon = ""; // Nerd Font (devicons), a symbol
+        harness.write(`${icon} x\r\n`); // followed by a space
+        harness.write(`${icon}x\r\n`); // followed by text
+        harness.write(`${icon}${icon} \r\n`); // a run of icons stays aligned
+        harness.write(`│${icon} \r\n`); // after box drawing it may grow
+        harness.write(`→\r\n`); // an arrow followed by an empty cell
+        harness.write(`\x1b[12G${icon}\r\n`); // the last column
+        harness.write("中 \u{1f600}"); // wide text; a wide emoji
+        const snapshot = harness.update();
+        const style = (row: number, column: number) =>
+          harness.map.style(harness.cell(snapshot, row, column).glyphId);
+        expect(style(0, 0)).toBe(GPU_GLYPH_TWO_CELLS);
+        expect(style(1, 0)).toBe(0);
+        expect([style(2, 0), style(2, 1)]).toEqual([0, 0]);
+        expect(style(3, 0)).toBe(0); // box drawing is not a symbol
+        expect(style(3, 1)).toBe(GPU_GLYPH_TWO_CELLS);
+        expect(style(4, 0)).toBe(GPU_GLYPH_TWO_CELLS);
+        expect(style(5, 11)).toBe(0);
+        expect(style(6, 0)).toBe(GPU_GLYPH_TWO_CELLS); // every wide cell
+        expect(style(6, 3)).toBe(GPU_GLYPH_TWO_CELLS); // 中 spans columns 0-1
+        // Same code point, two layouts: two glyph ids.
+        expect(harness.cell(snapshot, 0, 0).glyphId).not.toBe(
+          harness.cell(snapshot, 1, 0).glyphId,
+        );
+        // The renderer's rasterizer reads the same bit.
+        expect(GPU_GLYPH_TWO_CELLS).toBe(GLYPH_STYLE_TWO_CELLS);
+      } finally {
+        harness.terminal.dispose();
+      }
+    });
+
     it("encodes underline styles and colors, strikethrough, overline and blink", () => {
       const p = pair(30, 4);
       try {
@@ -664,9 +711,10 @@ describe.each([
         const familyGlyphs = Array.from(harness.map.glyphs.values()).filter(
           (glyph) => glyph.text === family,
         );
+        // A wide emoji is a symbol that always has two cells.
         expect(familyGlyphs.map((glyph) => glyph.style).sort()).toEqual([
-          0,
-          GPU_GLYPH_BOLD,
+          GPU_GLYPH_TWO_CELLS,
+          GPU_GLYPH_BOLD | GPU_GLYPH_TWO_CELLS,
         ]);
       } finally {
         harness.terminal.dispose();
@@ -1367,6 +1415,10 @@ const TEXT_POOL = [
   "⠋⠙⠹⠸",
   "λ→∑",
   "tab\t",
+  "\ue718 ",
+  "\uf015\uf07c",
+  "\u2192",
+  "\u{1F600}",
 ];
 const SGR_POOL = [
   "0",

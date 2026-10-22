@@ -157,8 +157,10 @@ export class GlyphAtlas {
    * `ATLAS_FULL` means even the largest atlas is exhausted; the caller flushes
    * between frames and tries again. `GLYPH_DEFERRED` means the glyph's font
    * is still loading; nothing is cached and the caller retries later.
-   * `style` is `GLYPH_STYLE_*` bits; with `GLYPH_STYLE_TWO_CELLS` a symbol may
-   * be laid out across two cells and is a separate glyph.
+   * `style` is `GLYPH_STYLE_*` bits from the core, which applies Ghostty's
+   * cell rule: with `GLYPH_STYLE_TWO_CELLS` the glyph may use two cells (a
+   * wide cell, or a symbol with room after it) and is a separate glyph;
+   * without it, one.
    */
   resolve(text: string, style: number): number {
     this.assertActive();
@@ -186,7 +188,11 @@ export class GlyphAtlas {
       return ATLAS_FULL;
     }
 
-    const glyph = this.rasterizer.rasterize(text, style);
+    const glyph = this.rasterizer.rasterize(
+      text,
+      style,
+      (style & GLYPH_STYLE_TWO_CELLS) !== 0 ? 2 : 1,
+    );
     if (!glyph) return GLYPH_DEFERRED;
     const plane = glyph.intrinsicColor
       ? (this.color ?? this.createColorPlane())

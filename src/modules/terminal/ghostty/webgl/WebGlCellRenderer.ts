@@ -7,11 +7,12 @@ import type { TerminalDamage } from "@/modules/terminal/backend/contracts";
 import { CellFlags } from "@terax/ghostty-core/protocol";
 import type { Rgb, TerminalCellReader } from "../core/packedCells";
 import type { GhosttyTerminalModelApi } from "../GhosttyTerminalModel";
-import { type LinkCellRange, linkRangesEqual } from "../gpu/linkUnderline";
 import {
   CanvasBackingStore,
   type GestureGrowth,
 } from "../gpu/CanvasBackingStore";
+import { constraintCells } from "../gpu/glyphConstraint";
+import { type LinkCellRange, linkRangesEqual } from "../gpu/linkUnderline";
 import type {
   TerminalFontMetrics,
   TerminalGpuTheme,
@@ -682,7 +683,19 @@ export class WebGlCellRenderer {
             cells.graphemeLength(cellIndex) > 0
               ? frame.model.grapheme(row, column)
               : null;
-          const glyph = this.atlas.glyph(codepoint, grapheme, flags);
+          // Ghostty's cell rule, as the core applies it for WebGPU: a symbol
+          // may use two cells when the next one is free.
+          const glyph = this.atlas.glyph(
+            codepoint,
+            grapheme,
+            flags,
+            constraintCells(
+              codepoint,
+              width,
+              column > 0 ? cells.codepoint(cellIndex - 1) : 0,
+              column + 1 < this.cols ? cells.codepoint(cellIndex + 1) : null,
+            ),
+          );
           this.writeGlyph(
             glyphIndex,
             glyph,

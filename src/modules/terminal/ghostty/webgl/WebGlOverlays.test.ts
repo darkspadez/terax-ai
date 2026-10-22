@@ -1,10 +1,14 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   GhosttyImagePlacement,
   GhosttyTerminalModelApi,
 } from "@/modules/terminal/ghostty/GhosttyTerminalModel";
 import { DEFAULT_IMAGE_BACKGROUND_Z_LIMIT } from "@/modules/terminal/ghostty/gpu/imageLayer";
 import { WebGlCellRenderer } from "@/modules/terminal/ghostty/webgl/WebGlCellRenderer";
+import {
+  WebGlGlyphAtlas,
+  type WebGlGlyphEntry,
+} from "@/modules/terminal/ghostty/webgl/WebGlGlyphAtlas";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -81,7 +85,13 @@ function image(
   };
 }
 
-function setup(options: { underlinedCell?: number } = {}) {
+function setup(
+  options: {
+    underlinedCell?: number;
+    /** Code points by cell index; every other cell is empty. */
+    codepoints?: ReadonlyMap<number, number>;
+  } = {},
+) {
   const fake = recordingGl();
   vi.stubGlobal("window", { setTimeout, clearTimeout });
   vi.stubGlobal("document", {
@@ -145,7 +155,8 @@ function setup(options: { underlinedCell?: number } = {}) {
         length: 80 * 24,
         width: () => 1,
         flags: () => 0,
-        codepoint: () => 0,
+        codepoint: (index: number) => options.codepoints?.get(index) ?? 0,
+        graphemeLength: () => 0,
         // An explicit background on the first column, so the cell pass draws rectangles.
         backgroundPacked: (index: number) => (index % 80 === 0 ? 0x334455 : 0),
         foregroundPacked: () => 0xffffff,
@@ -191,6 +202,51 @@ function setup(options: { underlinedCell?: number } = {}) {
     placements,
   };
 }
+
+describe("WebGL glyph cells", () => {
+  it("asks the atlas for Ghostty's cell count, from the neighbouring cells", () => {
+    const empty: WebGlGlyphEntry = {
+      originOffsetX: 0,
+      originOffsetY: 0,
+      width: 0,
+      height: 0,
+      uvMinX: 0,
+      uvMinY: 0,
+      uvMaxX: 0,
+      uvMaxY: 0,
+      intrinsicColor: false,
+    };
+    const glyph = vi
+      .spyOn(WebGlGlyphAtlas.prototype, "glyph")
+      .mockReturnValue(empty);
+    const icon = 0xe718;
+    const h = setup({
+      codepoints: new Map([
+        [0, icon], // then an empty cell: may use two
+        [80, icon], // then text: one
+        [81, 0x78],
+        [160, icon], // a run of icons: one each
+        [161, icon],
+        [240 + 79, icon], // the last column: one
+      ]),
+    });
+    try {
+      h.renderer.render(h.frame());
+      expect(glyph.mock.calls.map((args) => [args[0], args[3]])).toEqual([
+        [icon, 2],
+        [icon, 1],
+        [0x78, 1],
+        [icon, 1],
+        [icon, 1],
+        [icon, 1],
+      ]);
+      expect(glyph.mock.calls[0][1]).toBeNull(); // no grapheme cluster
+    } finally {
+      glyph.mockRestore();
+      h.renderer.dispose();
+    }
+  });
+});
 
 describe("WebGL Kitty images", () => {
   it("creates no image texture and draws no image pass without images", () => {

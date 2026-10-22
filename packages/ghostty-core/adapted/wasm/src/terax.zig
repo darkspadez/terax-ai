@@ -1250,6 +1250,9 @@ const GpuAttr = struct {
 const glyph_id_mask: u32 = 0x00FF_FFFF;
 const glyph_style_bold: u32 = 1 << 0;
 const glyph_style_italic: u32 = 1 << 1;
+/// The glyph may use two cells (Ghostty's `constraintWidth`, see
+/// `constraintCells`). Never set on ASCII, so the ASCII table keeps four styles.
+const glyph_style_two_cells: u32 = 1 << 2;
 const glyph_style_count: usize = 4;
 
 /// Glyph ids are dense from 1. The cap bounds table memory, the JavaScript
@@ -1374,7 +1377,7 @@ const GlyphTable = struct {
             slot.* = try self.append(alloc, style, &.{codepoint});
             return slot.*;
         }
-        const key = (codepoint << 2) | style;
+        const key = (codepoint << 3) | style;
         if (self.singles.get(key)) |id| return id;
         try self.singles.ensureUnusedCapacity(alloc, 1);
         const id = try self.append(alloc, style, &.{codepoint});
@@ -2946,6 +2949,60 @@ fn resolveGpuStyle(
     };
 }
 
+/// The first code point of Ghostty's "symbol-like" set.
+const first_symbol: u32 = 0x2190;
+
+/// Ghostty's `isSymbol` (renderer/cell.zig): Private Use Area icons and the
+/// Arrows, Enclosed Alphanumerics, Miscellaneous Symbols, Dingbats, Enclosed
+/// Alphanumeric Supplement, Miscellaneous Symbols and Pictographs, Emoticons
+/// and Transport and Map Symbols blocks.
+fn isSymbol(cp: u32) bool {
+    return switch (cp) {
+        0x2190...0x21FF,
+        0x2460...0x24FF,
+        0x2600...0x27BF,
+        0xE000...0xF8FF,
+        0x1F100...0x1F1FF,
+        0x1F300...0x1F64F,
+        0x1F680...0x1F6FF,
+        0xF0000...0xFFFFD,
+        0x100000...0x10FFFD,
+        => true,
+        else => false,
+    };
+}
+
+/// Box drawing, block elements, legacy computing and Powerline: drawn edge to
+/// edge, so a symbol after one still gets room to grow.
+fn isGraphicsElement(cp: u32) bool {
+    return switch (cp) {
+        0x2500...0x259F, 0x1FB00...0x1FBFF, 0x1CC00...0x1CEBF, 0xE0B0...0xE0D7 => true,
+        else => false,
+    };
+}
+
+/// Ghostty's `constraintWidth`: how many cells the glyph in cell `x` may
+/// use. A wide cell has two; a symbol gets two when the next cell is empty, a
+/// space or an en space, unless it ends the row or follows another symbol (so
+/// runs of icons stay aligned); everything else has one. The rasterizer
+/// (`GlyphRasterizer`) fits icons, symbols and emoji to that many cells; text
+/// is drawn as the font made it whatever the count.
+fn constraintCells(raw_cells: []const ghostty.Cell, x: usize, cols: usize) u2 {
+    const cell = raw_cells[x];
+    if (cell.wide == .wide) return 2;
+    const codepoint: u32 = cell.codepoint();
+    if (codepoint < first_symbol or !isSymbol(codepoint)) return 1;
+    if (x + 1 >= cols) return 1;
+    if (x > 0) {
+        const previous = raw_cells[x - 1].codepoint();
+        if (isSymbol(previous) and !isGraphicsElement(previous)) return 1;
+    }
+    return switch (raw_cells[x + 1].codepoint()) {
+        0, 0x20, 0x2002 => 2,
+        else => 1,
+    };
+}
+
 const InternOutcome = union(enum) {
     glyph: u32,
     table_full,
@@ -3110,6 +3167,11 @@ fn writeGpuRows(
                     const codepoint: u32 = raw.codepoint();
                     var glyph: u32 = 0;
                     if (codepoint > 32 and !resolved.invisible) {
+                        const glyph_style = if (codepoint >= 0x80 and
+                            constraintCells(raw_cells, c, cols) == 2)
+                            resolved.glyph_style | glyph_style_two_cells
+                        else
+                            resolved.glyph_style;
                         // Plain ASCII is the overwhelmingly common case: one
                         // table read, no hashing, no grapheme or placeholder test.
                         const ascii_hit: u32 = if (codepoint < 128 and !raw.hasGrapheme())
@@ -3124,7 +3186,7 @@ fn writeGpuRows(
                                 table,
                                 codepoint,
                                 if (raw.hasGrapheme()) cell_graphemes[c] else &.{},
-                                resolved.glyph_style,
+                                glyph_style,
                                 &sequence,
                                 allow_overflow,
                             )) {

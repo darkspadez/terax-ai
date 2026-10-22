@@ -34,10 +34,10 @@ export const ADAPTED_GHOSTTY_COMMIT =
 export const ADAPTED_RESTTY_COMMIT =
   "7700b14a7643ba9240818209ef1e0aa90d83ad77";
 export const ADAPTED_GHOSTTY_WASM_SHA256 =
-  "b6413d48ba90b02438828a7849cdafc6615d4595b2fca228a8ccd0326bdb759b";
+  "e41ef491a4ce5c4e5f75af82f0b824fe18db9fc113b06fdc2a426ad804130ac8";
 
 export const ADAPTED_GHOSTTY_SCALAR_WASM_SHA256 =
-  "b80eda8107c828d1811a847be2c97acc5bc17afc8060e0ef6097d70e30e86e9e";
+  "7e427f3a680cb185b6ae459ee3df82f12b30879873344e75a9feb370d2d1ab4d";
 
 let wasmSimdAvailable: boolean | undefined;
 

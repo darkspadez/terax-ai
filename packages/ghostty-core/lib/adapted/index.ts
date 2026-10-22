@@ -20,6 +20,7 @@ export {
   GPU_GLYPH_BOLD,
   GPU_GLYPH_ID_MASK,
   GPU_GLYPH_ITALIC,
+  GPU_GLYPH_TWO_CELLS,
   decodeGpuCell,
 } from "./gpuCells";
 export type { TeraxGhosttyGpuCell } from "./gpuCells";

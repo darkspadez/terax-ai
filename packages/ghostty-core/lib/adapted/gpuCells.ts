@@ -38,6 +38,12 @@ export const GPU_ATTR_WIDE_LEAD = 1 << 6;
 /** Glyph style bits (`TeraxGhosttyGpuGlyph.style`). */
 export const GPU_GLYPH_BOLD = 1 << 0;
 export const GPU_GLYPH_ITALIC = 1 << 1;
+/**
+ * The glyph may use two cells (Ghostty's `constraintWidth`): a wide cell, or
+ * a symbol followed by a blank cell or a space that neither ends the row nor
+ * follows another symbol. Icons, symbols and emoji are fitted to the count.
+ */
+export const GPU_GLYPH_TWO_CELLS = 1 << 2;
 
 /** Decoded view of one record, for tests and diagnostics (not a hot path). */
 export type TeraxGhosttyGpuCell = {
