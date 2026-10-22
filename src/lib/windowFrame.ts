@@ -16,6 +16,9 @@ type FrameWindow = {
 
 const NORMAL: WindowFrame = { maximized: false, fullscreen: false };
 
+export const WINDOW_MAXIMIZED_ATTR = "data-window-maximized";
+export const WINDOW_FULLSCREEN_ATTR = "data-window-fullscreen";
+
 let frame = NORMAL;
 const listeners = new Set<() => void>();
 
@@ -82,15 +85,16 @@ function publish(next: WindowFrame): void {
   }
   frame = next;
   const root = document.documentElement;
-  root.toggleAttribute("data-window-maximized", next.maximized);
-  root.toggleAttribute("data-window-fullscreen", next.fullscreen);
+  root.toggleAttribute(WINDOW_MAXIMIZED_ATTR, next.maximized);
+  root.toggleAttribute(WINDOW_FULLSCREEN_ATTR, next.fullscreen);
   for (const listener of [...listeners]) listener();
 }
 
 /**
  * Keeps `data-window-maximized` and `data-window-fullscreen` on `<html>` in
- * step with the current window, for chrome that changes with them (squared
- * corners, no traffic-light inset), and `useWindowFrame` for components.
+ * step with the current window, for CSS that changes with them (squared
+ * corners), and `useWindowFrame` for components (the traffic-light inset,
+ * the maximize button).
  */
 export function installWindowFrame(): void {
   const window = getCurrentWindow();

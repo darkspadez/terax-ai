@@ -287,6 +287,19 @@ html[data-chrome="borderless"] #settings-root {
 html[data-chrome="borderless"] #root {
   background: var(--frame);
 }
+/* Settings keeps its window shadow, and Windows 11 rounds a shadowed
+ * borderless window at 8 px: its corners match that frame. */
+html[data-chrome="borderless"] #settings-root {
+  border-radius: 8px;
+}
+/* A window that fills its screen has no corners to round or edge to draw. */
+html[data-chrome="borderless"][data-window-maximized]
+  :is(#root, #settings-root, .terax-bg-surface),
+html[data-chrome="borderless"][data-window-fullscreen]
+  :is(#root, #settings-root, .terax-bg-surface) {
+  border-radius: 0;
+  border-width: 0;
+}
 
 
 

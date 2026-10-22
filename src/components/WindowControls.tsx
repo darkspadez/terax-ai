@@ -1,5 +1,6 @@
 import { USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
+import { useWindowFrame } from "@/lib/windowFrame";
 import {
   Cancel01Icon,
   Copy01Icon,
@@ -8,7 +9,6 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useEffect, useState } from "react";
 
 type Props = {
   /** Render only the close button (used by the settings window). */
@@ -16,22 +16,7 @@ type Props = {
 };
 
 export function WindowControls({ closeOnly = false }: Props) {
-  const [maximized, setMaximized] = useState(false);
-
-  useEffect(() => {
-    if (!USE_CUSTOM_WINDOW_CONTROLS || closeOnly) return;
-    const w = getCurrentWindow();
-    let unlisten: (() => void) | undefined;
-    void w.isMaximized().then(setMaximized);
-    void w
-      .onResized(() => {
-        void w.isMaximized().then(setMaximized);
-      })
-      .then((un) => {
-        unlisten = un;
-      });
-    return () => unlisten?.();
-  }, [closeOnly]);
+  const { maximized } = useWindowFrame();
 
   if (!USE_CUSTOM_WINDOW_CONTROLS) return null;
 
