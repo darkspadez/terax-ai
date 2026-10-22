@@ -7,8 +7,8 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { arch, platform } from "@tauri-apps/plugin-os";
 import { type ReactNode, useEffect, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
+import { ISSUES_URL, REPO_SLUG, REPO_URL } from "./aboutLinks";
 
-const REPO_URL = "https://github.com/crynta/terax-ai";
 const WEBSITE = "https://terax.app";
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -77,7 +77,7 @@ export function AboutSection() {
             className="inline-flex items-center gap-1.5 rounded-md text-[12px] underline-offset-2 hover:text-foreground hover:underline"
           >
             <HugeiconsIcon icon={GithubIcon} size={12} strokeWidth={1.75} />
-            crynta/terax-ai
+            {REPO_SLUG}
           </button>
         </dd>
         <dt className="text-muted-foreground">Website</dt>
@@ -123,7 +123,7 @@ function LinkButtons({ children }: { children?: ReactNode }) {
       <Button
         variant="ghost"
         size="sm"
-        onClick={() => void openUrl(`${REPO_URL}/issues/new`)}
+        onClick={() => void openUrl(ISSUES_URL)}
       >
         Report an issue
       </Button>
