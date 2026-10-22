@@ -1409,4 +1409,71 @@ mod tests {
             Some(std::path::PathBuf::from("/app/bin"))
         );
     }
+
+    #[test]
+    fn powershell_profile_runs_under_strict_mode_and_reports_exit_codes() {
+        // crynta/terax-ai#930: Set-StrictMode in the user's $PROFILE.
+        let Some(shell) = ["pwsh", "powershell"].into_iter().find(|shell| {
+            std::process::Command::new(shell)
+                .args(["-NoLogo", "-NoProfile", "-Command", "exit 0"])
+                .output()
+                .is_ok_and(|out| out.status.success())
+        }) else {
+            eprintln!("skipping PowerShell integration test: PowerShell not found");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let profile = dir.path().join("profile.ps1");
+        std::fs::write(&profile, include_str!("scripts/profile.ps1")).unwrap();
+        let profile = profile.to_string_lossy().replace('\'', "''");
+        let script = format!(
+            r#"
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+function Code([string]$p) {{ if ($p -match '\]133;D;(-?\d+)') {{ $Matches[1] }} else {{ 'none' }} }}
+& '{profile}'
+& '{profile}'
+$p = prompt
+$markers = ($p -match '\]133;A') -and ($p -match '\]133;B') -and ($p -match '\]7;file://')
+$codes = @(Code $p)
+$global:LASTEXITCODE = 3
+Get-Location > $null
+$p = prompt
+$codes += Code $p
+Write-Error failed -ErrorAction SilentlyContinue
+$p = prompt
+$codes += Code $p
+$kept = $global:LASTEXITCODE
+Remove-Variable -Scope Global LASTEXITCODE
+Write-Error failed -ErrorAction SilentlyContinue
+$p = prompt
+$codes += Code $p
+$env:TERAX_BLOCKS = '1'
+$p = prompt
+$codes += Code $p
+"markers=$markers codes=$($codes -join ',') kept=$kept added=$(Test-Path Variable:global:LASTEXITCODE)"
+"#
+        );
+        let out = std::process::Command::new(shell)
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &script,
+            ])
+            .env_remove("TERAX_BLOCKS")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success(), "{stdout}{stderr}");
+        // Success after a failed native command is 0, a failed cmdlet keeps
+        // the native code that names it or is 1, and $LASTEXITCODE survives.
+        assert_eq!(
+            stdout.trim(),
+            "markers=True codes=0,0,3,1,0 kept=3 added=False",
+            "{stderr}"
+        );
+    }
 }

@@ -89,7 +89,7 @@ PowerShell loads `profile.ps1` via:
 pwsh -NoLogo -NoExit -ExecutionPolicy Bypass -File <profile.ps1>
 ```
 
-The profile wraps the user's existing `prompt` function to emit OSC 7 + OSC 133 A/B/D after `$PROFILE` runs. The cwd is normalized to backslashes before being passed to ConPTY because `CreateProcessW` misbehaves with forward slashes.
+The profile wraps the user's existing `prompt` function to emit OSC 7 + OSC 133 A/B/D after `$PROFILE` runs. It probes or initialises every variable it reads, so a `Set-StrictMode` left on by `$PROFILE` cannot break it. The exit code in OSC 133 D is 0 when `$?` is true, else `$LASTEXITCODE` when it is non-zero, else 1: `$LASTEXITCODE` belongs to the last native command, so on its own it would mark every later successful cmdlet as failed. The prompt puts `$LASTEXITCODE` back afterwards. A test runs the profile in `pwsh` or Windows PowerShell when one is installed. The cwd is normalized to backslashes before being passed to ConPTY because `CreateProcessW` misbehaves with forward slashes.
 
 ### Fish 4.0+
 

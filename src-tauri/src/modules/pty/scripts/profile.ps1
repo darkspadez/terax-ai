@@ -3,8 +3,12 @@
 # boundaries. C comes from a PSConsoleHostReadLine wrapper (PowerShell has no
 # preexec hook).
 
-if ($global:__TERAX_HOOKS_LOADED) { return }
+# Set-StrictMode in the user's $PROFILE makes reading an unset variable an
+# error, so every flag is probed or initialised before it is read.
+if ((Test-Path Variable:global:__TERAX_HOOKS_LOADED) -and $global:__TERAX_HOOKS_LOADED) { return }
 $global:__TERAX_HOOKS_LOADED = $true
+$global:__terax_readline_done = $false
+$global:__terax_block_seen = $false
 
 if ($env:TERAX_CLI -and (Test-Path -LiteralPath $env:TERAX_CLI -PathType Leaf)) {
     function global:terax {
@@ -74,9 +78,14 @@ function global:__terax_install_readline {
 }
 
 function global:prompt {
+    # Read first: any statement here resets $?. $LASTEXITCODE belongs to the
+    # last native command, which need not be the last command, so it only
+    # names the code of a failure.
+    $succeeded = $global:?
+    $hadExitCode = Test-Path Variable:global:LASTEXITCODE
+    $nativeExit = if ($hadExitCode) { $global:LASTEXITCODE } else { 0 }
+    $lec = if ($succeeded) { 0 } elseif ($nativeExit -is [int] -and $nativeExit -ne 0) { $nativeExit } else { 1 }
     __terax_install_readline
-    $lec = $LASTEXITCODE
-    if ($null -eq $lec) { $lec = if ($?) { 0 } else { 1 } }
     $esc = [char]27
 
     $oscD = "$esc]133;D;$lec$esc\"
@@ -97,7 +106,7 @@ function global:prompt {
     # prompt (markers only) and reserve the header/gap rows in the prompt
     # itself -- same layout contract as the zsh integration.
     if ($env:TERAX_BLOCKS) {
-        $global:LASTEXITCODE = $lec
+        if ($hadExitCode) { $global:LASTEXITCODE = $nativeExit }
         $gap = if ($global:__terax_block_seen) { "`n`n" } else { "`n" }
         return "$oscD$oscA$osc7$gap$oscB"
     }
@@ -108,6 +117,6 @@ function global:prompt {
         "PS $((Get-Location).Path)> "
     }
 
-    $global:LASTEXITCODE = $lec
+    if ($hadExitCode) { $global:LASTEXITCODE = $nativeExit }
     "$oscD$oscA$osc7${original}${oscB}"
 }
