@@ -18,6 +18,8 @@
     "core:window:allow-show",
     "core:window:allow-set-focus",
     "core:window:allow-set-title",
+    "core:window:allow-set-progress-bar",
+    "core:window:allow-request-user-attention",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "opener:default",

@@ -202,6 +202,7 @@ export function terminalIntegrationCallbacks(
       ) {
         const message = commandFinishedMessage(command, exitCode, durationMs);
         void osNotify(message.title, message.body);
+        if (!document.hasFocus()) void requestWindowAttention();
       }
     },
   };

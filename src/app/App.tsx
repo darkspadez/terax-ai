@@ -99,6 +99,7 @@ import {
   scrollFocusedTerminal,
   ptyIdForLeaf,
   setTerminalFileOpener,
+  startWindowProgress,
   type TerminalPaneHandle,
   TerminalPromptDialog,
   useAgentActivityStore,
@@ -1412,6 +1413,9 @@ export default function App() {
     });
     return () => setTerminalFileOpener(null);
   }, [openContentHit, openFileTab]);
+
+  // OSC 9;4 progress from every terminal drives the taskbar or dock bar.
+  useEffect(() => startWindowProgress(), []);
 
   const openControlFile = useCallback(
     ({
