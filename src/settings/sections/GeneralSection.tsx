@@ -30,6 +30,8 @@ import {
   setTerminalFontSize,
   setTerminalFontWeight,
   setTerminalLetterSpacing,
+  setTerminalLineHeight,
+  TERMINAL_LINE_HEIGHTS,
   setTerminalScrollback,
   setTerminalShell,
   setTerminalRenderer,
@@ -113,6 +115,7 @@ export function GeneralSection() {
     (s) => s.terminalLetterSpacing,
   );
   const terminalFontSize = usePreferencesStore((s) => s.terminalFontSize);
+  const terminalLineHeight = usePreferencesStore((s) => s.terminalLineHeight);
   const terminalScrollback = usePreferencesStore((s) => s.terminalScrollback);
   const confirmCloseRunningTerminal = usePreferencesStore(
     (s) => s.confirmCloseRunningTerminal,
@@ -435,6 +438,26 @@ export function GeneralSection() {
               {LETTER_SPACINGS.map((v) => (
                 <SelectItem key={v} value={String(v)} className="text-[12px]">
                   {v > 0 ? `+${v}` : v} px
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingRow>
+        <SettingRow
+          title="Line height"
+          description="Row height as a multiple of the font size."
+        >
+          <Select
+            value={String(terminalLineHeight)}
+            onValueChange={(v) => void setTerminalLineHeight(Number(v))}
+          >
+            <SelectTrigger size="sm" className="h-8 w-28 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TERMINAL_LINE_HEIGHTS.map((v) => (
+                <SelectItem key={v} value={String(v)} className="text-[12px]">
+                  {v.toFixed(2)}
                 </SelectItem>
               ))}
             </SelectContent>

@@ -171,6 +171,8 @@ export type Preferences = {
   terminalFontWeight: string;
   terminalShell: string;
   terminalLetterSpacing: number;
+  /** Cell height as a multiple of the font size. */
+  terminalLineHeight: number;
   terminalFontSize: number;
   terminalScrollback: number;
   terminalBehavior: TerminalBehavior;
@@ -268,6 +270,7 @@ const KEY_TERMINAL_FONT_FAMILY = "terminalFontFamily";
 const KEY_TERMINAL_FONT_WEIGHT = "terminalFontWeight";
 const KEY_TERMINAL_SHELL = "terminalShell";
 const KEY_TERMINAL_LETTER_SPACING = "terminalLetterSpacing";
+const KEY_TERMINAL_LINE_HEIGHT = "terminalLineHeight";
 const KEY_TERMINAL_FONT_SIZE = "terminalFontSize";
 const KEY_TERMINAL_SCROLLBACK = "terminalScrollback";
 const KEY_TERMINAL_BEHAVIOR = "terminalBehavior";
@@ -289,6 +292,16 @@ const KEY_LSP_ACTIVATION = "lspActivation";
 const KEY_LSP_CUSTOM_SERVERS = "lspCustomServers";
 
 const TERMINAL_FONT_SIZE_DEFAULT = 14;
+export const TERMINAL_LINE_HEIGHT_DEFAULT = 1.2;
+export const TERMINAL_LINE_HEIGHTS = [
+  1, 1.1, 1.15, 1.2, 1.25, 1.3, 1.4, 1.5, 1.6, 1.8, 2,
+] as const;
+
+export function clampTerminalLineHeight(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(2, Math.max(1, Math.round(value * 100) / 100))
+    : TERMINAL_LINE_HEIGHT_DEFAULT;
+}
 const TERMINAL_FONT_SIZE_MIN = 8;
 const TERMINAL_FONT_SIZE_MAX = 32;
 
@@ -364,6 +377,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   terminalFontWeight: "normal",
   terminalShell: "",
   terminalLetterSpacing: 0,
+  terminalLineHeight: TERMINAL_LINE_HEIGHT_DEFAULT,
   terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT,
   terminalScrollback: TERMINAL_SCROLLBACK_DEFAULT,
   terminalBehavior: defaultTerminalBehavior(currentPlatform()),
@@ -535,6 +549,9 @@ export async function loadPreferences(): Promise<Preferences> {
     terminalLetterSpacing:
       get<number>(KEY_TERMINAL_LETTER_SPACING) ??
       DEFAULT_PREFERENCES.terminalLetterSpacing,
+    terminalLineHeight: clampTerminalLineHeight(
+      get<number>(KEY_TERMINAL_LINE_HEIGHT),
+    ),
     terminalFontSize:
       get<number>(KEY_TERMINAL_FONT_SIZE) ??
       DEFAULT_PREFERENCES.terminalFontSize,
@@ -862,6 +879,10 @@ export async function setTerminalLetterSpacing(value: number): Promise<void> {
   await writePref(KEY_TERMINAL_LETTER_SPACING, clamped);
 }
 
+export async function setTerminalLineHeight(value: number): Promise<void> {
+  await writePref(KEY_TERMINAL_LINE_HEIGHT, clampTerminalLineHeight(value));
+}
+
 export async function setTerminalFontSize(value: number): Promise<void> {
   const clamped = Number.isFinite(value)
     ? Math.min(
@@ -1036,6 +1057,7 @@ export async function onPreferencesChange(
     [KEY_TERMINAL_FONT_WEIGHT]: "terminalFontWeight",
     [KEY_TERMINAL_SHELL]: "terminalShell",
     [KEY_TERMINAL_LETTER_SPACING]: "terminalLetterSpacing",
+    [KEY_TERMINAL_LINE_HEIGHT]: "terminalLineHeight",
     [KEY_TERMINAL_FONT_SIZE]: "terminalFontSize",
     [KEY_TERMINAL_SCROLLBACK]: "terminalScrollback",
     [KEY_TERMINAL_BEHAVIOR]: "terminalBehavior",

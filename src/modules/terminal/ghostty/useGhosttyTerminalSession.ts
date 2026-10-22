@@ -160,6 +160,7 @@ export function useGhosttyTerminalSession({
     (state) => state.terminalLetterSpacing,
   );
   const zoomLevel = usePreferencesStore((state) => state.zoomLevel);
+  const lineHeight = usePreferencesStore((state) => state.terminalLineHeight);
   const fontOffset = useTerminalFontOffsets(
     (state) => state.offsets[leafId] ?? 0,
   );
@@ -167,11 +168,19 @@ export function useGhosttyTerminalSession({
     () => ({
       family: resolveFontFamily(fontFamily),
       size: Math.max(4, Math.round((fontSize + fontOffset) * zoomLevel)),
-      lineHeight: 1.2,
+      lineHeight,
       letterSpacing,
       weight: fontWeight,
     }),
-    [fontFamily, fontSize, fontOffset, fontWeight, letterSpacing, zoomLevel],
+    [
+      fontFamily,
+      fontSize,
+      fontOffset,
+      fontWeight,
+      letterSpacing,
+      lineHeight,
+      zoomLevel,
+    ],
   );
   const fontRef = useRef(font);
   fontRef.current = font;
