@@ -130,6 +130,17 @@ export function TerminalBehaviorSettings() {
           }
         />
       </SettingRow>
+      {platform === "windows" && (
+        <SettingRow
+          title="Ctrl+C and Ctrl+V copy and paste"
+          description="As in Windows Terminal: Ctrl+C copies selected text and interrupts when nothing is selected, Ctrl+V pastes. Ctrl+Shift+C/V, Ctrl+Insert and Shift+Insert work either way."
+        >
+          <Switch
+            checked={behavior.smartCopyPaste}
+            onCheckedChange={(smartCopyPaste) => set({ smartCopyPaste })}
+          />
+        </SettingRow>
+      )}
       <SettingRow
         title="Confirm multi-line pastes"
         description="Ask before pasting text with line breaks into a shell that would run it as commands."

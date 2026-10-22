@@ -55,3 +55,60 @@ export function terminalReadlineSequence(
     terminalDeleteSequence(event, opts)
   );
 }
+
+export type TerminalPlatform = "linux" | "macos" | "windows" | "other";
+
+/**
+ * A clipboard key in a terminal, before the program sees it:
+ * - "copy": copy the selection; with nothing selected the key goes on to
+ *   the program.
+ * - "copyAndClear": the same, and the copied selection is cleared, so
+ *   pressing the key again (Ctrl+C) interrupts.
+ * - "paste": paste the clipboard.
+ * - "pasteText": paste the clipboard's text; when it holds none the key goes
+ *   to the program, which can read an image itself (Ctrl+V in agents).
+ */
+export type TerminalClipboardAction =
+  | "copy"
+  | "copyAndClear"
+  | "paste"
+  | "pasteText";
+
+/**
+ * Which clipboard action a key performs. macOS: Cmd+C and Cmd+V. Elsewhere:
+ * Ctrl+Shift+C and Ctrl+Shift+V, plus Ctrl+Insert and Shift+Insert (Ghostty's
+ * and Windows Terminal's defaults). Windows, unless `smartCopyPaste` is off,
+ * also follows Windows Terminal: Ctrl+C copies a selection (and otherwise
+ * interrupts) and Ctrl+V pastes. Linux keeps plain Ctrl+C and Ctrl+V for the
+ * program (interrupt, readline's quoted insert).
+ */
+export function terminalClipboardAction(
+  event: TerminalKeyEvent & Pick<KeyboardEvent, "shiftKey">,
+  opts: { platform: TerminalPlatform; smartCopyPaste: boolean },
+): TerminalClipboardAction | null {
+  const letter = latinLetter(event);
+  if (opts.platform === "macos") {
+    if (!event.metaKey || event.ctrlKey || event.altKey) return null;
+    return letter === "c" ? "copy" : letter === "v" ? "paste" : null;
+  }
+  if (event.metaKey || event.altKey) return null;
+  if (event.key === "Insert") {
+    if (event.ctrlKey !== event.shiftKey) return event.ctrlKey ? "copy" : "paste";
+    return null;
+  }
+  if (!event.ctrlKey) return null;
+  if (event.shiftKey) {
+    return letter === "c" ? "copy" : letter === "v" ? "paste" : null;
+  }
+  if (opts.platform !== "windows" || !opts.smartCopyPaste) return null;
+  return letter === "c" ? "copyAndClear" : letter === "v" ? "pasteText" : null;
+}
+
+/**
+ * The Latin letter a key types; on layouts typing another script (Cyrillic,
+ * Greek), the letter at its position, so Ctrl+C still copies there.
+ */
+function latinLetter(event: Pick<KeyboardEvent, "key" | "code">): string | null {
+  if (/^[a-z]$/i.test(event.key)) return event.key.toLowerCase();
+  return /^Key[A-Z]$/.test(event.code) ? event.code.charAt(3).toLowerCase() : null;
+}

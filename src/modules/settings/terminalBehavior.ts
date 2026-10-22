@@ -38,6 +38,12 @@ export type TerminalNotifyOnFinish = "never" | "unfocused" | "always";
 export type TerminalBehavior = {
   readonly optionAsAlt: TerminalOptionAsAlt;
   readonly copyOnSelect: TerminalCopyOnSelect;
+  /**
+   * Windows: Ctrl+C copies a selection (and otherwise interrupts) and Ctrl+V
+   * pastes, as in Windows Terminal. Ctrl+Shift+C/V, Ctrl+Insert and
+   * Shift+Insert copy and paste either way.
+   */
+  readonly smartCopyPaste: boolean;
   /** Confirm pastes that would run commands (newlines without bracketed paste). */
   readonly pasteProtection: boolean;
   readonly clipboardRead: TerminalClipboardRead;
@@ -69,6 +75,7 @@ export function defaultTerminalBehavior(
   return {
     optionAsAlt: "off",
     copyOnSelect: platform === "linux" ? "primary" : "off",
+    smartCopyPaste: true,
     pasteProtection: true,
     clipboardRead: "ask",
     desktopNotifications: true,
@@ -124,6 +131,10 @@ export function normalizeTerminalBehavior(
       ["off", "primary", "clipboard"],
       defaults.copyOnSelect,
     ),
+    smartCopyPaste:
+      typeof raw.smartCopyPaste === "boolean"
+        ? raw.smartCopyPaste
+        : defaults.smartCopyPaste,
     pasteProtection:
       typeof raw.pasteProtection === "boolean"
         ? raw.pasteProtection

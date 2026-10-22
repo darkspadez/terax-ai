@@ -1,5 +1,9 @@
 import type { TerminalOptionAsAlt } from "@/modules/settings/terminalBehavior";
-import { terminalReadlineSequence } from "@/modules/terminal/lib/keymap";
+import {
+  terminalClipboardAction,
+  terminalReadlineSequence,
+  type TerminalPlatform,
+} from "@/modules/terminal/lib/keymap";
 import { readTerminalClipboard } from "@/modules/terminal/lib/terminalClipboard";
 import {
   Key,
@@ -148,7 +152,12 @@ export type GhosttyInputControllerOptions = {
   /** CSS pixels the drawn grid is moved up inside the pointer target; zero when absent. */
   readonly gridShiftY?: () => number;
   readonly onData: (bytes: Uint8Array) => void;
-  readonly onCopy: () => boolean;
+  /**
+   * Copies the selection; false when nothing is selected, and the key goes
+   * on to the program. `clearSelection` asks for the copied selection to be
+   * cleared, so pressing the key again (Ctrl+C) interrupts.
+   */
+  readonly onCopy: (clearSelection: boolean) => boolean;
   readonly getSelection?: () => string | null;
   readonly onPaste?: (text: string) => boolean;
   readonly onText?: (text: string) => boolean;
@@ -172,6 +181,9 @@ export type GhosttyInputControllerOptions = {
    */
   readonly clipboardHasImage?: () => Promise<boolean>;
   readonly isMac?: boolean;
+  readonly isWindows?: boolean;
+  /** Windows: plain Ctrl+C copies a selection and Ctrl+V pastes. */
+  readonly smartCopyPaste?: () => boolean;
   /** Selected-placeholder input proxy (a macOS WebKit fix); defaults to `isMac`. */
   readonly inputPlaceholder?: boolean;
 };
@@ -179,6 +191,7 @@ export type GhosttyInputControllerOptions = {
 export class GhosttyInputController {
   private readonly encoder = new TextEncoder();
   private readonly isMac: boolean;
+  private readonly platform: TerminalPlatform;
   private readonly proxy: TerminalInputProxy;
   private readonly nativeSelection: TerminalNativeSelection | null;
   private readonly pressedKeys = new Map<string, KeyEvent>();
@@ -195,6 +208,11 @@ export class GhosttyInputController {
 
   constructor(private readonly options: GhosttyInputControllerOptions) {
     this.isMac = options.isMac ?? /Mac|iPhone|iPad/.test(navigator.userAgent);
+    this.platform = this.isMac
+      ? "macos"
+      : (options.isWindows ?? /Windows/.test(navigator.userAgent))
+        ? "windows"
+        : "linux";
     this.proxy = new TerminalInputProxy(options.input, {
       placeholder: options.inputPlaceholder ?? this.isMac,
     });
@@ -337,14 +355,31 @@ export class GhosttyInputController {
     )
       return;
 
-    if (isPasteShortcut(event, this.isMac)) {
+    const clipboard = terminalClipboardAction(event, {
+      platform: this.platform,
+      smartCopyPaste: this.options.smartCopyPaste?.() ?? false,
+    });
+    if (clipboard === "paste" || clipboard === "pasteText") {
       consume(event);
-      void readTerminalClipboard().then((text) =>
-        this.pasteFromClipboard(text),
-      );
+      void readTerminalClipboard().then((text) => {
+        if (
+          text ||
+          clipboard === "paste" ||
+          this.options.model.pasteEventsWanted?.()
+        ) {
+          this.pasteFromClipboard(text);
+        } else {
+          // No text: the program gets the key and reads the clipboard
+          // itself (agents paste an image on Ctrl+V).
+          this.sendHeldKey(event);
+        }
+      });
       return;
     }
-    if (isCopyShortcut(event, this.isMac) && this.options.onCopy()) {
+    if (
+      (clipboard === "copy" || clipboard === "copyAndClear") &&
+      this.options.onCopy(clipboard === "copyAndClear")
+    ) {
       consume(event);
       return;
     }
@@ -432,6 +467,17 @@ export class GhosttyInputController {
     const encoded = this.options.model.encodeKey(data);
     if (encoded.byteLength > 0) this.pressedKeys.set(event.code, data);
     return encoded;
+  }
+
+  /** Sends a key whose keydown was held back for an asynchronous decision. */
+  private sendHeldKey(event: KeyboardEvent): void {
+    const key = KEY_MAP[event.code];
+    if (this.disposed || this.options.model.isDisposed?.() || key === undefined)
+      return;
+    const encoded = this.encodeKeyDown(event, key);
+    if (encoded.byteLength === 0) return;
+    this.options.model.scrollToBottom();
+    this.emitBytes(encoded);
   }
 
   /** macOS Option-as-Alt applies to this key event (side-aware). */
@@ -860,36 +906,6 @@ function keyModifiers(
 ): Mods {
   const mods = modifiers(event);
   return event.code.startsWith("Numpad") ? mods : mods & ~Mods.NUMLOCK;
-}
-
-function isCopyShortcut(event: KeyboardEvent, isMac: boolean): boolean {
-  if (isMac) {
-    return (
-      event.metaKey && !event.ctrlKey && !event.altKey && event.code === "KeyC"
-    );
-  }
-  return (
-    event.ctrlKey &&
-    event.shiftKey &&
-    !event.altKey &&
-    !event.metaKey &&
-    event.code === "KeyC"
-  );
-}
-
-function isPasteShortcut(event: KeyboardEvent, isMac: boolean): boolean {
-  if (isMac) {
-    return (
-      event.metaKey && !event.ctrlKey && !event.altKey && event.code === "KeyV"
-    );
-  }
-  return (
-    event.ctrlKey &&
-    event.shiftKey &&
-    !event.altKey &&
-    !event.metaKey &&
-    event.code === "KeyV"
-  );
 }
 
 function consume(event: Event): void {

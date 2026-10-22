@@ -1148,12 +1148,15 @@ function createGhosttyInput(
     },
     clipboardHasImage: async () => (await readClipboardImage()) !== null,
     getSelection: () => surface.getSelection(),
-    onCopy: () => {
+    onCopy: (clearSelection) => {
       const text = surface.getSelection();
       if (!text) return false;
       void writeTerminalClipboard(text).catch(() => {});
+      if (clearSelection) surface.clearSelection();
       return true;
     },
+    smartCopyPaste: () =>
+      usePreferencesStore.getState().terminalBehavior.smartCopyPaste,
   });
 }
 

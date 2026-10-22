@@ -7,6 +7,11 @@ import { AdaptedGhosttyTerminalModel } from "../AdaptedGhosttyTerminalModel";
 import { baseCharacter, GhosttyInputController } from "./GhosttyInputController";
 import { supportedKittyKeyboardFlags } from "./terminalInputEncoding";
 
+const clipboard = vi.hoisted(() => ({ text: "" }));
+vi.mock("@/modules/terminal/lib/terminalClipboard", () => ({
+  readTerminalClipboard: async () => clipboard.text,
+}));
+
 describe("baseCharacter", () => {
   it("returns what a key types without Option, by physical position", () => {
     expect(baseCharacter({ code: "KeyF", shiftKey: false })).toBe("f");
@@ -633,6 +638,89 @@ describe.each(["ghostty-vt.wasm", "ghostty-vt-scalar.wasm"])(
         dispose();
       },
     );
+
+    // crynta/terax-ai#1384, #240, #619: Windows Terminal's clipboard keys.
+    it("copies and pastes with Windows Terminal's keys on Windows", async () => {
+      let selected = true;
+      const onCopy = vi.fn(() => selected);
+      let smart = true;
+      const { input, sent, write, dispose } = setup({
+        isWindows: true,
+        onCopy,
+        smartCopyPaste: () => smart,
+      });
+      const press = (chord: Partial<KeyboardEvent>) => {
+        const event = keyboardEvent(chord);
+        input.dispatchEvent(event);
+        return event.defaultPrevented;
+      };
+      const ctrlC = { key: "c", code: "KeyC", ctrlKey: true };
+      const ctrlV = { key: "v", code: "KeyV", ctrlKey: true };
+      // Ctrl+C copies a selection and clears it; without one it interrupts.
+      expect(press(ctrlC)).toBe(true);
+      expect(onCopy).toHaveBeenLastCalledWith(true);
+      selected = false;
+      expect(press(ctrlC)).toBe(true);
+      expect(sent.splice(0)).toEqual(["\x03"]);
+      // Ctrl+V pastes text (dictation tools send it too).
+      clipboard.text = "echo hi";
+      write("\x1b[?2004h");
+      expect(press(ctrlV)).toBe(true);
+      await vi.waitFor(() =>
+        expect(sent.splice(0)).toEqual(["\x1b[200~echo hi\x1b[201~"]),
+      );
+      // With no text the program gets Ctrl+V and reads an image itself.
+      clipboard.text = "";
+      press(ctrlV);
+      await vi.waitFor(() => expect(sent.splice(0)).toEqual(["\x16"]));
+      // Shift+Insert and Ctrl+Insert, and the Ctrl+Shift keys, always work.
+      clipboard.text = "x";
+      selected = true;
+      smart = false;
+      expect(press({ key: "Insert", code: "Insert", shiftKey: true })).toBe(
+        true,
+      );
+      expect(press({ key: "V", code: "KeyV", ctrlKey: true, shiftKey: true }))
+        .toBe(true);
+      await vi.waitFor(() =>
+        expect(sent.splice(0)).toEqual([
+          "\x1b[200~x\x1b[201~",
+          "\x1b[200~x\x1b[201~",
+        ]),
+      );
+      onCopy.mockClear();
+      expect(press({ key: "Insert", code: "Insert", ctrlKey: true })).toBe(
+        true,
+      );
+      expect(onCopy).toHaveBeenLastCalledWith(false);
+      // Turned off, plain Ctrl+C and Ctrl+V go to the program.
+      onCopy.mockClear();
+      press(ctrlC);
+      press(ctrlV);
+      expect(onCopy).not.toHaveBeenCalled();
+      expect(sent).toEqual(["\x03", "\x16"]);
+      dispose();
+    });
+
+    it("keeps Ctrl+C and Ctrl+V for the program on Linux", async () => {
+      const onCopy = vi.fn(() => true);
+      const { input, sent, dispose } = setup({
+        onCopy,
+        smartCopyPaste: () => true,
+      });
+      clipboard.text = "x";
+      for (const values of [
+        { key: "c", code: "KeyC", ctrlKey: true },
+        { key: "v", code: "KeyV", ctrlKey: true },
+        { key: "Insert", code: "Insert", shiftKey: true },
+        { key: "Insert", code: "Insert", ctrlKey: true },
+      ]) {
+        input.dispatchEvent(keyboardEvent(values));
+      }
+      await vi.waitFor(() => expect(sent).toEqual(["\x03", "\x16", "x"]));
+      expect(onCopy.mock.calls).toEqual([[false]]);
+      dispose();
+    });
 
     // crynta/terax-ai#1288: Kitty programs read Shift+Enter, not Alt+Enter.
     it("encodes Shift+Enter in the program's keyboard mode", () => {

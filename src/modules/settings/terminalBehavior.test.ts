@@ -10,6 +10,7 @@ describe("terminal behaviour preferences", () => {
     expect(defaultTerminalBehavior("macos")).toEqual({
       optionAsAlt: "off",
       copyOnSelect: "off",
+      smartCopyPaste: true,
       pasteProtection: true,
       clipboardRead: "ask",
       desktopNotifications: true,
@@ -33,6 +34,7 @@ describe("terminal behaviour preferences", () => {
           optionAsAlt: "left",
           copyOnSelect: "everywhere",
           pasteProtection: "yes",
+          smartCopyPaste: false,
           clipboardRead: "allow",
           notifyAfterSeconds: 0,
           scrollMultiplier: 99.6,
@@ -44,6 +46,7 @@ describe("terminal behaviour preferences", () => {
     ).toEqual({
       ...defaults,
       optionAsAlt: "left",
+      smartCopyPaste: false,
       clipboardRead: "allow",
       notifyAfterSeconds: 1,
       scrollMultiplier: 20,

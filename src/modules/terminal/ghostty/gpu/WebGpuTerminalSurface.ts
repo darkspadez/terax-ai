@@ -502,6 +502,10 @@ export class WebGpuTerminalSurface
     return this.selection.text();
   }
 
+  clearSelection(): void {
+    this.selection.clear();
+  }
+
   searchController(): GhosttySearchController {
     return this.search;
   }
