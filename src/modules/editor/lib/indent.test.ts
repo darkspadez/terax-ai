@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectIndentUnit } from "./indent";
+import { defaultIndentUnit, detectIndentUnit } from "./indent";
 
 const twoSpace = `function a() {\n  if (x) {\n    y();\n  }\n}\n`;
 const fourSpace = `def a():\n    if x:\n        y()\n    return\n`;
@@ -30,5 +30,19 @@ describe("detectIndentUnit", () => {
   it("majority wins on mixed tab/space files", () => {
     const mixed = `a {\n\tb\n\tc\n\td\n  e\n}\n`;
     expect(detectIndentUnit(mixed)).toBe("\t");
+  });
+});
+
+// crynta/terax-ai#732: new and unindented files follow the setting.
+describe("defaultIndentUnit", () => {
+  it("maps the setting to an indent unit", () => {
+    expect(defaultIndentUnit("spaces2")).toBe("  ");
+    expect(defaultIndentUnit("spaces4")).toBe("    ");
+    expect(defaultIndentUnit("tab")).toBe("\t");
+  });
+
+  it("only applies where the file has no indentation of its own", () => {
+    expect(detectIndentUnit("", defaultIndentUnit("spaces4"))).toBe("    ");
+    expect(detectIndentUnit(twoSpace, defaultIndentUnit("tab"))).toBe("  ");
   });
 });

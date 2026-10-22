@@ -3,7 +3,10 @@ import { getCustomEndpointKey, getKey } from "@/modules/ai/lib/keyring";
 import { native } from "@/modules/ai/lib/native";
 import { lspFormatDocument, useLspExtension } from "@/modules/lsp";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { onKeysChanged } from "@/modules/settings/store";
+import {
+  type EditorDefaultIndent,
+  onKeysChanged,
+} from "@/modules/settings/store";
 import { useWorkspaceAssetUrl } from "@/modules/workspace";
 import { acceptCompletion, startCompletion } from "@codemirror/autocomplete";
 import { redo, undo } from "@codemirror/commands";
@@ -60,7 +63,7 @@ import {
 import { normalizeToLf } from "./lib/eol";
 import { gitChangeGutter, setGitBase } from "./lib/gitGutter";
 import { onHeadMoved } from "./lib/gitSignals";
-import { detectIndentUnit } from "./lib/indent";
+import { defaultIndentUnit, detectIndentUnit } from "./lib/indent";
 import { type LanguageResult, resolveLanguage } from "./lib/languageResolver";
 import { FORCE_READ_LIMIT, useDocument } from "./lib/useDocument";
 import { useEditorThemeExt } from "./lib/useEditorThemeExt";
@@ -459,12 +462,16 @@ export const EditorPane = memo(
       if (view) syncViewText(view, text());
     }, [doc, text]);
 
+    // Detected from the buffer; the setting covers files with nothing to
+    // detect (new or unindented).
+    const editorDefaultIndent = usePreferencesStore(
+      (s) => s.editorDefaultIndent,
+    );
     const applyIndent = useCallback(
-      (view: EditorView) => {
+      (view: EditorView, setting: EditorDefaultIndent) => {
+        const unit = detectIndentUnit(text(), defaultIndentUnit(setting));
         view.dispatch({
-          effects: indentCompartment.reconfigure(
-            indentExtension(detectIndentUnit(text())),
-          ),
+          effects: indentCompartment.reconfigure(indentExtension(unit)),
         });
       },
       [text],
@@ -473,15 +480,15 @@ export const EditorPane = memo(
     useEffect(() => {
       if (doc.status !== "ready") return;
       const view = cmRef.current?.view;
-      if (view) applyIndent(view);
-    }, [doc, applyIndent]);
+      if (view) applyIndent(view, editorDefaultIndent);
+    }, [doc, editorDefaultIndent, applyIndent]);
 
     // CodeMirror creates its view a few renders after the document turned
     // ready, after this pane's effects for that document already ran
     // without one: apply what they could not (indent unit, a pending go-to
     // line or focus from opening the file at a location).
     const handleCreateEditor = (view: EditorView) => {
-      applyIndent(view);
+      applyIndent(view, editorDefaultIndent);
       applyPendingGoto(view);
       applyPendingFocus(view);
     };
