@@ -5,6 +5,7 @@ import { usePresence } from "@/lib/usePresence";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { useComposer } from "../lib/composer";
+import { pastedImages, pasteKeepsText } from "../lib/pastedImages";
 import { SLASH_COMMANDS } from "../lib/slashCommands";
 import { useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
@@ -217,6 +218,12 @@ export function AiComposerInput() {
               onKeyUp={updateTrigger}
               onClick={updateTrigger}
               onSelect={updateTrigger}
+              onPaste={(e) => {
+                const images = pastedImages(e.clipboardData);
+                if (images.length === 0) return;
+                if (!pasteKeepsText(e.clipboardData)) e.preventDefault();
+                void c.addFiles(images);
+              }}
               onKeyDown={(e) => {
                 if (pickerOpen) {
                   const items = fileTrigger ? filteredFiles : filteredItems;
