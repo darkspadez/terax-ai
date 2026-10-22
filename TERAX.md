@@ -411,6 +411,7 @@ establish production readiness, platform parity, or multi-day resource stability
 - **Comments**: default to none, the code should explain itself. If genuinely needed, 1-2 lines on *why*, never *what*. No AI-generic filler.
 - **No em-dash** anywhere: code, comments, commits, docs.
 - **No emojis** anywhere.
+- **Encoding**: text files are UTF-8 without a byte-order mark. Write control characters as escapes (`\x00`), never as raw bytes: one raw byte makes git and ripgrep treat the whole file as binary. `src/app/source-encoding.test.ts` enforces both.
 - **Imports**: always `@/...` on the frontend, never relative across modules.
 - **Bun only**, never npm/npx/pnpm/yarn. Invoke package binaries through `bun run <bin>` (`bun x` does not apply `bunfig.toml`'s `[run]` settings and falls back to Node).
 

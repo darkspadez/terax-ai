@@ -1,4 +1,4 @@
-﻿import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ManagedAgent } from "../store/managedAgentsStore";
 
 const managedAgents = vi.hoisted(() => {
