@@ -1,6 +1,18 @@
 import { isTerminalSurfaceTarget } from "@/modules/terminal/lib/terminalSurfaceTarget";
 import { useCallback, useEffect, useState } from "react";
 
+/**
+ * A mouseup that can end a selection to ask about: the primary button, in a
+ * terminal or an editor. A right click only opens the context menu.
+ */
+export function endsContentSelection(
+  event: Pick<MouseEvent, "button" | "target">,
+): boolean {
+  if (event.button !== 0) return false;
+  const el = event.target as HTMLElement | null;
+  return isTerminalSurfaceTarget(event.target) || !!el?.closest?.(".cm-editor");
+}
+
 type Params = {
   captureActiveSelection: () => string | null;
   askFromSelection: () => void;
@@ -34,11 +46,7 @@ export function useSelectionAskAi({
       setAskPopup(null);
     };
     const onUp = (e: MouseEvent) => {
-      if (isInsideAi(e.target)) return;
-      const el = e.target as HTMLElement | null;
-      const inContentArea =
-        isTerminalSurfaceTarget(e.target) || el?.closest?.(".cm-editor");
-      if (!inContentArea) return;
+      if (isInsideAi(e.target) || !endsContentSelection(e)) return;
       // Defer one tick so the terminal and CodeMirror finalize the selection.
       setTimeout(() => {
         const text = captureActiveSelection();
