@@ -242,8 +242,9 @@ export async function buildLanguageModel(
 }
 
 /** Builds any selectable model id: a catalog model, a local server's
- *  placeholder (resolved to its configured id) or a custom endpoint. */
-export async function buildConfiguredLanguageModel(
+ *  placeholder (resolved to its configured id) or a custom endpoint. A
+ *  missing configuration throws before anything is built. */
+export function buildConfiguredLanguageModel(
   modelId: string,
   keys: ProviderKeys,
   local: LocalProviderConfig = {},
