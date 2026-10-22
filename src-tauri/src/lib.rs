@@ -3,7 +3,8 @@ pub mod modules;
 #[cfg(target_os = "macos")]
 use modules::app_menu;
 use modules::{
-    agent, control, fs, git, history, lsp, net, pty, secrets, shell, vibrancy, workspace,
+    agent, control, fs, git, history, lsp, net, primary_selection, pty, secrets, shell, vibrancy,
+    workspace,
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -179,6 +180,7 @@ pub fn run() {
         }
     }
 
+    modules::panics::install_log_hook();
     modules::runtime::install();
 
     let launch = parse_launch_target();
@@ -255,6 +257,7 @@ pub fn run() {
         .manage(control_state)
         .manage(shell::ShellState::default())
         .manage(secrets::SecretsState::default())
+        .manage(primary_selection::PrimarySelection::default())
         .manage(fs::watch::FsWatchState::default())
         .manage(history::HistoryState::default())
         .manage(lsp::LspState::default())
@@ -297,6 +300,8 @@ pub fn run() {
             fs::mutate::fs_delete_batch,
             fs::copy::fs_copy,
             fs::clipboard::fs_clipboard_paths,
+            primary_selection::terminal_primary_selection_write,
+            primary_selection::terminal_primary_selection_read,
             fs::watch::fs_watch_add,
             fs::watch::fs_watch_remove,
             lsp::lsp_detect,

@@ -134,6 +134,9 @@ windows-sys = { version = "0.61", features = [
 [target.'cfg(target_os = "linux")'.dependencies]
 # Already in the tree via tauri; used directly for the file clipboard.
 gtk = "0.18"
+# Already in the tree via tauri-plugin-clipboard-manager; used directly for the
+# PRIMARY selection, which the plugin does not expose.
+arboard = { version = "3.7.0", default-features = false, features = ["wayland-data-control"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-autostart = "2"
@@ -147,8 +150,42 @@ incremental = true
 codegen-units = 1
 lto = "fat"
 opt-level = "s"
-panic = "abort"
+# A panic off the main thread ends only its thread or task (and is logged, see
+# modules/panics.rs); threads whose state cannot survive one abort (pty/hub.rs).
+panic = "unwind"
 strip = true
+
+# Speed where Terax spends CPU per byte or per keystroke; everything else stays
+# size-optimized. Generic code (serde derives, grep-searcher's search loop) is
+# compiled in the crate that instantiates it, so only these crates' own code is
+# affected.
+#
+# Scans every PTY output byte for terminal queries and agent markers, and finds
+# lines and literals for content search.
+[profile.release.package.memchr]
+opt-level = 3
+# String scanning behind every IPC payload and the streaming validation of
+# AI conversation files, which run to megabytes.
+[profile.release.package.serde_json]
+opt-level = 3
+# The regex and literal engines content search runs over every searched byte.
+[profile.release.package.regex-automata]
+opt-level = 3
+[profile.release.package.aho-corasick]
+opt-level = 3
+# Matches every walked path against ignore rules and fs_glob patterns.
+[profile.release.package.globset]
+opt-level = 3
+# Scores every cached path on each keystroke of the file finder.
+[profile.release.package.nucleo-matcher]
+opt-level = 3
+# Tauri serves the embedded frontend brotli-compressed and decompresses each
+# asset per request: startup, every window and every lazy chunk. The decoder is
+# generic over its allocator, so its loop is compiled in tauri-utils' asset lookup.
+[profile.release.package.tauri-utils]
+opt-level = 3
+[profile.release.package.brotli-decompressor]
+opt-level = 3
 
 # rust-lang/rust#110536: stripping proc-macro dylibs breaks the dlopen rustc does
 # at compile time on macOS, reported as a bogus E0463. Never shipped, so nothing to strip.

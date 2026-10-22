@@ -95,6 +95,12 @@ The profile wraps the user's existing `prompt` function to emit OSC 7 + OSC 133 
 
 Fish 4.0 writes its own OSC 133 prompt markers. To avoid doubling, Terax sets `fish_features=no-mark-prompt` and re-asserts its own prompt via `-C` after `config.fish` runs.
 
+### Terminal identity
+
+Every PTY shell gets `TERM=xterm-256color`, `COLORTERM=truecolor`, `TERM_PROGRAM=terax` and `TERM_PROGRAM_VERSION=<app version>` (the terminal core answers XTVERSION with the same `terax <version>`), plus `TERAX_TERMINAL=1`. A WSL shell receives them through `WSLENV`, which names the only Windows variables WSL passes into a distro.
+
+A Terax started from another terminal inherits that terminal's identity, so `terminal_env::inherited_identity` (`pty/terminal_env.rs`, pure and tested) removes it before the shell starts: `TERM_PROGRAM`, `TERM_SESSION_ID`, `WINDOWID`, `COLORFGBG`, the `GHOSTTY_*`, `ITERM*`/`LC_TERMINAL*`, `KITTY_*`, `WEZTERM_*`, `ALACRITTY_*`, `KONSOLE_*`, VTE (`VTE_VERSION`, GNOME Terminal, Ptyxis, Tilix, Terminator), xterm, JetBrains and Windows Terminal variables, VS Code's injected `VSCODE_*`, tmux/screen/Zellij session variables, and a parent Terax's `TERAX_*` session variables. Left behind, they make macOS `/etc/zshrc` source `/etc/zshrc_$TERM_PROGRAM`, VS Code's manual shell integration load, `vte.sh` install its prompt hooks, tools wrap output for a tmux that is not there, and `wezterm cli`, `kitten @` or `code` drive the other terminal. Generic variables go only when they hold the launcher's own value: `TERMINFO` inside Ghostty's or kitty's installation, iTerm2's `TERMINFO_DIRS`, and VS Code's `GIT_ASKPASS`/`GIT_EDITOR` helpers, which fail without its IPC. User configuration (`PATH`, locale, `XDG_*`, `MANPATH`, a tool's config location such as `KITTY_CONFIG_DIRECTORY` or `WEZTERM_CONFIG_FILE`, `TERAX_USER_ZDOTDIR`) is never removed. One-shot AI commands and background processes run on pipes, not a terminal, and keep Terax's environment as is.
+
 ## Concurrency and process lifetime on Windows
 
 ### `CONPTY_LIFECYCLE_LOCK`

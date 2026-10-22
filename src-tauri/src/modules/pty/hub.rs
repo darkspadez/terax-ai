@@ -627,7 +627,16 @@ impl Hub {
             std::thread::Builder::new()
                 .name("terax-pty-hub".into())
                 .stack_size(256 * 1024)
-                .spawn(move || run(shared))
+                .spawn(move || {
+                    // Every terminal's stream state lives here, half updated
+                    // after a panic: crash rather than freeze them all silently.
+                    let ran =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(shared)));
+                    if ran.is_err() {
+                        log::logger().flush();
+                        std::process::abort();
+                    }
+                })
                 .expect("spawn pty hub thread");
         });
         self.shared

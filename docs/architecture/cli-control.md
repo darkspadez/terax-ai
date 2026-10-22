@@ -42,7 +42,7 @@ Security properties:
 - File paths are canonicalized and required to reference a regular file inside an authorized workspace before the editor is opened.
 - The descriptor is removed only when it still belongs to the exiting process, so an older instance cannot delete a newer instance's endpoint.
 
-The token is injected into Terax-spawned native shells together with `TERAX_PANE_ID`. Child coding agents inherit the caller context intentionally, which gives them the same local UI-control capability as the terminal that launched them. Tokens must never be logged or added to command output.
+The token is injected into Terax-spawned native shells together with `TERAX_PANE_ID`. Child coding agents inherit the caller context intentionally, which gives them the same local UI-control capability as the terminal that launched them. A Terax started from another Terax's terminal removes the inherited `TERAX_CONTROL_*`, `TERAX_PANE_ID` and `TERAX_CLI` before spawning its own shells, so a parent's token never reaches them (`pty/terminal_env.rs`). Tokens must never be logged or added to command output.
 
 ## Command discovery inside a PTY
 
@@ -56,7 +56,7 @@ Launcher directories for exited processes are removed at the next control-server
 
 `tauri.conf.json` declares `binaries/terax-cli` as an external binary. Tauri selects the file with the current target-triple suffix and signs or packages it with the app. The release workflow passes its explicit Rust target to `scripts/build-cli.mjs`, which prevents an x86_64 macOS release from accidentally bundling an arm64 helper from the host.
 
-The release profile uses one codegen unit, fat LTO, size optimization, abort-on-panic, and stripping. Always measure the actual target artifacts after changing dependencies.
+The release profile uses one codegen unit, fat LTO, size optimization (speed for the few crates in the per-byte paths, listed in `Cargo.toml`), unwind-on-panic, and stripping. Always measure the actual target artifacts after changing dependencies.
 
 ## Current limits
 

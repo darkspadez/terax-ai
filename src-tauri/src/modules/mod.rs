@@ -11,6 +11,8 @@ pub mod history;
 pub mod ipc_body;
 pub mod lsp;
 pub mod net;
+pub mod panics;
+pub mod primary_selection;
 pub mod proc;
 pub mod pty;
 pub mod runtime;

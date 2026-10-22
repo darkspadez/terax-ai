@@ -351,6 +351,7 @@ pub(super) fn spawn_with(
         .name("terax-pty-reader".into())
         .stack_size(READER_STACK)
         .spawn(move || {
+            let _failed_on_panic = FailOnPanic(&output_r);
             let mut buf = [0u8; READ_BUF];
             // Reused for every filtered read: no per-chunk allocation.
             let mut filtered: Vec<u8> = Vec::with_capacity(READ_BUF);
@@ -486,6 +487,19 @@ impl Drop for Registration {
     }
 }
 
+/// The waiter joins the reader only once the shell exits, so a reader panic
+/// fails its terminal right away instead of leaving it frozen until then.
+struct FailOnPanic<'a>(&'a OutputQueue);
+
+impl Drop for FailOnPanic<'_> {
+    fn drop(&mut self) {
+        if thread::panicking() {
+            self.0.fail_reading();
+            self.0.finish_reading();
+        }
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -510,6 +524,7 @@ mod tests {
         received: Vec<u8>,
         acked: u64,
         exit: Option<i32>,
+        failed: Option<String>,
         max_in_flight: u64,
         frames_after_exit: usize,
     }
@@ -529,6 +544,7 @@ mod tests {
                 received: Vec::new(),
                 acked: 0,
                 exit: None,
+                failed: None,
                 max_in_flight: 0,
                 frames_after_exit: 0,
             }
@@ -563,6 +579,9 @@ mod tests {
                         payloads.push(payload.to_vec());
                     }
                     Frame::Exit { id: i, code } if i == id => self.exit = Some(code),
+                    Frame::Failed { id: i, reason } if i == id => {
+                        self.failed = Some(reason.to_string())
+                    }
                     Frame::Sync { .. } => {}
                     other => panic!("unexpected frame {other:?}"),
                 }
@@ -650,6 +669,29 @@ mod tests {
             frontend.max_in_flight
         );
         reaped.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
+
+    #[test]
+    fn a_panic_in_the_reader_fails_the_terminal_while_the_shell_lives() {
+        let hub = Hub::new();
+        let mut frontend = Frontend::open(&hub, "main");
+        let (mut host, reaped) = host(1, &hub);
+        host.signal = Arc::new(|_| panic!("agent signal sink failed"));
+        // An agent start marker makes the reader call the panicking sink.
+        let script = r"printf '\033]133;C;claude\033\\'; exec sleep 30";
+        let session = spawn_with(host, PtySize::default(), || Ok(sh(script))).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut acks = vec![Ack { id: 1, bytes: 0 }];
+        while frontend.failed.is_none() {
+            assert!(Instant::now() < deadline, "no failed frame");
+            frontend.poll_once(1, std::mem::take(&mut acks));
+        }
+        assert_eq!(frontend.failed.as_deref(), Some("PTY reader failed"));
+        assert_eq!(frontend.exit, None, "reported before the shell exits");
+        session.close_output();
+        let _ = session.killer.lock().unwrap().kill();
+        drop(session);
+        reaped.recv_timeout(Duration::from_secs(10)).unwrap();
     }
 
     #[test]

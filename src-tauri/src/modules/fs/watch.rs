@@ -139,16 +139,18 @@ fn drain_loop(
             }
         }
 
-        let Changes { touched, report } = resolve_changes(pending, &shared);
-        // The file list cache hears about every touched directory, whether or not the
-        // frontend does: an edited ignore file changes the list without changing a name.
-        for path in &touched {
-            index.note_change(path);
-        }
-        if report.is_empty() {
-            continue;
-        }
-        let _ = app.emit("fs:changed", ChangedPayload { paths: report });
+        // A burst that panics is lost, not the watcher.
+        crate::modules::panics::isolate("fs watch burst", || {
+            let Changes { touched, report } = resolve_changes(pending, &shared);
+            // The file list cache hears about every touched directory, whether or not the
+            // frontend does: an edited ignore file changes the list without changing a name.
+            for path in &touched {
+                index.note_change(path);
+            }
+            if !report.is_empty() {
+                let _ = app.emit("fs:changed", ChangedPayload { paths: report });
+            }
+        });
     }
 }
 

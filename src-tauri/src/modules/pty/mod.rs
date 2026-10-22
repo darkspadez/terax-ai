@@ -9,6 +9,7 @@ mod protocol;
 mod queue;
 mod session;
 pub(crate) mod shell_init;
+mod terminal_env;
 #[cfg(unix)]
 mod unix_reader;
 mod wake;

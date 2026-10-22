@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use portable_pty::CommandBuilder;
 
+use super::terminal_env;
 use crate::modules::control::ShellControlEnv;
 use crate::modules::workspace::{self, WorkspaceEnv};
 
@@ -143,15 +144,24 @@ fn ensure_utf8_locale(cmd: &mut CommandBuilder) {
     cmd.env("LANG", fallback);
 }
 
+/// Replaces whatever terminal launched Terax with Terax as the shell's terminal.
+fn apply_terminal_identity(cmd: &mut CommandBuilder) {
+    for key in terminal_env::inherited_identity(cmd.iter_full_env_as_str()) {
+        cmd.env_remove(key);
+    }
+    for (key, value) in terminal_env::IDENTITY {
+        cmd.env(key, value);
+    }
+    cmd.env("TERAX_TERMINAL", "1");
+}
+
 fn apply_common(
     cmd: &mut CommandBuilder,
     cwd: Option<String>,
     blocks: bool,
     control: Option<&ShellControlEnv>,
 ) {
-    cmd.env("TERM", "xterm-256color");
-    cmd.env("COLORTERM", "truecolor");
-    cmd.env("TERAX_TERMINAL", "1");
+    apply_terminal_identity(cmd);
     if blocks {
         cmd.env("TERAX_BLOCKS", "1");
     }
@@ -660,9 +670,14 @@ mod windows {
         for arg in &spec.args {
             cmd.arg(arg);
         }
-        cmd.env("TERM", "xterm-256color");
-        cmd.env("COLORTERM", "truecolor");
-        cmd.env("TERAX_TERMINAL", "1");
+        super::apply_terminal_identity(&mut cmd);
+        // A distro receives only the Windows variables WSLENV names.
+        let identity = super::terminal_env::IDENTITY.map(|(key, _)| key);
+        let wslenv = super::terminal_env::wslenv_with(
+            cmd.get_env("WSLENV").and_then(|value| value.to_str()),
+            &identity,
+        );
+        cmd.env("WSLENV", wslenv);
         super::ensure_utf8_locale(&mut cmd);
         log::info!("spawning WSL shell: {distro} ({shell_path})");
         Ok(cmd)
@@ -1118,6 +1133,46 @@ mod tests {
     fn empty_or_missing_override_is_none() {
         assert_eq!(sanitize_shell_override(Some("   ".into())), None);
         assert_eq!(sanitize_shell_override(None), None);
+    }
+
+    #[test]
+    fn common_env_is_terax_and_not_the_launching_terminal() {
+        let mut command = CommandBuilder::new("shell");
+        // What Terax inherits when a dev build is started from Ghostty in tmux
+        // inside another Terax.
+        for (key, value) in [
+            ("TERM", "xterm-ghostty"),
+            ("TERM_PROGRAM", "ghostty"),
+            ("GHOSTTY_RESOURCES_DIR", "/opt/ghostty/share/ghostty"),
+            ("TMUX", "/tmp/tmux-1000/default,1,0"),
+            ("TERAX_BLOCKS", "1"),
+            ("TERAX_CONTROL_TOKEN", "parent-secret"),
+            ("MY_TOOL_CONFIG", "kept"),
+        ] {
+            command.env(key, value);
+        }
+        let path = command.get_env("PATH").map(OsStr::to_os_string);
+        apply_common(&mut command, None, false, None);
+
+        for (key, value) in [
+            ("TERM", "xterm-256color"),
+            ("COLORTERM", "truecolor"),
+            ("TERM_PROGRAM", "terax"),
+            ("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION")),
+            ("TERAX_TERMINAL", "1"),
+            ("MY_TOOL_CONFIG", "kept"),
+        ] {
+            assert_eq!(command.get_env(key), Some(OsStr::new(value)), "{key}");
+        }
+        for key in [
+            "GHOSTTY_RESOURCES_DIR",
+            "TMUX",
+            "TERAX_BLOCKS",
+            "TERAX_CONTROL_TOKEN",
+        ] {
+            assert_eq!(command.get_env(key), None, "{key}");
+        }
+        assert_eq!(command.get_env("PATH").map(OsStr::to_os_string), path);
     }
 
     #[test]

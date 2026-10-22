@@ -24,16 +24,19 @@ impl Notify {
                 if matches!(event.kind, EventKind::Access(_)) {
                     return;
                 }
-                let dirs = sink.dirs();
-                let mut batch = Batch::default();
-                for path in &event.paths {
-                    if let Some(dir) = plan::owning_dir(&to_canon(path), &dirs) {
-                        if !batch.dirs.contains(&dir) {
-                            batch.dirs.push(dir);
+                // Runs on notify's event thread, which a panic would end for good.
+                crate::modules::panics::isolate("fs watch event", || {
+                    let dirs = sink.dirs();
+                    let mut batch = Batch::default();
+                    for path in &event.paths {
+                        if let Some(dir) = plan::owning_dir(&to_canon(path), &dirs) {
+                            if !batch.dirs.contains(&dir) {
+                                batch.dirs.push(dir);
+                            }
                         }
                     }
-                }
-                sink.send(batch);
+                    sink.send(batch);
+                });
             },
             Config::default(),
         )
