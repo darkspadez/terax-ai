@@ -25,6 +25,8 @@ type Palette = {
   property: string;
   type: string;
   operator: string;
+  /** Brackets, separators and accessors. Falls back to `operator`. */
+  punctuation?: string;
   tag: string;
   tagBracket?: string;
   attr: string;
@@ -33,6 +35,8 @@ type Palette = {
   link: string;
   invalid: string;
 };
+
+const PUNCTUATION = [t.punctuation, t.separator, t.bracket, t.derefOperator];
 
 function build(p: Palette): Extension {
   return createTheme({
@@ -96,16 +100,12 @@ function build(p: Palette): Extension {
         tag: [t.typeName, t.className, t.namespace, t.changed, t.annotation],
         color: p.type,
       },
-      {
-        tag: [
-          t.operator,
-          t.punctuation,
-          t.separator,
-          t.bracket,
-          t.derefOperator,
-        ],
-        color: p.operator,
-      },
+      ...(p.punctuation
+        ? [
+            { tag: [t.operator], color: p.operator },
+            { tag: PUNCTUATION, color: p.punctuation },
+          ]
+        : [{ tag: [t.operator, ...PUNCTUATION], color: p.operator }]),
       { tag: [t.tagName], color: p.tag },
       { tag: [t.angleBracket], color: p.tagBracket ?? p.tag },
       { tag: [t.attributeName], color: p.attr },
@@ -414,4 +414,33 @@ export const rosePineDawn = build({
   heading: "#907aa9",
   link: "#907aa9",
   invalid: "#b4637a",
+});
+
+// Monokai Pro. Port of crynta/terax-ai#269 by @MonsieurBarti; identifiers
+// stay in the foreground colour as in Monokai Pro, and punctuation is dimmed.
+export const monokaiPro = build({
+  mode: "dark",
+  bg: "#2d2a2e",
+  fg: "#fcfcfa",
+  caret: "#c1c0c0",
+  selection: "#5b595c",
+  lineHighlight: "#3a383c",
+  gutterFg: "#939293",
+  comment: "#727072",
+  keyword: "#ff6188",
+  string: "#ffd866",
+  number: "#ab9df2",
+  func: "#a9dc76",
+  variable: "#fcfcfa",
+  property: "#fc9867",
+  type: "#78dce8",
+  operator: "#ff6188",
+  punctuation: "#939293",
+  tag: "#ff6188",
+  tagBracket: "#939293",
+  attr: "#78dce8",
+  attrValue: "#ffd866",
+  heading: "#a9dc76",
+  link: "#ffd866",
+  invalid: "#ff6188",
 });

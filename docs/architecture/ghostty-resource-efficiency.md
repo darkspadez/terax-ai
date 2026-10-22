@@ -15,7 +15,7 @@ takes precedence; the renderer details are in
 | Resizing | One synchronized model + PTY resize per gesture; at most one canvas growth and one compaction per drag. |
 | Idle | No timers or frames while nothing changes; the focused input never shows a native caret (it keeps the display link running). Focused idle terminal: 0.24 % CPU, ~11 wakeups/s. |
 | Hidden / occluded | Hidden panes leave the canvas and release cell buffers; occlusion and sleep pause without releasing (WebKit leaks destroyed swapchains). CSS animations pause while the window is inactive. |
-| App shell | No AI SDK, zod, CodeMirror, Streamdown or icon set in either window's startup graph (`dist-budget.test.ts`); a collapsed explorer holds no watchers; `git status` runs only for visible consumers; compositing budget enforced by `compositingBudget.test.ts`. |
+| App shell | No AI SDK, zod, CodeMirror, Streamdown, KaTeX, Mermaid or icon set in either window's startup graph, and KaTeX and Mermaid only once a formula or diagram is shown (`dist-budget.test.ts`); a collapsed explorer holds no watchers; `git status` runs only for visible consumers; compositing budget enforced by `compositingBudget.test.ts`. |
 | Backend | Heavy fs/history/shell/git commands run on the blocking pool (never the macOS main thread); one directory-level FSEvents stream per root; two async workers; pooled HTTP/2 AI clients with byte credit; conversation saves coalesced and fsync'd only at durable points. |
 
 ## Measuring

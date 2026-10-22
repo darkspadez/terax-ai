@@ -1,5 +1,6 @@
 "use client";
 
+import { MermaidBlock } from "@/modules/markdown/MermaidBlock";
 import { isValidElement, type ReactNode } from "react";
 
 import { ChatCodeBlock } from "./chat-code";
@@ -21,7 +22,8 @@ export function markdownCodeText(children?: ReactNode): string {
 /**
  * Streamdown `components.code` override. Handles both inline (`code`) and
  * fenced blocks (className "language-X"). Fenced blocks delegate to the
- * Lezer-based renderer; inline stays a plain pill.
+ * Lezer-based renderer, `mermaid` ones to the diagram renderer; inline stays
+ * a plain pill.
  */
 export function MarkdownCode({
   className,
@@ -44,5 +46,6 @@ export function MarkdownCode({
   }
 
   const code = markdownCodeText(children).replace(/\n$/, "");
+  if (match[1] === "mermaid") return <MermaidBlock code={code} />;
   return <ChatCodeBlock code={code} lang={match[1] ?? null} />;
 }

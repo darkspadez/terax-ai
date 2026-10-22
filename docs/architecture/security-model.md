@@ -80,6 +80,8 @@ Local LLM endpoints are explicitly allowed because the user opted in by pointing
 
 The Markdown preview's remote images go through the same checks (`net/image.rs`): https only, public addresses only, and redirects are followed by hand so every hop is validated, classified and pinned again. The webview's CSP loads no remote images at all, because AI chat Markdown renders in the same webview and an image URL in a prompt-injected answer would send data out without a click; only the preview of a file the user opened asks the backend for its images.
 
+Formulas and diagrams in that Markdown are untrusted too. KaTeX runs with `trust` off, so `\href`, `\url`, `\includegraphics` and the `\html*` extensions render as errors, never as links or markup. Mermaid runs at its strict security level with labels as SVG text, and a diagram's own `%%{init}%%` directive or front matter cannot turn HTML labels, DOMPurify settings, theme CSS or fonts back on (`MERMAID_SECURE_KEYS`); links are removed from its output so a click never navigates the webview, and an image shape's remote URL falls to the same CSP (`src/modules/markdown/mermaidRender.ts`, `mathPlugin.ts`).
+
 ## Secret storage
 
 API keys are stored via `secrets_*` commands (`src-tauri/src/modules/secrets.rs`):

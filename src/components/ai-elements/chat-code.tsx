@@ -20,6 +20,7 @@ import { highlight, isHighlightable, type HighlightedNode } from "./chat-code-le
 // work and a flashing skeleton is calmer UI than text that grows char-by-char.
 const StreamingCtx = createContext(false);
 export const ChatStreamingProvider = StreamingCtx.Provider;
+export const useChatStreaming = () => useContext(StreamingCtx);
 
 const POSIX_SHELL = new Set([
   "bash",
@@ -84,7 +85,8 @@ function GeneratingPlaceholder({ label }: { label: string }) {
   );
 }
 
-function BlockChrome({
+/** Code block frame: language label and copy button over the content. */
+export function BlockChrome({
   label,
   code,
   children,

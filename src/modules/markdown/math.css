@@ -1,0 +1,8 @@
+/* KaTeX output in the Markdown preview and AI chat (loaded with the math
+   renderer, mathPlugin.ts). A long display formula scrolls on its own
+   instead of widening the message or the page. */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 0.125em;
+}
