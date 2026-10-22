@@ -8,7 +8,10 @@ use std::path::PathBuf;
 use tauri::{Emitter, Manager};
 
 use super::{fs, windows, workspace};
-use crate::{parse_launch_args, LaunchTarget};
+use crate::{parse_launch_args, LaunchFiles, LaunchTarget};
+
+/// Tells a window that files wait for it in `get_launch_files`.
+const OPEN_FILES_EVENT: &str = "terax:open-file";
 
 /// What a later launch asks the running process to do.
 #[derive(Debug, PartialEq)]
@@ -51,6 +54,25 @@ pub fn open_folder(app: &tauri::AppHandle, folder: String) {
     forward(app, SecondLaunch::Folder(folder));
 }
 
+/// Opens files in the window in front, which it returns. They are queued for
+/// its page, which takes them once its tabs are restored (`get_launch_files`),
+/// and announced, so a page that is already up takes them at once.
+pub fn open_files(app: &tauri::AppHandle, files: Vec<String>) -> Option<tauri::WebviewWindow> {
+    if files.is_empty() {
+        return None;
+    }
+    let window = windows::target_window(app);
+    let label = window
+        .as_ref()
+        .map_or(windows::MAIN, |window| window.label());
+    if let Some(state) = app.try_state::<LaunchFiles>() {
+        state.queue(label, files);
+    }
+    let window = window?;
+    let _ = window.emit_to(window.label(), OPEN_FILES_EVENT, ());
+    Some(window)
+}
+
 /// Called on the plugin's thread, inside the Windows message handler or an
 /// event callback: queue the work for the event loop instead of building
 /// windows here.
@@ -68,14 +90,13 @@ fn open_second_launch(app: &tauri::AppHandle, action: SecondLaunch) {
             let _ = registry.authorize(dir);
         }
     };
-    let opened = match &action {
+    let opened = match action {
         SecondLaunch::Files { dir, files } => {
-            if let Some(dir) = dir {
+            if let Some(dir) = &dir {
                 authorize(dir);
             }
-            match windows::target_window(app) {
+            match open_files(app, files) {
                 Some(window) => {
-                    let _ = window.emit_to(window.label(), "terax:open-file", files);
                     let _ = window.unminimize();
                     let _ = window.show();
                     let _ = window.set_focus();
@@ -85,11 +106,11 @@ fn open_second_launch(app: &tauri::AppHandle, action: SecondLaunch) {
             }
         }
         SecondLaunch::Folder(dir) => {
-            authorize(dir);
-            windows::open_new(app, None, Some(windows::WindowStart::Folder(dir))).map(drop)
+            authorize(&dir);
+            windows::open_new(app, None, Some(windows::WindowStart::Folder(&dir))).map(drop)
         }
         SecondLaunch::Window { cwd } => {
-            if let Some(cwd) = cwd {
+            if let Some(cwd) = &cwd {
                 authorize(cwd);
             }
             windows::open_new(app, None, cwd.as_deref().map(windows::WindowStart::Cwd)).map(drop)

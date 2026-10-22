@@ -66,13 +66,11 @@ export function isOpenedNow(): boolean {
 }
 
 /**
- * Drains the files passed via the OS "Open With" action (CLI args on
- * Linux/Windows, macOS open-files event). Drained once so HMR / re-mounts
- * can't replay them. Returns [] when the app wasn't launched with a file.
+ * Takes the files the OS asked this window to open ("Open With": arguments
+ * on Linux and Windows, a later launch, the macOS open-files event). Taken
+ * once, so a reload or re-mount can't replay them; [] when none wait.
  */
 export async function consumeLaunchFiles(): Promise<string[]> {
-  // Launch files are the main window's; later ones arrive as events.
-  if (!isMainWindow()) return [];
   const files = await invoke<string[]>("get_launch_files").catch(() => []);
   return files.map((f) => f.replace(/\\/g, "/"));
 }

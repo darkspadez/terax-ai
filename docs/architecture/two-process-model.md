@@ -140,7 +140,7 @@ Three distinct surfaces:
 ### Settings window
 
 - `get_launch_dir` - the folder Terax was launched with (a folder argument, not a launched file's folder), drained on first read
-- `get_launch_files` - files opened at launch (CLI args or OS Open With), drained on first read
+- `get_launch_files` - files the OS asked the calling window to open (CLI args, OS Open With, a later launch), each taken once; `terax:open-file` announces new ones
 - `open_settings_window` - open the separate settings webview (optional `tab` deep-link)
 
 ### App windows (`src-tauri/src/modules/windows.rs`, `quick_terminal.rs`)
