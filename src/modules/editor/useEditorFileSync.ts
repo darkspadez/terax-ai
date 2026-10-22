@@ -1,6 +1,5 @@
 import {
   listenFsChanged,
-  parentDir,
   watchAdd,
   watchRemove,
 } from "@/modules/explorer/lib/watch";
@@ -9,6 +8,7 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { type RefObject, useEffect, useRef } from "react";
 import type { EditorPaneHandle } from "./EditorPane";
 import { editorTabsUnder, onFilesDiscarded } from "./lib/discardSignal";
+import { fileWatchTargets } from "./lib/fileWatchTargets";
 
 type Params = {
   tabs: Tab[];
@@ -19,7 +19,7 @@ type Params = {
 /**
  * Keeps open editor tabs in sync with on-disk changes: reloads on applied AI
  * diffs, external writes, fs-watch events and git discards, and maintains the
- * watch set for the directories of open editor files.
+ * watch set for the directories of open editor and Markdown files.
  */
 export function useEditorFileSync({ tabs, tabsRef, editorRefs }: Params) {
   // When an AI diff is approved (write_file applied to disk), reload any
@@ -77,13 +77,7 @@ export function useEditorFileSync({ tabs, tabsRef, editorRefs }: Params) {
   const editorWatchRef = useRef<Set<string>>(new Set());
   const editorFilesRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    const wantDirs = new Set<string>();
-    const wantFiles = new Set<string>();
-    for (const t of tabs) {
-      if (t.kind !== "editor") continue;
-      wantDirs.add(parentDir(t.path));
-      wantFiles.add(t.path);
-    }
+    const { dirs: wantDirs, files: wantFiles } = fileWatchTargets(tabs);
     const prevDirs = editorWatchRef.current;
     const prevFiles = editorFilesRef.current;
     watchAdd(
