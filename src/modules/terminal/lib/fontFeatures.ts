@@ -1,5 +1,6 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { useSyncExternalStore } from "react";
+import { IS_MAC } from "@/lib/platform";
 
 /**
  * OpenType features for the terminal font, written as Ghostty's `font-feature`
@@ -16,6 +17,11 @@ import { useSyncExternalStore } from "react";
  * (`local()` cannot name faces reliably). Installed families are looked up
  * only ahead of the first declared one, the fonts the user chose, so the
  * fallbacks behind the bundled font are left alone.
+ *
+ * On macOS installed families take the same path with no features: WKWebView's
+ * canvas does not see fonts the user installed and draws a fallback instead,
+ * so a configured Nerd Font reaches the grid only through `FontFace`. Its own
+ * fonts (under /System) it draws by name.
  */
 
 const MAX_FONT_FEATURES = 32;
@@ -183,6 +189,8 @@ export function resolveSourceUrls(src: string, base: string): string {
 }
 
 const derived = new Map<string, string>();
+/** Whether `@font-face` rules declare a family, by lowercase name. */
+const declaredFamilies = new Map<string, boolean>();
 /** Installed families: the derived name once declared, null when none. */
 const installed = new Map<string, string | null | Promise<void>>();
 /** Every derived family name, for `loadFeatureFamilies`. */
@@ -244,12 +252,20 @@ export function useFontFeatureStack(stack: string, features: string): string {
 /**
  * `stack` with its families declared again with `settings` (a
  * `parseFontFeatures` value) under derived names, which it names instead.
- * `"normal"` returns the stack as it is. An installed family is looked up the
- * first time it is seen and stays as named until its faces are declared
- * (`fontFeaturesRevision`).
+ * With `"normal"` only installed families are, and only when
+ * `installedFromFiles` (macOS); otherwise the stack is returned as it is. An
+ * installed family is looked up the first time it is seen and stays as named
+ * until its faces are declared (`fontFeaturesRevision`).
  */
-export function withFontFeatures(stack: string, settings: string): string {
-  if (settings === "normal" || typeof FontFace === "undefined") return stack;
+export function withFontFeatures(
+  stack: string,
+  settings: string,
+  installedFromFiles: boolean = IS_MAC,
+): string {
+  const plain = settings === "normal";
+  if ((plain && !installedFromFiles) || typeof FontFace === "undefined") {
+    return stack;
+  }
   let changed = false;
   let chosen = true;
   const families = splitStack(stack).map((part) => {
@@ -257,8 +273,14 @@ export function withFontFeatures(stack: string, settings: string): string {
     if (!name || (part === name && GENERIC.has(name.toLowerCase()))) {
       return part;
     }
-    const declared = deriveFamily(name, settings);
-    if (declared) chosen = false;
+    let declared: string | null = null;
+    if (plain) {
+      // A declared family draws as it is, and ends the installed lookups.
+      if (chosen && isDeclared(name)) chosen = false;
+    } else {
+      declared = deriveFamily(name, settings);
+      if (declared) chosen = false;
+    }
     const derivedName =
       declared ?? (chosen ? installedFamily(name, settings) : null);
     if (!derivedName) return part;
@@ -266,6 +288,24 @@ export function withFontFeatures(stack: string, settings: string): string {
     return `"${derivedName}"`;
   });
   return changed ? families.join(", ") : stack;
+}
+
+function isDeclared(family: string): boolean {
+  const key = family.toLowerCase();
+  let known = declaredFamilies.get(key);
+  if (known === undefined) {
+    known = declaredFaces(family).length > 0;
+    declaredFamilies.set(key, known);
+  }
+  return known;
+}
+
+/**
+ * Whether a face is one of macOS's own fonts, which WKWebView draws by name:
+ * only fonts the user installed need their files declared.
+ */
+function isSystemFace(path: string): boolean {
+  return path.startsWith("/System/");
 }
 
 function derivedFamilyName(family: string): string {
@@ -292,6 +332,9 @@ async function declareInstalled(
     faces = await invoke<InstalledFace[]>("system_font_faces", { family });
   } catch {
     /* not in the app, or the lookup failed: draw without features */
+  }
+  if (settings === "normal" && faces.every((face) => isSystemFace(face.path))) {
+    faces = [];
   }
   if (faces.length === 0) {
     installed.set(key, null);
