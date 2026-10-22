@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
+import { IS_MAC } from "@/lib/platform";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { setShortcuts } from "@/modules/settings/store";
 import {
@@ -75,7 +76,11 @@ export function ShortcutsSection() {
       <div className="flex items-center justify-between">
         <SectionHeader
           title="Shortcuts"
-          description="View and customize keyboard shortcuts."
+          description={
+            IS_MAC
+              ? "View and customize keyboard shortcuts."
+              : "View and customize keyboard shortcuts. A focused terminal keeps Ctrl+letter keys for its programs; Ctrl+Shift shortcuts work everywhere."
+          }
         />
         <Button
           variant="outline"

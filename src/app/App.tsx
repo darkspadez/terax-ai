@@ -55,6 +55,7 @@ import { setShowHidden } from "@/modules/settings/store";
 import {
   type ShortcutHandlers,
   type ShortcutId,
+  shouldDeferShortcutToTerminal,
   shouldDisablePaneSwapShortcut,
   useGlobalShortcuts,
 } from "@/modules/shortcuts";
@@ -1091,6 +1092,15 @@ export default function App() {
           ? leafIds(activeTab.paneTree).length
           : null;
       if (shouldDisablePaneSwapShortcut(id, terminalPaneCount)) return true;
+      if (
+        shouldDeferShortcutToTerminal(id, e, {
+          isMac: IS_MAC,
+          inTerminal: isTerminalSurfaceTarget(
+            (e.target as HTMLElement | null) ?? document.activeElement,
+          ),
+        })
+      )
+        return true;
       if (
         id === "editor.undo" ||
         id === "editor.redo" ||

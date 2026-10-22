@@ -564,6 +564,23 @@ export function matchBinding(
 }
 
 /**
+ * The shortcut a key event triggers with the user's bindings (defaults where
+ * none are set), or null. Keys an input method is composing with belong to it.
+ */
+export function matchShortcut(
+  e: KeyboardEvent,
+  userBindings: Partial<Record<ShortcutId, KeyBinding[]>>,
+): ShortcutId | null {
+  if (e.isComposing) return null;
+  for (const s of SHORTCUTS) {
+    if (e.repeat && !s.allowRepeat) continue;
+    const bindings = userBindings[s.id] || s.defaultBindings;
+    if (bindings.some((b) => matchBinding(e, b, s.id))) return s.id;
+  }
+  return null;
+}
+
+/**
  * Display helpers
  */
 export function getBindingTokens(binding?: KeyBinding): string[] {

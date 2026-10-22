@@ -4,6 +4,7 @@ import {
   getBindingTokens,
   type KeyBinding,
   matchBinding,
+  matchShortcut,
   SHORTCUTS,
 } from "./shortcuts";
 
@@ -143,5 +144,32 @@ describe("SHORTCUTS registry", () => {
         expect.objectContaining({ key: "s", [MOD_PROP]: true }),
       ]),
     );
+  });
+});
+
+describe("matchShortcut", () => {
+  it("finds the shortcut, preferring the user's bindings", () => {
+    const palette = event({ key: "p", code: "KeyP", [`${MOD_PROP}Key`]: true });
+    expect(matchShortcut(palette, {})).toBe("commandPalette.open");
+    expect(
+      matchShortcut(palette, {
+        "commandPalette.open": [{ key: "F1" }],
+      }),
+    ).toBeNull();
+  });
+
+  // crynta/terax-ai#1030: a key an IME composes with is not a shortcut.
+  it("ignores keys an input method is composing with", () => {
+    expect(
+      matchShortcut(
+        event({
+          key: "p",
+          code: "KeyP",
+          [`${MOD_PROP}Key`]: true,
+          isComposing: true,
+        }),
+        {},
+      ),
+    ).toBeNull();
   });
 });
