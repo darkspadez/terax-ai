@@ -372,6 +372,9 @@ mod unix {
                 }
                 // fish 4.0+ writes its own OSC 133 A/B; ours would double it.
                 cmd.env("fish_features", "no-mark-prompt");
+                // Login shell like zsh: fish runs its path_helper emulation
+                // (/etc/paths, /etc/paths.d, Homebrew) only when it is one.
+                cmd.arg("-l");
                 cmd.arg("-i");
                 // Re-assert our prompt after config.fish (-C runs last), so a
                 // framework prompt (starship etc.) loaded there can't override
@@ -489,6 +492,7 @@ mod unix {
                 argv,
                 vec![
                     "/usr/bin/fish".to_string(),
+                    "-l".to_string(),
                     "-i".to_string(),
                     "-C".to_string(),
                     super::super::FISH_REINSTALL_PROMPT.to_string(),
@@ -915,6 +919,7 @@ mod windows {
                 args.push("env".to_string());
                 args.push("fish_features=no-mark-prompt".to_string());
                 args.push(shell_path.to_string());
+                args.push("-l".to_string());
                 args.push("-i".to_string());
                 args.push("-C".to_string());
                 args.push(super::FISH_REINSTALL_PROMPT.to_string());
@@ -923,8 +928,12 @@ mod windows {
                 args.push(shell_path.to_string());
                 args.push("-l".to_string());
             }
-            (ShellKind::Bash, WslShellIntegration::None)
-            | (ShellKind::Fish, WslShellIntegration::None) => {
+            (ShellKind::Fish, WslShellIntegration::None) => {
+                args.push(shell_path.to_string());
+                args.push("-l".to_string());
+                args.push("-i".to_string());
+            }
+            (ShellKind::Bash, WslShellIntegration::None) => {
                 args.push(shell_path.to_string());
                 args.push("-i".to_string());
             }
@@ -1233,6 +1242,7 @@ mod windows {
                     "env".to_string(),
                     "fish_features=no-mark-prompt".to_string(),
                     "/usr/bin/fish".to_string(),
+                    "-l".to_string(),
                     "-i".to_string(),
                     "-C".to_string(),
                     super::super::FISH_REINSTALL_PROMPT.to_string(),
