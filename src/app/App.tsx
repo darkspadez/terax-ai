@@ -6,7 +6,11 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { openNewWindow, quitApp } from "@/lib/appWindow";
-import { consumeLaunchFiles, getLaunchDir } from "@/lib/launchDir";
+import {
+  consumeLaunchFiles,
+  getExplicitLaunchDir,
+  getLaunchDir,
+} from "@/lib/launchDir";
 import { toast } from "sonner";
 import { IS_MAC } from "@/lib/platform";
 import { quoteShellArg } from "@/lib/shellQuote";
@@ -127,7 +131,6 @@ import {
   workspaceScopeKey,
 } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   lazy,
@@ -301,6 +304,7 @@ export default function App() {
   useSpacesBoot({
     ready: launchCwdResolved,
     launchCwd,
+    explicitLaunchDir: getExplicitLaunchDir() ?? null,
     home,
     allocId,
     replaceTabs,
@@ -748,13 +752,17 @@ export default function App() {
   // Warm start: the backend emits once the window already exists. Attach on
   // mount so an "Open With" that lands mid-restore isn't dropped — the backend
   // also seeds the drain-once state, so the boot drain below is the safety net.
+  // Only the window the files were sent to opens them.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let disposed = false;
     (async () => {
-      const off = await listen<string[]>("terax:open-file", (e) => {
-        openLaunchFiles(e.payload);
-      });
+      const off = await getCurrentWindow().listen<string[]>(
+        "terax:open-file",
+        (e) => {
+          openLaunchFiles(e.payload);
+        },
+      );
       if (disposed) off();
       else unlisten = off;
     })();

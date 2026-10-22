@@ -47,6 +47,25 @@ export function launchCwdFromUrl(search: string): string | null {
   return cwd ? cwd : null;
 }
 
+/**
+ * The folder a later launch of Terax opened this window on (`?folder=`,
+ * `windows.rs`): like a folder given to the first launch, it wins over the
+ * window's restored spaces.
+ */
+export function launchFolderFromUrl(search: string): string | null {
+  const folder = new URLSearchParams(search).get("folder");
+  return folder ? folder : null;
+}
+
+/** The query without the launch parameters, so a reload does not reapply them. */
+export function withoutLaunchParams(search: string): string {
+  const params = new URLSearchParams(search);
+  params.delete("cwd");
+  params.delete("folder");
+  const rest = params.toString();
+  return rest ? `?${rest}` : "";
+}
+
 /** Opens another window, its first terminal in `cwd`. */
 export function openNewWindow(cwd?: string | null): Promise<string> {
   return invoke<string>("app_window_open", { cwd: cwd ?? null });

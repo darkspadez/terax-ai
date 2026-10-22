@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import ReactDOM from "react-dom/client";
 import App from "./app/App";
-import { initLaunchDir } from "./lib/launchDir";
+import { initLaunchDir, isOpenedNow } from "./lib/launchDir";
 import { USE_CUSTOM_WINDOW_CONTROLS } from "./lib/platform";
 import { terminalDiagnosticsEnabled } from "@/modules/terminal/lib/terminalDiagnosticsEnabled";
 
@@ -39,9 +39,14 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 // Window starts hidden (per tauri.conf.json) so users never see a transparent
 // shadow-only frame before React paints. Use setTimeout — rAF is throttled
 // while the window is hidden and would never fire.
+// A window opened just now (a later launch from Explorer, Finder or a shell
+// included) comes to the front; showing alone leaves it behind on macOS.
+const focusOnShow = isOpenedNow();
 const showWindow = () => {
-  getCurrentWindow()
+  const current = getCurrentWindow();
+  current
     .show()
+    .then(() => (focusOnShow ? current.setFocus() : undefined))
     .catch((e) => console.error("window.show failed:", e));
 };
 setTimeout(showWindow, 50);
