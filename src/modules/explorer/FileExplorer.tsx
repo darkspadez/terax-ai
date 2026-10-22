@@ -40,6 +40,8 @@ import {
 import { InlineInput } from "./InlineInput";
 import {
   copyToClipboard,
+  openInDefaultApp,
+  REVEAL_LABEL,
   relativePath,
   revealInFinder,
 } from "./lib/contextActions";
@@ -895,6 +897,14 @@ export const FileExplorer = memo(
                       Open
                     </ContextMenuItem>
                   )}
+                  {!menuTarget.isDir && (
+                    <ContextMenuItem
+                      className={COMPACT_ITEM}
+                      onSelect={() => void openInDefaultApp(menuTarget.path)}
+                    >
+                      Open in Default App
+                    </ContextMenuItem>
+                  )}
                   {menuTarget.isDir && onRevealInTerminal && (
                     <ContextMenuItem
                       className={COMPACT_ITEM}
@@ -923,7 +933,7 @@ export const FileExplorer = memo(
                     className={COMPACT_ITEM}
                     onSelect={() => void revealInFinder(menuTarget.path)}
                   >
-                    Reveal in Finder
+                    {REVEAL_LABEL}
                   </ContextMenuItem>
                   <ContextMenuSeparator />
                   <ContextMenuItem
@@ -1044,7 +1054,7 @@ export const FileExplorer = memo(
                     className={COMPACT_ITEM}
                     onSelect={() => void revealInFinder(rootPath)}
                   >
-                    Reveal in Finder
+                    {REVEAL_LABEL}
                   </ContextMenuItem>
                   <ContextMenuSeparator />
                   <ContextMenuItem

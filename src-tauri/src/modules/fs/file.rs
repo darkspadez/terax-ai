@@ -3,13 +3,13 @@ use std::time::UNIX_EPOCH;
 use std::{fs, io::Write};
 
 use serde::Serialize;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use tempfile::NamedTempFile;
 
 use super::blocking;
 use super::index::FileIndexState;
 use super::mutate::note_changed;
-use crate::modules::workspace::{resolve_path, WorkspaceEnv};
+use crate::modules::workspace::{resolve_path, WorkspaceEnv, WorkspaceRegistry};
 
 const MAX_READ_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
 /// Ceiling for explicit "open anyway"; mirrored as FORCE_READ_LIMIT in useDocument.ts.
@@ -208,6 +208,45 @@ pub async fn fs_canonicalize(
     .await
 }
 
+/// What "Open in Default App" may hand to the OS: an existing file whose real location is
+/// inside an authorized workspace (a link pointing out of it is refused). A folder goes to the
+/// file manager through Reveal instead.
+fn default_app_target(registry: &WorkspaceRegistry, path: &Path) -> Result<PathBuf, String> {
+    let canonical = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
+    if !canonical.is_file() {
+        return Err("only files open in their default app".into());
+    }
+    if !registry.is_authorized(&canonical) {
+        return Err("path is outside the authorized workspace".into());
+    }
+    // Applications get the path in its ordinary spelling, not `\\?\`-prefixed.
+    #[cfg(windows)]
+    let canonical = PathBuf::from(super::to_canon(&canonical).replace('/', "\\"));
+    Ok(canonical)
+}
+
+/// Opens a file with the application the OS associates with it, as a double-click in the file
+/// manager would.
+#[tauri::command]
+pub async fn fs_open_default(
+    app: tauri::AppHandle,
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<(), String> {
+    blocking(move || {
+        let workspace = WorkspaceEnv::from_option(workspace);
+        let target = default_app_target(
+            &app.state::<WorkspaceRegistry>(),
+            &resolve_path(&path, &workspace),
+        )?;
+        tauri_plugin_opener::open_path(&target, None::<&str>).map_err(|e| {
+            log::warn!("fs_open_default({}) failed: {e}", target.display());
+            e.to_string()
+        })
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn fs_stat(path: String, workspace: Option<WorkspaceEnv>) -> Result<FileStat, String> {
     blocking(move || stat_path(path, workspace)).await
@@ -238,6 +277,38 @@ fn stat_path(path: String, workspace: Option<WorkspaceEnv>) -> Result<FileStat, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_an_authorized_file_opens_in_its_default_app() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let file = root.join("photo.png");
+        std::fs::write(&file, b"png").unwrap();
+        let registry = WorkspaceRegistry::default();
+        assert!(
+            default_app_target(&registry, &file).is_err(),
+            "nothing is authorized yet"
+        );
+        registry.authorize(&root).unwrap();
+        assert_eq!(default_app_target(&registry, &file).unwrap(), file);
+        assert!(default_app_target(&registry, &root).is_err(), "a folder");
+        assert!(default_app_target(&registry, &root.join("missing")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_out_of_the_workspace_does_not_open() {
+        let outside = tempfile::tempdir().unwrap();
+        let secret = outside.path().join("secret.txt");
+        std::fs::write(&secret, b"x").unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let link = root.join("innocent.txt");
+        std::os::unix::fs::symlink(&secret, &link).unwrap();
+        let registry = WorkspaceRegistry::default();
+        registry.authorize(&root).unwrap();
+        assert!(default_app_target(&registry, &link).is_err());
+    }
 
     #[test]
     fn write_new_file_creates_it() {
