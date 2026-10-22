@@ -4,16 +4,17 @@ import { native } from "../lib/native";
 import { checkWritableCanonical } from "../lib/security";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
 import { resolvePath, type ToolContext } from "./context";
+import { writtenEntry } from "./readCache";
 
 type EditResult =
   | { ok: true; replacements: number; bytesWritten: number; path: string }
+  | {
+      ok: true;
+      replacements: number;
+      queued_for_plan_review: true;
+      path: string;
+    }
   | { error: string; path: string };
-
-function djb2(s: string): number {
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
-  return h >>> 0;
-}
 
 async function applyEdits(
   abs: string,
@@ -98,18 +99,19 @@ async function applyEdits(
     return {
       ok: true,
       replacements: totalReplacements,
-      bytesWritten: content.length,
+      queued_for_plan_review: true,
       path: abs,
     };
   }
 
   try {
     await native.writeFile(abs, content);
-    readCache.set(abs, { size: content.length, hash: djb2(content) });
+    const entry = writtenEntry(content);
+    readCache.set(abs, entry);
     return {
       ok: true,
       replacements: totalReplacements,
-      bytesWritten: content.length,
+      bytesWritten: entry.size,
       path: abs,
     };
   } catch (err) {

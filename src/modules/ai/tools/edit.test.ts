@@ -17,9 +17,13 @@ vi.mock("../lib/security", () => ({
   })),
 }));
 
+const planMock = vi.hoisted(() => ({ active: false, enqueue: vi.fn() }));
+
 vi.mock("../store/planStore", () => ({
   newQueuedEditId: () => "queued-edit",
-  usePlanStore: { getState: () => ({ active: false, enqueue: vi.fn() }) },
+  usePlanStore: {
+    getState: () => ({ active: planMock.active, enqueue: planMock.enqueue }),
+  },
 }));
 
 import { buildEditTools } from "./edit";
@@ -60,7 +64,12 @@ function setFile(content: string) {
   });
 }
 
-type EditResult = { error?: string; replacements?: number };
+type EditResult = {
+  error?: string;
+  replacements?: number;
+  bytesWritten?: number;
+  queued_for_plan_review?: boolean;
+};
 
 async function runEdit(
   ctx: ToolContext,
@@ -82,6 +91,7 @@ async function runMultiEdit(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  planMock.active = false;
   nativeMock.canonicalize.mockImplementation(async (p: string) => p);
   nativeMock.writeFile.mockResolvedValue(undefined);
 });
@@ -188,6 +198,34 @@ describe("edit tool replacement", () => {
     });
     expect(result.replacements).toBe(3);
     expect(nativeMock.writeFile).toHaveBeenCalledWith(FILE, "z b z b z");
+  });
+
+  it("counts written bytes in UTF-8, as the next read reports them", async () => {
+    setFile("cafe");
+    const ctx = readContext();
+    const result = await runEdit(ctx, {
+      path: FILE,
+      old_string: "cafe",
+      new_string: "café ✓",
+    });
+    expect(result.bytesWritten).toBe(9);
+    expect(ctx.readCache.get(FILE)?.size).toBe(9);
+  });
+
+  it("reports a plan-mode edit as queued, not written", async () => {
+    planMock.active = true;
+    setFile("hello world");
+    const result = await runEdit(readContext(), {
+      path: FILE,
+      old_string: "world",
+      new_string: "there",
+    });
+    expect(result).toMatchObject({ ok: true, queued_for_plan_review: true });
+    expect(result.bytesWritten).toBeUndefined();
+    expect(nativeMock.writeFile).not.toHaveBeenCalled();
+    expect(planMock.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "edit", proposedContent: "hello there" }),
+    );
   });
 });
 

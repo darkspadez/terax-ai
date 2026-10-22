@@ -7,15 +7,10 @@ import {
 } from "../lib/security";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
 import { resolvePath, type ToolContext } from "./context";
+import { contentHash, writtenEntry } from "./readCache";
 
 const READ_BYTE_CAP = 25 * 1024;
 const READ_LINE_CAP = 2000;
-
-function djb2(s: string): number {
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
-  return h >>> 0;
-}
 
 export function buildFsTools(ctx: ToolContext) {
   return {
@@ -55,7 +50,7 @@ export function buildFsTools(ctx: ToolContext) {
               path: abs,
             };
 
-          const hash = djb2(r.content);
+          const hash = contentHash(r.content);
           const isFullRead = offset === undefined && limit === undefined;
           const prior = ctx.readCache.get(abs);
           if (isFullRead && prior && prior.size === r.size && prior.hash === hash) {
@@ -172,8 +167,9 @@ export function buildFsTools(ctx: ToolContext) {
 
         try {
           await native.writeFile(abs, content);
-          ctx.readCache.set(abs, { size: content.length, hash: djb2(content) });
-          return { path: abs, bytesWritten: content.length, ok: true };
+          const entry = writtenEntry(content);
+          ctx.readCache.set(abs, entry);
+          return { path: abs, bytesWritten: entry.size, ok: true };
         } catch (e) {
           return { error: String(e), path: abs };
         }
