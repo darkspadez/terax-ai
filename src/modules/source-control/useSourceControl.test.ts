@@ -74,6 +74,7 @@ describe("beginSourceControlRefresh", () => {
       branch: "main",
       upstream: null,
       isDetached: false,
+      linkedWorktree: null,
     },
     status: {
       repoRoot: "/old/repo",

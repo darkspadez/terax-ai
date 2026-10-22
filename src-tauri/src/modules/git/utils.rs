@@ -82,6 +82,34 @@ pub fn resolve_within_repo(repo_root: &Path, rel: &str) -> Result<PathBuf> {
     }
 }
 
+/// A branch name git accepts (`git check-ref-format --branch`, which also refuses a leading
+/// `-`, so a name is never read as an option), except `@`, which revisions read as HEAD.
+/// Every command that takes a branch name (switching, new worktrees) checks it.
+pub fn validate_branch_name(name: &str) -> Result<()> {
+    if is_valid_branch_name(name) {
+        Ok(())
+    } else {
+        Err(GitError::InvalidBranchName(name.into()))
+    }
+}
+
+fn is_valid_branch_name(name: &str) -> bool {
+    if name.is_empty() || name.starts_with('-') || name == "HEAD" || name == "@" {
+        return false;
+    }
+    if name.ends_with('.') || name.contains("..") || name.contains("@{") {
+        return false;
+    }
+    if name.chars().any(|c| {
+        c.is_ascii_control() || matches!(c, ' ' | '~' | '^' | ':' | '?' | '*' | '[' | '\\')
+    }) {
+        return false;
+    }
+    // No empty component (a leading, trailing or doubled `/`), none hidden, none a lock file.
+    name.split('/')
+        .all(|part| !part.is_empty() && !part.starts_with('.') && !part.ends_with(".lock"))
+}
+
 pub fn is_safe_pathspec(rel: &str) -> bool {
     if rel.is_empty() || rel.contains(':') || rel.contains('\0') {
         return false;
@@ -215,6 +243,59 @@ mod tests {
         let resolved =
             resolve_within_repo(&repo_root, "envs/__pycache__/g1.pyc").expect("deleted path");
         assert_eq!(resolved, repo_root.join("envs/__pycache__/g1.pyc"));
+    }
+
+    #[test]
+    fn branch_names_follow_git_check_ref_format() {
+        for name in [
+            "main",
+            "feature/login",
+            "fix-1.2",
+            "release_2026",
+            "größe",
+            "a.b/c-d",
+            "a-",
+            "HEADS",
+            "x@y",
+        ] {
+            assert!(validate_branch_name(name).is_ok(), "{name:?} is valid");
+        }
+        for name in [
+            "", "-b", "--force", "HEAD", "@", "a b", "a\tb", "a\u{7f}b", "a~1", "a^", "a:b", "a?",
+            "a*", "a[b", "a\\b", "a..b", "a@{1}", "a.", "/a", "a/", "a//b", ".a", "a/.b", "a.lock",
+            "a.lock/b",
+        ] {
+            assert!(
+                matches!(
+                    validate_branch_name(name),
+                    Err(GitError::InvalidBranchName(_))
+                ),
+                "{name:?} is invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn the_branch_rule_agrees_with_git() {
+        let git_accepts = |name: &str| {
+            std::process::Command::new("git")
+                .args(["check-ref-format", "--branch", name])
+                .output()
+                .map(|o| o.status.success())
+        };
+        if git_accepts("main").is_err() {
+            return;
+        }
+        for name in [
+            "main", "a/b", "größe", "x@y", "a..b", "a.lock", ".a", "a/", "a//b", "a b", "a~", "a.",
+            "a@{1}", "a\\b", "a:b", "a?", "a[b", "HEAD", "-b",
+        ] {
+            assert_eq!(
+                git_accepts(name).unwrap(),
+                validate_branch_name(name).is_ok(),
+                "{name:?}"
+            );
+        }
     }
 
     #[test]

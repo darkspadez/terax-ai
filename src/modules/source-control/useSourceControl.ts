@@ -368,6 +368,8 @@ export function useSourceControl(
                 branch: status.branch,
                 upstream: status.upstream,
                 isDetached: status.isDetached,
+                // Only a snapshot tells; the next one restores it.
+                linkedWorktree: null,
               };
             }
           } catch {

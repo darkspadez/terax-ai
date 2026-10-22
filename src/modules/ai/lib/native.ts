@@ -43,6 +43,15 @@ export type GitRepoInfo = {
   branch: string;
   upstream: string | null;
   isDetached: boolean;
+  /** Set when the work tree is a linked worktree, not the main one. */
+  linkedWorktree: GitLinkedWorktree | null;
+};
+
+export type GitLinkedWorktree = {
+  /** The worktree's folder name. */
+  name: string;
+  /** Its main worktree's folder name (a bare repository's, without `.git`). */
+  repositoryName: string;
 };
 
 export type GitChangedFile = {
@@ -135,16 +144,35 @@ export type GitDiscardEntry = {
   untracked: boolean;
 };
 
+/** A local branch. */
 export type GitBranchEntry = {
   name: string;
-  kind: "local" | "worktree";
+  /** Another worktree that has the branch checked out, which no other one can. */
   worktreePath: string | null;
   isHead: boolean;
   isDetached: boolean;
 };
 
+/** One entry of `git worktree list`. */
+export type GitWorktreeEntry = {
+  path: string;
+  /** Without `refs/heads/`; null when detached or bare. */
+  branch: string | null;
+  head: string | null;
+  /** The main worktree (or the bare repository), always listed first. */
+  isMain: boolean;
+  isBare: boolean;
+  /** The worktree the listing was made in. */
+  isCurrent: boolean;
+  /** The lock reason (possibly empty) when locked. */
+  locked: string | null;
+  /** Its folder is gone. */
+  prunable: boolean;
+};
+
 export type GitBranchListResult = {
   branches: GitBranchEntry[];
+  worktrees: GitWorktreeEntry[];
 };
 
 export const native = {
