@@ -722,6 +722,36 @@ describe.each(["ghostty-vt.wasm", "ghostty-vt-scalar.wasm"])(
       dispose();
     });
 
+    // crynta/terax-ai#904, #1303: a fast double letter, the second through
+    // the input method (keyCode 229, then its insertText).
+    it("types a repeated letter that arrives through another event", () => {
+      const { input, sent, dispose } = setup({ isMac: true });
+      const insert = (data: string) =>
+        input.dispatchEvent(
+          Object.assign(new Event("beforeinput", { cancelable: true }), {
+            inputType: "insertText",
+            data,
+            isComposing: false,
+          }),
+        );
+      input.dispatchEvent(keyboardEvent({ key: "s", code: "KeyS" }));
+      input.dispatchEvent(keyboardEvent({ key: "s", code: "KeyS" }, "keyup"));
+      input.dispatchEvent(
+        keyboardEvent({ key: "s", code: "KeyS", keyCode: 229 }),
+      );
+      insert("s");
+      // Within one keystroke a copy by another event is still dropped.
+      input.dispatchEvent(
+        keyboardEvent({ key: "l", code: "KeyL", keyCode: 229 }),
+      );
+      insert("l");
+      input.dispatchEvent(
+        Object.assign(new Event("compositionend"), { data: "l" }),
+      );
+      expect(sent).toEqual(["s", "s", "l"]);
+      dispose();
+    });
+
     // crynta/terax-ai#1009, #1215, #956.
     it("delivers Option+Arrow and Option+Backspace that WKWebView stamped 229", () => {
       const { input, sent, dispose } = setup({ isMac: true });

@@ -18,6 +18,12 @@ import { encodeTerminalPaste, isUnsafePaste } from "./terminalInputEncoding";
 import { TerminalInputProxy } from "@/modules/terminal/ghostty/input/TerminalInputProxy";
 import { TerminalNativeSelection } from "@/modules/terminal/ghostty/input/TerminalNativeSelection";
 
+/**
+ * One keystroke can deliver its text twice, by different events: a prevented
+ * keydown and a stray beforeinput, or compositionend and insertText. The
+ * second copy is dropped when it comes within this window and before the
+ * next keydown; a new keystroke always types.
+ */
 const DUPLICATE_INPUT_WINDOW_MS = 75;
 
 /** `WheelEvent.deltaMode` values (the constructor is not available everywhere). */
@@ -337,6 +343,9 @@ export class GhosttyInputController {
 
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
     this.nativeSelection?.reset();
+    // A new keystroke: its text is never a copy of the previous one's.
+    this.lastData = "";
+    this.lastSource = null;
     if (event.code === "AltLeft" || event.code === "AltRight") {
       this.optionKeys.add(event.code);
     }

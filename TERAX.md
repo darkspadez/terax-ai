@@ -263,6 +263,9 @@ Keydowns an input method owns (during a composition, dead keys, keyCode 229
 on character keys) are left to the webview, whose input and composition
 events carry the text (`isInputMethodKeyDown`); arrows, Home, End, Page keys,
 Backspace and Delete stamped 229 (WKWebView's Option keys) are still keys.
+Text one keystroke delivers twice by different events (a prevented keydown
+and a stray `beforeinput`, `compositionend` and `insertText`) is typed once;
+the pairing ends at the next keydown, so a fast double letter always types.
 Terminal text uses the configured font, an installed Nerd Font when detected,
 or bundled JetBrains Mono: the official variable fonts, upright and italic, with
 every glyph, weight (100-800) and OpenType feature, split by Unicode range into
