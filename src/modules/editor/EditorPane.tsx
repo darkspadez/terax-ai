@@ -312,32 +312,39 @@ export const EditorPane = memo(
       [],
     );
 
-    const applyPendingGoto = useCallback(() => {
-      const view = cmRef.current?.view;
-      const pending = pendingLineRef.current;
-      if (!view || pending == null || statusRef.current !== "ready") return;
-      if (pending.path !== path) {
+    const applyPendingGoto = useCallback(
+      (view = cmRef.current?.view) => {
+        const pending = pendingLineRef.current;
+        if (!view || pending == null || statusRef.current !== "ready") return;
+        if (pending.path !== path) {
+          pendingLineRef.current = null;
+          return;
+        }
+        const target = Math.max(
+          1,
+          Math.min(pending.line, view.state.doc.lines),
+        );
+        const at = view.state.doc.line(target).from;
+        view.dispatch({
+          selection: { anchor: at },
+          effects: EditorView.scrollIntoView(at, { y: "center" }),
+        });
+        if (pending.focus) focusWhenRendered(view, pending.path);
         pendingLineRef.current = null;
-        return;
-      }
-      const target = Math.max(1, Math.min(pending.line, view.state.doc.lines));
-      const at = view.state.doc.line(target).from;
-      view.dispatch({
-        selection: { anchor: at },
-        effects: EditorView.scrollIntoView(at, { y: "center" }),
-      });
-      if (pending.focus) focusWhenRendered(view, pending.path);
-      pendingLineRef.current = null;
-    }, [focusWhenRendered, path]);
+      },
+      [focusWhenRendered, path],
+    );
 
-    const applyPendingFocus = useCallback(() => {
-      const view = cmRef.current?.view;
-      const pendingPath = pendingFocusRef.current;
-      if (!view || pendingPath === null || statusRef.current !== "ready")
-        return;
-      pendingFocusRef.current = null;
-      if (pendingPath === path) focusWhenRendered(view, pendingPath);
-    }, [focusWhenRendered, path]);
+    const applyPendingFocus = useCallback(
+      (view = cmRef.current?.view) => {
+        const pendingPath = pendingFocusRef.current;
+        if (!view || pendingPath === null || statusRef.current !== "ready")
+          return;
+        pendingFocusRef.current = null;
+        if (pendingPath === path) focusWhenRendered(view, pendingPath);
+      },
+      [focusWhenRendered, path],
+    );
 
     useEffect(() => {
       if (doc.status !== "ready") return;
@@ -452,16 +459,32 @@ export const EditorPane = memo(
       if (view) syncViewText(view, text());
     }, [doc, text]);
 
+    const applyIndent = useCallback(
+      (view: EditorView) => {
+        view.dispatch({
+          effects: indentCompartment.reconfigure(
+            indentExtension(detectIndentUnit(text())),
+          ),
+        });
+      },
+      [text],
+    );
+
     useEffect(() => {
       if (doc.status !== "ready") return;
       const view = cmRef.current?.view;
-      if (!view) return;
-      view.dispatch({
-        effects: indentCompartment.reconfigure(
-          indentExtension(detectIndentUnit(doc.content)),
-        ),
-      });
-    }, [doc]);
+      if (view) applyIndent(view);
+    }, [doc, applyIndent]);
+
+    // CodeMirror creates its view a few renders after the document turned
+    // ready, after this pane's effects for that document already ran
+    // without one: apply what they could not (indent unit, a pending go-to
+    // line or focus from opening the file at a location).
+    const handleCreateEditor = (view: EditorView) => {
+      applyIndent(view);
+      applyPendingGoto(view);
+      applyPendingFocus(view);
+    };
 
     // The change gutter's base is the committed text, fetched when the file
     // is (re)loaded, when the pane comes into view, and after a commit or
@@ -713,6 +736,7 @@ export const EditorPane = memo(
         <MountedCodeMirror
           ref={cmRef}
           initialValue={doc.content}
+          onCreateEditor={handleCreateEditor}
           onChange={onChange}
           theme={themeExt}
           extensions={extensions}
