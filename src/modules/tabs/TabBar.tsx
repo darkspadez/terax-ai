@@ -25,6 +25,7 @@ import { FileIcon } from "@/modules/explorer/FileIcon";
 import {
   leafIds,
   ptyIdForLeaf,
+  type SplitPosition,
   useAgentActivityStore,
 } from "@/modules/terminal";
 import {
@@ -55,6 +56,7 @@ import { selectTabAgentStatus } from "./lib/tabAgentStatus";
 import { labelFor } from "./lib/tabLabel";
 import type { EditorTab, Tab, TerminalTab } from "./lib/useTabs";
 import { NewTabMenu } from "./NewTabMenu";
+import { MovePaneToNewTabMenu, MoveToSplitMenu } from "./TabMoveMenus";
 import { TerminalTabLabel } from "./TerminalTabLabel";
 
 type Props = {
@@ -79,6 +81,14 @@ type Props = {
   onRename: (id: number, title: string) => void;
   /** Move a dragged tab to a new position (insertion gap index 0..tabs.length). */
   onReorder: (fromId: number, toGapIndex: number) => void;
+  /** Move a single-pane terminal tab into another tab's split, shell kept. */
+  onMoveToSplit: (
+    sourceId: number,
+    destinationId: number,
+    position: SplitPosition,
+  ) => void;
+  /** Move one pane of a split terminal tab to a new tab, shell kept. */
+  onMovePaneToNewTab: (tabId: number, leafId: number) => void;
   onOverrideLanguage?: (id: number, lang: string | null) => void;
   compact?: boolean;
 };
@@ -100,6 +110,8 @@ export function TabBar({
   onPin,
   onRename,
   onReorder,
+  onMoveToSplit,
+  onMovePaneToNewTab,
   onOverrideLanguage,
   compact,
 }: Props) {
@@ -532,6 +544,15 @@ export function TabBar({
                           />
                           <span className="flex-1">Rename</span>
                         </ContextMenuItem>
+                        <MoveToSplitMenu
+                          tabs={tabs}
+                          sourceId={t.id}
+                          onMove={onMoveToSplit}
+                        />
+                        <MovePaneToNewTabMenu
+                          tab={t}
+                          onMove={onMovePaneToNewTab}
+                        />
                         {tabs.length > 1 && (
                           <>
                             <ContextMenuSeparator />

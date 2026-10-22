@@ -21,6 +21,7 @@ import {
   type AgentLaunchRequest,
   AgentNotificationsBridge,
   findAgentLauncher,
+  moveAgentLeafToTab,
   nextAttentionTarget,
   validateAgentLaunchCommand,
 } from "@/modules/agents";
@@ -102,6 +103,7 @@ import {
   leafShellAtPrompt,
   navigateFocusedBlocks,
   type PaneBounds,
+  type SplitPosition,
   ptyIdForLeaf,
   resizeActivePane,
   scrollFocusedTerminal,
@@ -216,6 +218,8 @@ export default function App() {
     togglePaneZoom,
     swapActivePaneInDirection,
     splitActivePane,
+    moveTabIntoSplit,
+    movePaneToNewTab,
     closeActivePane,
     closePaneByLeaf,
   } = useTabs(getLaunchDir() ? { cwd: getLaunchDir() } : undefined);
@@ -1302,6 +1306,23 @@ export default function App() {
     [removeTabsForSpace],
   );
 
+  // The pane keeps its shell; its agent records follow it to its new tab.
+  const handleMoveTabIntoSplit = useCallback(
+    (sourceId: number, destinationId: number, position: SplitPosition) => {
+      const leafId = moveTabIntoSplit(sourceId, destinationId, position);
+      if (leafId !== null) moveAgentLeafToTab(leafId, destinationId);
+    },
+    [moveTabIntoSplit],
+  );
+
+  const handleMovePaneToNewTab = useCallback(
+    (tabId?: number, leafId?: number) => {
+      const moved = movePaneToNewTab(tabId, leafId);
+      if (moved) moveAgentLeafToTab(moved.leafId, moved.tabId);
+    },
+    [movePaneToNewTab],
+  );
+
   const handleMoveTab = useCallback(
     (tabId: number, targetSpaceId: string) => {
       if (moveTabToSpace(tabId, targetSpaceId)) {
@@ -1379,6 +1400,7 @@ export default function App() {
             closeActiveTabOrPane: handleCloseTabOrPane,
             splitPaneRight: () => splitActivePaneInActiveTab("row"),
             splitPaneDown: () => splitActivePaneInActiveTab("col"),
+            movePaneToNewTab: () => handleMovePaneToNewTab(),
             focusSearch: () => searchInlineRef.current?.focus(),
             focusExplorerSearch: () => explorerRef.current?.focusSearch(),
             toggleSidebar,
@@ -1410,6 +1432,7 @@ export default function App() {
       toggleSourceControl,
       handleCloseTabOrPane,
       splitActivePaneInActiveTab,
+      handleMovePaneToNewTab,
       toggleSidebar,
       toggleHiddenFiles,
       togglePanelAndFocus,
@@ -1555,6 +1578,8 @@ export default function App() {
               onPin={pinTab}
               onRename={handleRenameTab}
               onReorder={reorderTabByGap}
+              onMoveToSplit={handleMoveTabIntoSplit}
+              onMovePaneToNewTab={handleMovePaneToNewTab}
               onToggleSidebar={toggleSidebar}
               onOpenCommandPalette={() => openCommandPalette("commands")}
               onActivateAgent={onActivateAgent}

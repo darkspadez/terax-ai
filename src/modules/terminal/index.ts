@@ -9,6 +9,7 @@ export {
   leafIds,
   type PaneBounds,
   type PaneNode,
+  type SplitPosition,
 } from "./lib/panes";
 export {
   clearFocusedTerminal,
@@ -26,6 +27,7 @@ export {
 } from "./lib/terminalSessionApi";
 export {
   selectTerminalTabStatus,
+  type TerminalLeafStatus,
   type TerminalProgress,
   useTerminalStatusStore,
 } from "./lib/terminalStatus";

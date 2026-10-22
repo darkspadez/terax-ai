@@ -6,7 +6,9 @@ import {
 import {
   canSplitPane,
   findLeafCwd,
+  findLeafNode,
   hasLeaf,
+  insertLeafAt,
   leafIds,
   leafInDirection,
   nextLeafId,
@@ -15,6 +17,7 @@ import {
   type PaneNode,
   removeLeaf,
   type SplitDir,
+  type SplitPosition,
   setLeafCwd as setLeafCwdInTree,
   siblingLeafOf,
   splitLeaf,
@@ -569,6 +572,175 @@ export function planSpaceRemoval(
     activeId = inFallback[inFallback.length - 1].id;
   }
   return { tabs: next, disposeLeafIds, activeId };
+}
+
+type LeafNode = Extract<PaneNode, { kind: "leaf" }>;
+
+type MoveTabIntoSplitRejection =
+  | "same-tab"
+  | "source-missing"
+  | "destination-missing"
+  | "source-not-terminal"
+  | "destination-not-terminal"
+  | "source-multi-pane"
+  | "different-space"
+  | "blocks"
+  | "private-mismatch"
+  | "pane-limit";
+
+export type MoveTabIntoSplitPlan =
+  | {
+      ok: true;
+      source: TerminalTab;
+      destination: TerminalTab;
+      leaf: LeafNode;
+    }
+  | { ok: false; reason: MoveTabIntoSplitRejection };
+
+/**
+ * Whether a single-pane terminal tab can join another terminal tab's split:
+ * same space, same privacy, no block tabs (they never split), within the
+ * pane limit.
+ */
+export function planMoveTabIntoSplit(
+  tabs: readonly Tab[],
+  sourceTabId: number,
+  destinationTabId: number,
+): MoveTabIntoSplitPlan {
+  const reject = (reason: MoveTabIntoSplitRejection) =>
+    ({ ok: false, reason }) as const;
+  if (sourceTabId === destinationTabId) return reject("same-tab");
+  const source = tabs.find((t) => t.id === sourceTabId);
+  const destination = tabs.find((t) => t.id === destinationTabId);
+  if (!source) return reject("source-missing");
+  if (!destination) return reject("destination-missing");
+  if (source.kind !== "terminal") return reject("source-not-terminal");
+  if (destination.kind !== "terminal") {
+    return reject("destination-not-terminal");
+  }
+  if (source.paneTree.kind !== "leaf") return reject("source-multi-pane");
+  if (source.spaceId !== destination.spaceId) return reject("different-space");
+  if (source.blocks || destination.blocks) return reject("blocks");
+  if (!!source.private !== !!destination.private) {
+    return reject("private-mismatch");
+  }
+  if (!canSplitPane(destination.paneTree)) return reject("pane-limit");
+  return { ok: true, source, destination, leaf: source.paneTree };
+}
+
+/** The tabs a single-pane terminal tab can be moved into. */
+export function moveToSplitTargets(
+  tabs: readonly Tab[],
+  sourceTabId: number,
+): TerminalTab[] {
+  return tabs.filter(
+    (t): t is TerminalTab => planMoveTabIntoSplit(tabs, sourceTabId, t.id).ok,
+  );
+}
+
+/**
+ * Removes the source tab and grafts its leaf beside the destination's active
+ * pane in one pass, so the leaf (and its shell) never leaves the live pane
+ * trees. The moved pane becomes the active one.
+ */
+export function applyMoveTabIntoSplit(
+  tabs: readonly Tab[],
+  sourceTabId: number,
+  destinationTabId: number,
+  position: SplitPosition,
+  newSplitId: number,
+): Tab[] | null {
+  const plan = planMoveTabIntoSplit(tabs, sourceTabId, destinationTabId);
+  if (!plan.ok) return null;
+  const { source, destination, leaf } = plan;
+  const paneTree = insertLeafAt(
+    destination.paneTree,
+    destination.activeLeafId,
+    leaf,
+    position,
+    newSplitId,
+  );
+  if (paneTree === destination.paneTree) return null;
+  const moved: TerminalTab = {
+    ...destination,
+    paneTree,
+    activeLeafId: leaf.id,
+    cwd: leaf.cwd ?? source.cwd ?? destination.cwd,
+    zoomedLeafId: undefined,
+  };
+  return tabs.flatMap((t) =>
+    t.id === sourceTabId ? [] : t.id === destinationTabId ? [moved] : [t],
+  );
+}
+
+type MovePaneToNewTabRejection =
+  | "tab-missing"
+  | "tab-not-terminal"
+  | "leaf-missing"
+  | "single-pane";
+
+export type MovePaneToNewTabPlan =
+  | { ok: true; source: TerminalTab; leaf: LeafNode; remaining: PaneNode }
+  | { ok: false; reason: MovePaneToNewTabRejection };
+
+/** Whether a pane of a split terminal tab can become a tab of its own. */
+export function planMovePaneToNewTab(
+  tabs: readonly Tab[],
+  tabId: number,
+  leafId: number,
+): MovePaneToNewTabPlan {
+  const reject = (reason: MovePaneToNewTabRejection) =>
+    ({ ok: false, reason }) as const;
+  const source = tabs.find((t) => t.id === tabId);
+  if (!source) return reject("tab-missing");
+  if (source.kind !== "terminal") return reject("tab-not-terminal");
+  const leaf = findLeafNode(source.paneTree, leafId);
+  if (!leaf) return reject("leaf-missing");
+  const remaining = removeLeaf(source.paneTree, leafId);
+  if (!remaining) return reject("single-pane");
+  return { ok: true, source, leaf, remaining };
+}
+
+/**
+ * Detaches the pane and wraps the same leaf node in a new tab right after its
+ * tab, in one pass, so its shell keeps running. The leaf keeps its slot id,
+ * which stays unique across leaves.
+ */
+export function applyMovePaneToNewTab(
+  tabs: readonly Tab[],
+  tabId: number,
+  leafId: number,
+  newTabId: number,
+): Tab[] | null {
+  const plan = planMovePaneToNewTab(tabs, tabId, leafId);
+  if (!plan.ok) return null;
+  const { source, leaf, remaining } = plan;
+  let { activeLeafId, cwd } = source;
+  if (activeLeafId === leaf.id) {
+    const ids = leafIds(remaining);
+    const sibling = siblingLeafOf(source.paneTree, leaf.id);
+    activeLeafId = sibling !== null && ids.includes(sibling) ? sibling : ids[0];
+    cwd = findLeafCwd(remaining, activeLeafId) ?? cwd;
+  }
+  const rest: TerminalTab = {
+    ...source,
+    paneTree: remaining,
+    activeLeafId,
+    cwd,
+    zoomedLeafId: undefined,
+  };
+  const moved: TerminalTab = {
+    id: newTabId,
+    kind: "terminal",
+    spaceId: source.spaceId,
+    title: source.private ? "private" : "shell",
+    cwd: leaf.cwd ?? source.cwd,
+    paneTree: leaf,
+    activeLeafId: leaf.id,
+    ...(source.blocks && { blocks: true }),
+    ...(source.private && { private: true }),
+  };
+  return tabs.flatMap((t) => (t.id === tabId ? [rest, moved] : [t]));
 }
 
 export function useTabs(initial?: Partial<TerminalTab>) {
@@ -1358,6 +1530,69 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     [],
   );
 
+  /**
+   * Moves a single-pane terminal tab into another tab's split, keeping its
+   * session. Returns the moved leaf, or null when the move is not allowed.
+   */
+  const moveTabIntoSplit = useCallback(
+    (
+      sourceTabId: number,
+      destinationTabId: number,
+      position: SplitPosition,
+    ): number | null => {
+      const plan = planMoveTabIntoSplit(
+        tabsRef.current,
+        sourceTabId,
+        destinationTabId,
+      );
+      if (!plan.ok) return null;
+      const next = applyMoveTabIntoSplit(
+        tabsRef.current,
+        sourceTabId,
+        destinationTabId,
+        position,
+        nextIdRef.current++,
+      );
+      if (!next) return null;
+      tabsRef.current = next;
+      activeIdRef.current = destinationTabId;
+      setTabs(next);
+      setActiveId(destinationTabId);
+      return plan.leaf.id;
+    },
+    [],
+  );
+
+  /**
+   * Moves a pane of a split terminal tab (by default the active tab's active
+   * pane) into a new tab right after it, keeping its session.
+   */
+  const movePaneToNewTab = useCallback(
+    (
+      tabId?: number,
+      leafId?: number,
+    ): { tabId: number; leafId: number } | null => {
+      const sourceId = tabId ?? activeIdRef.current;
+      const source = tabsRef.current.find((t) => t.id === sourceId);
+      if (source?.kind !== "terminal") return null;
+      const moved = leafId ?? source.activeLeafId;
+      const newTabId = nextIdRef.current++;
+      const next = applyMovePaneToNewTab(
+        tabsRef.current,
+        sourceId,
+        moved,
+        newTabId,
+      );
+      if (!next) return null;
+      tabsRef.current = next;
+      activeIdRef.current = newTabId;
+      setTabs(next);
+      setActiveId(newTabId);
+      return { tabId: newTabId, leafId: moved };
+    },
+    [],
+  );
+
   const closePaneByLeaf = useCallback((leafId: number): void => {
     let didRemove = false;
     setTabs((curr) => {
@@ -1477,6 +1712,8 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     togglePaneZoom,
     swapActivePaneInDirection,
     splitActivePane,
+    moveTabIntoSplit,
+    movePaneToNewTab,
     closeActivePane,
     closePaneByLeaf,
   };

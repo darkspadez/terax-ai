@@ -118,6 +118,56 @@ export function splitLeaf(
   };
 }
 
+export type SplitPosition = "left" | "right" | "top" | "bottom";
+
+/**
+ * Inserts an existing leaf beside `targetId`, keeping the leaf node itself so
+ * its session survives the move. Flattens into an enclosing split of the same
+ * direction like `splitLeaf`. Returns `tree` unchanged when the target is
+ * missing or the leaf is already there.
+ */
+export function insertLeafAt(
+  tree: PaneNode,
+  targetId: PaneId,
+  leaf: Extract<PaneNode, { kind: "leaf" }>,
+  position: SplitPosition,
+  newSplitId: PaneId,
+): PaneNode {
+  if (!hasLeaf(tree, targetId) || hasLeaf(tree, leaf.id)) return tree;
+  const dir: SplitDir =
+    position === "left" || position === "right" ? "row" : "col";
+  const before = position === "left" || position === "top";
+  const insert = (node: PaneNode): PaneNode => {
+    if (isLeaf(node)) {
+      if (node.id !== targetId) return node;
+      return {
+        kind: "split",
+        id: newSplitId,
+        dir,
+        children: before ? [leaf, node] : [node, leaf],
+      };
+    }
+    if (node.dir === dir) {
+      const index = node.children.findIndex(
+        (c) => isLeaf(c) && c.id === targetId,
+      );
+      if (index >= 0) {
+        const at = before ? index : index + 1;
+        return {
+          ...node,
+          children: [
+            ...node.children.slice(0, at),
+            leaf,
+            ...node.children.slice(at),
+          ],
+        };
+      }
+    }
+    return { ...node, children: node.children.map(insert) };
+  };
+  return insert(tree);
+}
+
 /**
  * Remove a leaf and collapse single-child splits left in its wake. Returns
  * `null` when the entire subtree is gone.

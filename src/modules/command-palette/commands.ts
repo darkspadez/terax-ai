@@ -19,6 +19,7 @@ import {
   SidebarLeftIcon,
   SourceCodeIcon,
   SparklesIcon,
+  SquareArrowUpRightIcon,
   TerminalIcon,
   ViewIcon,
 } from "@hugeicons/core-free-icons";
@@ -53,6 +54,7 @@ export type CommandPaletteActionContext = {
   closeActiveTabOrPane: () => void;
   splitPaneRight: () => void;
   splitPaneDown: () => void;
+  movePaneToNewTab: () => void;
   focusSearch: () => void;
   focusExplorerSearch: () => void;
   toggleSidebar: () => void;
@@ -84,6 +86,11 @@ export function createCommandItems(
     ? "No terminal tab"
     : !canSplitPane(activeTerminalTab.paneTree)
       ? "Pane limit"
+      : undefined;
+  const moveToNewTabDisabled = !activeTerminalTab
+    ? "No terminal tab"
+    : activePaneCount < 2
+      ? "Single pane"
       : undefined;
   const closeDisabled =
     onlyOneTab && activePaneCount < 2 ? "Last tab" : undefined;
@@ -231,6 +238,15 @@ export function createCommandItems(
       shortcutId: "pane.splitDown",
       disabledReason: splitDisabled,
       run: ctx.splitPaneDown,
+    },
+    {
+      id: "pane.moveToNewTab",
+      title: "Move pane to new tab",
+      group: "Panes",
+      keywords: ["terminal", "pane", "move", "break", "detach", "tab"],
+      icon: SquareArrowUpRightIcon,
+      disabledReason: moveToNewTabDisabled,
+      run: ctx.movePaneToNewTab,
     },
     {
       id: "git.graph",
