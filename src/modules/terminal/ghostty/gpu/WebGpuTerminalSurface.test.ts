@@ -21,6 +21,7 @@ import {
   createWebGpuImageSupport,
   type WebGpuImageSupport,
 } from "@/modules/terminal/ghostty/gpu/WebGpuImageLayer";
+import { TERMINAL_SCROLLBAR_WIDTH } from "@/modules/terminal/ghostty/gpu/TerminalFit";
 import { WebGpuTerminalSurface } from "@/modules/terminal/ghostty/gpu/WebGpuTerminalSurface";
 import { deriveFontMetrics } from "@/modules/terminal/ghostty/gpu/terminalVisuals";
 import { resetTerminalResizeGestureForTest } from "@/modules/terminal/lib/terminalResizeGesture";
@@ -51,6 +52,8 @@ afterEach(() => {
 });
 
 const CELL = 16;
+/** Columns the harness's 960 px host fits beside the scrollbar strip. */
+const COLS = Math.floor((960 - TERMINAL_SCROLLBAR_WIDTH) / 8);
 
 describe("WebGPU surface data path", () => {
   it("uploads dirty row ranges straight from the borrowed view before any other model call", async () => {
@@ -75,8 +78,8 @@ describe("WebGPU surface data path", () => {
         size,
       ]),
     ).toEqual([
-      [2 * 120 * CELL, 2 * 120 * CELL, 120 * CELL],
-      [5 * 120 * CELL, 5 * 120 * CELL, 2 * 120 * CELL],
+      [2 * COLS * CELL, 2 * COLS * CELL, COLS * CELL],
+      [5 * COLS * CELL, 5 * COLS * CELL, 2 * COLS * CELL],
     ]);
     // The data argument is the very view the model returned: no copy.
     expect(uploads[0][2]).toBe(h.gpu.cells);
@@ -391,7 +394,10 @@ describe("pixel-exact geometry", () => {
     const h = await harness({ scale: 1.25 });
     h.render();
     const before = h.surface.diagnostics().cols;
-    const deviceWidth = before * h.surface.diagnostics().deviceCellWidth - 1;
+    const deviceWidth =
+      before * h.surface.diagnostics().deviceCellWidth +
+      TERMINAL_SCROLLBAR_WIDTH * 1.25 -
+      1;
     h.observe({
       width: 700,
       height: 500,
@@ -518,7 +524,9 @@ describe("resizing the host", () => {
     // One synchronized resize at the final size.
     expect(h.onResize).toHaveBeenCalledOnce();
     const last = h.surface.diagnostics();
-    expect(last.cols).toBe(Math.floor((960 - 62 * 8) / 8));
+    expect(last.cols).toBe(
+      Math.floor((960 - 62 * 8 - TERMINAL_SCROLLBAR_WIDTH) / 8),
+    );
     expect(h.onResize).toHaveBeenCalledWith(last.cols, last.rows);
     expect(last.cols).toBeLessThan(first.cols);
   });
@@ -596,7 +604,8 @@ describe("resizing the host", () => {
     vi.advanceTimersByTime(500);
     h.onResize.mockClear();
 
-    h.observe(hostSize(800));
+    // 100 columns of 8 px beside the scrollbar strip.
+    h.observe(hostSize(800 + TERMINAL_SCROLLBAR_WIDTH));
     h.render();
     expect(h.onResize).toHaveBeenCalledTimes(1);
     // The model already has the size the PTY is told about.
@@ -617,16 +626,17 @@ describe("resizing the host", () => {
     const h = await harness();
     h.render();
     vi.advanceTimersByTime(500);
-    h.observe(hostSize(900));
+    const strip = TERMINAL_SCROLLBAR_WIDTH;
+    h.observe(hostSize(896 + strip));
     h.render();
     h.onResize.mockClear();
 
     // A second change within 150 ms of the first starts the burst.
     vi.advanceTimersByTime(10);
-    h.observe(hostSize(640));
+    h.observe(hostSize(640 + strip));
     h.render();
     vi.advanceTimersByTime(100);
-    h.observe(hostSize(560));
+    h.observe(hostSize(560 + strip));
     h.render();
     expect(h.onResize).not.toHaveBeenCalled();
     expect(h.surface.diagnostics().cols).toBe(112);

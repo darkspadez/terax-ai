@@ -3,6 +3,7 @@ import {
   endTerminalResizeInteraction,
 } from "@/modules/terminal/lib/terminalResizeInteraction";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { TERMINAL_SCROLLBAR_WIDTH } from "@/modules/terminal/ghostty/gpu/TerminalFit";
 import type { GhosttyTerminalModelApi } from "@/modules/terminal/ghostty/GhosttyTerminalModel";
 import type { WindowPresentation } from "@/modules/terminal/ghostty/WindowPresentationPolicy";
 import type { WebGlCellRenderer } from "@/modules/terminal/ghostty/webgl/WebGlCellRenderer";
@@ -103,7 +104,7 @@ describe("WebGL surface resizing", () => {
     endTerminalResizeInteraction(token);
     h.surface.renderFrame(h.renderer as unknown as WebGlCellRenderer);
 
-    const cols = Math.floor((960 - 62 * 8) / 8);
+    const cols = Math.floor((960 - 62 * 8 - TERMINAL_SCROLLBAR_WIDTH) / 8);
     expect(h.onResize).toHaveBeenCalledOnce();
     expect(h.onResize).toHaveBeenCalledWith(cols, expect.any(Number));
     expect(h.surface.diagnostics().cols).toBe(cols);
@@ -115,7 +116,8 @@ describe("WebGL surface resizing", () => {
     vi.advanceTimersByTime(500);
     h.onResize.mockClear();
 
-    h.setHost(800);
+    // 100 columns of 8 px beside the scrollbar strip.
+    h.setHost(800 + TERMINAL_SCROLLBAR_WIDTH);
     h.resize();
     h.surface.renderFrame(h.renderer as unknown as WebGlCellRenderer);
 

@@ -115,7 +115,10 @@ while something is highlighted, so none of them rewrites cell records.
 Geometry is pixel exact. Fonts are measured at size times ratio and cells are
 whole device pixels (`TerminalFontMetrics.deviceCell*`). `cellWidth` and
 `cellHeight` are the CSS size, device divided by ratio, and are what fit,
-hit-testing, selection, links and block overlays use. A pane's rectangle in the
+hit-testing, selection, links and block overlays use. The fit leaves the
+scrollbar strip on a pane's right edge (11 px, `TERMINAL_SCROLLBAR_WIDTH`) out of
+the grid, so the last column is never under the strip, which takes the pointer
+there, and text keeps a gutter from the pane's edge. A pane's rectangle in the
 window canvas holds at least cols by rows device cells (slack is background, the
 scissor clips the rest) and the canvas origin is translated onto the device
 pixel grid when the observer, ratio or window size changes. A ratio change

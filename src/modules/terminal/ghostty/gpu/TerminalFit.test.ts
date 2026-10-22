@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { fitTerminalViewport, snapOffsetCss } from "./TerminalFit";
+import {
+  fitTerminalViewport,
+  snapOffsetCss,
+  TERMINAL_SCROLLBAR_WIDTH,
+} from "./TerminalFit";
 import { deriveFontMetrics, type TerminalFontMetrics } from "./terminalVisuals";
 
 const FONT = {
@@ -33,11 +37,11 @@ describe("fitTerminalViewport", () => {
       // CSS size times ratio is the backing size, so nothing is resampled.
       expect(fit.cssWidth * scale).toBeCloseTo(fit.pixelWidth, 9);
       expect(fit.cssHeight * scale).toBeCloseTo(fit.pixelHeight, 9);
-      // The whole grid fits and one more cell would not.
-      expect(fit.pixelWidth).toBeLessThanOrEqual(Math.round(731.4 * scale) + 1);
-      expect(fit.pixelWidth + metrics.deviceCellWidth).toBeGreaterThan(
-        Math.round(731.4 * scale),
-      );
+      // The whole grid fits beside the scrollbar strip and one more cell
+      // would not.
+      const room = Math.round((731.4 - TERMINAL_SCROLLBAR_WIDTH) * scale);
+      expect(fit.pixelWidth).toBeLessThanOrEqual(room + 1);
+      expect(fit.pixelWidth + metrics.deviceCellWidth).toBeGreaterThan(room);
     },
   );
 
@@ -48,9 +52,29 @@ describe("fitTerminalViewport", () => {
       width: 1000 - 1,
       height: 500,
     });
-    expect(css?.cols).toBe(Math.floor(1000 / metrics.deviceCellWidth));
-    expect(device?.cols).toBe(Math.floor(999 / metrics.deviceCellWidth));
+    const strip = TERMINAL_SCROLLBAR_WIDTH * 1.25;
+    expect(css?.cols).toBe(
+      Math.floor((1000 - strip) / metrics.deviceCellWidth),
+    );
+    expect(device?.cols).toBe(
+      Math.floor((999 - strip) / metrics.deviceCellWidth),
+    );
   });
+
+  it.each(RATIOS)(
+    "keeps the last column clear of the scrollbar strip at %s",
+    (scale) => {
+      const metrics = metricsAt(scale);
+      for (const width of [120, 333.3, 731.4, 1280]) {
+        const fit = fitTerminalViewport(width, 400, metrics);
+        expect(fit).not.toBeNull();
+        if (!fit) continue;
+        expect(fit.cssWidth + TERMINAL_SCROLLBAR_WIDTH).toBeLessThanOrEqual(
+          width + 0.02,
+        );
+      }
+    },
+  );
 
   it("round-trips CSS and device sizes without drift", () => {
     for (const scale of RATIOS) {
@@ -67,7 +91,7 @@ describe("fitTerminalViewport", () => {
 
   it("tolerates browser subpixel noise at an exact cell boundary", () => {
     const metrics = metricsAt(2);
-    const edge = (80 * metrics.deviceCellWidth) / 2;
+    const edge = (80 * metrics.deviceCellWidth) / 2 + TERMINAL_SCROLLBAR_WIDTH;
     expect(fitTerminalViewport(edge - 0.004, 432, metrics)).toMatchObject({
       cols: 80,
     });

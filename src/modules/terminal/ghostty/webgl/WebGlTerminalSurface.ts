@@ -29,7 +29,7 @@ import {
   linkCellRange,
   linkRangesEqual,
 } from "../gpu/linkUnderline";
-import { fitTerminalViewport } from "../gpu/TerminalFit";
+import { fitTerminalViewport, TERMINAL_SCROLLBAR_WIDTH } from "../gpu/TerminalFit";
 import {
   TerminalFitQueue,
   type TerminalFitQueueDiagnostics,
@@ -195,8 +195,7 @@ export class WebGlTerminalSurface
       "position:absolute;left:0;top:0;width:1px;height:1px;opacity:0;resize:none;pointer-events:none;";
     this.scrollbar.setAttribute("aria-label", "Terminal scrollback");
     this.scrollbar.setAttribute("role", "scrollbar");
-    this.scrollbar.style.cssText =
-      "position:absolute;inset:0 0 0 auto;z-index:10;width:11px;overflow-x:hidden;overflow-y:scroll;overscroll-behavior:contain;visibility:hidden;";
+    this.scrollbar.style.cssText = `position:absolute;inset:0 0 0 auto;z-index:10;width:${TERMINAL_SCROLLBAR_WIDTH}px;overflow-x:hidden;overflow-y:scroll;overscroll-behavior:contain;visibility:hidden;`;
     this.scrollbarContent.style.cssText = "width:1px;height:1px;";
     this.scrollbar.append(this.scrollbarContent);
     this.root.append(this.input, this.scrollbar);

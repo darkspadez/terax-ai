@@ -6,6 +6,13 @@ const MIN_ROWS = 1;
 const MAX_ROWS = 256;
 const DEVICE_ROUNDING_TOLERANCE_PX = 0.02;
 
+/**
+ * The scrollbar strip along a pane's right edge, in CSS pixels. The fit leaves
+ * it out of the grid, so the last column is never under the strip (which takes
+ * the pointer there) and text keeps a gutter from the pane's edge.
+ */
+export const TERMINAL_SCROLLBAR_WIDTH = 11;
+
 export type TerminalDeviceBounds = {
   readonly width: number;
   readonly height: number;
@@ -21,7 +28,8 @@ export type TerminalViewportFit = {
 };
 
 /**
- * Fits whole integer device cells into a host box. `deviceBounds` is the exact
+ * Fits whole integer device cells into a host box, less the scrollbar strip on
+ * its right (`TERMINAL_SCROLLBAR_WIDTH`). `deviceBounds` is the exact
  * device-pixel content box from `ResizeObserver` when the engine reports it;
  * otherwise the CSS size is converted and rounded. The CSS size of the result
  * is the device size divided by the ratio, so a canvas styled with it maps
@@ -43,7 +51,9 @@ export function fitTerminalViewport(
   ) {
     return null;
   }
-  const deviceWidth = deviceBounds?.width ?? hostWidth * scale;
+  const deviceWidth =
+    (deviceBounds?.width ?? hostWidth * scale) -
+    TERMINAL_SCROLLBAR_WIDTH * scale;
   const deviceHeight = deviceBounds?.height ?? hostHeight * scale;
   if (
     deviceWidth + DEVICE_ROUNDING_TOLERANCE_PX <
