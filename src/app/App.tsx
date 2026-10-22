@@ -6,10 +6,14 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { openNewWindow, quitApp } from "@/lib/appWindow";
-import { consumeLaunchFiles, getLaunchDir } from "@/lib/launchDir";
+import {
+  consumeLaunchFiles,
+  getExplicitLaunchDir,
+  getLaunchDir,
+} from "@/lib/launchDir";
 import { toast } from "sonner";
 import { IS_MAC } from "@/lib/platform";
-import { quoteShellArg } from "@/lib/shellQuote";
+import { cdCommandLine } from "@/lib/shellQuote";
 import { usePresence } from "@/lib/usePresence";
 import { useZoom } from "@/lib/useZoom";
 import { isMarkdownPath } from "@/lib/utils";
@@ -17,6 +21,7 @@ import {
   type AgentLaunchRequest,
   AgentNotificationsBridge,
   findAgentLauncher,
+  moveAgentLeafToTab,
   nextAttentionTarget,
   validateAgentLaunchCommand,
 } from "@/modules/agents";
@@ -100,8 +105,10 @@ import {
   hasLeaf,
   isTerminalSurfaceTarget,
   leafIds,
+  leafShellAtPrompt,
   navigateFocusedBlocks,
   type PaneBounds,
+  type SplitPosition,
   ptyIdForLeaf,
   resizeActivePane,
   scrollFocusedTerminal,
@@ -128,12 +135,11 @@ import {
 } from "@/modules/theme";
 import { UpdaterDialog } from "@/modules/updater";
 import {
+  currentWorkspaceEnv,
   useWorkspaceEnvStore,
-  type WorkspaceEnv,
   workspaceScopeKey,
 } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   lazy,
@@ -147,6 +153,7 @@ import {
   useState,
 } from "react";
 import { CloseDialogs } from "./components/CloseDialogs";
+import { detectShell } from "./components/useSystemInfo";
 import {
   TOGGLE_BLOCK_INPUT_EVENT,
   WorkspaceInputBar,
@@ -224,9 +231,10 @@ export default function App() {
     togglePaneZoom,
     swapActivePaneInDirection,
     splitActivePane,
+    moveTabIntoSplit,
+    movePaneToNewTab,
     closeActivePane,
     closePaneByLeaf,
-    resetWorkspace,
   } = useTabs(getLaunchDir() ? { cwd: getLaunchDir() } : undefined);
 
   // Mirror `tabs` into a ref so callbacks scheduled with `setTimeout`
@@ -260,16 +268,6 @@ export default function App() {
   // split/unsplit re-mount components but the leaf is still live.
   const liveLeavesRef = useRef<Set<number>>(new Set());
 
-  const clearWorkspaceState = useCallback(() => {
-    for (const id of liveLeavesRef.current) disposeSession(id);
-    searchAddons.current.clear();
-    terminalRefs.current.clear();
-    editorRefs.current.clear();
-    previewRefs.current.clear();
-    setActiveSearchAddon(null);
-    setActiveEditorHandle(null);
-  }, []);
-
   const workspaceEnv = useWorkspaceEnvStore((s) => s.env);
   const setWorkspaceEnv = useWorkspaceEnvStore((s) => s.setEnv);
   const {
@@ -279,11 +277,9 @@ export default function App() {
     switchWorkspace,
     adoptWorkspaceEnv,
   } = useWorkspaceSwitcher({
-    tabsRef,
-    workspaceEnv,
     setWorkspaceEnv,
-    resetWorkspace,
-    clearWorkspaceState,
+    newTab,
+    setActiveSpaceForNewTabs,
   });
 
   const activeSpaceId = useSpaces((s) => s.activeId);
@@ -296,19 +292,10 @@ export default function App() {
   }, [tabs, activeId, activeSpaceId]);
   const sourceControlSpaceId = activeSpaceId ?? DEFAULT_SPACE_ID;
 
-  const handleWorkspaceChange = useCallback(
-    async (env: WorkspaceEnv) => {
-      const switched = await switchWorkspace(env);
-      if (switched && activeSpaceId) {
-        useSpaces.getState().setEnv(activeSpaceId, env);
-      }
-    },
-    [switchWorkspace, activeSpaceId],
-  );
-
   useSpacesBoot({
     ready: launchCwdResolved,
     launchCwd,
+    explicitLaunchDir: getExplicitLaunchDir() ?? null,
     home,
     allocId,
     replaceTabs,
@@ -708,30 +695,44 @@ export default function App() {
     [inheritedCwdForNewTab, newAgentGroupTab],
   );
 
+  // The new tab's shell starts there; typing a `cd` as well raced its prompt.
+  const cdInNewTab = useCallback((path: string) => void newTab(path), [newTab]);
+
+  // Typed only while the shell is at its prompt: a running program (an agent,
+  // vim) would take the `cd` as its own input.
+  const cdRequest = useRef(0);
   const sendCd = useCallback(
-    (path: string) => {
+    async (path: string) => {
       if (activeLeafId === null) return;
-      const term = terminalRefs.current.get(activeLeafId);
+      const leafId = activeLeafId;
+      const request = ++cdRequest.current;
+      const atPrompt = await leafShellAtPrompt(leafId);
+      if (request !== cdRequest.current) return;
+      const term = terminalRefs.current.get(leafId);
       if (!term) return;
-      term.write(`cd ${quoteShellArg(path)}\r`);
+      if (atPrompt !== true) {
+        toast(
+          atPrompt === false
+            ? "A program is running in this terminal"
+            : "Could not tell whether this terminal is at its prompt",
+          {
+            description: "Its directory was left as it is.",
+            action: {
+              label: "Open in new tab",
+              onClick: () => cdInNewTab(path),
+            },
+          },
+        );
+        return;
+      }
+      const shell =
+        usePreferencesStore.getState().terminalShell || (await detectShell());
+      if (request !== cdRequest.current) return;
+      const wsl = currentWorkspaceEnv().kind === "wsl";
+      term.write(`${cdCommandLine(path, shell, wsl)}\r`);
       term.focus();
     },
-    [activeLeafId],
-  );
-
-  const cdInNewTab = useCallback(
-    (path: string) => {
-      const tabId = newTab(path);
-      setTimeout(() => {
-        const tab = tabsRef.current.find((x) => x.id === tabId);
-        if (!tab || tab.kind !== "terminal") return;
-        const t = terminalRefs.current.get(tab.activeLeafId);
-        if (!t) return;
-        t.write(`cd ${quoteShellArg(path)}\r`);
-        t.focus();
-      }, 80);
-    },
-    [newTab],
+    [activeLeafId, cdInNewTab],
   );
 
   const handleOpenFile = useCallback(
@@ -755,13 +756,17 @@ export default function App() {
   // Warm start: the backend emits once the window already exists. Attach on
   // mount so an "Open With" that lands mid-restore isn't dropped — the backend
   // also seeds the drain-once state, so the boot drain below is the safety net.
+  // Only the window the files were sent to opens them.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let disposed = false;
     (async () => {
-      const off = await listen<string[]>("terax:open-file", (e) => {
-        openLaunchFiles(e.payload);
-      });
+      const off = await getCurrentWindow().listen<string[]>(
+        "terax:open-file",
+        (e) => {
+          openLaunchFiles(e.payload);
+        },
+      );
       if (disposed) off();
       else unlisten = off;
     })();
@@ -1350,6 +1355,23 @@ export default function App() {
     [removeTabsForSpace],
   );
 
+  // The pane keeps its shell; its agent records follow it to its new tab.
+  const handleMoveTabIntoSplit = useCallback(
+    (sourceId: number, destinationId: number, position: SplitPosition) => {
+      const leafId = moveTabIntoSplit(sourceId, destinationId, position);
+      if (leafId !== null) moveAgentLeafToTab(leafId, destinationId);
+    },
+    [moveTabIntoSplit],
+  );
+
+  const handleMovePaneToNewTab = useCallback(
+    (tabId?: number, leafId?: number) => {
+      const moved = movePaneToNewTab(tabId, leafId);
+      if (moved) moveAgentLeafToTab(moved.leafId, moved.tabId);
+    },
+    [movePaneToNewTab],
+  );
+
   const handleMoveTab = useCallback(
     (tabId: number, targetSpaceId: string) => {
       if (moveTabToSpace(tabId, targetSpaceId)) {
@@ -1427,6 +1449,7 @@ export default function App() {
             closeActiveTabOrPane: handleCloseTabOrPane,
             splitPaneRight: () => splitActivePaneInActiveTab("row"),
             splitPaneDown: () => splitActivePaneInActiveTab("col"),
+            movePaneToNewTab: () => handleMovePaneToNewTab(),
             focusSearch: () => searchInlineRef.current?.focus(),
             focusExplorerSearch: () => explorerRef.current?.focusSearch(),
             toggleSidebar,
@@ -1458,6 +1481,7 @@ export default function App() {
       toggleSourceControl,
       handleCloseTabOrPane,
       splitActivePaneInActiveTab,
+      handleMovePaneToNewTab,
       toggleSidebar,
       toggleHiddenFiles,
       togglePanelAndFocus,
@@ -1619,6 +1643,8 @@ export default function App() {
               onPin={pinTab}
               onRename={handleRenameTab}
               onReorder={reorderTabByGap}
+              onMoveToSplit={handleMoveTabIntoSplit}
+              onMovePaneToNewTab={handleMovePaneToNewTab}
               onToggleSidebar={toggleSidebar}
               onOpenCommandPalette={() => openCommandPalette("commands")}
               onActivateAgent={onActivateAgent}
@@ -1758,7 +1784,7 @@ export default function App() {
               filePath={activeFilePath}
               home={home}
               onCd={sendCd}
-              onWorkspaceChange={handleWorkspaceChange}
+              onWorkspaceChange={switchWorkspace}
               onOpenMini={openMini}
               onOpenAi={togglePanelAndFocus}
               hasComposer={hasComposer}

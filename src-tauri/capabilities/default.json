@@ -28,6 +28,7 @@
     "opener:default",
     "log:default",
     "os:default",
+    "os:allow-hostname",
     "notification:default",
     "store:default",
     "autostart:allow-enable",

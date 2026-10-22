@@ -8,6 +8,9 @@ describe("terminal semantic boundaries", () => {
     ["file:///c/Users/leo/project", "C:/Users/leo/project"],
     ["file:///C:/Users/me/project", "C:/Users/me/project"],
     ["file://host/home/me/a%20b", "/home/me/a b"],
+    // cmd.exe: $P unencoded, so a literal % stays (crynta/terax-ai#1271).
+    [String.raw`file://PC/C:\Users\me\100%20 done`, "C:/Users/me/100%20 done"],
+    ["file://PC/C:\\", "C:/"],
     ["https://example.com/path", null],
   ])("normalizes cwd %s", (uri, expected) =>
     expect(parseOsc7(uri)).toBe(expected),

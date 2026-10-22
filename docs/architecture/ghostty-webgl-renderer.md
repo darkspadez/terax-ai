@@ -45,7 +45,7 @@ only while a pane is visible.
 
 The first implementation uses these bounds:
 
-- at most five simultaneous renderer slots, matching the existing Terax pool;
+- at most nine simultaneous renderer slots, the pane limit of a tab plus one;
 - one warm idle renderer slot;
 - surplus idle WebGL contexts reclaimed after 30 seconds;
 - one requestAnimationFrame scheduler shared by all Ghostty WebGL surfaces;

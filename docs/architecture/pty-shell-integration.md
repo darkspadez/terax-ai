@@ -71,7 +71,7 @@ Integration scripts live in `src-tauri/src/modules/pty/scripts/`:
 - `bashrc.bash` for bash
 - `init.fish` for fish, installed to `~/.config/fish/conf.d/terax.fish`
 
-Zsh is launched with `ZDOTDIR` pointing at a temp directory that sources our scripts and then the user's real configs. Bash uses `--rcfile` with a wrapper that sources the user's `~/.bashrc` after Terax's. Fish uses `conf.d` so no user file is replaced.
+Zsh is launched as a login shell with `ZDOTDIR` pointing at `~/.cache/terax/shell-integration/zsh`, whose four files each source the user's matching file (`.zshrc` then installs Terax's hooks). While a user file runs, `ZDOTDIR` is the user's own (`TERAX_USER_ZDOTDIR`, or unset), so `$ZDOTDIR/conf.d/*` loaders and `${ZDOTDIR:-$HOME}/.zsh_history` resolve as in any terminal; a `ZDOTDIR` the user's `.zshenv` sets (the XDG layout) is carried to the later files in `TERAX_USER_ZDOTDIR`, and `ZDOTDIR` points back at the wrapper so zsh keeps loading it. A `HISTFILE` derived from the wrapper directory (macOS `/etc/zshrc` runs before our `.zshrc`) is moved to the user's directory before their `.zshrc`; zsh then reads it once, as usual. The scenarios run against a real zsh in `shell_init.rs` tests (skipped when zsh is missing). Bash uses `--rcfile` with a wrapper that sources the user's `~/.bashrc` after Terax's. Fish uses `conf.d` so no user file is replaced. Fish also starts as a login shell (`-l`, locally and in WSL), since only a login fish runs its `path_helper` emulation that adds `/etc/paths` and `/etc/paths.d` (Homebrew) on macOS; zsh gets the same from `/etc/zprofile`, bash from the `/etc/profile` its rcfile sources.
 
 All integrated shells emit **OSC 7** (cwd) and **OSC 133 A/B/C/D** (prompt boundaries and exit code) so Terax can track cwd and detect command boundaries without parsing the user's prompt.
 
@@ -81,7 +81,7 @@ On Windows the shell priority is:
 
 1. `pwsh.exe` (PowerShell 7+)
 2. `powershell.exe` (Windows PowerShell 5.1)
-3. `cmd.exe` (no integration)
+3. `cmd.exe` (`cmd /k profile.cmd`: OSC 7 and OSC 133 D/A/B around the user's `PROMPT`; no OSC 133 C, so block tabs keep its prompt with `terax_blocks=0`)
 
 PowerShell loads `profile.ps1` via:
 
@@ -89,7 +89,7 @@ PowerShell loads `profile.ps1` via:
 pwsh -NoLogo -NoExit -ExecutionPolicy Bypass -File <profile.ps1>
 ```
 
-The profile wraps the user's existing `prompt` function to emit OSC 7 + OSC 133 A/B/D after `$PROFILE` runs. The cwd is normalized to backslashes before being passed to ConPTY because `CreateProcessW` misbehaves with forward slashes.
+The profile wraps the user's existing `prompt` function to emit OSC 7 + OSC 133 A/B/D after `$PROFILE` runs. It probes or initialises every variable it reads, so a `Set-StrictMode` left on by `$PROFILE` cannot break it. The exit code in OSC 133 D is 0 when `$?` is true, else `$LASTEXITCODE` when it is non-zero, else 1: `$LASTEXITCODE` belongs to the last native command, so on its own it would mark every later successful cmdlet as failed. The prompt puts `$LASTEXITCODE` back afterwards. A test runs the profile in `pwsh` or Windows PowerShell when one is installed. The cwd is normalized to backslashes before being passed to ConPTY because `CreateProcessW` misbehaves with forward slashes.
 
 ### Fish 4.0+
 

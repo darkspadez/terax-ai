@@ -4,7 +4,9 @@ import {
   isAppWindowLabel,
   isMainWindow,
   launchCwdFromUrl,
+  launchFolderFromUrl,
   spacesStorePath,
+  withoutLaunchParams,
 } from "./appWindow";
 
 describe("app windows", () => {
@@ -36,5 +38,18 @@ describe("app windows", () => {
     expect(launchCwdFromUrl("?cwd=C%3A%5Ca%26b")).toBe("C:\\a&b");
     expect(launchCwdFromUrl("")).toBeNull();
     expect(launchCwdFromUrl("?cwd=")).toBeNull();
+  });
+
+  // Mirrors `window_url` in `windows.rs`.
+  it("reads the folder a later launch opened the window on", () => {
+    expect(launchFolderFromUrl("?folder=C%3A/work/a%26b")).toBe("C:/work/a&b");
+    expect(launchFolderFromUrl("?cwd=/home/me")).toBeNull();
+    expect(launchFolderFromUrl("?folder=")).toBeNull();
+  });
+
+  it("drops the launch parameters so a reload does not reopen them", () => {
+    expect(withoutLaunchParams("?folder=%2Fa")).toBe("");
+    expect(withoutLaunchParams("?cwd=%2Fa&debug=1")).toBe("?debug=1");
+    expect(withoutLaunchParams("")).toBe("");
   });
 });

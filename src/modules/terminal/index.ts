@@ -3,17 +3,20 @@ export {
   useAgentActivityStore,
 } from "./lib/agentActivity";
 export {
+  canSplitPane,
   findLeafCwd,
   hasLeaf,
   leafIds,
   type PaneBounds,
   type PaneNode,
+  type SplitPosition,
 } from "./lib/panes";
 export {
   clearFocusedTerminal,
   disposeSession,
   leafHasForegroundProcess,
   leafIdForPty,
+  leafShellAtPrompt,
   adjustFocusedTerminalFont,
   focusedTerminalInAlternateScreen,
   navigateFocusedBlocks,
@@ -24,6 +27,7 @@ export {
 } from "./lib/terminalSessionApi";
 export {
   selectTerminalTabStatus,
+  type TerminalLeafStatus,
   type TerminalProgress,
   useTerminalStatusStore,
 } from "./lib/terminalStatus";

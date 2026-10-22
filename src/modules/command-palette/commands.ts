@@ -1,6 +1,6 @@
 import type { SearchTarget } from "@/modules/header";
-import { MAX_PANES_PER_TAB, type Tab } from "@/modules/tabs";
-import { leafIds } from "@/modules/terminal";
+import type { Tab } from "@/modules/tabs";
+import { canSplitPane, leafIds } from "@/modules/terminal";
 import {
   AppWindowIcon,
   Cancel01Icon,
@@ -19,6 +19,7 @@ import {
   SidebarLeftIcon,
   SourceCodeIcon,
   SparklesIcon,
+  SquareArrowUpRightIcon,
   TerminalIcon,
   ViewIcon,
 } from "@hugeicons/core-free-icons";
@@ -53,6 +54,7 @@ export type CommandPaletteActionContext = {
   closeActiveTabOrPane: () => void;
   splitPaneRight: () => void;
   splitPaneDown: () => void;
+  movePaneToNewTab: () => void;
   focusSearch: () => void;
   focusExplorerSearch: () => void;
   toggleSidebar: () => void;
@@ -82,8 +84,13 @@ export function createCommandItems(
   const noWorkspaceRoot = !ctx.explorerRoot && !ctx.home;
   const splitDisabled = !activeTerminalTab
     ? "No terminal tab"
-    : activePaneCount >= MAX_PANES_PER_TAB
+    : !canSplitPane(activeTerminalTab.paneTree)
       ? "Pane limit"
+      : undefined;
+  const moveToNewTabDisabled = !activeTerminalTab
+    ? "No terminal tab"
+    : activePaneCount < 2
+      ? "Single pane"
       : undefined;
   const closeDisabled =
     onlyOneTab && activePaneCount < 2 ? "Last tab" : undefined;
@@ -231,6 +238,15 @@ export function createCommandItems(
       shortcutId: "pane.splitDown",
       disabledReason: splitDisabled,
       run: ctx.splitPaneDown,
+    },
+    {
+      id: "pane.moveToNewTab",
+      title: "Move pane to new tab",
+      group: "Panes",
+      keywords: ["terminal", "pane", "move", "break", "detach", "tab"],
+      icon: SquareArrowUpRightIcon,
+      disabledReason: moveToNewTabDisabled,
+      run: ctx.movePaneToNewTab,
     },
     {
       id: "git.graph",

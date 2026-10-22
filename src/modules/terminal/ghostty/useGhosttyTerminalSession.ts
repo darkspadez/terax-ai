@@ -1,4 +1,3 @@
-import { openExternalUrl } from "@/lib/external-link";
 import { ensureMonoFontsLoaded, resolveFontFamily } from "@/lib/fonts";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { currentPlatform } from "@/modules/settings/terminalBehavior";
@@ -22,7 +21,6 @@ import {
 } from "@/modules/terminal/lib/terminalScrollbackRestore";
 import { useTerminalFont } from "@/modules/terminal/lib/useTerminalFont";
 import type { TerminalSearchController } from "@/modules/terminal/search/TerminalSearchController";
-import { currentWorkspaceEnv } from "@/modules/workspace/env";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { loadFeatureFamilies, useFontFeatureStack } from "../lib/fontFeatures";
@@ -41,11 +39,7 @@ import {
   writeTerminalClipboardContent,
 } from "../lib/terminalClipboard";
 import { useTerminalFontOffsets } from "../lib/terminalFontOffsets";
-import {
-  openTerminalFile,
-  openTerminalPreview,
-  resolveTerminalLink,
-} from "../lib/terminalLinkOpen";
+import { openTerminalLink } from "../lib/terminalLinkOpen";
 import { requestTerminalPrompt } from "../lib/terminalPrompts";
 import { useTerminalStatusStore } from "../lib/terminalStatus";
 import { GhosttySemanticEventRouter } from "./core/GhosttySemanticEventRouter";
@@ -543,6 +537,20 @@ export async function ghosttyLeafHasForegroundProcess(
   }
 }
 
+/**
+ * A job owns the pane's terminal (Unix), or its shell has a child (Windows);
+ * null when that cannot be told.
+ */
+export async function ghosttyLeafHasForegroundJob(
+  leafId: number,
+): Promise<boolean | null> {
+  const session = sessions.get(leafId);
+  if (!session?.pty || session.shellExited) return null;
+  return invoke<boolean>("pty_has_foreground_job", {
+    id: session.pty.id,
+  }).catch(() => null);
+}
+
 export function disposeGhosttySession(leafId: number): boolean {
   const session = sessions.get(leafId);
   if (!session) return false;
@@ -937,7 +945,11 @@ async function initializeSessionGeneration(
     onFrame: () => ghosttyBlocks(session.leafId)?.present(),
     onRequestFocus: () => focusGhosttySession(session.leafId),
     onOpenLink: (uri: string) => {
-      void openGhosttyLink(session, uri);
+      void openTerminalLink(
+        uri,
+        session.lastCwd ?? session.initialCwd ?? null,
+        () => focusGhosttySession(session.leafId),
+      );
     },
   };
   session.surfaceOptions = surfaceBaseOptions;
@@ -1055,37 +1067,6 @@ async function initializeSessionGeneration(
   session.writer.attach(pty);
   if (model.cols !== startCols || model.rows !== startRows) {
     session.ptyResize.send(model.cols, model.rows);
-  }
-}
-
-let homeDirectory: Promise<string | null> | null = null;
-
-/** URLs open in the browser; files (file://, paths) in the editor at their line. */
-async function openGhosttyLink(
-  session: GhosttySession,
-  uri: string,
-): Promise<void> {
-  homeDirectory ??= import("@tauri-apps/api/path")
-    .then(({ homeDir }) => homeDir())
-    .catch(() => null);
-  const target = resolveTerminalLink(
-    uri,
-    session.lastCwd ?? session.initialCwd ?? null,
-    await homeDirectory,
-  );
-  if (!target) return;
-  if (target.kind === "external") {
-    if (openTerminalPreview(target.url)) return;
-    void openExternalUrl(target.url, () => focusGhosttySession(session.leafId));
-    return;
-  }
-  // Detected paths are guesses: open only what exists and is a file.
-  const stat = await invoke<{ kind: string }>("fs_stat", {
-    path: target.path,
-    workspace: currentWorkspaceEnv(),
-  }).catch(() => null);
-  if (stat && stat.kind !== "dir") {
-    openTerminalFile(target.path, target.line, target.column);
   }
 }
 

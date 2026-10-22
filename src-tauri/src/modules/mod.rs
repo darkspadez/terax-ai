@@ -20,6 +20,7 @@ pub mod proc;
 pub mod pty;
 pub mod quick_terminal;
 pub mod runtime;
+pub mod second_launch;
 pub mod secrets;
 pub mod shell;
 pub mod system_fonts;

@@ -303,19 +303,34 @@ fn percent_encode(text: &str) -> String {
     out
 }
 
+/// Where a new window's first terminal starts (`launchDir.ts` reads it).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum WindowStart<'a> {
+    /// The directory of the window it was opened from (New Window).
+    Cwd(&'a str),
+    /// A folder a later launch of Terax asked it to open: it wins over the
+    /// window's restored spaces, like a folder given to the first launch.
+    Folder(&'a str),
+}
+
+fn window_url(start: Option<WindowStart>) -> String {
+    match start {
+        Some(WindowStart::Cwd(cwd)) => format!("index.html?cwd={}", percent_encode(cwd)),
+        Some(WindowStart::Folder(dir)) => format!("index.html?folder={}", percent_encode(dir)),
+        None => "index.html".to_owned(),
+    }
+}
+
 /// A window like `main` (see `tauri.conf.json` and the platform files),
-/// hidden until its page has painted; `cwd` is where its first terminal
-/// starts. `near` places it a step down and right of that window.
+/// hidden until its page has painted. `near` places it a step down and right
+/// of that window.
 fn build(
     app: &AppHandle,
     label: &str,
-    cwd: Option<&str>,
+    start: Option<WindowStart>,
     near: Option<&WebviewWindow>,
 ) -> tauri::Result<WebviewWindow> {
-    let url = match cwd {
-        Some(cwd) => format!("index.html?cwd={}", percent_encode(cwd)),
-        None => "index.html".to_owned(),
-    };
+    let url = window_url(start);
     let builder = WebviewWindowBuilder::new(app, label, WebviewUrl::App(url.into()))
         .title("Terax")
         .inner_size(800.0, 600.0)
@@ -355,8 +370,12 @@ fn build(
     Ok(window)
 }
 
-/// Opens a new window near `from`, its first terminal in `cwd`.
-pub fn open_new(app: &AppHandle, from: Option<&str>, cwd: Option<&str>) -> Result<String, String> {
+/// Opens a new window near `from`.
+pub fn open_new(
+    app: &AppHandle,
+    from: Option<&str>,
+    start: Option<WindowStart>,
+) -> Result<String, String> {
     let state = app.state::<WindowsState>();
     let label = {
         let inner = state.lock();
@@ -370,7 +389,7 @@ pub fn open_new(app: &AppHandle, from: Option<&str>, cwd: Option<&str>) -> Resul
         new_label(&taken).ok_or_else(|| format!("At most {MAX_WINDOWS} windows can be open"))?
     };
     let near = from.and_then(|label| app.get_webview_window(label));
-    build(app, &label, cwd, near.as_ref()).map_err(|e| e.to_string())?;
+    build(app, &label, start, near.as_ref()).map_err(|e| e.to_string())?;
     let open = {
         let mut inner = state.lock();
         inner.open.push(label.clone());
@@ -719,7 +738,11 @@ pub fn app_window_open(
     window: tauri::Window,
     cwd: Option<String>,
 ) -> Result<String, String> {
-    open_new(&app, Some(window.label()), cwd.as_deref())
+    open_new(
+        &app,
+        Some(window.label()),
+        cwd.as_deref().map(WindowStart::Cwd),
+    )
 }
 
 /// The calling page now answers quit requests.
@@ -915,5 +938,14 @@ mod tests {
         assert_eq!(percent_encode("/home/me/my proj"), "/home/me/my%20proj");
         assert_eq!(percent_encode("C:\\a&b=c#d"), "C%3A%5Ca%26b%3Dc%23d");
         assert_eq!(percent_encode("/ü"), "/%C3%BC");
+        assert_eq!(window_url(None), "index.html");
+        assert_eq!(
+            window_url(Some(WindowStart::Cwd("/home/me/my proj"))),
+            "index.html?cwd=/home/me/my%20proj"
+        );
+        assert_eq!(
+            window_url(Some(WindowStart::Folder("C:/work/a&b"))),
+            "index.html?folder=C%3A/work/a%26b"
+        );
     }
 }

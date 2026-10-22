@@ -6,16 +6,49 @@ use modules::{
     agent, control, fs, git, history, lsp, net, primary_selection, pty, secrets, shell, vibrancy,
     windows, workspace,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 #[cfg(target_os = "macos")]
 use tauri::PhysicalPosition;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_window_state::StateFlags;
 
-/// Drained on first read so HMR / re-mounts can't replay the launch dir.
-#[derive(Default)]
-struct LaunchDir(Mutex<Option<String>>);
+/// The folder Terax was launched with (not a launched file's parent), until
+/// the main window reads it: drained so HMR / re-mounts can't replay it.
+struct LaunchDir(Mutex<LaunchFolder>);
+
+enum LaunchFolder {
+    Unread(Option<String>),
+    Read,
+}
+
+impl LaunchDir {
+    fn new(folder: Option<String>) -> Self {
+        Self(Mutex::new(LaunchFolder::Unread(folder)))
+    }
+
+    fn take(&self) -> Option<String> {
+        let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        match std::mem::replace(&mut *state, LaunchFolder::Read) {
+            LaunchFolder::Unread(folder) => folder,
+            LaunchFolder::Read => None,
+        }
+    }
+
+    /// A folder opened before the main window read its launch folder becomes
+    /// that folder; false once it was read (or one is already there).
+    #[cfg(any(target_os = "macos", test))]
+    fn seed(&self, folder: String) -> bool {
+        let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        match &mut *state {
+            LaunchFolder::Unread(slot @ None) => {
+                *slot = Some(folder);
+                true
+            }
+            _ => false,
+        }
+    }
+}
 
 /// Drained on first read so HMR / re-mounts can't replay the launch files.
 #[derive(Default)]
@@ -23,7 +56,7 @@ struct LaunchFiles(Mutex<Vec<String>>);
 
 #[tauri::command]
 fn get_launch_dir(state: State<'_, LaunchDir>) -> Option<String> {
-    state.0.lock().expect("LaunchDir mutex poisoned").take()
+    state.take()
 }
 
 #[tauri::command]
@@ -39,6 +72,8 @@ enum LaunchEntry {
 #[derive(Default, Debug, PartialEq)]
 struct LaunchTarget {
     dir: Option<String>,
+    /// The first dir arg: a folder the user asked Terax to open.
+    folder: Option<String>,
     files: Vec<String>,
 }
 
@@ -46,12 +81,16 @@ struct LaunchTarget {
 /// file arg is opened. Kept free of fs/env access so it stays unit-testable.
 fn resolve_launch_target(entries: Vec<LaunchEntry>) -> LaunchTarget {
     let mut dir = None;
+    let mut folder = None;
     let mut files = Vec::new();
     for entry in entries {
         match entry {
             LaunchEntry::Dir(path) => {
+                if folder.is_none() {
+                    folder = Some(fs::to_canon(&path));
+                }
                 if dir.is_none() {
-                    dir = Some(fs::to_canon(&path));
+                    dir = folder.clone();
                 }
             }
             LaunchEntry::File(path) => {
@@ -62,24 +101,35 @@ fn resolve_launch_target(entries: Vec<LaunchEntry>) -> LaunchTarget {
             }
         }
     }
-    LaunchTarget { dir, files }
+    LaunchTarget { dir, folder, files }
 }
 
 fn parse_launch_target() -> LaunchTarget {
-    let entries = std::env::args()
-        .skip(1)
+    parse_launch_args(std::env::args().skip(1), None)
+}
+
+/// Paths among `args` (flags skipped), relative ones taken from `cwd` when
+/// given (a later launch's directory) else from this process's.
+fn parse_launch_args(args: impl IntoIterator<Item = String>, cwd: Option<&Path>) -> LaunchTarget {
+    let entries = args
+        .into_iter()
         .filter(|arg| !arg.starts_with('-'))
-        .filter_map(|arg| std::fs::canonicalize(arg).ok())
-        .filter_map(|path| {
-            let meta = std::fs::metadata(&path).ok()?;
-            Some(if meta.is_dir() {
-                LaunchEntry::Dir(path)
-            } else {
-                LaunchEntry::File(path)
-            })
+        .map(|arg| match cwd {
+            Some(cwd) => cwd.join(arg),
+            None => PathBuf::from(arg),
         })
+        .filter_map(launch_entry)
         .collect();
     resolve_launch_target(entries)
+}
+
+fn launch_entry(path: PathBuf) -> Option<LaunchEntry> {
+    let path = std::fs::canonicalize(path).ok()?;
+    Some(if std::fs::metadata(&path).ok()?.is_dir() {
+        LaunchEntry::Dir(path)
+    } else {
+        LaunchEntry::File(path)
+    })
 }
 
 #[tauri::command]
@@ -193,6 +243,16 @@ pub fn run() {
     let control_for_setup = control_state.clone();
 
     let builder = tauri::Builder::default();
+    // First, so a later launch hands over before anything else starts. Debug
+    // builds skip it: a dev build would otherwise hand off to an installed
+    // Terax (same identifier) and exit.
+    let builder = if cfg!(debug_assertions) {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_single_instance::init(
+            modules::second_launch::on_second_launch,
+        ))
+    };
     let builder = builder.plugin(tauri_plugin_clipboard_manager::init());
     #[cfg(target_os = "macos")]
     let builder = builder
@@ -277,7 +337,7 @@ pub fn run() {
             }
             registry
         })
-        .manage(LaunchDir(Mutex::new(cli_dir)))
+        .manage(LaunchDir::new(launch.folder))
         .manage(LaunchFiles(Mutex::new(launch.files)))
         .invoke_handler(tauri::generate_handler![
             pty::pty_open,
@@ -454,21 +514,27 @@ pub fn run() {
                     let entries = urls
                         .iter()
                         .filter_map(|u| u.to_file_path().ok())
-                        .filter_map(|p| std::fs::canonicalize(p).ok())
-                        .filter(|p| p.is_file())
-                        .map(LaunchEntry::File)
+                        .filter_map(launch_entry)
                         .collect();
                     let target = resolve_launch_target(entries);
-                    if target.files.is_empty() {
-                        return;
-                    }
                     if let Some(dir) = &target.dir {
                         if let Some(registry) = app.try_state::<workspace::WorkspaceRegistry>() {
                             let _ = registry.authorize(dir);
                         }
-                        if let Some(state) = app.try_state::<LaunchDir>() {
-                            *state.0.lock().expect("LaunchDir mutex poisoned") = Some(dir.clone());
+                    }
+                    // A folder (Open With, dropped on the Dock icon) is a launch
+                    // folder while the main window has not started, later it
+                    // opens in a new window, as from the command line.
+                    if let Some(folder) = target.folder {
+                        let seeded = app
+                            .try_state::<LaunchDir>()
+                            .is_some_and(|state| state.seed(folder.clone()));
+                        if !seeded {
+                            modules::second_launch::open_folder(app, folder);
                         }
+                    }
+                    if target.files.is_empty() {
+                        return;
                     }
                     if let Some(state) = app.try_state::<LaunchFiles>() {
                         *state.0.lock().expect("LaunchFiles mutex poisoned") = target.files.clone();
@@ -485,7 +551,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod launch_target_tests {
-    use super::{resolve_launch_target, LaunchEntry, LaunchTarget};
+    use super::{parse_launch_args, resolve_launch_target, LaunchDir, LaunchEntry, LaunchTarget};
     use std::path::PathBuf;
 
     #[test]
@@ -497,6 +563,7 @@ mod launch_target_tests {
     fn dir_arg_sets_workspace_and_opens_nothing() {
         let out = resolve_launch_target(vec![LaunchEntry::Dir(PathBuf::from("/home/u/proj"))]);
         assert_eq!(out.dir.as_deref(), Some("/home/u/proj"));
+        assert_eq!(out.folder.as_deref(), Some("/home/u/proj"));
         assert!(out.files.is_empty());
     }
 
@@ -506,6 +573,7 @@ mod launch_target_tests {
             "/home/u/proj/main.rs",
         ))]);
         assert_eq!(out.dir.as_deref(), Some("/home/u/proj"));
+        assert_eq!(out.folder, None);
         assert_eq!(out.files, vec!["/home/u/proj/main.rs".to_string()]);
     }
 
@@ -531,4 +599,38 @@ mod launch_target_tests {
         assert_eq!(out.dir.as_deref(), Some("/workspace"));
         assert_eq!(out.files, vec!["/other/x.rs".to_string()]);
     }
+
+    #[test]
+    fn a_later_launch_resolves_its_arguments_from_its_own_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let launch = tmp.path().join("launched-from");
+        std::fs::create_dir_all(launch.join("proj")).unwrap();
+        std::fs::write(launch.join("notes.md"), "").unwrap();
+        let canon = |rel: &str| super::fs::to_canon(launch.join(rel).canonicalize().unwrap());
+
+        let out = parse_launch_args(
+            ["--path", "proj", "notes.md", "missing"].map(String::from),
+            Some(&launch),
+        );
+
+        assert_eq!(out.dir, Some(canon("proj")));
+        assert_eq!(out.folder, Some(canon("proj")));
+        assert_eq!(out.files, vec![canon("notes.md")]);
+    }
+
+    #[test]
+    fn the_launch_folder_is_read_once_and_taken_before_that_only() {
+        let state = LaunchDir::new(None);
+        assert!(state.seed("/opened".into()));
+        assert!(!state.seed("/second".into()));
+        assert_eq!(state.take().as_deref(), Some("/opened"));
+        assert_eq!(state.take(), None);
+        // Read: a later folder opens a window instead.
+        assert!(!state.seed("/later".into()));
+
+        let launched = LaunchDir::new(Some("/cli".into()));
+        assert!(!launched.seed("/opened".into()));
+        assert_eq!(launched.take().as_deref(), Some("/cli"));
+    }
+
 }

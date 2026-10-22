@@ -62,12 +62,18 @@ export type TerminalBehavior = {
   readonly quickTerminalHotkey: QuickTerminalHotkey;
   /** Hide the quick terminal when another window takes focus. */
   readonly quickTerminalAutohide: boolean;
+  /**
+   * Opacity of a split tab's panes other than the focused one, over the
+   * terminal background (Ghostty's unfocused-split-opacity); 1 leaves them be.
+   */
+  readonly unfocusedSplitOpacity: number;
 };
 
 const NOTIFY_AFTER_SECONDS_MIN = 1;
 const NOTIFY_AFTER_SECONDS_MAX = 3600;
 const SCROLL_MULTIPLIER_MIN = 1;
 const SCROLL_MULTIPLIER_MAX = 20;
+const UNFOCUSED_SPLIT_OPACITY_MIN = 0.15;
 
 export function defaultTerminalBehavior(
   platform: "linux" | "macos" | "windows" | "other",
@@ -86,6 +92,7 @@ export function defaultTerminalBehavior(
     restoreScrollback: true,
     quickTerminalHotkey: "off",
     quickTerminalAutohide: true,
+    unfocusedSplitOpacity: 0.7,
   };
 }
 
@@ -108,6 +115,16 @@ function boundedInteger(
 ): number {
   return typeof value === "number" && Number.isFinite(value)
     ? Math.min(max, Math.max(min, Math.round(value)))
+    : fallback;
+}
+
+function boundedFraction(
+  value: unknown,
+  min: number,
+  fallback: number,
+): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(1, Math.max(min, Math.round(value * 100) / 100))
     : fallback;
 }
 
@@ -180,6 +197,11 @@ export function normalizeTerminalBehavior(
       typeof raw.quickTerminalAutohide === "boolean"
         ? raw.quickTerminalAutohide
         : defaults.quickTerminalAutohide,
+    unfocusedSplitOpacity: boundedFraction(
+      raw.unfocusedSplitOpacity,
+      UNFOCUSED_SPLIT_OPACITY_MIN,
+      defaults.unfocusedSplitOpacity,
+    ),
   };
 }
 

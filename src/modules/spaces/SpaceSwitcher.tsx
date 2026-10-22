@@ -226,6 +226,12 @@ export function SpaceSwitcher({
     }
   };
 
+  // Opened with the pointer, focus goes to the list rather than its first
+  // row, which WebKit would ring as if reached by keyboard. Opened with the
+  // shortcut, the first row takes focus for the keyboard.
+  const openedByPointer = useRef(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+
   const onPointerUp = (e: React.PointerEvent, onActivate?: () => void) => {
     const st = drag.current;
     if (st?.active) commit();
@@ -240,6 +246,9 @@ export function SpaceSwitcher({
       <PopoverTrigger asChild>
         <button
           type="button"
+          onPointerDown={() => {
+            openedByPointer.current = !open;
+          }}
           title={shortcut ? `Spaces · ${shortcut}` : "Spaces"}
           className="flex h-7 shrink-0 items-center gap-2 rounded-md px-2 text-muted-foreground/90 outline-none transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
         >
@@ -254,7 +263,19 @@ export function SpaceSwitcher({
           />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" sideOffset={6} className="w-[20rem] p-1.5">
+      <PopoverContent
+        ref={contentRef}
+        align="start"
+        sideOffset={6}
+        className="w-[20rem] p-1.5"
+        onOpenAutoFocus={(e) => {
+          if (openedByPointer.current) {
+            e.preventDefault();
+            contentRef.current?.focus({ preventScroll: true });
+          }
+          openedByPointer.current = false;
+        }}
+      >
         <div className="flex items-center justify-between px-1.5 pb-1.5 pt-0.5">
           <span className="text-xs font-semibold text-foreground">Spaces</span>
           {shortcut && (

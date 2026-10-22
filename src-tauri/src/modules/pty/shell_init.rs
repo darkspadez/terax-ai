@@ -372,6 +372,9 @@ mod unix {
                 }
                 // fish 4.0+ writes its own OSC 133 A/B; ours would double it.
                 cmd.env("fish_features", "no-mark-prompt");
+                // Login shell like zsh: fish runs its path_helper emulation
+                // (/etc/paths, /etc/paths.d, Homebrew) only when it is one.
+                cmd.arg("-l");
                 cmd.arg("-i");
                 // Re-assert our prompt after config.fish (-C runs last), so a
                 // framework prompt (starship etc.) loaded there can't override
@@ -489,10 +492,203 @@ mod unix {
                 argv,
                 vec![
                     "/usr/bin/fish".to_string(),
+                    "-l".to_string(),
                     "-i".to_string(),
                     "-C".to_string(),
                     super::super::FISH_REINSTALL_PROMPT.to_string(),
                 ]
+            );
+        }
+
+        /// A zsh started the way `apply_shell_init` starts it (login and
+        /// interactive, ZDOTDIR at the integration scripts) in a scratch home,
+        /// without the system's startup files. None when zsh is not installed.
+        struct ZshLaunch {
+            _tmp: tempfile::TempDir,
+            home: PathBuf,
+            wrapper: PathBuf,
+        }
+
+        impl ZshLaunch {
+            fn new() -> Option<Self> {
+                let installed = std::process::Command::new("zsh")
+                    .arg("--version")
+                    .output()
+                    .is_ok_and(|out| out.status.success());
+                if !installed {
+                    eprintln!("skipping zsh integration test: zsh not found");
+                    return None;
+                }
+                let tmp = tempfile::tempdir().unwrap();
+                let home = tmp.path().join("home");
+                let wrapper = home.join(".cache/terax/shell-integration/zsh");
+                fs::create_dir_all(&wrapper).unwrap();
+                for (name, script) in [
+                    (".zshenv", ZSHENV),
+                    (".zprofile", ZPROFILE),
+                    (".zshrc", ZSHRC),
+                    (".zlogin", ZLOGIN),
+                ] {
+                    fs::write(wrapper.join(name), script).unwrap();
+                }
+                Some(Self {
+                    _tmp: tmp,
+                    home,
+                    wrapper,
+                })
+            }
+
+            fn write(&self, rel: &str, content: &str) {
+                let path = self.home.join(rel);
+                fs::create_dir_all(path.parent().unwrap()).unwrap();
+                fs::write(path, content).unwrap();
+            }
+
+            fn read(&self, rel: &str) -> String {
+                fs::read_to_string(self.home.join(rel)).unwrap_or_default()
+            }
+
+            /// Feeds `input` to the shell as typed commands (so zsh loads its
+            /// history first) and returns stderr.
+            fn run(&self, env: &[(&str, &Path)], input: &str) -> String {
+                use std::io::Write;
+                use std::process::{Command, Stdio};
+
+                let mut child = Command::new("zsh")
+                    .args(["-d", "-l", "-i"])
+                    .env_clear()
+                    .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+                    .env("HOME", &self.home)
+                    .env("TERM", "dumb")
+                    .env("ZDOTDIR", &self.wrapper)
+                    .envs(env.iter().copied())
+                    .current_dir(&self.home)
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .unwrap();
+                child
+                    .stdin
+                    .take()
+                    .unwrap()
+                    .write_all(input.as_bytes())
+                    .unwrap();
+                let out = child.wait_with_output().unwrap();
+                assert!(out.status.success(), "zsh exited with {}", out.status);
+                String::from_utf8_lossy(&out.stderr).into_owned()
+            }
+        }
+
+        #[test]
+        fn zsh_user_files_run_under_the_users_zdotdir() {
+            // crynta/terax-ai#526: a conf.d loader in the user's .zshenv.
+            let Some(zsh) = ZshLaunch::new() else { return };
+            let user = zsh.home.join(".config/zsh");
+            zsh.write(
+                ".config/zsh/.zshenv",
+                "for f in \"$ZDOTDIR\"/conf.d/*.zsh; do source \"$f\"; done\n",
+            );
+            zsh.write(".config/zsh/conf.d/a.zsh", "TERAX_TEST_CONF_D=1\n");
+            for name in ["zprofile", "zshrc", "zlogin"] {
+                zsh.write(
+                    &format!(".config/zsh/.{name}"),
+                    &format!("print -r -- \"{name} $ZDOTDIR\" >> \"$HOME/seen\"\n"),
+                );
+            }
+
+            let stderr = zsh.run(
+                &[("TERAX_USER_ZDOTDIR", &user)],
+                "print -r -- \"$TERAX_TEST_CONF_D $ZDOTDIR\" > \"$HOME/result\"\n",
+            );
+
+            assert!(!stderr.contains("no matches found"), "{stderr}");
+            assert_eq!(
+                zsh.read("result").trim(),
+                format!("1 {}", zsh.wrapper.display())
+            );
+            let user = user.display();
+            assert_eq!(
+                zsh.read("seen"),
+                format!("zprofile {user}\nzshrc {user}\nzlogin {user}\n")
+            );
+        }
+
+        #[test]
+        fn zsh_zdotdir_set_by_the_users_zshenv_keeps_the_integration() {
+            // The XDG layout: ~/.zshenv moves the rest of the config.
+            let Some(zsh) = ZshLaunch::new() else { return };
+            zsh.write(".zshenv", "export ZDOTDIR=\"$HOME/.config/zsh\"\n");
+            zsh.write(".config/zsh/.zshrc", "TERAX_TEST_USER_RC=1\n");
+
+            zsh.run(
+                &[],
+                "print -r -- \"$TERAX_TEST_USER_RC $(whence -w _terax_precmd) \
+                 $ZDOTDIR $TERAX_USER_ZDOTDIR\" > \"$HOME/result\"\n",
+            );
+
+            assert_eq!(
+                zsh.read("result").trim(),
+                format!(
+                    "1 _terax_precmd: function {} {}",
+                    zsh.wrapper.display(),
+                    zsh.home.join(".config/zsh").display()
+                )
+            );
+        }
+
+        #[test]
+        fn zsh_history_file_derived_from_zdotdir_is_the_users() {
+            // macOS /etc/zshrc sets HISTFILE=${ZDOTDIR:-$HOME}/.zsh_history
+            // between the wrapper's .zprofile and .zshrc, with ZDOTDIR here.
+            let Some(zsh) = ZshLaunch::new() else { return };
+            let mut zprofile = ZPROFILE.to_string();
+            zprofile.push_str("HISTFILE=${ZDOTDIR:-$HOME}/.zsh_history\n");
+            fs::write(zsh.wrapper.join(".zprofile"), zprofile).unwrap();
+            // oh-my-zsh keeps a HISTFILE that is already set.
+            zsh.write(
+                ".zshrc",
+                "[ -z \"$HISTFILE\" ] && HISTFILE=\"$HOME/.zsh_history\"\n",
+            );
+            zsh.write(
+                ".zsh_history",
+                ": 1700000000:0;terax-test-earlier-command\n",
+            );
+
+            zsh.run(
+                &[],
+                "{ print -r -- \"$HISTFILE\"; fc -ln 1 } > \"$HOME/result\"\n",
+            );
+
+            let result = zsh.read("result");
+            let mut lines = result.lines();
+            assert_eq!(
+                lines.next(),
+                Some(zsh.home.join(".zsh_history").to_string_lossy().as_ref())
+            );
+            // Read once, by zsh itself: an extra `fc -R` would list it twice.
+            assert_eq!(
+                lines
+                    .filter(|line| *line == "terax-test-earlier-command")
+                    .count(),
+                1,
+                "{result}"
+            );
+        }
+
+        #[test]
+        fn zsh_history_file_chosen_by_the_user_is_kept() {
+            let Some(zsh) = ZshLaunch::new() else { return };
+            zsh.write(".zshrc", "HISTFILE=\"$HOME/.local/state/zsh/history\"\n");
+
+            zsh.run(&[], "print -r -- \"$HISTFILE\" > \"$HOME/result\"\n");
+
+            assert_eq!(
+                zsh.read("result").trim(),
+                zsh.home
+                    .join(".local/state/zsh/history")
+                    .display()
+                    .to_string()
             );
         }
     }
@@ -508,6 +704,7 @@ mod windows {
     use portable_pty::CommandBuilder;
 
     const PROFILE_PS1: &str = include_str!("scripts/profile.ps1");
+    const PROFILE_CMD: &str = include_str!("scripts/profile.cmd");
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     enum ShellKind {
@@ -570,6 +767,7 @@ mod windows {
             .unwrap_or_default();
         let is_powershell = shell_name == "pwsh.exe" || shell_name == "powershell.exe";
         let is_bash = shell_name == "bash.exe";
+        let is_cmd = shell_name == "cmd.exe";
 
         let mut cmd = CommandBuilder::new(&shell_path);
         super::apply_common(&mut cmd, cwd, blocks, control.as_ref());
@@ -602,6 +800,17 @@ mod windows {
                 }
                 Err(e) => {
                     log::warn!("bash shell integration disabled: {e}");
+                }
+            }
+        } else if is_cmd {
+            match prepare_cmd_profile() {
+                Ok(profile) => {
+                    // After AutoRun, so the PROMPT it sets gets wrapped too.
+                    cmd.arg("/k");
+                    cmd.arg(profile);
+                }
+                Err(e) => {
+                    log::warn!("cmd shell integration disabled: {e}");
                 }
             }
         } else {
@@ -723,6 +932,7 @@ mod windows {
                 args.push("env".to_string());
                 args.push("fish_features=no-mark-prompt".to_string());
                 args.push(shell_path.to_string());
+                args.push("-l".to_string());
                 args.push("-i".to_string());
                 args.push("-C".to_string());
                 args.push(super::FISH_REINSTALL_PROMPT.to_string());
@@ -731,8 +941,12 @@ mod windows {
                 args.push(shell_path.to_string());
                 args.push("-l".to_string());
             }
-            (ShellKind::Bash, WslShellIntegration::None)
-            | (ShellKind::Fish, WslShellIntegration::None) => {
+            (ShellKind::Fish, WslShellIntegration::None) => {
+                args.push(shell_path.to_string());
+                args.push("-l".to_string());
+                args.push("-i".to_string());
+            }
+            (ShellKind::Bash, WslShellIntegration::None) => {
                 args.push(shell_path.to_string());
                 args.push("-i".to_string());
             }
@@ -816,6 +1030,14 @@ mod windows {
         Ok(root)
     }
 
+    fn prepare_cmd_profile() -> Result<PathBuf, String> {
+        let dir = integration_root()?.join("cmd");
+        fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+        let file = dir.join("profile.cmd");
+        write_if_changed(&file, &super::crlf(PROFILE_CMD))?;
+        Ok(file)
+    }
+
     fn prepare_ps_profile() -> Result<PathBuf, String> {
         let dir = integration_root()?.join("powershell");
         fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
@@ -867,7 +1089,7 @@ mod windows {
                 .join("powershell.exe"),
             true,
         );
-        add(&mut out, "Command Prompt", system32.join("cmd.exe"), false);
+        add(&mut out, "Command Prompt", system32.join("cmd.exe"), true);
         if let Some(p) = git_bash_path() {
             add(&mut out, "Git Bash", p, true);
         }
@@ -891,7 +1113,9 @@ mod windows {
                 }
             }
         }
-        None
+        // A portable or custom-located Git on PATH.
+        super::which_in_path("git.exe")
+            .and_then(|git| super::git_bash_beside(&git, |path| path.is_file()))
     }
 
     fn write_if_changed(path: &Path, content: &str) -> Result<(), String> {
@@ -1041,11 +1265,47 @@ mod windows {
                     "env".to_string(),
                     "fish_features=no-mark-prompt".to_string(),
                     "/usr/bin/fish".to_string(),
+                    "-l".to_string(),
                     "-i".to_string(),
                     "-C".to_string(),
                     super::super::FISH_REINSTALL_PROMPT.to_string(),
                 ]
             );
+        }
+
+        /// Loads the integration profile in cmd.exe `times` times (as a
+        /// nested cmd would), then echoes PROMPT.
+        fn prompt_after_loading_profile(times: usize) -> String {
+            use std::os::windows::process::CommandExt;
+            let profile = prepare_cmd_profile().unwrap();
+            let call = format!("call \"{}\" & ", profile.display());
+            // raw_arg: Command escapes quotes as \", which cmd.exe rejects.
+            let line = format!("/c {}echo PROMPT=!PROMPT!", call.repeat(times));
+            let output = std::process::Command::new("cmd.exe")
+                .raw_arg("/d")
+                .raw_arg("/v:on")
+                .raw_arg(&line)
+                .env_remove("PROMPT")
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&output.stdout).into_owned()
+        }
+
+        #[test]
+        fn cmd_profile_wraps_the_prompt_once() {
+            let stdout = prompt_after_loading_profile(2);
+            assert!(stdout.contains("]7;file://"), "{stdout:?}");
+            assert!(stdout.contains("$P$G"), "{stdout:?}");
+            assert_eq!(stdout.matches("]133;A").count(), 1, "{stdout:?}");
+        }
+
+        #[test]
+        fn command_prompt_is_integrated() {
+            let cmd = list_shells()
+                .into_iter()
+                .find(|s| s.name == "Command Prompt")
+                .expect("cmd.exe is listed on Windows");
+            assert!(cmd.integrated);
         }
 
         #[test]
@@ -1070,6 +1330,12 @@ mod windows {
             );
         }
     }
+}
+
+/// cmd.exe can misparse batch files with LF-only line ends.
+#[cfg(any(windows, test))]
+fn crlf(content: &str) -> String {
+    content.replace("\r\n", "\n").replace('\n', "\r\n")
 }
 
 #[cfg(windows)]
@@ -1098,6 +1364,22 @@ pub fn windows_shell_path() -> PathBuf {
     }
 
     system32.join("cmd.exe")
+}
+
+/// Git for Windows' bash.exe for its git.exe (`<root>\cmd\git.exe`,
+/// `<root>\bin\git.exe` or `<root>\mingw64\bin\git.exe`): `<root>\bin\bash.exe`.
+#[cfg(any(windows, test))]
+fn git_bash_beside(
+    git_exe: &std::path::Path,
+    is_file: impl Fn(&std::path::Path) -> bool,
+) -> Option<PathBuf> {
+    git_exe
+        .parent()?
+        .ancestors()
+        .skip(1)
+        .take(2)
+        .map(|root| root.join("bin").join("bash.exe"))
+        .find(|bash| is_file(bash))
 }
 
 #[cfg(windows)]
@@ -1205,6 +1487,116 @@ mod tests {
                 .get_env("PATH")
                 .and_then(|path| std::env::split_paths(path).next()),
             Some(std::path::PathBuf::from("/app/bin"))
+        );
+    }
+
+    #[test]
+    fn git_bash_is_found_beside_a_git_on_path() {
+        // crynta/terax-ai#1120: a portable Git was never offered.
+        let root = std::path::PathBuf::from("PortableGit");
+        let bash = root.join("bin").join("bash.exe");
+        let present = |path: &std::path::Path| path == bash;
+        for git in [
+            root.join("cmd").join("git.exe"),
+            root.join("bin").join("git.exe"),
+            root.join("mingw64").join("bin").join("git.exe"),
+        ] {
+            assert_eq!(super::git_bash_beside(&git, present), Some(bash.clone()));
+        }
+        // A shim directory has no bash beside it.
+        let shim = std::path::PathBuf::from("scoop")
+            .join("shims")
+            .join("git.exe");
+        assert_eq!(super::git_bash_beside(&shim, present), None);
+    }
+
+    #[test]
+    fn cmd_profile_wraps_prompt_with_cwd_and_prompt_marks() {
+        // crynta/terax-ai#1271: the explorer did not follow cd in cmd.exe.
+        let profile = super::crlf(include_str!("scripts/profile.cmd"));
+        assert!(!profile.replace("\r\n", "").contains('\n'));
+        let prompt = profile
+            .lines()
+            .find(|line| line.starts_with("set \"PROMPT=$E"))
+            .expect("profile.cmd sets the prompt");
+        let marks: Vec<_> = [
+            "]133;D",
+            "]133;A",
+            "]7;file://%COMPUTERNAME%/$P",
+            "%PROMPT%",
+        ]
+        .iter()
+        .map(|mark| prompt.find(mark).expect(mark))
+        .collect();
+        assert!(marks.windows(2).all(|w| w[0] < w[1]), "{prompt}");
+        // No preexec hook: block tabs keep cmd's own prompt.
+        assert!(prompt.ends_with("]133;B;terax_blocks=0$E\\\""), "{prompt}");
+    }
+
+    #[test]
+    fn powershell_profile_runs_under_strict_mode_and_reports_exit_codes() {
+        // crynta/terax-ai#930: Set-StrictMode in the user's $PROFILE.
+        let Some(shell) = ["pwsh", "powershell"].into_iter().find(|shell| {
+            std::process::Command::new(shell)
+                .args(["-NoLogo", "-NoProfile", "-Command", "exit 0"])
+                .output()
+                .is_ok_and(|out| out.status.success())
+        }) else {
+            eprintln!("skipping PowerShell integration test: PowerShell not found");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let profile = dir.path().join("profile.ps1");
+        std::fs::write(&profile, include_str!("scripts/profile.ps1")).unwrap();
+        let profile = profile.to_string_lossy().replace('\'', "''");
+        let script = format!(
+            r#"
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+function Code([string]$p) {{ if ($p -match '\]133;D;(-?\d+)') {{ $Matches[1] }} else {{ 'none' }} }}
+& '{profile}'
+& '{profile}'
+$p = prompt
+$markers = ($p -match '\]133;A') -and ($p -match '\]133;B') -and ($p -match '\]7;file://')
+$codes = @(Code $p)
+$global:LASTEXITCODE = 3
+Get-Location > $null
+$p = prompt
+$codes += Code $p
+Write-Error failed -ErrorAction SilentlyContinue
+$p = prompt
+$codes += Code $p
+$kept = $global:LASTEXITCODE
+Remove-Variable -Scope Global LASTEXITCODE
+Write-Error failed -ErrorAction SilentlyContinue
+$p = prompt
+$codes += Code $p
+$env:TERAX_BLOCKS = '1'
+$p = prompt
+$codes += Code $p
+"markers=$markers codes=$($codes -join ',') kept=$kept added=$(Test-Path Variable:global:LASTEXITCODE)"
+"#
+        );
+        let out = std::process::Command::new(shell)
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &script,
+            ])
+            .env_remove("TERAX_BLOCKS")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success(), "{stdout}{stderr}");
+        // Success after a failed native command is 0, a failed cmdlet keeps
+        // the native code that names it or is 1, and $LASTEXITCODE survives.
+        assert_eq!(
+            stdout.trim(),
+            "markers=True codes=0,0,3,1,0 kept=3 added=False",
+            "{stderr}"
         );
     }
 }

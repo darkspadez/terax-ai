@@ -3,12 +3,14 @@ import {
   ensureGhosttyBlocks,
   ghosttyBlocks,
 } from "@/modules/terminal/ghostty/ghosttyBlockSessions";
+import { useTerminalStatusStore } from "@/modules/terminal/lib/terminalStatus";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearFocusedTerminal,
   disposeSession,
   leafCwd,
   leafGridSelection,
+  leafShellAtPrompt,
   whenSessionReady,
   writeToSession,
 } from "./terminalSessionApi";
@@ -18,6 +20,7 @@ vi.mock("@/modules/terminal/ghostty/useGhosttyTerminalSession", () => ({
   disposeGhosttySession: vi.fn(() => false),
   focusGhosttySession: vi.fn(),
   ghosttyFocusedLeaf: vi.fn(() => null),
+  ghosttyLeafHasForegroundJob: vi.fn(async () => false),
   ghosttyLeafHasForegroundProcess: vi.fn(async () => false),
   ghosttyLeafIdForPty: vi.fn(() => null),
   ghosttyCwdForLeaf: vi.fn(() => "/workspace"),
@@ -97,5 +100,23 @@ describe("terminalSessionApi", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // crynta/terax-ai#1028: a breadcrumb `cd` typed into a running agent or vim.
+  it("tells the shell's prompt from a running program", async () => {
+    const job = vi.mocked(ghosttySession.ghosttyLeafHasForegroundJob);
+    job.mockResolvedValueOnce(false);
+    expect(await leafShellAtPrompt(4)).toBe(true);
+    job.mockResolvedValueOnce(true);
+    expect(await leafShellAtPrompt(4)).toBe(false);
+    job.mockResolvedValueOnce(null);
+    expect(await leafShellAtPrompt(4)).toBeNull();
+
+    // Shell integration already says a command runs: no native check.
+    job.mockClear();
+    useTerminalStatusStore.getState().update(4, { running: true });
+    expect(await leafShellAtPrompt(4)).toBe(false);
+    expect(job).not.toHaveBeenCalled();
+    useTerminalStatusStore.getState().clear(4);
   });
 });

@@ -1,3 +1,4 @@
+import { nativeDropPoint } from "@/lib/nativeDropPoint";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useEffect } from "react";
 import { useTerminalDropStore } from "./dropStore";
@@ -36,14 +37,6 @@ type TerminalPathDropDeps = {
   setTarget: (leafId: number | null) => void;
   program?: TerminalProgramDrop;
 };
-
-// Tauri reports the drop point in physical pixels on some platforms and logical
-// on others; only scale down when it overflows the logical viewport.
-function logicalPoint(x: number, y: number): { x: number; y: number } {
-  if (x <= window.innerWidth && y <= window.innerHeight) return { x, y };
-  const dpr = window.devicePixelRatio || 1;
-  return { x: x / dpr, y: y / dpr };
-}
 
 function leafIdAt(x: number, y: number): number | null {
   const el = document.elementFromPoint(x, y);
@@ -132,7 +125,7 @@ export function useTerminalFileDrop(): TerminalPathDropTarget {
           target.clearTarget();
           return;
         }
-        const { x, y } = logicalPoint(p.position.x, p.position.y);
+        const { x, y } = nativeDropPoint(p.position);
         if (p.type === "enter" || p.type === "over") {
           target.updateTarget(x, y);
           return;

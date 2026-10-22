@@ -37,6 +37,7 @@ The comparison surface normalizes paths: backslashes to forward slashes, strips 
 - `authorize_spawn_cwd` rejects a spawn cwd outside an authorized root.
 - `authorize_user_spawn_cwd` registers the user's chosen cwd as a new root instead of rejecting it.
 - The registry is bootstrapped with the launch directory and the user's home directory (`bootstrap_registry`).
+- A later launch of Terax handed over by `tauri-plugin-single-instance` authorizes its folder (or its files' folder, or its usable directory) before a window opens there (`second_launch.rs`). Only the user's own processes reach it (the session D-Bus on Linux, a window message on Windows, a socket in `/tmp` the user owns on macOS), and those could start Terax with the same arguments anyway.
 
 This is the allow side of the file-system boundary. Any new feature that spawns a shell or mutates files outside the current workspace must interact with this registry.
 

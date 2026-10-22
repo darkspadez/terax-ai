@@ -206,7 +206,7 @@ fn resolve_launch_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
 }
 
-fn is_usable_launch_dir(path: &Path) -> bool {
+pub(crate) fn is_usable_launch_dir(path: &Path) -> bool {
     if !path.is_dir() || path == Path::new("/") {
         return false;
     }

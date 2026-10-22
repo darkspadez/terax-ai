@@ -21,7 +21,21 @@ describe("terminal behaviour preferences", () => {
       restoreScrollback: true,
       quickTerminalHotkey: "off",
       quickTerminalAutohide: true,
+      unfocusedSplitOpacity: 0.7,
     });
+  });
+
+  // crynta/terax-ai#537: the focused pane of a split was hard to spot.
+  it("keeps the unfocused split opacity within Ghostty's range", () => {
+    const defaults = defaultTerminalBehavior("linux");
+    const normalize = (unfocusedSplitOpacity: unknown) =>
+      normalizeTerminalBehavior({ unfocusedSplitOpacity }, defaults)
+        .unfocusedSplitOpacity;
+    expect(normalize(0.85)).toBe(0.85);
+    expect(normalize(1)).toBe(1);
+    expect(normalize(0.01)).toBe(0.15);
+    expect(normalize(3)).toBe(1);
+    expect(normalize("0.5")).toBe(0.7);
   });
 
   it("fills missing and invalid fields from the defaults", () => {

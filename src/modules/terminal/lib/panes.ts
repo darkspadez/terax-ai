@@ -30,6 +30,13 @@ export function leafIds(n: PaneNode): PaneId[] {
   return n.children.flatMap(leafIds);
 }
 
+/** Panes one terminal tab holds at most; the WebGL fallback sizes its pool from it. */
+export const MAX_PANES_PER_TAB = 8;
+
+export function canSplitPane(tree: PaneNode): boolean {
+  return leafIds(tree).length < MAX_PANES_PER_TAB;
+}
+
 export function firstLeafSlotId(n: PaneNode): PaneId {
   if (isLeaf(n)) return n.slotId ?? n.id;
   return firstLeafSlotId(n.children[0]);
@@ -109,6 +116,56 @@ export function splitLeaf(
       splitLeaf(c, targetId, newSplitId, newLeafId, dir, newCwd),
     ),
   };
+}
+
+export type SplitPosition = "left" | "right" | "top" | "bottom";
+
+/**
+ * Inserts an existing leaf beside `targetId`, keeping the leaf node itself so
+ * its session survives the move. Flattens into an enclosing split of the same
+ * direction like `splitLeaf`. Returns `tree` unchanged when the target is
+ * missing or the leaf is already there.
+ */
+export function insertLeafAt(
+  tree: PaneNode,
+  targetId: PaneId,
+  leaf: Extract<PaneNode, { kind: "leaf" }>,
+  position: SplitPosition,
+  newSplitId: PaneId,
+): PaneNode {
+  if (!hasLeaf(tree, targetId) || hasLeaf(tree, leaf.id)) return tree;
+  const dir: SplitDir =
+    position === "left" || position === "right" ? "row" : "col";
+  const before = position === "left" || position === "top";
+  const insert = (node: PaneNode): PaneNode => {
+    if (isLeaf(node)) {
+      if (node.id !== targetId) return node;
+      return {
+        kind: "split",
+        id: newSplitId,
+        dir,
+        children: before ? [leaf, node] : [node, leaf],
+      };
+    }
+    if (node.dir === dir) {
+      const index = node.children.findIndex(
+        (c) => isLeaf(c) && c.id === targetId,
+      );
+      if (index >= 0) {
+        const at = before ? index : index + 1;
+        return {
+          ...node,
+          children: [
+            ...node.children.slice(0, at),
+            leaf,
+            ...node.children.slice(at),
+          ],
+        };
+      }
+    }
+    return { ...node, children: node.children.map(insert) };
+  };
+  return insert(tree);
 }
 
 /**
