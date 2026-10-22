@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { currentWorkspaceEnv } from "@/modules/workspace";
+import { authorizationSettled, currentWorkspaceEnv } from "@/modules/workspace";
 
 export type ReadResult =
   | { kind: "text"; content: string; size: number }
@@ -175,6 +175,24 @@ export type GitBranchListResult = {
   worktrees: GitWorktreeEntry[];
 };
 
+/**
+ * A git command on a path the page names (the folder a terminal just moved
+ * to, an open file) waits for that path's authorization in flight, as reads
+ * and listings do, so right after a `cd` it never reaches the backend first
+ * and is refused. A repository root needs no wait: the backend authorizes a
+ * root when it finds one.
+ */
+function gitOnPath<T>(
+  command: string,
+  path: string,
+  args: Record<string, unknown>,
+): Promise<T> {
+  const workspace = currentWorkspaceEnv();
+  return authorizationSettled(path, workspace).then(() =>
+    invoke<T>(command, { ...args, workspace }),
+  );
+}
+
 export const native = {
   workspaceCurrentDir: () => invoke<string>("workspace_current_dir"),
   readFile: (path: string) =>
@@ -293,21 +311,12 @@ export const native = {
       }[]
     >("shell_bg_list"),
   gitResolveRepo: (cwd: string) =>
-    invoke<GitRepoInfo | null>("git_resolve_repo", {
-      cwd,
-      workspace: currentWorkspaceEnv(),
-    }),
+    gitOnPath<GitRepoInfo | null>("git_resolve_repo", cwd, { cwd }),
   /** Repositories inside a folder that is not one itself (children, grandchildren). */
   gitDiscoverRepos: (path: string) =>
-    invoke<string[]>("git_discover_repos", {
-      path,
-      workspace: currentWorkspaceEnv(),
-    }),
+    gitOnPath<string[]>("git_discover_repos", path, { path }),
   gitPanelSnapshot: (cwd: string) =>
-    invoke<GitPanelSnapshot>("git_panel_snapshot", {
-      cwd,
-      workspace: currentWorkspaceEnv(),
-    }),
+    gitOnPath<GitPanelSnapshot>("git_panel_snapshot", cwd, { cwd }),
   gitStatus: (repoRoot: string) =>
     invoke<GitStatusSnapshot>("git_status", {
       repoRoot,
@@ -321,10 +330,7 @@ export const native = {
       workspace: currentWorkspaceEnv(),
     }),
   gitFileBase: (path: string) =>
-    invoke<string | null>("git_file_base", {
-      path,
-      workspace: currentWorkspaceEnv(),
-    }),
+    gitOnPath<string | null>("git_file_base", path, { path }),
   gitDiffContent: (
     repoRoot: string,
     path: string,
