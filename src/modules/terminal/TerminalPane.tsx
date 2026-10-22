@@ -77,6 +77,9 @@ const GhosttyTerminalPane = memo(
     const minimumContrast = usePreferencesStore(
       (state) => state.terminalMinimumContrast,
     );
+    const customShader = usePreferencesStore(
+      (state) => state.terminalCustomShader,
+    );
     const ligatures = usePreferencesStore((state) =>
       ligaturesApply(state.terminalLigatures, state.terminalLetterSpacing),
     );
@@ -101,9 +104,10 @@ const GhosttyTerminalPane = memo(
       void resolvedMode;
       void activeTheme;
       void minimumContrast;
+      void customShader;
       const id = requestAnimationFrame(() => session.applyTheme());
       return () => cancelAnimationFrame(id);
-    }, [resolvedMode, activeTheme, minimumContrast, session]);
+    }, [resolvedMode, activeTheme, minimumContrast, customShader, session]);
 
     useImperativeHandle(
       ref,
@@ -223,7 +227,9 @@ export const TerminalPane = memo(
   forwardRef<TerminalPaneHandle, TerminalPaneProps>(
     function TerminalPane(props, ref) {
       const [backend] = useState(() =>
-        usePreferencesStore.getState().terminalRenderer === "webgl"
+        // Custom shaders run on the WebGL renderer.
+        usePreferencesStore.getState().terminalRenderer === "webgl" ||
+        usePreferencesStore.getState().terminalCustomShader
           ? ("ghostty-webgl" as const)
           : resolvedTerminalBackend(),
       );

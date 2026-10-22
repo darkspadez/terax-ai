@@ -43,6 +43,11 @@ export type TerminalGpuTheme = {
   readonly palette: readonly Rgb[];
   /** Ghostty's minimum contrast ratio for text; 1 or absent is off. */
   readonly minimumContrast?: number;
+  /**
+   * A Ghostty/Shadertoy custom shader run over each frame; the WebGL
+   * renderer applies it (`webgl/customShader.ts`).
+   */
+  readonly customShader?: string | null;
 };
 
 let colorCanvas: HTMLCanvasElement | null = null;
@@ -164,11 +169,17 @@ export function fontCss(
   return `${italic ? "italic " : ""}${weight} ${font.size}px ${font.family}`;
 }
 
-export function readTerminalGpuTheme(minimumContrast = 1): TerminalGpuTheme {
+export function readTerminalGpuTheme(
+  options: {
+    readonly minimumContrast?: number;
+    readonly customShader?: string | null;
+  } = {},
+): TerminalGpuTheme {
   const tokens = readTerminalTokens();
   const selection = cssColorToRgba(tokens.selection);
   return {
-    minimumContrast,
+    minimumContrast: options.minimumContrast ?? 1,
+    customShader: options.customShader ?? null,
     background: cssColorToRgb(tokens.background),
     foreground: cssColorToRgb(tokens.foreground),
     cursor: cssColorToRgb(tokens.cursor),

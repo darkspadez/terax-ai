@@ -166,6 +166,14 @@ the next frame change, and none while the pane cannot be seen
 (`gpu/imageAnimation.ts`). The hovered link (OSC 8 or detected) gets an
 underline overlay in the text colour; cell data is never rewritten for it
 (`gpu/linkUnderline.ts`).
+A custom shader (Settings, General, Terminal; Ghostty's and Shadertoy's
+`mainImage` contract with Ghostty's uniform names, `iChannel0` the finished
+frame, `iCurrentCursor`/`iPreviousCursor`/`iTimeCursorChange` for trail shaders)
+runs on the WebGL renderer, which terminals use while one is set
+(`webgl/customShader.ts`, loaded on first use): the frame is drawn into a texture
+and the shader draws the canvas from it, as WebGL2 GLSL (Shadertoy's dialect).
+Settings compiles a chosen file before saving it and shows compiler errors by
+line; it animates only while the window has focus.
 Native cell, grapheme and hyperlink presentation buffers allocate on first use
 and return to the WASM allocator when a pane is hidden. Hidden parsing does not
 rebuild them. Window pauses (occlusion, sleep) retain them and the uploaded cell

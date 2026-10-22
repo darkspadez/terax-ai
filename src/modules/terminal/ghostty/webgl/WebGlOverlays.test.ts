@@ -98,11 +98,15 @@ function setup(
     flags?: ReadonlyMap<number, number>;
     /** What the model reports for `ligatures()`; the method is absent when unset. */
     ligatures?: boolean;
+    customShader?: string;
+    /** `document.hasFocus()`; true when unset. */
+    focused?: boolean;
   } = {},
 ) {
   const fake = recordingGl();
   vi.stubGlobal("window", { setTimeout, clearTimeout });
   vi.stubGlobal("document", {
+    hasFocus: () => options.focused ?? true,
     createElement: () =>
       Object.assign(new EventTarget(), {
         width: 1,
@@ -140,6 +144,7 @@ function setup(
         selection: { color: [50, 50, 50], alpha: 0.5 },
         palette: [],
         minimumContrast: options.minimumContrast,
+        customShader: options.customShader,
       },
       scale: 1,
     },
@@ -389,6 +394,86 @@ describe("WebGL minimum contrast", () => {
     // Cells 1-3 sit on black (only column 0 has a background of its own).
     expect(colours(1)).toEqual([dark, dark, dark]);
     expect(colours(4.5)).toEqual([[255, 255, 255], dark, dark]);
+  });
+});
+
+describe("WebGL custom shader", () => {
+  const SHADER = `void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+  fragColor = texture(iChannel0, fragCoord / iResolution.xy);
+}`;
+
+  /** Renders until the lazily loaded shader module has compiled the pass. */
+  async function shaded(focused: boolean) {
+    const h = setup({ customShader: SHADER, focused });
+    h.renderer.render(h.frame());
+    await vi.dynamicImportSettled();
+    expect(h.requestFrame).toHaveBeenCalled(); // the module arrived
+    h.requestFrame.mockClear();
+    h.method("bindFramebuffer").mockClear();
+    h.method("drawArrays").mockClear();
+    return h;
+  }
+
+  it("draws the frame into a texture, then the shader over the canvas", async () => {
+    const h = await shaded(true);
+    try {
+      expect(h.renderer.render(h.frame("none"))).toBe(true);
+      const targets = h
+        .method("bindFramebuffer")
+        .mock.calls.map((call) => call[1]);
+      // Into the pass's framebuffer first, back to the canvas last.
+      expect(targets[0]).not.toBeNull();
+      expect(targets[targets.length - 1]).toBeNull();
+      expect(h.method("drawArrays")).toHaveBeenCalledWith(
+        expect.anything(),
+        0,
+        3,
+      );
+      const sources = h.method("shaderSource").mock.calls;
+      expect(sources[sources.length - 1]?.[1]).toContain(
+        "fragColor = texture(iChannel0, fragCoord / iResolution.xy);",
+      );
+    } finally {
+      h.renderer.dispose();
+    }
+  });
+
+  it("animates while the window has focus and rests without it", async () => {
+    const focused = await shaded(true);
+    try {
+      // Nothing changed, yet it draws and asks for the next frame.
+      expect(focused.renderer.render(focused.frame("none"))).toBe(true);
+      expect(focused.requestFrame).toHaveBeenCalledOnce();
+    } finally {
+      focused.renderer.dispose();
+    }
+    const resting = await shaded(false);
+    try {
+      expect(resting.renderer.render(resting.frame("none"))).toBe(false);
+      expect(resting.requestFrame).not.toHaveBeenCalled();
+    } finally {
+      resting.renderer.dispose();
+    }
+  });
+
+  it("draws without the shader when it does not compile", async () => {
+    const h = setup({ customShader: SHADER });
+    try {
+      h.method("getProgramParameter").mockReturnValue(false);
+      h.method("getProgramInfoLog").mockReturnValue(
+        "ERROR: Linking fragment stage: no mainImage",
+      );
+      h.renderer.render(h.frame());
+      await vi.dynamicImportSettled();
+      h.method("bindFramebuffer").mockClear();
+      expect(h.renderer.render(h.frame())).toBe(true);
+      expect(h.method("bindFramebuffer")).not.toHaveBeenCalledWith(
+        expect.anything(),
+        null,
+      );
+    } finally {
+      h.renderer.dispose();
+    }
   });
 });
 

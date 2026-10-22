@@ -28,6 +28,7 @@ import {
   selectionBoundsContain,
   type TerminalSelectionBounds,
 } from "../selection/TerminalSelectionController";
+import type { CustomShaderRunner } from "./customShader";
 import { WebGlGlyphAtlas, type WebGlGlyphEntry } from "./WebGlGlyphAtlas";
 import type { WebGlImageLayer } from "./WebGlImageLayer";
 
@@ -206,6 +207,13 @@ export class WebGlCellRenderer {
   /** Placements must be read again without damage: the image layer just loaded. */
   private imagesStale = false;
   private imagesShownValue = false;
+  /** The theme's custom shader source; its code loads when one is first set. */
+  private shaderSource: string | null = null;
+  private shaderModule: typeof import("./customShader") | null = null;
+  private shaderLoading = false;
+  /** A source that failed to compile is not tried again until it changes. */
+  private shaderFailedSource: string | null = null;
+  private shader: CustomShaderRunner | null = null;
 
   constructor() {
     this.canvas.className = "block";
@@ -242,6 +250,12 @@ export class WebGlCellRenderer {
       !this.profile ||
       rendererProfileKey(this.profile) !== rendererProfileKey(profile);
     this.profile = profile;
+    const shaderSource = profile.theme.customShader || null;
+    if (shaderSource !== this.shaderSource) {
+      this.disposeShader();
+      this.shaderSource = shaderSource;
+      this.forcePresent = true;
+    }
     if (fontChanged && !this.contextLost) {
       this.atlas?.dispose();
       this.atlas = new WebGlGlyphAtlas(this.gl, profile.metrics, profile.scale);
@@ -339,15 +353,20 @@ export class WebGlCellRenderer {
     const blinkChanged =
       this.hasBlinkingCells &&
       this.lastTextBlinkVisible !== frame.textBlinkVisible;
+    // A custom shader animates while the window has focus (Ghostty's
+    // default), so it draws every frame then.
+    const shader = this.prepareShader(frame);
     if (
       damage.kind === "none" &&
       !cursorChanged &&
       !blinkChanged &&
       !linkChanged &&
-      !this.forcePresent
+      !this.forcePresent &&
+      !shader?.focused
     )
       return false;
     this.draw(frame.textBlinkVisible);
+    if (shader?.focused) this.requestFrame?.();
     this.forcePresent = false;
     this.lastTextBlinkVisible = frame.textBlinkVisible;
     this.forceFullRedraw = false;
@@ -447,6 +466,7 @@ export class WebGlCellRenderer {
     this.canvas.remove();
     this.atlas?.dispose();
     this.atlas = null;
+    this.disposeShader();
     this.images?.dispose(this.contextLost);
     this.images = null;
     this.imagesOwner = null;
@@ -477,6 +497,8 @@ export class WebGlCellRenderer {
   private readonly handleContextLost = (event: Event): void => {
     event.preventDefault();
     this.contextLost = true;
+    // Its program and texture died with the context; compiled again after.
+    this.shader = null;
     this.images?.dispose(true);
     this.images = null;
     this.imagesOwner = null;
@@ -1099,6 +1121,8 @@ export class WebGlCellRenderer {
     if (!resources || !profile || !atlas) return;
     const gl = this.gl;
     const background = profile.theme.background;
+    const shader = this.shader;
+    shader?.begin(this.canvas.width, this.canvas.height);
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.STENCIL_TEST);
     gl.clearColor(
@@ -1165,6 +1189,62 @@ export class WebGlCellRenderer {
       this.glyphInstanceCount,
     );
     images?.draw(IMAGES_ABOVE_TEXT, gridWidth, gridHeight);
+    shader?.finish(profile.theme);
+  }
+
+  /**
+   * The custom shader for this frame, compiled on first use (its module loads
+   * first, then a frame is requested), with its clock, focus and cursor
+   * brought up to date; null without one or when it does not compile.
+   */
+  private prepareShader(frame: WebGlRendererFrame) {
+    const source = this.shaderSource;
+    if (!source || this.contextLost || !this.profile) return null;
+    if (!this.shader) {
+      if (this.shaderFailedSource === source) return null;
+      const module = this.shaderModule;
+      if (!module) {
+        if (!this.shaderLoading) {
+          this.shaderLoading = true;
+          void import("./customShader").then(
+            (loaded) => {
+              this.shaderModule = loaded;
+              this.shaderLoading = false;
+              if (!this.disposed) this.requestFrame?.();
+            },
+            () => {
+              this.shaderLoading = false;
+              this.shaderFailedSource = source;
+            },
+          );
+        }
+        return null;
+      }
+      const runner = module.CustomShaderRunner.create(this.gl, source);
+      if (typeof runner === "string") {
+        console.warn(`[terax] custom shader: ${runner}`);
+        this.shaderFailedSource = source;
+        return null;
+      }
+      this.shader = runner;
+    }
+    const shader = this.shader;
+    const metrics = this.profile.metrics;
+    shader.update(
+      frame.model.cursor(),
+      frame.cursorVisible,
+      metrics.deviceCellWidth,
+      metrics.deviceCellHeight,
+      this.canvas.height,
+      this.profile.theme.cursor,
+    );
+    return shader;
+  }
+
+  private disposeShader(): void {
+    if (this.shader && !this.contextLost) this.shader.dispose();
+    this.shader = null;
+    this.shaderFailedSource = null;
   }
 
   /** The hovered link's underline, then the cursor over it. */

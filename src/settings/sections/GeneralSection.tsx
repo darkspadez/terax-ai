@@ -26,6 +26,7 @@ import {
   setShowHidden,
   setTerminalCursorBlink,
   setTerminalCursorStyle,
+  setTerminalCustomShader,
   setTerminalFontFamily,
   setTerminalFontSize,
   setTerminalFontWeight,
@@ -38,6 +39,7 @@ import {
   setTerminalScrollback,
   setTerminalShell,
   setZoomLevel,
+  TERMINAL_CUSTOM_SHADER_MAX_BYTES,
   TERMINAL_FONT_SIZES,
   TERMINAL_LINE_HEIGHTS,
   TERMINAL_MINIMUM_CONTRASTS,
@@ -52,7 +54,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
 import { TerminalBehaviorSettings } from "./TerminalBehaviorSettings";
@@ -103,6 +105,33 @@ export function GeneralSection() {
     (s) => s.explorerGitDecorations,
   );
   const terminalRenderer = usePreferencesStore((s) => s.terminalRenderer);
+  const terminalCustomShader = usePreferencesStore(
+    (s) => s.terminalCustomShader,
+  );
+  const shaderInput = useRef<HTMLInputElement | null>(null);
+  const [shaderError, setShaderError] = useState<string | null>(null);
+
+  // Compiled here first, so a shader that does not build never reaches the
+  // terminals and its errors show with their line numbers.
+  const chooseShader = async (file: File | undefined) => {
+    setShaderError(null);
+    if (!file) return;
+    if (file.size > TERMINAL_CUSTOM_SHADER_MAX_BYTES) {
+      setShaderError(`${file.name}: larger than 256 KiB`);
+      return;
+    }
+    try {
+      const source = await file.text();
+      const { validateCustomShader } = await import(
+        "@/modules/terminal/ghostty/webgl/customShader"
+      );
+      const error = validateCustomShader(source);
+      if (error) setShaderError(`${file.name}:\n${error}`);
+      else await setTerminalCustomShader({ name: file.name, source });
+    } catch (error) {
+      setShaderError(`${file.name}: ${String(error)}`);
+    }
+  };
   const terminalScreenReader = usePreferencesStore(
     (s) => s.terminalScreenReader,
   );
@@ -277,6 +306,55 @@ export function GeneralSection() {
             </SelectContent>
           </Select>
         </SettingRow>
+        <SettingRow
+          title="Custom shader"
+          description="A Ghostty or Shadertoy shader (mainImage) drawn over every terminal frame, animated while the window has focus. Runs on the WebGL renderer; terminals already open on WebGPU pick it up when reopened."
+        >
+          <div className="flex items-center gap-2">
+            <span className="max-w-36 truncate text-[12px] text-muted-foreground">
+              {terminalCustomShader?.name ?? "None"}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-[11px]"
+              onClick={() => shaderInput.current?.click()}
+            >
+              Choose…
+            </Button>
+            {terminalCustomShader ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-[11px]"
+                onClick={() => {
+                  setShaderError(null);
+                  void setTerminalCustomShader(null);
+                }}
+              >
+                Remove
+              </Button>
+            ) : null}
+            <input
+              ref={shaderInput}
+              type="file"
+              accept=".glsl,.frag,.fs,.txt,text/plain"
+              className="hidden"
+              onChange={(event) => {
+                void chooseShader(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+          </div>
+        </SettingRow>
+        {shaderError ? (
+          <div
+            role="alert"
+            className="whitespace-pre-wrap rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 font-mono text-[11px] text-destructive"
+          >
+            {shaderError}
+          </div>
+        ) : null}
         <SettingRow
           title="Screen reader support"
           description="Expose terminal output as accessible text. Page Up and Page Down browse history when the output region is focused."

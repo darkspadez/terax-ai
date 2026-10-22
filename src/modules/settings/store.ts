@@ -175,6 +175,8 @@ export type Preferences = {
   terminalLineHeight: number;
   /** Ghostty's minimum contrast for terminal text (1 is off). */
   terminalMinimumContrast: number;
+  /** A Ghostty/Shadertoy shader run over terminal frames (WebGL renderer). */
+  terminalCustomShader: TerminalCustomShader | null;
   /** Join punctuation such as `->` and `!=` with the font's ligatures. */
   terminalLigatures: boolean;
   terminalFontSize: number;
@@ -276,6 +278,7 @@ const KEY_TERMINAL_SHELL = "terminalShell";
 const KEY_TERMINAL_LETTER_SPACING = "terminalLetterSpacing";
 const KEY_TERMINAL_LINE_HEIGHT = "terminalLineHeight";
 const KEY_TERMINAL_MINIMUM_CONTRAST = "terminalMinimumContrast";
+const KEY_TERMINAL_CUSTOM_SHADER = "terminalCustomShader";
 const KEY_TERMINAL_LIGATURES = "terminalLigatures";
 const KEY_TERMINAL_FONT_SIZE = "terminalFontSize";
 const KEY_TERMINAL_SCROLLBACK = "terminalScrollback";
@@ -310,6 +313,28 @@ export function clampTerminalLineHeight(value: unknown): number {
 }
 /** Off, then WCAG's thresholds: large text, AA, AAA. */
 export const TERMINAL_MINIMUM_CONTRASTS = [1, 1.5, 3, 4.5, 7] as const;
+
+export type TerminalCustomShader = {
+  /** The file it came from, for display. */
+  readonly name: string;
+  readonly source: string;
+};
+
+/** Ghostty's shaders are a few KiB; the WebGL renderer refuses more. */
+export const TERMINAL_CUSTOM_SHADER_MAX_BYTES = 256 * 1024;
+
+export function normalizeTerminalCustomShader(
+  value: unknown,
+): TerminalCustomShader | null {
+  if (!value || typeof value !== "object") return null;
+  const { name, source } = value as Record<string, unknown>;
+  if (typeof source !== "string" || source.trim() === "") return null;
+  if (source.length > TERMINAL_CUSTOM_SHADER_MAX_BYTES) return null;
+  return {
+    name: typeof name === "string" && name ? name.slice(0, 200) : "shader",
+    source,
+  };
+}
 
 /** A WCAG contrast ratio, 1 (off) to 21. */
 export function clampMinimumContrast(value: unknown): number {
@@ -402,6 +427,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   terminalLetterSpacing: 0,
   terminalLineHeight: TERMINAL_LINE_HEIGHT_DEFAULT,
   terminalMinimumContrast: 1,
+  terminalCustomShader: null,
   terminalLigatures: true,
   terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT,
   terminalScrollback: TERMINAL_SCROLLBACK_DEFAULT,
@@ -579,6 +605,9 @@ export async function loadPreferences(): Promise<Preferences> {
     ),
     terminalMinimumContrast: clampMinimumContrast(
       get<number>(KEY_TERMINAL_MINIMUM_CONTRAST),
+    ),
+    terminalCustomShader: normalizeTerminalCustomShader(
+      get<unknown>(KEY_TERMINAL_CUSTOM_SHADER),
     ),
     terminalLigatures: coerceTerminalLigatures(
       get<unknown>(KEY_TERMINAL_LIGATURES),
@@ -914,6 +943,15 @@ export async function setTerminalLineHeight(value: number): Promise<void> {
   await writePref(KEY_TERMINAL_LINE_HEIGHT, clampTerminalLineHeight(value));
 }
 
+export async function setTerminalCustomShader(
+  value: TerminalCustomShader | null,
+): Promise<void> {
+  await writePref(
+    KEY_TERMINAL_CUSTOM_SHADER,
+    normalizeTerminalCustomShader(value),
+  );
+}
+
 export async function setTerminalMinimumContrast(value: number): Promise<void> {
   await writePref(KEY_TERMINAL_MINIMUM_CONTRAST, clampMinimumContrast(value));
 }
@@ -1098,6 +1136,7 @@ export async function onPreferencesChange(
     [KEY_TERMINAL_LETTER_SPACING]: "terminalLetterSpacing",
     [KEY_TERMINAL_LINE_HEIGHT]: "terminalLineHeight",
     [KEY_TERMINAL_MINIMUM_CONTRAST]: "terminalMinimumContrast",
+    [KEY_TERMINAL_CUSTOM_SHADER]: "terminalCustomShader",
     [KEY_TERMINAL_LIGATURES]: "terminalLigatures",
     [KEY_TERMINAL_FONT_SIZE]: "terminalFontSize",
     [KEY_TERMINAL_SCROLLBACK]: "terminalScrollback",

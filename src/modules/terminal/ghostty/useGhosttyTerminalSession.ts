@@ -121,6 +121,15 @@ type GhosttyStartupTimings = {
 
 const sessions = new Map<number, GhosttySession>();
 
+/** The preferences that shape how the renderers draw (`TerminalGpuTheme`). */
+function terminalThemeOptions() {
+  const preferences = usePreferencesStore.getState();
+  return {
+    minimumContrast: preferences.terminalMinimumContrast,
+    customShader: preferences.terminalCustomShader?.source ?? null,
+  };
+}
+
 setScrollbackModelSource((leafId) => {
   const session = sessions.get(leafId);
   return session && !session.disposed ? session.model : null;
@@ -295,9 +304,7 @@ export function useGhosttyTerminalSession({
   const applyTheme = useCallback(() => {
     const session = sessions.get(leafId);
     if (!session?.model || !session.surface) return;
-    const theme = readTerminalGpuTheme(
-      usePreferencesStore.getState().terminalMinimumContrast,
-    );
+    const theme = readTerminalGpuTheme(terminalThemeOptions());
     session.model.setColors(
       rgbToInt(theme.foreground),
       rgbToInt(theme.background),
@@ -708,9 +715,7 @@ async function initializeSessionGeneration(
       startup[key] = performance.now() - startup.startedAt;
     }
   };
-  const theme = readTerminalGpuTheme(
-    usePreferencesStore.getState().terminalMinimumContrast,
-  );
+  const theme = readTerminalGpuTheme(terminalThemeOptions());
   const coreRuntime = getGhosttyCoreRuntime();
   const metricsPromise = (async () => {
     await ensureMonoFontsLoaded();
