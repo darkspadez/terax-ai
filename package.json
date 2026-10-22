@@ -144,5 +144,8 @@
   "trustedDependencies": [
     "esbuild",
     "msw"
-  ]
+  ],
+  "overrides": {
+    "@lezer/highlight": "^1.2.5"
+  }
 }
