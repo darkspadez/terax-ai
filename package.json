@@ -86,7 +86,7 @@
     "@tauri-apps/plugin-os": "~2.4.0",
     "@tauri-apps/plugin-process": "~2.4.0",
     "@tauri-apps/plugin-store": "~2.5.0",
-    "@tauri-apps/plugin-updater": "~2.13.3",
+    "@tauri-apps/plugin-updater": "~2.14.0",
     "@tauri-apps/plugin-window-state": "~2.5.0",
     "@terax/ghostty-core": "workspace:*",
     "@uiw/codemirror-theme-atomone": "^4.25.12",
