@@ -44,6 +44,15 @@ impl Probe {
     }
 }
 
+/// A search's root listing that macOS privacy controls refused, as the error the
+/// page explains; any other outcome lets the search go on as before.
+pub fn refused<T>(listing: std::io::Result<T>) -> Result<(), String> {
+    match listing {
+        Err(error) if error.raw_os_error() == Some(EPERM) => Err(error.to_string()),
+        _ => Ok(()),
+    }
+}
+
 /// Full Disk Access as the first probe that tells has it. Probes are taken in
 /// order and only as far as needed.
 pub fn full_disk_access(probes: impl IntoIterator<Item = Probe>) -> Access {
@@ -145,14 +154,14 @@ mod tests {
     use super::*;
     use std::io::{Error, ErrorKind};
 
-    fn refused() -> std::io::Result<()> {
+    fn refused_probe() -> std::io::Result<()> {
         Err(Error::from_raw_os_error(EPERM))
     }
 
     #[test]
     fn only_eperm_is_a_refusal() {
         assert_eq!(Probe::of(&Ok(())), Probe::Opened);
-        assert_eq!(Probe::of(&refused()), Probe::Refused);
+        assert_eq!(Probe::of(&refused_probe()), Probe::Refused);
         // EACCES: the file's own permissions, which say nothing about TCC.
         assert_eq!(
             Probe::of::<()>(&Err(Error::from_raw_os_error(13))),
@@ -167,6 +176,18 @@ mod tests {
             Probe::of::<()>(&Err(Error::from(ErrorKind::PermissionDenied))),
             Probe::Inconclusive
         );
+    }
+
+    #[test]
+    fn a_search_reports_only_a_refused_root() {
+        assert_eq!(
+            refused(refused_probe()),
+            Err(Error::from_raw_os_error(EPERM).to_string())
+        );
+        assert_eq!(refused(Ok(())), Ok(()));
+        // Unreadable for another reason: the search goes on as it always did.
+        assert_eq!(refused::<()>(Err(Error::from_raw_os_error(13))), Ok(()));
+        assert_eq!(refused::<()>(Err(Error::from(ErrorKind::NotFound))), Ok(()));
     }
 
     #[test]

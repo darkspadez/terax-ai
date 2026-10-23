@@ -75,7 +75,7 @@ Every command here that takes a path is refused outside the folders the workspac
 
 #### Search
 
-- `fs_search` - fuzzy file finder
+- `fs_search` - fuzzy file finder (on macOS a root the privacy controls refuse to list fails with that `EPERM` instead of finding nothing; so does `fs_grep_interactive`)
 - `fs_list_files` - recursive file listing
 
 #### Grep

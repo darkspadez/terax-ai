@@ -7,7 +7,7 @@ use tauri::{AppHandle, State};
 
 use super::index::{FileIndexState, IndexKey, Packed};
 use super::supersede::Supersede;
-use super::{authorized_root, blocking, display_path};
+use super::{authorized_root, blocking, display_path, privacy_refused_root};
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
 #[derive(Serialize, Clone)]
@@ -71,6 +71,7 @@ pub async fn fs_search(
     let index = index.inner().clone();
     blocking(move || {
         authorized_root(&app, &root, workspace.as_ref())?;
+        privacy_refused_root(&root)?;
         let cancelled = || ticket.as_ref().is_some_and(|t| t.is_superseded());
         run_search(
             &index,

@@ -11,6 +11,14 @@ export type PrivacyArea =
   | "removableVolumes"
   | "networkVolumes";
 
+/**
+ * Where a refused file lies. A path under /Volumes does not tell a removable
+ * volume from a network one, so a refusal there names both.
+ */
+export type RefusedArea =
+  | Exclude<PrivacyArea, "removableVolumes" | "networkVolumes">
+  | "volumes";
+
 /** Mirrors `SettingsPane` in `mac_privacy.rs`. */
 export type SettingsPane = "fullDiskAccess" | "filesAndFolders";
 
@@ -28,7 +36,7 @@ export const PRIVACY_AREAS: readonly PrivacyArea[] = [
 ];
 
 /** Full Disk Access has a pane of its own; every folder and volume switch is under Files and Folders. */
-export function settingsPaneFor(area: PrivacyArea): SettingsPane {
+export function settingsPaneFor(area: PrivacyArea | RefusedArea): SettingsPane {
   return area === "fullDiskAccess" ? "fullDiskAccess" : "filesAndFolders";
 }
 

@@ -16,6 +16,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { currentWorkspaceEnv } from "@/modules/workspace";
+import { PrivacyRefusalNotice, usePrivacyRefusal } from "@/modules/mac-privacy";
 import {
   forwardRef,
   useEffect,
@@ -86,6 +87,8 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [searching, setSearching] = useState(false);
   const [truncated, setTruncated] = useState(false);
+  const [failure, setFailure] = useState<unknown>(null);
+  const refusal = usePrivacyRefusal(rootPath, failure);
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastKeyboardNavAt = useRef(0);
@@ -105,6 +108,7 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
       setSelectedIndex(0);
       setSearching(false);
       setTruncated(false);
+      setFailure(null);
     }
   }, [open]);
 
@@ -115,11 +119,13 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
       setSelectedIndex(0);
       setSearching(false);
       setTruncated(false);
+      setFailure(null);
       return;
     }
     setSearching(true);
     let alive = true;
     const handle = setTimeout(async () => {
+      setFailure(null);
       try {
         const res = await invoke<SearchResult>("fs_search", {
           root: rootPath,
@@ -137,6 +143,7 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
       } catch (e) {
         if (alive) {
           console.error("fs_search failed:", e);
+          setFailure(e);
           setResults([]);
           setTruncated(false);
           setSelectedIndex(0);
@@ -242,9 +249,13 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
                 Searching…
               </div>
             ) : results.length === 0 ? (
-              <div className="px-3 py-2 text-[11px] text-muted-foreground">
-                No matches
-              </div>
+              refusal ? (
+                <PrivacyRefusalNotice refusal={refusal} className="px-3 py-3" />
+              ) : (
+                <div className="px-3 py-2 text-[11px] text-muted-foreground">
+                  No matches
+                </div>
+              )
             ) : (
               results.map((hit, index) => {
                 const isSelected = index === selectedIndex;

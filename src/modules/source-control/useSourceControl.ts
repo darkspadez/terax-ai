@@ -4,6 +4,7 @@ import {
   type GitStatusSnapshot,
 } from "@/modules/ai/lib/native";
 import { notifyHeadMoved } from "@/modules/editor/lib/gitSignals";
+import { showPrivacyRefusal } from "@/modules/mac-privacy";
 import { useTerminalStatusStore } from "@/modules/terminal/lib/terminalStatus";
 import {
   currentWorkspaceEnv,
@@ -533,6 +534,10 @@ export function useSourceControl(
         return { ok: true, action };
       } catch (error) {
         const message = normalizeError(error);
+        showPrivacyRefusal(`Could not ${action}`, {
+          path: repo.repoRoot,
+          error,
+        });
         if (isCurrentContext()) {
           setState((current) => ({ ...current, lastRemoteError: message }));
           await refresh({ remote: "never" }).catch(() => {});
