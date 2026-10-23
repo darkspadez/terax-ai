@@ -25,8 +25,8 @@ pub enum SourceKind {
     User,
     /// A project's `.claude/skills`.
     ClaudeProject,
-    /// A project's `.terax/skills`.
-    TeraxProject,
+    /// A project's `.oarlock/skills`.
+    OarlockProject,
 }
 
 impl SourceKind {
@@ -35,23 +35,23 @@ impl SourceKind {
             SourceKind::Oarlock => "oarlock",
             SourceKind::User => "user",
             SourceKind::ClaudeProject => "claude-project",
-            SourceKind::TeraxProject => "terax-project",
+            SourceKind::OarlockProject => "oarlock-project",
         }
     }
 
     /// A name found in several sources is taken from the highest: a project over the user's
-    /// `~/.claude/skills` over Oarlock's folder, and in a project `.terax/skills` over `.claude/skills`.
+    /// `~/.claude/skills` over Oarlock's folder, and in a project `.oarlock/skills` over `.claude/skills`.
     pub fn precedence(self) -> u8 {
         match self {
             SourceKind::Oarlock => 0,
             SourceKind::User => 1,
             SourceKind::ClaudeProject => 2,
-            SourceKind::TeraxProject => 3,
+            SourceKind::OarlockProject => 3,
         }
     }
 
     pub fn is_project(self) -> bool {
-        matches!(self, SourceKind::ClaudeProject | SourceKind::TeraxProject)
+        matches!(self, SourceKind::ClaudeProject | SourceKind::OarlockProject)
     }
 }
 
@@ -470,7 +470,7 @@ mod tests {
             (SourceKind::User, "pdf"),
             (SourceKind::ClaudeProject, "pdf"),
             (SourceKind::Oarlock, "only"),
-            (SourceKind::TeraxProject, "pdf"),
+            (SourceKind::OarlockProject, "pdf"),
             (SourceKind::User, "two"),
             (SourceKind::Oarlock, "two"),
         ];

@@ -32,7 +32,7 @@ export function trustDecisions(
 
 /** Whether an item holds skills (rather than instructions or MCP servers). */
 export function isSkillsItem(kind: TrustItemKind): boolean {
-  return kind === "claude-skills" || kind === "terax-skills";
+  return kind === "claude-skills" || kind === "oarlock-skills";
 }
 
 /** What a project provides, as the prompt names it, in the prompt's order. */
@@ -53,7 +53,7 @@ const GROUP_ACCEPT: Record<ItemGroup, string> = {
 };
 
 function itemGroup(kind: TrustItemKind): ItemGroup {
-  if (kind === "terax-md") return "instructions";
+  if (kind === "agents-md") return "instructions";
   return isSkillsItem(kind) ? "skills" : "servers";
 }
 

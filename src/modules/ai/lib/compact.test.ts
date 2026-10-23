@@ -135,7 +135,7 @@ describe("the system prompt in the context", () => {
     const alone = compactModelMessagesDetailed(history, 100_000);
     expect(alone.compacted).toBe(false);
 
-    // ...but not beside a 56,000-token system prompt (a large TERAX.md):
+    // ...but not beside a 56,000-token system prompt (a large AGENTS.md):
     // older results are elided, the recent ones kept.
     const beside = compactModelMessagesDetailed(history, 100_000, 56_000);
     expect(beside.compacted).toBe(true);
@@ -143,29 +143,29 @@ describe("the system prompt in the context", () => {
     expect(isElided(beside.messages[beside.messages.length - 1])).toBe(false);
   });
 
-  it("estimates four characters a token and sizes the largest TERAX.md a model could take", () => {
+  it("estimates four characters a token and sizes the largest AGENTS.md a model could take", () => {
     expect(approxTextTokens("x".repeat(4000))).toBe(1000);
     // At most four bytes a character: a larger file holds more characters
     // than the whole context.
     expect(maxMemoryBytes(128_000)).toBe(128_000 * 4 * 4);
   });
 
-  it("fails a run whose system prompt cannot fit, naming TERAX.md when it is the cause", () => {
+  it("fails a run whose system prompt cannot fit, naming AGENTS.md when it is the cause", () => {
     expect(systemPromptOverflow(99_999, 100_000, null)).toBeNull();
     const memory = { size: 1_600_000, tokens: 400_000 };
     expect(systemPromptOverflow(99_999, 100_000, memory)).toBeNull();
 
     expect(systemPromptOverflow(405_000, 100_000, memory)).toBe(
-      "This project's TERAX.md (1.5 MB) does not fit in the model's context of 100,000 tokens. Shorten it, stop using it in Settings > Skills, or choose a model with a larger context.",
+      "This project's AGENTS.md (1.5 MB) does not fit in the model's context of 100,000 tokens. Shorten it, stop using it in Settings > Skills, or choose a model with a larger context.",
     );
-    // Without TERAX.md it would not fit either: the message names no file.
+    // Without AGENTS.md it would not fit either: the message names no file.
     expect(systemPromptOverflow(505_000, 100_000, memory)).toBe(
-      "The instructions for this run (about 505,000 tokens, with your custom instructions, the project's TERAX.md, skills and MCP servers) do not fit in the model's context of 100,000 tokens.",
+      "The instructions for this run (about 505,000 tokens, with your custom instructions, the project's AGENTS.md, skills and MCP servers) do not fit in the model's context of 100,000 tokens.",
     );
     expect(systemPromptOverflow(100_000, 100_000, null)).toMatch(
       /^The instructions for this run/,
     );
-    expect(memoryOverflow(900, 128_000)).toContain("TERAX.md (900 bytes)");
-    expect(memoryOverflow(40 * 1024, 128_000)).toContain("TERAX.md (40.0 KB)");
+    expect(memoryOverflow(900, 128_000)).toContain("AGENTS.md (900 bytes)");
+    expect(memoryOverflow(40 * 1024, 128_000)).toContain("AGENTS.md (40.0 KB)");
   });
 });

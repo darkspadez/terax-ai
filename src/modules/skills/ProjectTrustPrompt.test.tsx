@@ -36,8 +36,8 @@ describe("ProjectTrustPrompt", () => {
     const html = render([
       trustItem({ kind: "claude-skills" }),
       trustItem({
-        kind: "terax-skills",
-        path: "/work/proj/.terax/skills",
+        kind: "oarlock-skills",
+        path: "/work/proj/.oarlock/skills",
         state: "changed",
       }),
     ]);
@@ -79,12 +79,12 @@ describe("ProjectTrustPrompt", () => {
     expect(html).toContain("Use selected");
   });
 
-  it("asks about a project's TERAX.md, showing its size and first lines as text", () => {
+  it("asks about a project's AGENTS.md, showing its size and first lines as text", () => {
     const html = render([
       trustItem({
-        kind: "terax-md",
-        label: "Instructions in TERAX.md",
-        path: "/work/proj/TERAX.md",
+        kind: "agents-md",
+        label: "Instructions in AGENTS.md",
+        path: "/work/proj/AGENTS.md",
         entries: [
           {
             title: "2.1 KB · 60 lines",
@@ -94,7 +94,7 @@ describe("ProjectTrustPrompt", () => {
       }),
     ]);
     expect(html).toContain("Use the project instructions in proj?");
-    expect(html).toContain("/work/proj/TERAX.md");
+    expect(html).toContain("/work/proj/AGENTS.md");
     expect(html).toContain("2.1 KB · 60 lines");
     expect(html).toContain("# Rules\n&lt;b&gt;never&lt;/b&gt; ask");
     expect(html).not.toContain("<b>never</b>");
@@ -106,7 +106,7 @@ describe("ProjectTrustPrompt", () => {
 
   it("asks about instructions, skills and servers together", () => {
     const html = render([
-      trustItem({ kind: "terax-md", path: "/work/proj/TERAX.md" }),
+      trustItem({ kind: "agents-md", path: "/work/proj/AGENTS.md" }),
       trustItem(),
       trustItem({ kind: "mcp-json", path: "/work/proj/.mcp.json" }),
     ]);
@@ -124,8 +124,8 @@ describe("ProjectTrustPrompt", () => {
     const html = render([
       trustItem(),
       trustItem({
-        kind: "terax-skills",
-        path: "/work/proj/.terax/skills",
+        kind: "oarlock-skills",
+        path: "/work/proj/.oarlock/skills",
         hash: null,
         problem: "holds more than 10000 files, too many to review",
         state: "unreviewable",

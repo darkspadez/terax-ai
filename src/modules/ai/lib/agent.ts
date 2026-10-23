@@ -346,7 +346,7 @@ function buildStableSystem(
     : "";
   const memoryBlock =
     projectMemory && projectMemory.trim().length > 0
-      ? `\n\n## PROJECT — TERAX.md\n${projectMemory.trim()}`
+      ? `\n\n## PROJECT INSTRUCTIONS (AGENTS.md)\n${projectMemory.trim()}`
       : "";
   const mcpBlock = mcp ? mcpPrompt(mcp.instructions) : "";
   const skillsList = skills ? skillsPromptBlock(modelSkills(skills)) : null;
@@ -389,7 +389,7 @@ export type RunAgentOptions = {
   approvalState?: () => ApprovalState;
   /** The effort chosen for this model; absent keeps the model's default. */
   reasoningEffort?: ReasoningEffort;
-  /** The project's TERAX.md, sent whole; without text when it is larger than
+  /** The project's AGENTS.md, sent whole; without text when it is larger than
    *  the model could take, which fails the run with a message saying so. */
   projectMemory?: ProjectMemory | null;
   /** This run's MCP tools; never given to sub-agents. */
@@ -434,7 +434,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   );
   // The system prompt goes with every step whole, so it counts against the
   // context before the history, and a run it cannot fit fails here, naming
-  // TERAX.md when that is what does not fit, instead of at the provider.
+  // AGENTS.md when that is what does not fit, instead of at the provider.
   const contextLimit = resolveContextLimit(
     modelId,
     endpoints,

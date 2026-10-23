@@ -14,11 +14,11 @@ describe("project trust prompt", () => {
   it("asks about items never decided and items changed since", () => {
     const status = trustStatus([
       trustItem({ kind: "claude-skills", state: "pending" }),
-      trustItem({ kind: "terax-skills", state: "changed", hash: "t2" }),
+      trustItem({ kind: "oarlock-skills", state: "changed", hash: "t2" }),
     ]);
     expect(askingItems(status).map((i) => i.kind)).toEqual([
       "claude-skills",
-      "terax-skills",
+      "oarlock-skills",
     ]);
     for (const state of ["allowed", "denied", "unreviewable"] as const) {
       expect(askingItems(trustStatus([trustItem({ state })]))).toEqual([]);
@@ -36,12 +36,12 @@ describe("project trust prompt", () => {
   it("answers each item with the hash the user saw", () => {
     const items = [
       trustItem({ kind: "claude-skills", hash: "a" }),
-      trustItem({ kind: "terax-skills", hash: "b" }),
-      trustItem({ kind: "terax-skills", hash: null, state: "unreviewable" }),
+      trustItem({ kind: "oarlock-skills", hash: "b" }),
+      trustItem({ kind: "oarlock-skills", hash: null, state: "unreviewable" }),
     ];
-    expect(trustDecisions(items, new Set(["terax-skills"]))).toEqual([
+    expect(trustDecisions(items, new Set(["oarlock-skills"]))).toEqual([
       { kind: "claude-skills", hash: "a", allow: false },
-      { kind: "terax-skills", hash: "b", allow: true },
+      { kind: "oarlock-skills", hash: "b", allow: true },
     ]);
   });
 });
@@ -58,12 +58,12 @@ describe("prompt wording", () => {
     expect(acceptLabel([skills])).toBe("Use skills");
     expect(acceptLabel([servers])).toBe("Use servers");
     expect(acceptLabel([skills, servers])).toBe("Use selected");
-    expect(isSkillsItem("terax-skills")).toBe(true);
+    expect(isSkillsItem("oarlock-skills")).toBe(true);
     expect(isSkillsItem("mcp-json")).toBe(false);
   });
 
-  it("names a project's TERAX.md as its instructions, first", () => {
-    const memory = trustItem({ kind: "terax-md" });
+  it("names a project's AGENTS.md as its instructions, first", () => {
+    const memory = trustItem({ kind: "agents-md" });
     const skills = trustItem();
     const servers = trustItem({ kind: "mcp-json" });
     expect(promptTitle([memory], "p")).toBe(
@@ -77,7 +77,7 @@ describe("prompt wording", () => {
     );
     expect(acceptLabel([memory])).toBe("Use instructions");
     expect(acceptLabel([memory, servers])).toBe("Use selected");
-    expect(isSkillsItem("terax-md")).toBe(false);
+    expect(isSkillsItem("agents-md")).toBe(false);
     expect(promptGroups([memory])).toEqual({
       instructions: true,
       skills: false,

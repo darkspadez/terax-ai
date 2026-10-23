@@ -725,7 +725,7 @@ function TrustedProjects({
       <div className="flex flex-col">
         <GroupLabel>Project decisions</GroupLabel>
         <span className="text-[10.5px] text-muted-foreground">
-          Projects whose instructions (TERAX.md), skills or MCP servers you
+          Projects whose instructions (AGENTS.md), skills or MCP servers you
           allowed or declined. Forget one to be asked again next time you open
           it.
         </span>

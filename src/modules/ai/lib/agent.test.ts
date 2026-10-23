@@ -231,7 +231,7 @@ describe("runAgentStream", () => {
   });
 });
 
-describe("the project's TERAX.md in a run", () => {
+describe("the project's AGENTS.md in a run", () => {
   // gpt-4.1-mini: a context of 128,000 tokens, about 512,000 characters.
   const modelId = "gpt-4.1-mini";
 
@@ -289,7 +289,7 @@ describe("the project's TERAX.md in a run", () => {
       modelId,
       projectMemory: { size: text.length, text },
     });
-    expect(systemText(options)).toContain(`## PROJECT — TERAX.md\n${text.trim()}`);
+    expect(systemText(options)).toContain(`## PROJECT INSTRUCTIONS (AGENTS.md)\n${text.trim()}`);
   });
 
   it("fails before reaching the provider when the file cannot fit the model", async () => {
@@ -303,7 +303,7 @@ describe("the project's TERAX.md in a run", () => {
         projectMemory: { size: text.length, text },
       }),
     ).rejects.toThrow(
-      "This project's TERAX.md (585.9 KB) does not fit in the model's context of 128,000 tokens.",
+      "This project's AGENTS.md (585.9 KB) does not fit in the model's context of 128,000 tokens.",
     );
     // Larger than the model could take at all: the backend sent only its size.
     await expect(
@@ -314,7 +314,7 @@ describe("the project's TERAX.md in a run", () => {
         uiMessages,
         projectMemory: { size: 3 * 1024 * 1024, text: null },
       }),
-    ).rejects.toThrow("This project's TERAX.md (3.0 MB) does not fit");
+    ).rejects.toThrow("This project's AGENTS.md (3.0 MB) does not fit");
     expect(streamTextMock).not.toHaveBeenCalled();
   });
 
@@ -324,7 +324,7 @@ describe("the project's TERAX.md in a run", () => {
       __elided: true,
     });
 
-    // About 87,500 tokens of TERAX.md: with it, the same history crosses
+    // About 87,500 tokens of AGENTS.md: with it, the same history crosses
     // what compaction allows, so the older read result is elided.
     streamTextMock.mockClear();
     const onCompact = vi.fn();

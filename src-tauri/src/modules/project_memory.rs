@@ -1,6 +1,6 @@
-//! A project's `TERAX.md`: instructions Oarlock adds to every AI run in the project (the system
+//! A project's `AGENTS.md`: instructions Oarlock adds to every AI run in the project (the system
 //! prompt's project section), used only through the shared project trust. It is an
-//! `ItemKind::TeraxMd` item whose inspector shows its size, line count and first lines, hashed by
+//! `ItemKind::AgentsMd` item whose inspector shows its size, line count and first lines, hashed by
 //! content, so a change asks again. There is no size limit: the model gets the whole allowed
 //! file, and a run whose instructions cannot fit the model's context says so.
 //!
@@ -22,7 +22,7 @@ use crate::modules::project_trust::{
 use crate::modules::skills::frontmatter::clean_text;
 use crate::modules::workspace::{Origin, WorkspaceEnv, WorkspaceRegistry};
 
-pub const FILE: &str = "TERAX.md";
+pub const FILE: &str = "AGENTS.md";
 const PREVIEW_LINES: usize = 8;
 const PREVIEW_LINE_CHARS: usize = 160;
 /// The most of one line the preview keeps before cleaning it, so a line of hidden characters
@@ -47,7 +47,7 @@ fn is_blank(text: &str) -> bool {
     text.trim_start_matches('\u{feff}').trim().is_empty()
 }
 
-/// The text of a TERAX.md's bytes: None when it holds nothing (empty or blank), an error when it
+/// The text of an AGENTS.md's bytes: None when it holds nothing (empty or blank), an error when it
 /// cannot be used.
 fn text_of(bytes: &[u8]) -> Option<Result<&str, String>> {
     if memchr::memchr(0, bytes).is_some() {
@@ -109,7 +109,7 @@ impl Preview {
     }
 }
 
-/// A TERAX.md read once, in chunks: the SHA-256 of all its bytes, its size and line count,
+/// An AGENTS.md read once, in chunks: the SHA-256 of all its bytes, its size and line count,
 /// whether it is UTF-8 text without NUL bytes, whether it holds anything, and the lines the
 /// prompt previews. It never holds more than a chunk and the preview, whatever the file's size.
 struct Scan {
@@ -290,7 +290,7 @@ fn scan_file(path: &Path) -> Result<Scanned, String> {
     Scan::new().read(&mut file).map_err(|e| e.to_string())
 }
 
-/// A project's TERAX.md as read for the model.
+/// A project's AGENTS.md as read for the model.
 #[derive(Debug)]
 enum ForModel {
     /// Its text, with the hash of exactly these bytes.
@@ -299,7 +299,7 @@ enum ForModel {
     TooLarge(Scanned),
 }
 
-/// The TERAX.md at `path` (its real path) for the model: its text, or when it is larger than
+/// The AGENTS.md at `path` (its real path) for the model: its text, or when it is larger than
 /// `limit` bytes only what a scan finds. None when it holds nothing.
 fn read_file(path: &Path, limit: u64) -> Option<Result<ForModel, String>> {
     let mut file = match open_file(path) {
@@ -360,19 +360,19 @@ fn preview_line(line: &str) -> String {
         .collect()
 }
 
-/// The trust prompt's view of a project's TERAX.md (`project_trust::inspect`): its size and line
+/// The trust prompt's view of a project's AGENTS.md (`project_trust::inspect`): its size and line
 /// count as the title and its first lines (from the first that is not blank) as the detail,
 /// read in chunks, so a file of any size costs a chunk.
 pub fn inspect(root: &Path) -> Option<Inspected> {
     let unusable = |problem: String| {
         Some(Inspected {
-            kind: ItemKind::TeraxMd,
+            kind: ItemKind::AgentsMd,
             path: root.join(FILE),
             hash: Err(problem),
             entries: Vec::new(),
         })
     };
-    let real = match item_path(root, ItemKind::TeraxMd)? {
+    let real = match item_path(root, ItemKind::AgentsMd)? {
         Ok(real) => real,
         Err(problem) => return unusable(problem),
     };
@@ -387,7 +387,7 @@ pub fn inspect(root: &Path) -> Option<Inspected> {
         return None;
     }
     Some(Inspected {
-        kind: ItemKind::TeraxMd,
+        kind: ItemKind::AgentsMd,
         path: real,
         hash: Ok(scanned.hash),
         entries: vec![scanned.entry],
@@ -396,7 +396,7 @@ pub fn inspect(root: &Path) -> Option<Inspected> {
 
 // ---- What the model gets ----
 
-/// What `project_memory_read` returns: the project's TERAX.md as the user allowed it.
+/// What `project_memory_read` returns: the project's AGENTS.md as the user allowed it.
 #[derive(Serialize, Debug, PartialEq, Eq)]
 pub struct ProjectMemory {
     /// Its size in bytes.
@@ -406,7 +406,7 @@ pub struct ProjectMemory {
     pub text: Option<String>,
 }
 
-/// What the model gets of the TERAX.md of the project at `root` (a real path): only when the AI's
+/// What the model gets of the AGENTS.md of the project at `root` (a real path): only when the AI's
 /// file tools reach it and the user allows exactly the content read; its text, or only its size
 /// when it is larger than `limit` bytes.
 fn usable_memory(
@@ -415,7 +415,7 @@ fn usable_memory(
     reaches: impl Fn(&Path) -> bool,
     allowed: impl Fn(&str) -> bool,
 ) -> Option<ProjectMemory> {
-    let real = item_path(root, ItemKind::TeraxMd)?.ok()?;
+    let real = item_path(root, ItemKind::AgentsMd)?.ok()?;
     if !reaches(&real) {
         return None;
     }
@@ -452,11 +452,11 @@ fn window_memory(
         &project.real,
         limit,
         |path| gates.reaches(path),
-        |hash| project_trust::is_allowed(app, &project.key, ItemKind::TeraxMd, hash),
+        |hash| project_trust::is_allowed(app, &project.key, ItemKind::AgentsMd, hash),
     )
 }
 
-/// The TERAX.md of the calling window's project for an AI run working in `root`, while the user
+/// The AGENTS.md of the calling window's project for an AI run working in `root`, while the user
 /// allows its current content and the AI's file tools reach it, else None (the run goes on
 /// without it). Its whole text, or only its size when it is larger than `limit` bytes (more than
 /// the run's model could take). Read on every run, so an answer withdrawn or a change takes
@@ -484,7 +484,7 @@ pub async fn project_memory_read(
 
 // ---- Oarlock's own changes (`project_trust::keeping_trust`) ----
 
-/// The hash of the TERAX.md at `path` (its real path), read in chunks, and whether it holds
+/// The hash of the AGENTS.md at `path` (its real path), read in chunks, and whether it holds
 /// nothing (empty or blank).
 pub fn held(path: &Path) -> Result<(String, bool), String> {
     let scanned = scan_file(path)?;
@@ -492,7 +492,7 @@ pub fn held(path: &Path) -> Result<(String, bool), String> {
     Ok((scanned.hash, nothing))
 }
 
-/// Whether a TERAX.md with this content holds nothing (empty or blank).
+/// Whether an AGENTS.md with this content holds nothing (empty or blank).
 pub fn holds_nothing(content: &[u8]) -> bool {
     text_of(content).is_none()
 }
@@ -508,7 +508,7 @@ mod tests {
         (dir, root)
     }
 
-    /// The prompt's entry for a TERAX.md with this text.
+    /// The prompt's entry for an AGENTS.md with this text.
     fn review(text: &str) -> ItemEntry {
         Scan::of(text.as_bytes()).entry
     }
@@ -525,7 +525,7 @@ mod tests {
         let text = "# Rules\n\nAlways\tuse tabs.\n";
         std::fs::write(root.join(FILE), text).unwrap();
         let item = inspect(&root).unwrap();
-        assert_eq!(item.kind, ItemKind::TeraxMd);
+        assert_eq!(item.kind, ItemKind::AgentsMd);
         assert_eq!(item.path, root.join(FILE));
         let hash = item.hash.unwrap();
         assert_eq!(hash, hex(&Sha256::digest(text.as_bytes())));
@@ -639,12 +639,12 @@ mod tests {
             assert!(problem(&root).contains("outside the project"));
             std::fs::remove_file(root.join(FILE)).unwrap();
             std::fs::create_dir(root.join("docs")).unwrap();
-            std::fs::write(root.join("docs/AGENTS.md"), "rules").unwrap();
-            std::os::unix::fs::symlink(root.join("docs/AGENTS.md"), root.join(FILE)).unwrap();
+            std::fs::write(root.join("docs/RULES.md"), "rules").unwrap();
+            std::os::unix::fs::symlink(root.join("docs/RULES.md"), root.join(FILE)).unwrap();
             let item = inspect(&root).unwrap();
             assert_eq!(
                 item.path,
-                root.join("docs/AGENTS.md"),
+                root.join("docs/RULES.md"),
                 "a link inside is fine"
             );
             assert!(item.hash.is_ok());

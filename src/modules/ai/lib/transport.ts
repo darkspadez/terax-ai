@@ -14,14 +14,14 @@ import type { ApprovalMode } from "./approvalMode";
 import type { ReasoningEffort } from "./reasoningEffort";
 
 /**
- * The project's TERAX.md for this run. The backend reads it and returns it only
+ * The project's AGENTS.md for this run. The backend reads it and returns it only
  * while the user allows its current content (project trust), so it is asked on
  * every run: a withdrawn answer or a changed file stops reaching the model at
  * once. Without it the run goes on with no project memory. The whole file is
  * sent, whatever its size; above `limit` bytes (more than the model could take)
  * only its size comes back, and the run says it does not fit.
  */
-async function readTeraxMd(
+async function readAgentsMd(
   workspaceRoot: string | null,
   limit: number,
 ): Promise<ProjectMemory | null> {
@@ -87,7 +87,7 @@ export function createContextAwareTransport(deps: Deps) {
       deps.getOpenaiCompatibleContextLimit?.(),
     );
     const [projectMemory, mcp, skills] = await Promise.all([
-      readTeraxMd(live.workspaceRoot, maxMemoryBytes(contextLimit)),
+      readAgentsMd(live.workspaceRoot, maxMemoryBytes(contextLimit)),
       mcpToolsForRun({
         signal: options.abortSignal,
         onWaiting: () => deps.onStep?.("Starting MCP servers"),

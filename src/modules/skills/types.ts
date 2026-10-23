@@ -1,7 +1,7 @@
 import type { WorkspaceEnv } from "@/modules/workspace";
 
 /** Where a skill comes from (`skills::discover::SourceKind`). */
-export type SkillSource = "oarlock" | "user" | "claude-project" | "terax-project";
+export type SkillSource = "oarlock" | "user" | "claude-project" | "oarlock-project";
 
 /** A project a window has open (`project_trust::OpenProject`). */
 export type OpenProject = {
@@ -47,9 +47,9 @@ export type InvalidSkill = {
 };
 
 export type TrustItemKind =
-  | "terax-md"
+  | "agents-md"
   | "claude-skills"
-  | "terax-skills"
+  | "oarlock-skills"
   | "mcp-json";
 
 type TrustItemState =

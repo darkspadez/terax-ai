@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { authorizationSettled, currentWorkspaceEnv } from "@/modules/workspace";
 
-/** A project's TERAX.md as the user allowed it: its size in bytes and its
+/** A project's AGENTS.md as the user allowed it: its size in bytes and its
  *  whole text, or no text when it is larger than the run's model could take. */
 export type ProjectMemory = { size: number; text: string | null };
 
@@ -212,7 +212,7 @@ export const native = {
       workspace: currentWorkspaceEnv(),
       ...AI_ORIGIN,
     }),
-  /** The window's project TERAX.md for a run in `root`, only while the user
+  /** The window's project AGENTS.md for a run in `root`, only while the user
    *  allows its current content (`project_memory_read`); null otherwise. Its
    *  text is null when it is larger than `limit` bytes. */
   readProjectMemory: (root: string, limit: number) =>

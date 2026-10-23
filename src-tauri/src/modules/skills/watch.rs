@@ -388,7 +388,7 @@ mod tests {
                 stop: home.join("oarlock"),
             },
             Target {
-                path: home.join("project/.terax/skills"),
+                path: home.join("project/.oarlock/skills"),
                 stop: home.join("project"),
             },
         ];

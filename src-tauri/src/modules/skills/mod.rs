@@ -1,6 +1,6 @@
 //! Agent Skills: folders with a `SKILL.md` (instructions for the model, with optional reference
 //! files and scripts) from Oarlock's own skills folder, `~/.claude/skills`, and the open projects'
-//! `.claude/skills` and `.terax/skills` once the user trusts them (`project_trust`).
+//! `.claude/skills` and `.oarlock/skills` once the user trusts them (`project_trust`).
 //!
 //! The page lists skills, loads one's instructions and reads its files through these commands,
 //! never through the file commands: a skill's files are read only inside its real folder, and a
@@ -84,15 +84,15 @@ fn user_dir() -> Option<PathBuf> {
 fn source_kind(kind: ItemKind) -> Option<SourceKind> {
     match kind {
         ItemKind::ClaudeSkills => Some(SourceKind::ClaudeProject),
-        ItemKind::TeraxSkills => Some(SourceKind::TeraxProject),
-        ItemKind::TeraxMd | ItemKind::McpJson => None,
+        ItemKind::OarlockSkills => Some(SourceKind::OarlockProject),
+        ItemKind::AgentsMd | ItemKind::McpJson => None,
     }
 }
 
 fn item_kind(kind: SourceKind) -> Option<ItemKind> {
     match kind {
         SourceKind::ClaudeProject => Some(ItemKind::ClaudeSkills),
-        SourceKind::TeraxProject => Some(ItemKind::TeraxSkills),
+        SourceKind::OarlockProject => Some(ItemKind::OarlockSkills),
         SourceKind::Oarlock | SourceKind::User => None,
     }
 }
@@ -598,7 +598,7 @@ fn parse_id(id: &str) -> Result<(SourceKind, String), String> {
         SourceKind::Oarlock,
         SourceKind::User,
         SourceKind::ClaudeProject,
-        SourceKind::TeraxProject,
+        SourceKind::OarlockProject,
     ]
     .into_iter()
     .find(|kind| kind.id() == source)
@@ -1156,8 +1156,8 @@ mod tests {
             "claude-project/pdf@/p"
         );
         assert_eq!(
-            parse_id("terax-project/pdf"),
-            Ok((SourceKind::TeraxProject, "pdf".into()))
+            parse_id("oarlock-project/pdf"),
+            Ok((SourceKind::OarlockProject, "pdf".into()))
         );
         for bad in [
             "pdf",
@@ -1201,7 +1201,7 @@ mod tests {
         );
         views(
             scanned(&[("only", "only")]),
-            &source(SourceKind::TeraxProject),
+            &source(SourceKind::OarlockProject),
             Some(&project()),
             false,
             &disabled,
@@ -1223,7 +1223,7 @@ mod tests {
                 ("oarlock/only", None),
                 ("user/pdf", None),
                 ("claude-project/pdf@/p", None),
-                ("terax-project/only@/p", None),
+                ("oarlock-project/only@/p", None),
             ]
         );
         assert!(!snapshot.skills[3].enabled);
@@ -1253,7 +1253,7 @@ mod tests {
         write_skill(&user, "pdf");
         write_skill(&user, "notes");
         write_skill(&project_root.join(".claude/skills"), "pdf");
-        write_skill(&project_root.join(".terax/skills"), "deploy");
+        write_skill(&project_root.join(".oarlock/skills"), "deploy");
         let globals = [
             Source {
                 kind: SourceKind::Oarlock,
@@ -1300,7 +1300,7 @@ mod tests {
         );
 
         let only_oarlock_item =
-            |_: &OpenProject, kind: ItemKind, _: &str| kind == ItemKind::TeraxSkills;
+            |_: &OpenProject, kind: ItemKind, _: &str| kind == ItemKind::OarlockSkills;
         let partly = collect_from(
             &globals,
             std::slice::from_ref(&project),
@@ -1313,10 +1313,10 @@ mod tests {
             .iter()
             .all(|s| s.source != SourceKind::ClaudeProject));
         let deploy = partly.skills.iter().find(|s| s.name == "deploy").unwrap();
-        assert_eq!(deploy.dir, "/work/project/.terax/skills/deploy");
+        assert_eq!(deploy.dir, "/work/project/.oarlock/skills/deploy");
         assert_eq!(
             deploy.key,
-            format!("terax-project/deploy@{}", to_canon(&project_root))
+            format!("oarlock-project/deploy@{}", to_canon(&project_root))
         );
 
         let trusted = collect_from(
