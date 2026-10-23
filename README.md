@@ -20,20 +20,6 @@
   </p>
 </div>
 
-<p align="center">
-  <a href="docs/readme/README.zh-CN.md">简体中文</a> |
-  <a href="docs/readme/README.es.md">Español</a> |
-  <a href="docs/readme/README.de.md">Deutsch</a> |
-  <a href="docs/readme/README.fr.md">Français</a> |
-  <a href="docs/readme/README.ja.md">日本語</a> |
-  <a href="docs/readme/README.ko.md">한국어</a> |
-  <a href="docs/readme/README.pt-BR.md">Português</a> |
-  <a href="docs/readme/README.pl.md">Polski</a> |
-  <a href="docs/readme/README.ru.md">Русский</a> |
-  <a href="docs/readme/README.id.md">Bahasa Indonesia</a> |
-  <a href="docs/readme/README.hi.md">हिन्दी</a>
-</p>
-
 ---
 
 Terax is a lightweight open-source terminal-first AI-native development environment (ADE) built on Tauri 2 + Rust and React 19. A native PTY backend with a WebGL renderer, an agentic AI side-panel that runs against your own keys or fully local models, plus a code editor, file explorer, source control with a git graph, and a web preview pane built in. About 7-8 MB on disk. No telemetry. No account.
@@ -171,14 +157,6 @@ Tauri 2, Rust, `portable-pty`, React 19, TypeScript, Vite, libghostty-vt, WebGPU
 ## Contributing
 
 Issues and PRs are welcome! Feel free to open issues, suggest features, or submit pull requests. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [architecture docs](docs/README.md) for more details.
-
-## Code signing
-
-<a href="https://signpath.org"><img src="https://avatars.githubusercontent.com/u/34448643?s=200&v=4" width="80" alt="SignPath" align="left" /></a>
-
-Windows builds are signed with a free code signing certificate provided by [SignPath.io](https://signpath.io), certificate by the [SignPath Foundation](https://signpath.org).
-
-<br clear="left" />
 
 ## License
 

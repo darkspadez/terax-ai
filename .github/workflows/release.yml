@@ -15,8 +15,7 @@ jobs:
     # `platform` names the leg (the steps below branch on it); `runner` is the
     # Namespace profile it builds on (see ci.yml). The Linux profiles are Ubuntu
     # 22.04 so the packages keep that glibc baseline. There is no Windows
-    # profile yet: the Windows leg is left out until one exists, and its
-    # SignPath steps below stay for when it returns.
+    # profile yet, so there is no Windows leg: Windows builds from source.
     strategy:
       fail-fast: false
       matrix:
@@ -178,91 +177,12 @@ jobs:
               --clobber --repo "$GITHUB_REPOSITORY"
           fi
 
-      # SignPath Authenticode-signs the Windows installers. Their bytes change,
-      # so the minisign updater signatures tauri-action produced over the
-      # unsigned files no longer match. We stage the installers under the exact
-      # names the SignPath artifact configuration expects, submit them, then
-      # re-run the tauri signer over the SIGNED files and re-upload both the
-      # installers and their new .sig. latest.json is patched in the final
-      # patch-updater-manifest job, after every matrix leg has merged, so a
-      # parallel macOS/Linux upload cannot clobber the Windows signatures.
-      - name: Stage Windows installers for SignPath
-        if: matrix.platform == 'windows-latest' && startsWith(github.ref, 'refs/tags/')
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $bundleDir = "src-tauri/target/release/bundle"
-          $exe = Get-ChildItem "$bundleDir/nsis" -Filter *.exe | Select-Object -First 1
-          $msi = Get-ChildItem "$bundleDir/msi"  -Filter *.msi | Select-Object -First 1
-          if (-not $exe) { throw "No NSIS .exe produced by Tauri" }
-          if (-not $msi) { throw "No .msi produced by Tauri" }
-          New-Item -ItemType Directory -Path signpath-staging -Force | Out-Null
-          Copy-Item $exe.FullName signpath-staging/terax-setup.exe
-          Copy-Item $msi.FullName signpath-staging/terax.msi
-          "EXE_REAL_PATH=$($exe.FullName)" | Out-File $env:GITHUB_ENV -Append
-          "MSI_REAL_PATH=$($msi.FullName)" | Out-File $env:GITHUB_ENV -Append
-
-      - name: Upload unsigned Windows artifact
-        id: upload-windows
-        if: matrix.platform == 'windows-latest' && startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-artifact@v7
-        with:
-          name: windows-unsigned
-          path: signpath-staging/
-          if-no-files-found: error
-
-      # Requires manual approval in the SignPath UI for the production policy.
-      # The default wait timeout is 600s; bumped so the job survives the time
-      # it takes to review and approve the request during a release.
-      - name: Submit Windows installers to SignPath
-        if: matrix.platform == 'windows-latest' && startsWith(github.ref, 'refs/tags/')
-        uses: signpath/github-action-submit-signing-request@v3
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: 'df665bf4-9b76-41ae-9596-1ba3a23010aa'
-          project-slug: 'terax-ai'
-          signing-policy-slug: 'release-signing'
-          artifact-configuration-slug: 'initial'
-          github-artifact-id: ${{ steps.upload-windows.outputs.artifact-id }}
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 3600
-          output-artifact-directory: 'signed'
-
-      - name: Re-sign updater and upload signed Windows installers
-        if: matrix.platform == 'windows-latest' && startsWith(github.ref, 'refs/tags/')
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          $signedExe = "signed/terax-setup.exe"
-          $signedMsi = "signed/terax.msi"
-          foreach ($f in @($signedExe, $signedMsi)) {
-            if (-not (Test-Path $f)) { throw "Signed artifact missing: $f" }
-            $sig = Get-AuthenticodeSignature $f
-            if ($null -eq $sig.SignerCertificate) { throw "$f is NOT Authenticode-signed" }
-            if ($sig.Status -ne 'Valid') { throw "$f signature status: $($sig.Status)" }
-            Write-Host "OK $f -> $($sig.SignerCertificate.Subject)"
-          }
-          Copy-Item $signedExe $env:EXE_REAL_PATH -Force
-          Copy-Item $signedMsi $env:MSI_REAL_PATH -Force
-          Remove-Item "$($env:EXE_REAL_PATH).sig" -ErrorAction SilentlyContinue
-          Remove-Item "$($env:MSI_REAL_PATH).sig" -ErrorAction SilentlyContinue
-          bun run tauri signer sign $env:EXE_REAL_PATH
-          bun run tauri signer sign $env:MSI_REAL_PATH
-          gh release upload $env:GITHUB_REF_NAME `
-            $env:EXE_REAL_PATH "$($env:EXE_REAL_PATH).sig" `
-            $env:MSI_REAL_PATH "$($env:MSI_REAL_PATH).sig" `
-            --clobber --repo $env:GITHUB_REPOSITORY
-
-  # Patch the re-signed AppImages and SignPath-signed Windows signatures into
-  # the combined updater manifest. Runs once, after every matrix leg has
-  # finished merging its platform into latest.json, so it operates on the full
-  # manifest and cannot be clobbered by a parallel upload. Each platform key is
-  # patched only when its leg ran and signed (no Windows leg for now), and the
-  # job does nothing while updates are off and there is no latest.json.
+  # Patch the re-signed AppImages into the combined updater manifest. Runs
+  # once, after every matrix leg has finished merging its platform into
+  # latest.json, so it operates on the full manifest and cannot be clobbered by
+  # a parallel upload. Each platform key is patched only when its leg ran and
+  # signed, and the job does nothing while updates are off and there is no
+  # latest.json.
   patch-updater-manifest:
     needs: publish-tauri
     if: startsWith(github.ref, 'refs/tags/')
@@ -270,7 +190,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Patch latest.json with re-signed AppImage and Windows signatures
+      - name: Patch latest.json with the re-signed AppImage signatures
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -303,26 +223,11 @@ jobs:
           }
 
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
-            --pattern "*.AppImage.sig" --pattern "*_x64-setup.exe.sig" \
-            --pattern "*_x64_en-US.msi.sig" || true
+            --pattern "*.AppImage.sig" || true
 
           patch linux-x86_64 "./*_amd64.AppImage.sig"
           patch linux-x86_64-appimage "./*_amd64.AppImage.sig"
           patch linux-aarch64 "./*_aarch64.AppImage.sig"
           patch linux-aarch64-appimage "./*_aarch64.AppImage.sig"
-          patch windows-x86_64-msi "./*_x64_en-US.msi.sig"
-          patch windows-x86_64-nsis "./*_x64-setup.exe.sig"
-
-          # The generic windows-x86_64 key mirrors whichever installer Tauri
-          # picked as primary; its current signature names that file.
-          if jq -e '.platforms["windows-x86_64"]' latest.json >/dev/null; then
-            GEN_FILE=$(jq -r '.platforms["windows-x86_64"].signature' latest.json \
-              | base64 -d | grep -oE 'file:[^[:space:]]+' | head -n1)
-            GEN_FILE=${GEN_FILE#file:}
-            case "$GEN_FILE" in
-              *.msi) patch windows-x86_64 "./*_x64_en-US.msi.sig" ;;
-              *)     patch windows-x86_64 "./*_x64-setup.exe.sig" ;;
-            esac
-          fi
 
           gh release upload "$TAG" latest.json --clobber --repo "$GITHUB_REPOSITORY"
