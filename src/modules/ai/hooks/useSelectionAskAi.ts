@@ -21,6 +21,8 @@ export function endsContentSelection(
 type Params = {
   captureActiveSelection: () => string | null;
   askFromSelection: () => void;
+  /** Settings' "Ask Terax on selected text"; off, no popup and no listeners. */
+  enabled: boolean;
 };
 
 /**
@@ -30,12 +32,17 @@ type Params = {
 export function useSelectionAskAi({
   captureActiveSelection,
   askFromSelection,
+  enabled,
 }: Params) {
   const [askPopup, setAskPopup] = useState<{ x: number; y: number } | null>(
     null,
   );
+  // Turned off while it shows: it goes, and does not come back when the
+  // setting is turned on again.
+  if (!enabled && askPopup !== null) setAskPopup(null);
 
   useEffect(() => {
+    if (!enabled) return;
     const isInsideAi = (t: EventTarget | null) => {
       const el = t as HTMLElement | null;
       if (!el) return false;
@@ -69,7 +76,7 @@ export function useSelectionAskAi({
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [captureActiveSelection]);
+  }, [captureActiveSelection, enabled]);
 
   const onAskFromSelection = useCallback(() => {
     askFromSelection();

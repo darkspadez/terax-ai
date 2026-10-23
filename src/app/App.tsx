@@ -631,9 +631,11 @@ export default function App() {
     activeTab,
   ]);
 
+  const selectionAskAi = usePreferencesStore((s) => s.selectionAskAi);
   const { askPopup, setAskPopup, onAskFromSelection } = useSelectionAskAi({
     captureActiveSelection,
     askFromSelection,
+    enabled: selectionAskAi,
   });
   const askPresence = usePresence(Boolean(askPopup), 120);
 
