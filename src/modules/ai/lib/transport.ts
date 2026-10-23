@@ -2,12 +2,13 @@ import { mcpToolsForRun } from "@/modules/mcp";
 import type { UIMessage } from "@ai-sdk/react";
 import { toUIMessageStream } from "ai";
 import type { AgentSkills } from "@/modules/skills/catalog";
-import type { CustomEndpoint } from "../config";
+import { type CustomEndpoint, resolveContextLimit } from "../config";
 import { runAgentStream, type AgentUsageDelta } from "./agent";
+import { maxMemoryBytes } from "./compact";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { formatAiError } from "./errors";
 import { pathText } from "./messageBlocks";
-import { native } from "./native";
+import { native, type ProjectMemory } from "./native";
 import type { ToolContext } from "../tools/tools";
 import type { ApprovalMode } from "./approvalMode";
 import type { ReasoningEffort } from "./reasoningEffort";
@@ -16,14 +17,17 @@ import type { ReasoningEffort } from "./reasoningEffort";
  * The project's TERAX.md for this run. The backend reads it and returns it only
  * while the user allows its current content (project trust), so it is asked on
  * every run: a withdrawn answer or a changed file stops reaching the model at
- * once. Without it the run goes on with no project memory.
+ * once. Without it the run goes on with no project memory. The whole file is
+ * sent, whatever its size; above `limit` bytes (more than the model could take)
+ * only its size comes back, and the run says it does not fit.
  */
 async function readTeraxMd(
   workspaceRoot: string | null,
-): Promise<string | null> {
+  limit: number,
+): Promise<ProjectMemory | null> {
   if (!workspaceRoot) return null;
   try {
-    return await native.readProjectMemory(workspaceRoot);
+    return await native.readProjectMemory(workspaceRoot, limit);
   } catch {
     return null;
   }
@@ -77,8 +81,13 @@ type SendOptions = {
 export function createContextAwareTransport(deps: Deps) {
   const run = async (options: SendOptions) => {
     const live = deps.getLive();
+    const contextLimit = resolveContextLimit(
+      deps.getModelId(),
+      deps.getCustomEndpoints?.() ?? [],
+      deps.getOpenaiCompatibleContextLimit?.(),
+    );
     const [projectMemory, mcp, skills] = await Promise.all([
-      readTeraxMd(live.workspaceRoot),
+      readTeraxMd(live.workspaceRoot, maxMemoryBytes(contextLimit)),
       mcpToolsForRun({
         signal: options.abortSignal,
         onWaiting: () => deps.onStep?.("Starting MCP servers"),

@@ -231,6 +231,115 @@ describe("runAgentStream", () => {
   });
 });
 
+describe("the project's TERAX.md in a run", () => {
+  // gpt-4.1-mini: a context of 128,000 tokens, about 512,000 characters.
+  const modelId = "gpt-4.1-mini";
+
+  function systemText(options: StreamTextOptions): string {
+    return (options.instructions as { content: string }[])[0].content;
+  }
+
+  /** An earlier read of `/big.txt` whose result is still in the history. */
+  const readHistory: UIMessage[] = [
+    { id: "u0", role: "user", parts: [{ type: "text", text: "read it" }] },
+    {
+      id: "a0",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-read_file",
+          toolCallId: "r0",
+          state: "output-available",
+          input: { path: "/big.txt" },
+          output: { content: "y".repeat(8_000) },
+        },
+      ],
+    } as UIMessage,
+    ...Array.from({ length: 13 }, (_, i): UIMessage[] => [
+      { id: `u${i + 1}`, role: "user", parts: [{ type: "text", text: "go" }] },
+      {
+        id: `a${i + 1}`,
+        role: "assistant",
+        parts: [{ type: "text", text: "ok" }],
+      },
+    ]).flat(),
+  ];
+
+  function readResultOutput(options: Record<string, unknown>): unknown {
+    for (const message of options.messages as {
+      content: unknown;
+    }[]) {
+      if (!Array.isArray(message.content)) continue;
+      for (const part of message.content as {
+        type: string;
+        toolCallId?: string;
+        output?: unknown;
+      }[]) {
+        if (part.type === "tool-result" && part.toolCallId === "r0") {
+          return part.output;
+        }
+      }
+    }
+    throw new Error("no read result");
+  }
+
+  it("sends the whole file, however large, when it fits the model", async () => {
+    const text = `# Rules\n${"Keep every change small.\n".repeat(12_000)}`;
+    const { options } = await startRun({
+      modelId,
+      projectMemory: { size: text.length, text },
+    });
+    expect(systemText(options)).toContain(`## PROJECT — TERAX.md\n${text.trim()}`);
+  });
+
+  it("fails before reaching the provider when the file cannot fit the model", async () => {
+    const text = "x".repeat(600_000);
+    await expect(
+      runAgentStream({
+        keys: { ...EMPTY_PROVIDER_KEYS, openai: "sk-test" },
+        modelId,
+        toolContext,
+        uiMessages,
+        projectMemory: { size: text.length, text },
+      }),
+    ).rejects.toThrow(
+      "This project's TERAX.md (585.9 KB) does not fit in the model's context of 128,000 tokens.",
+    );
+    // Larger than the model could take at all: the backend sent only its size.
+    await expect(
+      runAgentStream({
+        keys: { ...EMPTY_PROVIDER_KEYS, openai: "sk-test" },
+        modelId,
+        toolContext,
+        uiMessages,
+        projectMemory: { size: 3 * 1024 * 1024, text: null },
+      }),
+    ).rejects.toThrow("This project's TERAX.md (3.0 MB) does not fit");
+    expect(streamTextMock).not.toHaveBeenCalled();
+  });
+
+  it("compacts the history against what the system prompt leaves of the context", async () => {
+    const small = await startRun({ modelId, uiMessages: readHistory });
+    expect(readResultOutput(small.options)).not.toMatchObject({
+      __elided: true,
+    });
+
+    // About 87,500 tokens of TERAX.md: with it, the same history crosses
+    // what compaction allows, so the older read result is elided.
+    streamTextMock.mockClear();
+    const onCompact = vi.fn();
+    const text = "z".repeat(350_000);
+    const large = await startRun({
+      modelId,
+      uiMessages: readHistory,
+      projectMemory: { size: text.length, text },
+      onCompact,
+    });
+    expect(readResultOutput(large.options)).toMatchObject({ __elided: true });
+    expect(onCompact).toHaveBeenCalledWith({ droppedCount: 1 });
+  });
+});
+
 describe("runAgentStream with MCP tools", () => {
   const echo = {
     description: "Echo",

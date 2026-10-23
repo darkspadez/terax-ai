@@ -2,6 +2,55 @@ import type { ModelMessage } from "ai";
 
 const KEEP_TAIL = 24;
 const ELISION_TEXT = "[elided to save context — see prior tool call in history]";
+/** Characters per token, the estimate compaction works with. */
+const CHARS_PER_TOKEN = 4;
+/** The most bytes UTF-8 spends on one character. */
+const MAX_UTF8_BYTES = 4;
+
+/** Roughly how many tokens a text costs, by the estimate compaction uses. */
+export function approxTextTokens(text: string): number {
+  return text.length / CHARS_PER_TOKEN;
+}
+
+/** The largest TERAX.md, in bytes, a model with this context could take: a
+ *  larger file holds more characters than the whole context at the estimate. */
+export function maxMemoryBytes(contextLimit: number): number {
+  return contextLimit * CHARS_PER_TOKEN * MAX_UTF8_BYTES;
+}
+
+function sizeText(bytes: number): string {
+  if (bytes < 1024) return `${bytes} bytes`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function tokensText(tokens: number): string {
+  return `${Math.round(tokens).toLocaleString("en-US")} tokens`;
+}
+
+/** Why a run cannot start when the project's TERAX.md (`size` bytes) alone
+ *  takes the model's whole context. */
+export function memoryOverflow(size: number, contextLimit: number): string {
+  return `This project's TERAX.md (${sizeText(size)}) does not fit in the model's context of ${tokensText(contextLimit)}. Shorten it, stop using it in Settings > Skills, or choose a model with a larger context.`;
+}
+
+/**
+ * Why a run cannot start because its system prompt (`systemTokens`, sent whole
+ * with every step, so no compaction can help) takes the model's whole context,
+ * or null when it fits. `memory` is the project's TERAX.md in it: it is named
+ * when the prompt fits without it.
+ */
+export function systemPromptOverflow(
+  systemTokens: number,
+  contextLimit: number,
+  memory: { size: number; tokens: number } | null,
+): string | null {
+  if (systemTokens < contextLimit) return null;
+  if (memory && systemTokens - memory.tokens < contextLimit) {
+    return memoryOverflow(memory.size, contextLimit);
+  }
+  return `The instructions for this run (about ${tokensText(systemTokens)}, with your custom instructions, the project's TERAX.md, skills and MCP servers) do not fit in the model's context of ${tokensText(contextLimit)}.`;
+}
 
 type ToolPart = {
   type: string;
@@ -150,20 +199,29 @@ export function compactModelMessages(
   return compactModelMessagesDetailed(messages, contextLimit).messages;
 }
 
+/**
+ * Elides old tool results once the history nears the model's context.
+ * `fixedTokens` is what every request also carries and compaction cannot
+ * shrink (the system prompt, with the project's TERAX.md), counted against
+ * the context with the history.
+ */
 export function compactModelMessagesDetailed(
   messages: ModelMessage[],
   contextLimit: number,
+  fixedTokens = 0,
 ): CompactResult {
   let dropped = 0;
   let working = messages;
-  let approxTokens = approxBytes(working) / 4;
+  const tokensOf = (list: ModelMessage[]) =>
+    fixedTokens + approxBytes(list) / CHARS_PER_TOKEN;
+  let approxTokens = tokensOf(working);
 
   if (approxTokens >= 0.55 * contextLimit) {
     const r = dropSupersededReads(working);
     if (r.touched) {
       working = r.out;
       dropped++;
-      approxTokens = approxBytes(working) / 4;
+      approxTokens = tokensOf(working);
     }
   }
 
@@ -189,7 +247,7 @@ export function compactModelMessagesDetailed(
     if (local) {
       out[i] = { ...out[i], content: next } as ModelMessage;
       dropped++;
-      if (approxBytes(out) / 4 < 0.6 * contextLimit) break;
+      if (tokensOf(out) < 0.6 * contextLimit) break;
     }
   }
 

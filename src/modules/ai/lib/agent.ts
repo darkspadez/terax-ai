@@ -35,10 +35,16 @@ import {
   type ToolContext,
   type ToolName,
 } from "../tools/tools";
-import { compactModelMessagesDetailed } from "./compact";
+import {
+  approxTextTokens,
+  compactModelMessagesDetailed,
+  memoryOverflow,
+  systemPromptOverflow,
+} from "./compact";
 import { escapeAttribute, escapeBlockText } from "./messageBlocks";
 import { withMcpHistoryTools } from "./mcpHistory";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
+import type { ProjectMemory } from "./native";
 import {
   type BuildModelOptions,
   type LocalProviderConfig,
@@ -383,7 +389,9 @@ export type RunAgentOptions = {
   approvalState?: () => ApprovalState;
   /** The effort chosen for this model; absent keeps the model's default. */
   reasoningEffort?: ReasoningEffort;
-  projectMemory?: string | null;
+  /** The project's TERAX.md, sent whole; without text when it is larger than
+   *  the model could take, which fails the run with a message saying so. */
+  projectMemory?: ProjectMemory | null;
   /** This run's MCP tools; never given to sub-agents. */
   mcp?: McpRunTools | null;
   /** The skills this run may use; none when absent. */
@@ -415,14 +423,37 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
   const mcp = mcpToolsWithGates(opts.mcp);
   const tools = { ...buildTools(opts.toolContext, opts.skills), ...mcp.tools };
+  const memory = opts.projectMemory ?? null;
   const stableSystem = buildStableSystem(
     modelId,
     opts.agentPersona ?? null,
     opts.customInstructions,
-    opts.projectMemory ?? null,
+    memory?.text ?? null,
     Object.keys(mcp.tools).length > 0 ? (opts.mcp ?? null) : null,
     opts.skills,
   );
+  // The system prompt goes with every step whole, so it counts against the
+  // context before the history, and a run it cannot fit fails here, naming
+  // TERAX.md when that is what does not fit, instead of at the provider.
+  const contextLimit = resolveContextLimit(
+    modelId,
+    endpoints,
+    opts.openaiCompatibleContextLimit,
+  );
+  const systemTokens =
+    approxTextTokens(stableSystem) +
+    (opts.planMode ? approxTextTokens(PLAN_MODE_PROMPT) : 0);
+  const overflow =
+    memory && memory.text === null
+      ? memoryOverflow(memory.size, contextLimit)
+      : systemPromptOverflow(
+          systemTokens,
+          contextLimit,
+          memory?.text
+            ? { size: memory.size, tokens: approxTextTokens(memory.text) }
+            : null,
+        );
+  if (overflow) throw new Error(overflow);
 
   const history = await convertToModelMessages(opts.uiMessages, {
     tools: withMcpHistoryTools(opts.uiMessages, tools),
@@ -435,7 +466,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
   });
   const compact = compactModelMessagesDetailed(
     prunedHistory,
-    resolveContextLimit(modelId, endpoints, opts.openaiCompatibleContextLimit),
+    contextLimit,
+    systemTokens,
   );
   const compactedHistory = compact.messages;
   if (compact.compacted) {

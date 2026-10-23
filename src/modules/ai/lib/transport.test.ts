@@ -31,11 +31,11 @@ function userMessage(text: string): UIMessage {
   return { id: "u1", role: "user", parts: [{ type: "text", text }] };
 }
 
-function makeDeps(live: Record<string, unknown>) {
+function makeDeps(live: Record<string, unknown>, modelId = "gpt-test") {
   return {
     getKeys: () => ({}) as never,
     toolContext: {} as never,
-    getModelId: () => "gpt-test",
+    getModelId: () => modelId,
     getCustomInstructions: () => "",
     getAgentPersona: () => null,
     getLive: () => live as never,
@@ -180,7 +180,8 @@ describe("context-aware AI transport", () => {
   }
 
   it("takes project memory only from the backend's trust-checked read", async () => {
-    nativeMock.readProjectMemory.mockResolvedValue("# Project rules");
+    const memory = { size: 15, text: "# Project rules" };
+    nativeMock.readProjectMemory.mockResolvedValue(memory);
 
     await send([userMessage("hi")], {
       workspaceRoot: "/repo-read",
@@ -189,8 +190,36 @@ describe("context-aware AI transport", () => {
       terminalPrivate: false,
     });
 
-    expect(nativeMock.readProjectMemory).toHaveBeenCalledWith("/repo-read");
-    expect(lastCall().projectMemory).toBe("# Project rules");
+    // An unknown model has the default context of 128,000 tokens.
+    expect(nativeMock.readProjectMemory).toHaveBeenCalledWith(
+      "/repo-read",
+      128_000 * 16,
+    );
+    expect(lastCall().projectMemory).toEqual(memory);
+  });
+
+  it("asks for the whole file, up to what the run's model could take", async () => {
+    const live = { workspaceRoot: "/repo-size", cwd: null };
+    const transport = (modelId: string) =>
+      createContextAwareTransport(makeDeps(live, modelId));
+    await transport("gpt-4.1-mini").sendMessages({
+      messages: [userMessage("a")],
+    });
+    await transport("gpt-5.6").sendMessages({ messages: [userMessage("b")] });
+    // Four characters a token, at most four bytes a character: a larger file
+    // holds more than the whole context.
+    expect(nativeMock.readProjectMemory.mock.calls).toEqual([
+      ["/repo-size", 128_000 * 16],
+      ["/repo-size", 1_050_000 * 16],
+    ]);
+
+    // Too large for the model: only its size, which the run reports.
+    const tooLarge = { size: 3_000_000, text: null };
+    nativeMock.readProjectMemory.mockResolvedValueOnce(tooLarge);
+    await transport("gpt-4.1-mini").sendMessages({
+      messages: [userMessage("c")],
+    });
+    expect(lastCall().projectMemory).toEqual(tooLarge);
   });
 
   it("asks on every run, so an answer withdrawn or a change takes effect at once", async () => {
@@ -200,9 +229,10 @@ describe("context-aware AI transport", () => {
       activeFile: null,
       terminalPrivate: false,
     };
-    nativeMock.readProjectMemory.mockResolvedValueOnce("# Allowed");
+    const allowed = { size: 9, text: "# Allowed" };
+    nativeMock.readProjectMemory.mockResolvedValueOnce(allowed);
     await send([userMessage("a")], live);
-    expect(lastCall().projectMemory).toBe("# Allowed");
+    expect(lastCall().projectMemory).toEqual(allowed);
 
     // Not allowed (never, declined, revoked) or changed since: the backend
     // returns nothing.
