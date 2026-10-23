@@ -21,8 +21,8 @@ below do.
 
 | Gate | Needed |
 | --- | --- |
-| Windows (WebView2, ConPTY) | Installer, text crispness at 125/150 %, contrast defaults, `terax-pty` long-poll, IME, AltGr, pwsh/cmd/WSL, resize behaviour (burst heuristic, no native live-resize signal). |
-| Linux (WebKitGTK 4.1) | Package install, WebGPU or WebGL path, `terax-pty` POST bodies, IME, resize. |
+| Windows (WebView2, ConPTY) | Installer, text crispness at 125/150 %, contrast defaults, `oarlock-pty` long-poll, IME, AltGr, pwsh/cmd/WSL, resize behaviour (burst heuristic, no native live-resize signal). |
+| Linux (WebKitGTK 4.1) | Package install, WebGPU or WebGL path, `oarlock-pty` POST bodies, IME, resize. |
 | Long sessions | A multi-hour daily-use run with agents on the release build; memory must return to its floor after tab switches, drags and occlusion. |
 | Accessibility | VoiceOver smoke test (the terminal input holds a selected placeholder character). |
 | Updater | Signed release artifacts and update from the previous beta. |

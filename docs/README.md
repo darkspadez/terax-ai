@@ -1,12 +1,12 @@
-# Terax contributor documentation
+# Oarlock contributor documentation
 
-This directory holds long-form contributor and maintainer guides. `TERAX.md` at the repo root is the living architecture doc and the source of truth; these guides elaborate on specific areas without duplicating it.
+This directory holds long-form contributor and maintainer guides. `AGENTS.md` at the repo root is the living architecture doc and the source of truth; these guides elaborate on specific areas without duplicating it.
 
-If a guide conflicts with `TERAX.md`, `TERAX.md` wins.
+If a guide conflicts with `AGENTS.md`, `AGENTS.md` wins.
 
 ## Getting started
 
-- [TERAX.md](../TERAX.md) - the architecture source of truth; read this first
+- [AGENTS.md](../AGENTS.md) - the architecture source of truth; read this first
 - [CONTRIBUTING.md](../CONTRIBUTING.md) - how to contribute, quality bar, project layout
 
 ## Architecture guides
@@ -29,6 +29,9 @@ If a guide conflicts with `TERAX.md`, `TERAX.md` wins.
 
 Dated reports and their raw JSON data preserve evidence for specific revisions;
 they do not replace the current architecture or establish full release readiness.
+The dated reports and the original migration design record work done in Terax,
+the project Oarlock is based on, before the rename, so they name Terax and its
+identifiers as they were then.
 These contributor documents and test-only reference WASM cores stay in the
 repository and are not included in the application bundle.
 

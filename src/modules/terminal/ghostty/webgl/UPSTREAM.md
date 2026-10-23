@@ -1,7 +1,7 @@
 # xterm.js WebGL renderer fork
 
 This directory is a narrow adaptation of the xterm.js WebGL renderer. It keeps
-the renderer algorithms and lifecycle patterns that are useful to Terax while
+the renderer algorithms and lifecycle patterns that are useful to Oarlock while
 replacing xterm.js terminal internals with `libghostty-vt` render state.
 
 - Repository: https://github.com/xtermjs/xterm.js
@@ -11,10 +11,10 @@ replacing xterm.js terminal internals with `libghostty-vt` render state.
 - License: MIT, retained in `LICENSE.xterm-js`
 
 The adapted renderer intentionally does not construct an xterm.js `Terminal`.
-Terax owns PTY transport, model lifetime, input, selection, scheduling, and the
+Oarlock owns PTY transport, model lifetime, input, selection, scheduling, and the
 renderer pool. Ghostty owns parsing, reflow, scrollback, and render state.
 
-Terax-specific changes include a single-channel glyph coverage atlas, shared
+Oarlock-specific changes include a single-channel glyph coverage atlas, shared
 frame scheduling, renderer leasing for visible panes, direct typed WASM cell
 reads, retained dirty-row GPU uploads, extended Ghostty decorations,
 damage-free cursor and text blink presentation, exact resource diagnostics,

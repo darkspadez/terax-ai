@@ -1,6 +1,6 @@
 # Terminal model ownership and renderer pools
 
-This guide elaborates on `TERAX.md`, which takes precedence.
+This guide elaborates on `AGENTS.md`, which takes precedence.
 
 Every terminal leaf owns one libghostty model and one PTY. Renderer leases never
 own terminal state. Switching tabs, changing graphics APIs, or losing a GPU

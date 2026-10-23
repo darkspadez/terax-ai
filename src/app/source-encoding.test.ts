@@ -82,7 +82,7 @@ describe("source encoding", () => {
     const names = files.map((f) => f.name);
     expect(names.length).toBeGreaterThan(900);
     for (const name of [
-      "TERAX.md",
+      "AGENTS.md",
       join("src", "main.tsx"),
       join("src-tauri", "src", "lib.rs"),
       join("scripts", "eager-graph.mjs"),

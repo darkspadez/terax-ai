@@ -16,7 +16,7 @@ were linearly filtered: the Windows text blur.
 
 ## Bridge (Zig → GPU)
 
-Zig: `packages/ghostty-core/adapted/wasm/src/terax.zig`; TS:
+Zig: `packages/ghostty-core/adapted/wasm/src/oarlock.zig`; TS:
 `packages/ghostty-core/lib/adapted/` (`gpuCells.ts`) and
 `GhosttyTerminalModelApi.consumeGpuFrame()`. Tests: `AdaptedGhosttyGpu.test.ts`,
 `AdaptedGhosttyGpuModel.test.ts` (incl. a randomized cell-by-cell equivalence
@@ -99,7 +99,7 @@ Grayscale antialiasing at ratios below 2 (and on Windows/Linux) gets
 DirectWrite-style contrast (`DWrite_EnhanceContrast` scaled by foreground
 lightness, blended toward `DWrite_ApplyAlphaCorrection` with Windows Terminal's
 1.8 gamma ratios). macOS Retina output is unchanged.
-`localStorage["terax:terminal-text-contrast"]` (`off`, `on` or a strength) tunes
+`localStorage["oarlock:terminal-text-contrast"]` (`off`, `on` or a strength) tunes
 it without a build; the defaults (0.5 / 0.5) still need a look on real Windows.
 
 ## Window canvas
@@ -119,7 +119,7 @@ above the canvas and is transparent once the pane's first frame is shown.
 **Lifecycle.** WebKit (macOS 26) keeps the swapchain of a presented-then-destroyed
 WebGPU canvas in the WebContent process for good (~30 MiB for 2000×1300), and
 every swapchain a resizing canvas retires until JavaScriptCore collects its
-wrappers. Reproduced with raw WebGPU, no Terax code (`--workload canvas`):
+wrappers. Reproduced with raw WebGPU, no Oarlock code (`--workload canvas`):
 destroying a canvas per occlusion cycle +30 MiB/cycle; keeping it hidden 0. So:
 
 - A presented canvas is never destroyed, unconfigured or shrunk while the runtime

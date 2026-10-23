@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-// Locks the animation-cost invariants documented in TERAX.md: nothing in the
+// Locks the animation-cost invariants documented in AGENTS.md: nothing in the
 // global stylesheet animates forever at display rate, and an inactive window
 // pauses every CSS animation.
 const css = readFileSync(new URL("./globals.css", import.meta.url), "utf8");

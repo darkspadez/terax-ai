@@ -22,7 +22,7 @@ bun run tauri dev
 
 Prereqs: Rust (stable), [Bun](https://bun.sh) 1.4.3+, plus your platform's [Tauri prerequisites](https://tauri.app/start/prerequisites/).
 
-For the architecture and how to contribute safely, see [TERAX.md](TERAX.md) and the [docs/ index](docs/README.md).
+For the architecture and how to contribute safely, see [AGENTS.md](AGENTS.md) and the [docs/ index](docs/README.md).
 
 ## Where to discuss
 

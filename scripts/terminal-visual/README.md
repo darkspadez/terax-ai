@@ -8,17 +8,17 @@ Use it to compare renderer changes pixel for pixel and to check geometry at
 display ratios the machine does not have.
 
 ```sh
-TERAX_VISUAL_OUT=/tmp/visual TERAX_VISUAL_PORT=5199 \
+OARLOCK_VISUAL_OUT=/tmp/visual OARLOCK_VISUAL_PORT=5199 \
   node_modules/.bin/vite --config scripts/terminal-visual/vite.config.ts
 ```
 
 Open `http://localhost:5199/?w=1000&h=640&fs=15&select=19,5,21,14&capture=name`.
 With `capture`, the page writes `name.rgba` (raw RGBA) and `name.json` (size,
-ratio, surface diagnostics) to `TERAX_VISUAL_OUT` and sets its title to
+ratio, surface diagnostics) to `OARLOCK_VISUAL_OUT` and sets its title to
 `captured name`. To compare another revision, extract it
 (`git archive <rev> src packages package.json tsconfig.json | tar -x -C dir`,
 link `node_modules`), start a second server with
-`TERAX_VISUAL_SOURCE_ROOT=dir` and another port, and load the same URL.
+`OARLOCK_VISUAL_SOURCE_ROOT=dir` and another port, and load the same URL.
 
 ```sh
 bun scripts/terminal-visual/compare.mjs diff /tmp/visual a b diff.png
@@ -71,7 +71,7 @@ open "http://localhost:5199/?pattern=sprites&w=1000&h=780&fs=15&dpr=1.25&capture
 
 Use `h=780` or more so the pattern is not scrolled. Compare against a revision
 that draws these characters from the font by serving it with
-`TERAX_VISUAL_SOURCE_ROOT` as described above.
+`OARLOCK_VISUAL_SOURCE_ROOT` as described above.
 
 ## Window canvas and split panes
 

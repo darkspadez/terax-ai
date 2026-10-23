@@ -1,6 +1,6 @@
-# Terax Ghostty WASM adaptation
+# Oarlock Ghostty WASM adaptation
 
-This is the production-candidate terminal core for the pooled Terax renderer
+This is the production-candidate terminal core for the pooled Oarlock renderer
 architecture. It adapts the mature bulk render-state bridge from Restty
 without importing Restty's application runtime, PTY transport, perpetual
 per-terminal frame loop, or per-pane GPU lifecycle.
@@ -16,7 +16,7 @@ per-terminal frame loop, or per-pane GPU lifecycle.
 - SIMD SHA-256: `4ce072f77919d1372cfe60a97d5bb216ff7f07ef051a9d1a5633e3941d9339e1`
 - Scalar SHA-256: `548fca54db2d13a63b57b7e5dda72c2df55d96571d8ae477929604a2046d4d35`
 
-Terax-specific changes include:
+Oarlock-specific changes include:
 
 - rebasing the bridge onto the pinned current Ghostty API;
 - Ghostty `TinyIo`, avoiding the binary and runtime overhead of threaded I/O;
@@ -37,7 +37,7 @@ Terax-specific changes include:
 - native mode, size, color, visibility, and version query replies;
 - generated upstream Ghostty XTGETTCAP responses and native DECRQSS replies;
 - synchronized-output state for damage suppression with bounded recovery;
-- one WebAssembly instance (one linear memory) per Terax model, all created
+- one WebAssembly instance (one linear memory) per Oarlock model, all created
   from a single compiled module; disposing the model drops the instance, which
   is the only way WebAssembly memory is ever returned to the operating system;
 - Ghostty's module-global exact-page WASM pool, avoiding geometric page-pool
@@ -92,7 +92,7 @@ Terax-specific changes include:
   colors, text blink, graphemes, and wide-cell state;
 - a raw `.wasm` asset instead of a multi-megabyte JavaScript string literal.
 
-The bridge deliberately stays below Terax's model/surface boundary. Terax
+The bridge deliberately stays below Oarlock's model/surface boundary. Oarlock
 retains renderer pooling, hidden-tab renderer release, damage-driven frame
 scheduling, shell integration, semantic routing, and fallback selection.
 
@@ -117,14 +117,14 @@ XTVERSION, OSC 9;4 progress), instead of answering only a hand-picked set:
 - Configurable mode defaults (`restty_set_mode_default`), Ghostty's
   `mode_default` terminal option for the modes it marks configurable: the
   value a mode returns to on RIS. A terminal still at the old default takes
-  the new one at once; one whose program changed the mode keeps it. Terax
+  the new one at once; one whose program changed the mode keeps it. Oarlock
   sets mode 1007 (alternate scroll) from its scroll wheel setting.
 - Mode 2048 in-band size reports on enable, on every resize (one report, with
   the current cell size) and on cell-size changes; mode 2027 grapheme
   clustering on by default and across RIS, like Ghostty's
   `grapheme-width-method = unicode`.
 - Host-set colour scheme (DSR 996, mode 2031 change reports), visibility
-  (DSR 998, mode 2033) and XTVERSION (`terax <version>`).
+  (DSR 998, mode 2033) and XTVERSION (`oarlock <version>`).
 - Ghostty's mouse encoder for every tracking mode and format (X10, normal,
   button, any; X10, UTF-8, SGR, urxvt, SGR-pixels) with motion deduplication.
 - Events for OSC 9;4 progress, OSC 22 pointer shapes and OSC 52 clipboard
@@ -227,9 +227,9 @@ about 0.4 microseconds to a write plus render-state update.
 ## October 14 upstream update
 
 Both artifacts use the exact `main` revision above (141 commits after the
-previous `7ec9e26a` pin). Terax continues to use its adapted bulk bridge; it does
+previous `7ec9e26a` pin). Oarlock continues to use its adapted bulk bridge; it does
 not consume the mutable official nightly binary as a drop-in ABI. Upstream
-changes that matter to Terax:
+changes that matter to Oarlock:
 
 - use-after-free when scrollback pruning frees the page holding the cursor
   (ghostty-org/ghostty#14686), which long-running agent sessions that prune
@@ -239,7 +239,7 @@ changes that matter to Terax:
 - DECXCPR (`CSI ? 6 n`, answered `CSI ? row;col;1 R`) and `CSI 19 t`
   (`CSI 9;rows;cols t`) were added to upstream's device-status and size-report
   enums. The bridge's exhaustive switches required matching replies in
-  `terax.zig`; no other bridge behavior changed.
+  `oarlock.zig`; no other bridge behavior changed.
 
 Linear memory is unchanged from the previous pin: 20 blank 120x40 models use
 10.4375 MiB, and the block-enabled stress workload plateaus at 68.1875 MiB for
@@ -248,7 +248,7 @@ both variants with zero plateau growth. Artifacts grew by 4,099 (SIMD) and 4,172
 saving. Native canvas reuse and row-staging measurements are recorded separately
 in `docs/architecture/ghostty-resource-efficiency.md`.
 
-The GPU cell-record format (`TERAX_SOAK_FORMAT=gpu`, `TERAX_PROFILE_FORMAT=gpu`)
+The GPU cell-record format (`OARLOCK_SOAK_FORMAT=gpu`, `OARLOCK_PROFILE_FORMAT=gpu`)
 keeps the blank allocation and plateaus 786,432 bytes lower (67.4375 MiB) with
 zero plateau growth. The format added about 16 KiB to each artifact.
 
@@ -256,12 +256,12 @@ zero plateau growth. The format added about 16 KiB to each artifact.
 
 The September 7 pin includes upstream page allocation, default-palette sharing
 and fixed terminal allocation reductions. There is no tagged stable standalone
-libghostty WASM release in the inspected release list; Terax still builds its
+libghostty WASM release in the inspected release list; Oarlock still builds its
 adapted bridge from an exact source revision, rather than consuming the nightly
 artifact or treating Ghostty's application version as a stable library ABI.
 
 The update alone saved only one 64 KiB WASM page across 20 blank 120x40 models.
-With Terax's lazy presentation arrays, the identical workload uses 10,878,976
+With Oarlock's lazy presentation arrays, the identical workload uses 10,878,976
 bytes instead of 16,187,392 bytes at `0e3fae9`, a 5,308,416-byte reduction.
 Isolated per-artifact row-edit, scrolling and OSC microbenchmarks were within
 roughly 2% of baseline; this is not evidence of an application CPU speedup.
@@ -282,9 +282,9 @@ From `packages/ghostty-core/adapted/wasm` (add `-Dwasm-stack-kib=N` to change th
 
 ```sh
 zig build -Dtarget=wasm32-freestanding -Doptimize=ReleaseFast
-cp zig-out/bin/terax-ghostty-vt.wasm ../ghostty-vt.wasm
+cp zig-out/bin/oarlock-ghostty-vt.wasm ../ghostty-vt.wasm
 zig build -Dtarget=wasm32-freestanding -Doptimize=ReleaseFast -Dwasm-simd=false
-cp zig-out/bin/terax-ghostty-vt.wasm ../ghostty-vt-scalar.wasm
+cp zig-out/bin/oarlock-ghostty-vt.wasm ../ghostty-vt-scalar.wasm
 shasum -a 256 ../ghostty-vt.wasm ../ghostty-vt-scalar.wasm
 ```
 

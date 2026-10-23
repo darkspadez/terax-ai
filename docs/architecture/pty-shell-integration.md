@@ -1,14 +1,14 @@
 # PTY shell integration
 
-This guide elaborates on `TERAX.md`. If anything here conflicts with `TERAX.md`, `TERAX.md` wins.
+This guide elaborates on `AGENTS.md`. If anything here conflicts with `AGENTS.md`, `AGENTS.md` wins.
 
 ## Session model
 
 Block sessions keep direct terminal input until OSC 133 confirms prompt input.
 Bare shells therefore remain usable. Bash before 4.4 lacks PS0 and emits
-`OSC 133;B;terax_blocks=0`, retaining its native prompt instead of activating
-Terax's shared command bar. Shell command labels stay bounded; block rerun uses
-the complete command submitted through Terax, never a truncated OSC label.
+`OSC 133;B;oarlock_blocks=0`, retaining its native prompt instead of activating
+Oarlock's shared command bar. Shell command labels stay bounded; block rerun uses
+the complete command submitted through Oarlock, never a truncated OSC label.
 
 A terminal tab maps to one PTY session. Sessions live in `PtyState` (`src-tauri/src/modules/pty/mod.rs`):
 
@@ -21,7 +21,7 @@ pub struct PtyState {
 
 IDs start at 1 and monotonically increase; they are never reused so the frontend can treat `0` as unset.
 
-`pty_open` spawns a session on a blocking thread, registers it with the PTY hub under the calling webview's label, inserts it into the map, and returns the id. Output and exit codes travel over the multiplexed `terax-pty` stream (see `pty-transport-v2.md`), not per-PTY channels. `pty_write` accepts raw bytes with an `x-pty-id` header and queues them to the session's writer thread, so a full input pipe cannot block other IPC and write order and I/O errors are preserved.
+`pty_open` spawns a session on a blocking thread, registers it with the PTY hub under the calling webview's label, inserts it into the map, and returns the id. Output and exit codes travel over the multiplexed `oarlock-pty` stream (see `pty-transport-v2.md`), not per-PTY channels. `pty_write` accepts raw bytes with an `x-pty-id` header and queues them to the session's writer thread, so a full input pipe cannot block other IPC and write order and I/O errors are preserved.
 
 ## Reader / writer / waiter threads, and the hub
 
@@ -69,11 +69,11 @@ Integration scripts live in `src-tauri/src/modules/pty/scripts/`:
 
 - `zshenv.zsh`, `zprofile.zsh`, `zlogin.zsh`, `zshrc.zsh` for zsh
 - `bashrc.bash` for bash
-- `init.fish` for fish, installed to `~/.config/fish/conf.d/terax.fish`
+- `init.fish` for fish, installed to `~/.config/fish/conf.d/oarlock.fish`
 
-Zsh is launched as a login shell with `ZDOTDIR` pointing at `~/.cache/terax/shell-integration/zsh`, whose four files each source the user's matching file (`.zshrc` then installs Terax's hooks). While a user file runs, `ZDOTDIR` is the user's own (`TERAX_USER_ZDOTDIR`, or unset), so `$ZDOTDIR/conf.d/*` loaders and `${ZDOTDIR:-$HOME}/.zsh_history` resolve as in any terminal; a `ZDOTDIR` the user's `.zshenv` sets (the XDG layout) is carried to the later files in `TERAX_USER_ZDOTDIR`, and `ZDOTDIR` points back at the wrapper so zsh keeps loading it. A `HISTFILE` derived from the wrapper directory (macOS `/etc/zshrc` runs before our `.zshrc`) is moved to the user's directory before their `.zshrc`; zsh then reads it once, as usual. The scenarios run against a real zsh in `shell_init.rs` tests (skipped when zsh is missing). Bash uses `--rcfile` with a wrapper that sources the user's `~/.bashrc` after Terax's. Fish uses `conf.d` so no user file is replaced. Fish also starts as a login shell (`-l`, locally and in WSL), since only a login fish runs its `path_helper` emulation that adds `/etc/paths` and `/etc/paths.d` (Homebrew) on macOS; zsh gets the same from `/etc/zprofile`, bash from the `/etc/profile` its rcfile sources.
+Zsh is launched as a login shell with `ZDOTDIR` pointing at `~/.cache/oarlock/shell-integration/zsh`, whose four files each source the user's matching file (`.zshrc` then installs Oarlock's hooks). While a user file runs, `ZDOTDIR` is the user's own (`OARLOCK_USER_ZDOTDIR`, or unset), so `$ZDOTDIR/conf.d/*` loaders and `${ZDOTDIR:-$HOME}/.zsh_history` resolve as in any terminal; a `ZDOTDIR` the user's `.zshenv` sets (the XDG layout) is carried to the later files in `OARLOCK_USER_ZDOTDIR`, and `ZDOTDIR` points back at the wrapper so zsh keeps loading it. A `HISTFILE` derived from the wrapper directory (macOS `/etc/zshrc` runs before our `.zshrc`) is moved to the user's directory before their `.zshrc`; zsh then reads it once, as usual. The scenarios run against a real zsh in `shell_init.rs` tests (skipped when zsh is missing). Bash uses `--rcfile` with a wrapper that sources the user's `~/.bashrc` after Oarlock's. Fish uses `conf.d` so no user file is replaced. Fish also starts as a login shell (`-l`, locally and in WSL), since only a login fish runs its `path_helper` emulation that adds `/etc/paths` and `/etc/paths.d` (Homebrew) on macOS; zsh gets the same from `/etc/zprofile`, bash from the `/etc/profile` its rcfile sources.
 
-All integrated shells emit **OSC 7** (cwd) and **OSC 133 A/B/C/D** (prompt boundaries and exit code) so Terax can track cwd and detect command boundaries without parsing the user's prompt. OSC 7 is still terminal output that any program can print, so a report becomes the terminal's folder (and an authorized root) only through `pty_authorize_cwd`, which on Linux and macOS checks it against the folder the OS reports for the shell or its foreground job (`pty/cwd.rs`, see the security model).
+All integrated shells emit **OSC 7** (cwd) and **OSC 133 A/B/C/D** (prompt boundaries and exit code) so Oarlock can track cwd and detect command boundaries without parsing the user's prompt. OSC 7 is still terminal output that any program can print, so a report becomes the terminal's folder (and an authorized root) only through `pty_authorize_cwd`, which on Linux and macOS checks it against the folder the OS reports for the shell or its foreground job (`pty/cwd.rs`, see the security model).
 
 ### Windows
 
@@ -81,7 +81,7 @@ On Windows the shell priority is:
 
 1. `pwsh.exe` (PowerShell 7+)
 2. `powershell.exe` (Windows PowerShell 5.1)
-3. `cmd.exe` (`cmd /k profile.cmd`: OSC 7 and OSC 133 D/A/B around the user's `PROMPT`; no OSC 133 C, so block tabs keep its prompt with `terax_blocks=0`)
+3. `cmd.exe` (`cmd /k profile.cmd`: OSC 7 and OSC 133 D/A/B around the user's `PROMPT`; no OSC 133 C, so block tabs keep its prompt with `oarlock_blocks=0`)
 
 PowerShell loads `profile.ps1` via:
 
@@ -93,13 +93,13 @@ The profile wraps the user's existing `prompt` function to emit OSC 7 + OSC 133 
 
 ### Fish 4.0+
 
-Fish 4.0 writes its own OSC 133 prompt markers. To avoid doubling, Terax sets `fish_features=no-mark-prompt` and re-asserts its own prompt via `-C` after `config.fish` runs.
+Fish 4.0 writes its own OSC 133 prompt markers. To avoid doubling, Oarlock sets `fish_features=no-mark-prompt` and re-asserts its own prompt via `-C` after `config.fish` runs.
 
 ### Terminal identity
 
-Every PTY shell gets `TERM=xterm-256color`, `COLORTERM=truecolor`, `TERM_PROGRAM=terax` and `TERM_PROGRAM_VERSION=<app version>` (the terminal core answers XTVERSION with the same `terax <version>`), plus `TERAX_TERMINAL=1`. A WSL shell receives them through `WSLENV`, which names the only Windows variables WSL passes into a distro.
+Every PTY shell gets `TERM=xterm-256color`, `COLORTERM=truecolor`, `TERM_PROGRAM=oarlock` and `TERM_PROGRAM_VERSION=<app version>` (the terminal core answers XTVERSION with the same `oarlock <version>`), plus `OARLOCK_TERMINAL=1`. A WSL shell receives them through `WSLENV`, which names the only Windows variables WSL passes into a distro.
 
-A Terax started from another terminal inherits that terminal's identity, so `terminal_env::inherited_identity` (`pty/terminal_env.rs`, pure and tested) removes it before the shell starts: `TERM_PROGRAM`, `TERM_SESSION_ID`, `WINDOWID`, `COLORFGBG`, the `GHOSTTY_*`, `ITERM*`/`LC_TERMINAL*`, `KITTY_*`, `WEZTERM_*`, `ALACRITTY_*`, `KONSOLE_*`, VTE (`VTE_VERSION`, GNOME Terminal, Ptyxis, Tilix, Terminator), xterm, JetBrains and Windows Terminal variables, VS Code's injected `VSCODE_*`, tmux/screen/Zellij session variables, and a parent Terax's `TERAX_*` session variables. Left behind, they make macOS `/etc/zshrc` source `/etc/zshrc_$TERM_PROGRAM`, VS Code's manual shell integration load, `vte.sh` install its prompt hooks, tools wrap output for a tmux that is not there, and `wezterm cli`, `kitten @` or `code` drive the other terminal. Generic variables go only when they hold the launcher's own value: `TERMINFO` inside Ghostty's or kitty's installation, iTerm2's `TERMINFO_DIRS`, and VS Code's `GIT_ASKPASS`/`GIT_EDITOR` helpers, which fail without its IPC. User configuration (`PATH`, locale, `XDG_*`, `MANPATH`, a tool's config location such as `KITTY_CONFIG_DIRECTORY` or `WEZTERM_CONFIG_FILE`, `TERAX_USER_ZDOTDIR`) is never removed. One-shot AI commands and background processes run on pipes, not a terminal, and keep Terax's environment as is.
+An Oarlock started from another terminal inherits that terminal's identity, so `terminal_env::inherited_identity` (`pty/terminal_env.rs`, pure and tested) removes it before the shell starts: `TERM_PROGRAM`, `TERM_SESSION_ID`, `WINDOWID`, `COLORFGBG`, the `GHOSTTY_*`, `ITERM*`/`LC_TERMINAL*`, `KITTY_*`, `WEZTERM_*`, `ALACRITTY_*`, `KONSOLE_*`, VTE (`VTE_VERSION`, GNOME Terminal, Ptyxis, Tilix, Terminator), xterm, JetBrains and Windows Terminal variables, VS Code's injected `VSCODE_*`, tmux/screen/Zellij session variables, and a parent Oarlock's `OARLOCK_*` session variables. Left behind, they make macOS `/etc/zshrc` source `/etc/zshrc_$TERM_PROGRAM`, VS Code's manual shell integration load, `vte.sh` install its prompt hooks, tools wrap output for a tmux that is not there, and `wezterm cli`, `kitten @` or `code` drive the other terminal. Generic variables go only when they hold the launcher's own value: `TERMINFO` inside Ghostty's or kitty's installation, iTerm2's `TERMINFO_DIRS`, and VS Code's `GIT_ASKPASS`/`GIT_EDITOR` helpers, which fail without its IPC. User configuration (`PATH`, locale, `XDG_*`, `MANPATH`, a tool's config location such as `KITTY_CONFIG_DIRECTORY` or `WEZTERM_CONFIG_FILE`, `OARLOCK_USER_ZDOTDIR`) is never removed. One-shot AI commands and background processes run on pipes, not a terminal, and keep Oarlock's environment as is.
 
 ## Concurrency and process lifetime on Windows
 
@@ -111,7 +111,7 @@ A Terax started from another terminal inherits that terminal's identity, so `ter
 
 ### Job Object
 
-Each ConPTY child is assigned to a Windows Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (`proc::job::ProcessJob`, `src-tauri/src/modules/proc/job.rs`). When the Job HANDLE drops - clean shutdown, panic, or even a SIGKILL'd Terax process - the kernel kills every descendant of the shell. Without this, `TerminateProcess` only kills the immediate child and `npm run dev` started inside pwsh would be orphaned.
+Each ConPTY child is assigned to a Windows Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (`proc::job::ProcessJob`, `src-tauri/src/modules/proc/job.rs`). When the Job HANDLE drops - clean shutdown, panic, or even a SIGKILL'd Oarlock process - the kernel kills every descendant of the shell. Without this, `TerminateProcess` only kills the immediate child and `npm run dev` started inside pwsh would be orphaned.
 
 On macOS and Linux, `Drop for Session` calls `killer.kill()`. Dev `Ctrl-C` of `cargo run` can still leave orphans because destructors may not run; that is acceptable for development only.
 
@@ -123,7 +123,7 @@ PowerShell / PSReadLine sends a cursor-position query (`ESC[6n`) at startup and 
 
 ### Agent detection
 
-The reader thread runs an `AgentDetector` (`agent_detect.rs`) over the byte stream. It is armed by `OSC 133;C;<cmd>` (a listed agent command) or by a self-armed `OSC 777` marker (any agent name, sanitized to plain display text) and emits `terax:agent-signal` transitions (`started`, `working`, `attention`, `finished`, `exited`). Detection is driven only by OSC sequences, never by raw output, so a repainting TUI never flaps.
+The reader thread runs an `AgentDetector` (`agent_detect.rs`) over the byte stream. It is armed by `OSC 133;C;<cmd>` (a listed agent command) or by a self-armed `OSC 777` marker (any agent name, sanitized to plain display text) and emits `oarlock:agent-signal` transitions (`started`, `working`, `attention`, `finished`, `exited`). Detection is driven only by OSC sequences, never by raw output, so a repainting TUI never flaps.
 
 ### Enter key
 
@@ -139,7 +139,7 @@ Terminal input sends `\r` (CR), not `\n` (LF). PowerShell on Windows requires CR
 
 ## See also
 
-- [`TERAX.md`](../../TERAX.md) - the architecture source of truth
+- [`AGENTS.md`](../../AGENTS.md) - the architecture source of truth
 - [`docs/README.md`](../README.md) - index of contributor guides
 - [Two-process model](two-process-model.md) - IPC boundary and command catalog
 - [Terminal renderer pool](terminal-renderer-pool.md) - model ownership and presentation pooling

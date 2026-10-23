@@ -1,10 +1,10 @@
 # Two-process model and IPC command reference
 
-This guide elaborates on `TERAX.md`. If anything here conflicts with `TERAX.md`, `TERAX.md` wins.
+This guide elaborates on `AGENTS.md`. If anything here conflicts with `AGENTS.md`, `AGENTS.md` wins.
 
 ## The split
 
-Terax is two processes: the Rust backend (`src-tauri/`) and the webview frontend (`src/`).
+Oarlock is two processes: the Rust backend (`src-tauri/`) and the webview frontend (`src/`).
 
 - **Rust owns all OS access**: PTY, file system, git, shell spawn, network, secrets, workspace authorization.
 - **The webview never touches the FS, processes, or shells directly**. Every host operation goes through an `invoke()` call to a command registered in `src-tauri/src/lib.rs`.
@@ -38,9 +38,9 @@ Long-lived interactive terminal sessions.
 - `pty_has_foreground_process` / `pty_has_foreground_job` - detect whether a command is running
 - `pty_authorize_cwd` - authorize the folder a terminal reported (OSC 7) and say whether the page may take it; on Linux and macOS only where the shell or its foreground job really is
 - `pty_shell_name` / `pty_list_shells` - shell detection and enumeration
-- `pty_diagnostics` - native queue counters for the opt-in terminal diagnostics (`window.__teraxTermSnapshot()`)
+- `pty_diagnostics` - native queue counters for the opt-in terminal diagnostics (`window.__oarlockTermSnapshot()`)
 
-Output streams over the `terax-pty` custom URI scheme (one held `poll` request per window), not through `pty_open`; see `pty-transport-v2.md`.
+Output streams over the `oarlock-pty` custom URI scheme (one held `poll` request per window), not through `pty_open`; see `pty-transport-v2.md`.
 
 ### File system (`src-tauri/src/modules/fs/`)
 
@@ -128,7 +128,7 @@ Three distinct surfaces:
 
 - `skills_list` - the skills a conversation in a project may use, or (`all`) every skill with the open projects' trust states, for Settings
 - `skills_load` / `skills_read_file` - a usable skill's `SKILL.md` body and file list, or one of its text files, read only inside its real folder
-- `skills_set_enabled` / `skills_create` / `skills_edit` / `skills_delete` - turn a skill on or off, create one from the template, open its `SKILL.md` in the editor of the window in front, delete one of Terax's folder (to the trash)
+- `skills_set_enabled` / `skills_create` / `skills_edit` / `skills_delete` - turn a skill on or off, create one from the template, open its `SKILL.md` in the editor of the window in front, delete one of Oarlock's folder (to the trash)
 - `skills_install_git` / `skills_install_zip` / `skills_install_commit` / `skills_install_cancel` - stage skills from a Git repository or a zip the user picks, then install the reviewed ones
 - `project_trust_status` / `project_trust_decide` / `project_trust_list` / `project_trust_revoke` - what a project provides (its `AGENTS.md`, its skills, its `.mcp.json`) and the user's decision on each item, kept with its content hash
 - `project_memory_read` - the window's project `AGENTS.md` for an AI run, only while the user allows its current content (`project_memory.rs`)
@@ -145,15 +145,15 @@ Three distinct surfaces:
 - `mcp_http_open` / `mcp_http_close` - a remote server's session: the one origin its requests may reach, and its configured headers (secret values read here)
 - `mcp_http_stream` / `mcp_http_cancel` / `mcp_http_ack` - one request of a session through the `net.rs` proxy, streamed like `ai_http_stream`
 - `mcp_logs` / `mcp_logs_clear` / `mcp_log_note` - the bounded log of each server (stderr and lifecycle notes)
-- `mcp_status_report` / `mcp_status_list` - what each window's client reports, for Settings (`terax://mcp-status`)
+- `mcp_status_report` / `mcp_status_list` - what each window's client reports, for Settings (`oarlock://mcp-status`)
 - `mcp_secret_set` / `mcp_secret_delete` / `mcp_secret_status` - secret values of servers, written from Settings and never read back by a page
-- `mcp_oauth_status` / `mcp_oauth_probe` / `mcp_oauth_sign_in` / `mcp_oauth_cancel` / `mcp_oauth_sign_out` - OAuth sign-in of remote servers, run in the backend (settings window only; the page sees a status, never a token; `terax://mcp-auth`)
+- `mcp_oauth_status` / `mcp_oauth_probe` / `mcp_oauth_sign_in` / `mcp_oauth_cancel` / `mcp_oauth_sign_out` - OAuth sign-in of remote servers, run in the backend (settings window only; the page sees a status, never a token; `oarlock://mcp-auth`)
 - `mcp_import_scan` / `mcp_import_secrets` - servers other apps configure (Claude Desktop, Claude Code, Cursor, VS Code), read from their fixed paths; secret values go from those files to the keychain without passing the page (settings window only)
 - `mcp_project_servers` / `mcp_project_spawn` / `mcp_project_http_open` - the servers of a project's `.mcp.json` while the user allows it: listed for the calling window's project (Settings: every open project), started from the trusted file with its variables expanded in the backend
 
 ### Secrets (`src-tauri/src/modules/secrets.rs`)
 
-- `secrets_get` / `secrets_set` / `secrets_delete` / `secrets_get_all` - OS keychain access, service `terax-ai` (they refuse the MCP service, `terax-mcp`)
+- `secrets_get` / `secrets_set` / `secrets_delete` / `secrets_get_all` - OS keychain access, service `oarlock-ai` (they refuse the MCP service, `oarlock-mcp`)
 
 ### Agent hooks (`src-tauri/src/modules/agent.rs`)
 
@@ -165,8 +165,8 @@ Three distinct surfaces:
 
 ### Settings window
 
-- `get_launch_dir` - the folder Terax was launched with (a folder argument, not a launched file's folder), drained on first read
-- `get_launch_files` - files the OS asked the calling window to open (CLI args, OS Open With, a later launch), each taken once; `terax:open-file` announces new ones
+- `get_launch_dir` - the folder Oarlock was launched with (a folder argument, not a launched file's folder), drained on first read
+- `get_launch_files` - files the OS asked the calling window to open (CLI args, OS Open With, a later launch), each taken once; `oarlock:open-file` announces new ones
 - `open_settings_window` - open the separate settings webview (optional `tab` deep-link)
 
 ### App windows (`src-tauri/src/modules/windows.rs`, `quick_terminal.rs`)
@@ -182,7 +182,7 @@ Three distinct surfaces:
 
 ### macOS privacy (`src-tauri/src/modules/mac_privacy.rs`, macOS only)
 
-- `mac_privacy_status` - whether Terax has Full Disk Access, from files only that grant opens (never prompts)
+- `mac_privacy_status` - whether Oarlock has Full Disk Access, from files only that grant opens (never prompts)
 - `mac_privacy_open_settings` - Privacy & Security in System Settings at a named pane (`fullDiskAccess`, `filesAndFolders`); the page never passes a URL
 
 ### Terminal clipboard, scrollback and fonts
@@ -207,7 +207,7 @@ See [CLI control plane](cli-control.md) for the local protocol and packaging mod
 
 ## See also
 
-- [`TERAX.md`](../../TERAX.md) - the architecture source of truth
+- [`AGENTS.md`](../../AGENTS.md) - the architecture source of truth
 - [`docs/README.md`](../README.md) - index of contributor guides
 - [PTY shell integration](pty-shell-integration.md) - how sessions and shell integration work
 - [Security model](security-model.md) - the boundaries every command must respect
