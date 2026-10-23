@@ -46,3 +46,25 @@ export function segmentsFromCwd(cwd: string, home: string | null): Segment[] {
   }
   return segments;
 }
+
+/**
+ * `path` as `segmentsFromCwd` spells it (forward slashes) in the separators
+ * `like` uses, so a copied Windows path reads `C:\Users\me` again.
+ */
+export function inSeparatorsOf(path: string, like: string): string {
+  return like.includes("\\") && !like.includes("/")
+    ? path.replace(/\//g, "\\")
+    : path;
+}
+
+/**
+ * `path` relative to `root`, or null unless it lies strictly inside it.
+ * Either may use either separator; the result uses forward slashes.
+ */
+export function pathInside(root: string | null, path: string): string | null {
+  if (!root) return null;
+  const base = normalize(root).replace(/\/+$/, "");
+  const target = normalize(path).replace(/\/+$/, "");
+  if (!target.startsWith(`${base}/`)) return null;
+  return target.slice(base.length + 1) || null;
+}

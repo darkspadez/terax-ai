@@ -1832,7 +1832,9 @@ export default function App() {
               cwd={activeCwd}
               filePath={activeFilePath}
               home={home}
+              root={explorerRoot}
               onCd={sendCd}
+              onOpenTerminal={cdInNewTab}
               onWorkspaceChange={switchWorkspace}
               onOpenMini={openMini}
               onOpenAi={togglePanelAndFocus}
