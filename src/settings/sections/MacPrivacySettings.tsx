@@ -26,6 +26,11 @@ const AREAS: Record<PrivacyArea, { title: string; description: string }> = {
     title: "iCloud Drive",
     description: "~/Library/Mobile Documents",
   },
+  cloudStorage: {
+    title: "Cloud storage",
+    description:
+      "Dropbox, OneDrive, Google Drive and others under ~/Library/CloudStorage",
+  },
   removableVolumes: {
     title: "Removable volumes",
     description: "USB drives and memory cards under /Volumes",

@@ -7,6 +7,7 @@ const HOME_AREAS: readonly (readonly [string, RefusedArea])[] = [
   ["Documents", "documents"],
   ["Downloads", "downloads"],
   ["Library/Mobile Documents", "iCloudDrive"],
+  ["Library/CloudStorage", "cloudStorage"],
   ["Library/Mail", "fullDiskAccess"],
   ["Library/Messages", "fullDiskAccess"],
   ["Library/Safari", "fullDiskAccess"],
@@ -89,6 +90,8 @@ const REFUSALS: Record<RefusedArea, string> = {
   downloads:
     "macOS privacy settings do not allow Terax to use your Downloads folder.",
   iCloudDrive: "macOS privacy settings do not allow Terax to use iCloud Drive.",
+  cloudStorage:
+    "macOS privacy settings do not allow Terax to use files in cloud storage such as Dropbox, OneDrive or Google Drive.",
   volumes:
     "macOS privacy settings do not allow Terax to use removable or network volumes.",
 };

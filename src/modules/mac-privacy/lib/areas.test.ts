@@ -45,6 +45,6 @@ describe("PRIVACY_AREAS", () => {
   it("lists Full Disk Access first and each area once", () => {
     expect(PRIVACY_AREAS[0]).toBe("fullDiskAccess");
     expect(new Set(PRIVACY_AREAS).size).toBe(PRIVACY_AREAS.length);
-    expect(PRIVACY_AREAS).toHaveLength(7);
+    expect(PRIVACY_AREAS).toHaveLength(8);
   });
 });

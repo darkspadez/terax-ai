@@ -53,6 +53,9 @@ describe("privacyRefusal", () => {
         "/Users/me/Library/Mobile Documents/com~apple~CloudDocs/Plans/q3.md",
       ),
     ).toBe("iCloudDrive");
+    expect(
+      refusal("/Users/me/Library/CloudStorage/Dropbox/Plans/q3.md"),
+    ).toBe("cloudStorage");
   });
 
   it("names Full Disk Access for the places only it opens", () => {

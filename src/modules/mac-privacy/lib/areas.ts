@@ -8,6 +8,7 @@ export type PrivacyArea =
   | "documents"
   | "downloads"
   | "iCloudDrive"
+  | "cloudStorage"
   | "removableVolumes"
   | "networkVolumes";
 
@@ -31,6 +32,7 @@ export const PRIVACY_AREAS: readonly PrivacyArea[] = [
   "documents",
   "downloads",
   "iCloudDrive",
+  "cloudStorage",
   "removableVolumes",
   "networkVolumes",
 ];
