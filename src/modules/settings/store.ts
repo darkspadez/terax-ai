@@ -221,6 +221,8 @@ export type Preferences = {
   terminalScrollback: number;
   /** Panes a terminal tab may be split into, 1 to `MAX_PANES_PER_TAB`. */
   terminalPaneLimit: number;
+  /** Where a tab the user opens goes in the tab strip. */
+  newTabPosition: NewTabPosition;
   terminalBehavior: TerminalBehavior;
   confirmCloseRunningTerminal: boolean;
   lastWslDistro: string | null;
@@ -331,6 +333,7 @@ const KEY_TERMINAL_LIGATURES = "terminalLigatures";
 const KEY_TERMINAL_FONT_SIZE = "terminalFontSize";
 const KEY_TERMINAL_SCROLLBACK = "terminalScrollback";
 const KEY_TERMINAL_PANE_LIMIT = "terminalPaneLimit";
+const KEY_NEW_TAB_POSITION = "newTabPosition";
 const KEY_TERMINAL_BEHAVIOR = "terminalBehavior";
 const KEY_CONFIRM_CLOSE_RUNNING_TERMINAL = "confirmCloseRunningTerminal";
 const KEY_LAST_WSL_DISTRO = "lastWslDistro";
@@ -497,6 +500,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT,
   terminalScrollback: TERMINAL_SCROLLBACK_DEFAULT,
   terminalPaneLimit: MAX_PANES_PER_TAB,
+  newTabPosition: "end",
   terminalBehavior: defaultTerminalBehavior(currentPlatform()),
   confirmCloseRunningTerminal: true,
   lastWslDistro: null,
@@ -706,6 +710,7 @@ export async function loadPreferences(): Promise<Preferences> {
         DEFAULT_PREFERENCES.terminalScrollback,
     ),
     terminalPaneLimit: clampPaneLimit(get<unknown>(KEY_TERMINAL_PANE_LIMIT)),
+    newTabPosition: parseNewTabPosition(get<unknown>(KEY_NEW_TAB_POSITION)),
     terminalBehavior: normalizeTerminalBehavior(
       get<unknown>(KEY_TERMINAL_BEHAVIOR),
       DEFAULT_PREFERENCES.terminalBehavior,
@@ -960,6 +965,17 @@ export async function setRecentModelIds(value: string[]): Promise<void> {
 
 export async function setVimMode(value: boolean): Promise<void> {
   await writePref(KEY_VIM_MODE, value);
+}
+
+/** At the end of the strip, or right after the active tab. */
+export type NewTabPosition = "end" | "afterCurrent";
+
+export function parseNewTabPosition(value: unknown): NewTabPosition {
+  return value === "afterCurrent" ? "afterCurrent" : "end";
+}
+
+export async function setNewTabPosition(value: NewTabPosition): Promise<void> {
+  await writePref(KEY_NEW_TAB_POSITION, parseNewTabPosition(value));
 }
 
 export type DiffViewMode = "inline" | "split";
@@ -1310,6 +1326,7 @@ export async function onPreferencesChange(
     [KEY_TERMINAL_FONT_SIZE]: "terminalFontSize",
     [KEY_TERMINAL_SCROLLBACK]: "terminalScrollback",
     [KEY_TERMINAL_PANE_LIMIT]: "terminalPaneLimit",
+    [KEY_NEW_TAB_POSITION]: "newTabPosition",
     [KEY_TERMINAL_BEHAVIOR]: "terminalBehavior",
     [KEY_CONFIRM_CLOSE_RUNNING_TERMINAL]: "confirmCloseRunningTerminal",
     [KEY_LAST_WSL_DISTRO]: "lastWslDistro",

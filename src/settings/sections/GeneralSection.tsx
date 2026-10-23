@@ -22,6 +22,7 @@ import {
   setConfirmCloseRunningTerminal,
   setDefaultWorkspaceEnv,
   setExplorerGitDecorations,
+  setNewTabPosition,
   setTerminalLinksInPreview,
   setRestoreWindowState,
   setShowHidden,
@@ -42,6 +43,7 @@ import {
   setTerminalScrollback,
   setTerminalShell,
   setZoomLevel,
+  parseNewTabPosition,
   TERMINAL_CUSTOM_SHADER_MAX_BYTES,
   TERMINAL_FONT_SIZES,
   TERMINAL_LINE_HEIGHTS,
@@ -167,6 +169,7 @@ export function GeneralSection() {
   const terminalLigatures = usePreferencesStore((s) => s.terminalLigatures);
   const terminalScrollback = usePreferencesStore((s) => s.terminalScrollback);
   const terminalPaneLimit = usePreferencesStore((s) => s.terminalPaneLimit);
+  const newTabPosition = usePreferencesStore((s) => s.newTabPosition);
   const confirmCloseRunningTerminal = usePreferencesStore(
     (s) => s.confirmCloseRunningTerminal,
   );
@@ -275,6 +278,33 @@ export function GeneralSection() {
             onValueChange={(v) => void setZoomLevel(v[0] ?? 1)}
           />
         </div>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label>Tabs</Label>
+        <SettingRow
+          title="Open new tabs"
+          description="Where a tab you open goes: terminals, files, previews and diffs. Tabs opened in the background or in another space go to the end."
+        >
+          <Select
+            value={newTabPosition}
+            onValueChange={(v) =>
+              void setNewTabPosition(parseNewTabPosition(v))
+            }
+          >
+            <SelectTrigger size="sm" className="h-8 w-44 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="end" className="text-[12px]">
+                At the end
+              </SelectItem>
+              <SelectItem value="afterCurrent" className="text-[12px]">
+                After the current tab
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingRow>
       </div>
 
       <div className="flex flex-col gap-2">
