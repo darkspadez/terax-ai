@@ -17,12 +17,15 @@ import {
   planComposerDrop,
 } from "./composerDrop";
 import type { ReadResult } from "./native";
+import { encodeForSending, imageNeedsEncoding } from "./imageAttachment";
+import { readClipboardImageFile } from "./pastedImages";
 import {
   attachableText,
   attachmentName,
   MAX_TEXT_ATTACHMENT_BYTES,
   readDroppedFile,
   readPickedFile,
+  textTooLarge,
 } from "./pathAttachment";
 import { tryRunSlashCommand, type SlashCommandMeta } from "./slashCommands";
 import { getChat, useChatStore } from "../store/chatStore";
@@ -55,6 +58,9 @@ type ComposerCtx = {
   setValue: React.Dispatch<React.SetStateAction<string>>;
   files: FileAttachment[];
   addFiles: (list: FileList | readonly File[] | null) => Promise<void>;
+  /** Attach the clipboard's image as the app reads it (a paste the webview
+   *  handed no image, `pasteNeedsClipboardImage`). */
+  pasteClipboardImage: () => Promise<void>;
   /** Attach a file by absolute path — used by the file explorer's "Attach to Agent". */
   attachFileByPath: (path: string) => Promise<void>;
   removeFile: (id: string) => void;
@@ -174,6 +180,11 @@ export function AiComposerProvider({ children }: ProviderProps) {
       if (att) next.push(att);
     }
     if (next.length) setFiles((prev) => [...prev, ...next]);
+  };
+
+  const pasteClipboardImage = async () => {
+    const image = await readClipboardImageFile();
+    if (image) await addFiles([image]);
   };
 
   const removeFile = (id: string) =>
@@ -395,6 +406,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     setValue,
     files,
     addFiles,
+    pasteClipboardImage,
     attachFileByPath,
     removeFile,
     pickedSnippets,
@@ -413,20 +425,38 @@ export function AiComposerProvider({ children }: ProviderProps) {
   return <Ctx.Provider value={ctx}>{children}</Ctx.Provider>;
 }
 
+/** A picked or pasted file as an attachment; null (said in a toast) when it
+ *  cannot be one. */
 async function readAttachment(file: File): Promise<FileAttachment | null> {
   const id = `${file.name}-${file.size}-${file.lastModified}`;
+  const name = file.name || "image";
   if (file.type.startsWith("image/")) {
-    const url = await readAsDataURL(file);
+    const image = imageNeedsEncoding(file.type, file.size)
+      ? await encodeForSending(file)
+      : file;
+    if (!image) {
+      toast.error(`Could not attach ${name}`, {
+        description:
+          "The AI takes PNG, JPEG, GIF and WebP images, and this one could not be converted or made small enough.",
+      });
+      return null;
+    }
+    const url = await readAsDataURL(image);
     return {
       id,
-      name: file.name,
+      name: image.name,
       kind: "image",
-      mediaType: file.type || "image/png",
+      mediaType: image.type,
       url,
-      size: file.size,
+      size: image.size,
     };
   }
-  if (file.size > MAX_TEXT_ATTACHMENT_BYTES) return null;
+  if (file.size > MAX_TEXT_ATTACHMENT_BYTES) {
+    toast.error(`Could not attach ${name}`, {
+      description: textTooLarge(file.size),
+    });
+    return null;
+  }
   const text = await file.text();
   return {
     id,

@@ -7,6 +7,11 @@ export const MAX_TEXT_ATTACHMENT_BYTES = 200_000;
 
 const kb = (bytes: number) => `${Math.ceil(bytes / 1000)} KB`;
 
+/** Why a text file of `size` bytes is not attached. */
+export function textTooLarge(size: number): string {
+  return `It is ${kb(size)}; a text attachment holds up to ${kb(MAX_TEXT_ATTACHMENT_BYTES)}.`;
+}
+
 /** A file read for an attachment: its text, or why it is not attached. */
 export function attachableText(
   result: ReadResult,
@@ -15,10 +20,7 @@ export function attachableText(
     return { ok: false, reason: "It is not a text file." };
   }
   if (result.kind === "toolarge" || result.size > MAX_TEXT_ATTACHMENT_BYTES) {
-    return {
-      ok: false,
-      reason: `It is ${kb(result.size)}; a text attachment holds up to ${kb(MAX_TEXT_ATTACHMENT_BYTES)}.`,
-    };
+    return { ok: false, reason: textTooLarge(result.size) };
   }
   return { ok: true, text: result.content, size: result.size };
 }
