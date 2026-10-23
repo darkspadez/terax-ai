@@ -6,6 +6,7 @@ import type { CustomEndpoint } from "../config";
 import { runAgentStream, type AgentUsageDelta } from "./agent";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { formatAiError } from "./errors";
+import { pathText } from "./messageBlocks";
 import { native } from "./native";
 import type { ToolContext } from "../tools/tools";
 import type { ApprovalMode } from "./approvalMode";
@@ -178,11 +179,16 @@ function injectEnvIntoLastUser(
   return messages;
 }
 
+/** The run's environment for the model. A path is a folder or file name the
+ *  user did not type, so it may hold a newline or `</env>`: each stays on its
+ *  own line (`pathText`). */
 function formatEnvBlock(live: LiveSnapshot): string | null {
   const lines: string[] = [];
-  if (live.workspaceRoot) lines.push(`workspace_root: ${live.workspaceRoot}`);
-  if (live.cwd) lines.push(`active_terminal_cwd: ${live.cwd}`);
-  if (live.activeFile) lines.push(`active_file: ${live.activeFile}`);
+  if (live.workspaceRoot) {
+    lines.push(`workspace_root: ${pathText(live.workspaceRoot)}`);
+  }
+  if (live.cwd) lines.push(`active_terminal_cwd: ${pathText(live.cwd)}`);
+  if (live.activeFile) lines.push(`active_file: ${pathText(live.activeFile)}`);
   if (live.terminalPrivate) lines.push("active_terminal_mode: private");
   if (lines.length === 0) return null;
   return `<env>\n${lines.join("\n")}\n</env>`;

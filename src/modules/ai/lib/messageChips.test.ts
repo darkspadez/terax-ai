@@ -19,9 +19,14 @@ describe("unescapeAttribute", () => {
       'my "notes"\nv2.txt',
       "a & b < c > d\r\n",
       "&amp; &quot; &#10; stay as written",
+      "tab\tvt\vnel\u0085ls\u2028ps\u2029del\u007f",
     ]) {
       expect(unescapeAttribute(escapeAttribute(value))).toBe(value);
     }
+  });
+
+  it("reads a name stored before control characters were escaped", () => {
+    expect(unescapeAttribute("a&#10;b&#13;c\td")).toBe("a\nb\rc\td");
   });
 });
 

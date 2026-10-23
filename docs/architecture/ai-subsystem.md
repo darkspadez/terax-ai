@@ -47,7 +47,7 @@ Keys are never persisted outside the OS keychain / Linux secrets file.
 
 The tool set is assembled in `src/modules/ai/tools/tools.ts` from the `fs`, `edit`, `search`, `shell`, `subagent`, `terminal`, `todo`, managed-agent (`agent.ts`) and `skills` builders, plus the window's MCP tools (below).
 
-`createContextAwareTransport` (`src/modules/ai/lib/transport.ts`) is the chat transport: it adds the environment block to the last user message, reads `TERAX.md` (capped, cached per workspace root), runs `runAgentStream` and returns `toUIMessageStream(...)` for the `Chat`.
+`createContextAwareTransport` (`src/modules/ai/lib/transport.ts`) is the chat transport: it adds the environment block (`<env>`) to the last user message, each path as it is or, when it could start a line or end the block, as a JSON string (`pathText`), reads `TERAX.md` (capped, cached per workspace root), runs `runAgentStream` and returns `toUIMessageStream(...)` for the `Chat`.
 
 ### Reasoning effort
 

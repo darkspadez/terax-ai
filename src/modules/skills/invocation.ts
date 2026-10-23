@@ -1,6 +1,7 @@
 import {
   escapeAttribute,
   escapeBlockText,
+  pathText,
 } from "@/modules/ai/lib/messageBlocks";
 import type { WorkspaceEnv } from "@/modules/workspace";
 
@@ -81,14 +82,15 @@ export function pathForWorkspace(path: string, env: WorkspaceEnv): string {
 /**
  * The block a user-invoked skill adds before their message: the instructions, introduced so the
  * model knows where they came from, escaped like every block of a message (`messageBlocks.ts`)
- * so the block stays one.
+ * so the block stays one. The folder is a path no one typed, so it stays on its line
+ * (`pathText`).
  */
 export function skillMessageBlock(
   name: string,
   dir: string,
   content: string,
 ): string {
-  const text = `The user invoked the skill "${name}". Follow its instructions below for their message. Its files are in ${dir}: read them with read_skill_file, run its scripts with bash_run.
+  const text = `The user invoked the skill "${name}". Follow its instructions below for their message. Its files are in ${pathText(dir)}: read them with read_skill_file, run its scripts with bash_run.
 
 ${content.trim()}`;
   return `<skill name="${escapeAttribute(name)}" dir="${escapeAttribute(dir)}">

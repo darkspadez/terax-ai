@@ -38,15 +38,15 @@ const ATTRIBUTE_UNESCAPES: Record<string, string> = {
   amp: "&",
   quot: '"',
   lt: "<",
-  "#10": "\n",
-  "#13": "\r",
 };
 
-/** An attribute value as it was before `escapeAttribute`. */
+/** An attribute value as it was before `escapeAttribute`, which writes a
+ *  control character or line separator as its decimal reference. */
 export function unescapeAttribute(value: string): string {
   return value.replace(
-    /&(amp|quot|lt|#10|#13);/g,
-    (_, name: string) => ATTRIBUTE_UNESCAPES[name],
+    /&(amp|quot|lt|#\d{1,4});/g,
+    (_, name: string) =>
+      ATTRIBUTE_UNESCAPES[name] ?? String.fromCharCode(Number(name.slice(1))),
   );
 }
 
