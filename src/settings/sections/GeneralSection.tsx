@@ -36,6 +36,7 @@ import {
   setTerminalLigatures,
   setTerminalLineHeight,
   setTerminalMinimumContrast,
+  setTerminalPaneLimit,
   setTerminalRenderer,
   setTerminalScreenReader,
   setTerminalScrollback,
@@ -48,6 +49,7 @@ import {
   TERMINAL_SCROLLBACK_PRESETS,
 } from "@/modules/settings/store";
 import { parseFontFeatures } from "@/modules/terminal/lib/fontFeatures";
+import { MAX_PANES_PER_TAB } from "@/modules/terminal/lib/panes";
 import { useTheme } from "@/modules/theme";
 import {
   ComputerIcon,
@@ -164,6 +166,7 @@ export function GeneralSection() {
   );
   const terminalLigatures = usePreferencesStore((s) => s.terminalLigatures);
   const terminalScrollback = usePreferencesStore((s) => s.terminalScrollback);
+  const terminalPaneLimit = usePreferencesStore((s) => s.terminalPaneLimit);
   const confirmCloseRunningTerminal = usePreferencesStore(
     (s) => s.confirmCloseRunningTerminal,
   );
@@ -653,6 +656,32 @@ export function GeneralSection() {
                   {lines.toLocaleString()} lines
                 </SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+        </SettingRow>
+        <SettingRow
+          title="Panes per tab"
+          description="How many panes a terminal tab can be split into. Tabs that already have more keep them."
+        >
+          <Select
+            value={String(terminalPaneLimit)}
+            onValueChange={(v) => void setTerminalPaneLimit(Number(v))}
+          >
+            <SelectTrigger size="sm" className="h-8 w-36 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Array.from({ length: MAX_PANES_PER_TAB }, (_, i) => i + 1).map(
+                (count) => (
+                  <SelectItem
+                    key={count}
+                    value={String(count)}
+                    className="text-[12px]"
+                  >
+                    {count === 1 ? "1 (no splits)" : `Up to ${count}`}
+                  </SelectItem>
+                ),
+              )}
             </SelectContent>
           </Select>
         </SettingRow>

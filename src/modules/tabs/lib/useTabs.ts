@@ -4,6 +4,7 @@ import {
   type AgentInstanceCount,
   createAgentPanePlan,
 } from "@/modules/agents/lib/launcher";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   canSplitPane,
   findLeafCwd,
@@ -612,6 +613,7 @@ export function planMoveTabIntoSplit(
   tabs: readonly Tab[],
   sourceTabId: number,
   destinationTabId: number,
+  paneLimit: number,
 ): MoveTabIntoSplitPlan {
   const reject = (reason: MoveTabIntoSplitRejection) =>
     ({ ok: false, reason }) as const;
@@ -630,7 +632,9 @@ export function planMoveTabIntoSplit(
   if (!!source.private !== !!destination.private) {
     return reject("private-mismatch");
   }
-  if (!canSplitPane(destination.paneTree)) return reject("pane-limit");
+  if (!canSplitPane(destination.paneTree, paneLimit)) {
+    return reject("pane-limit");
+  }
   return { ok: true, source, destination, leaf: source.paneTree };
 }
 
@@ -638,9 +642,11 @@ export function planMoveTabIntoSplit(
 export function moveToSplitTargets(
   tabs: readonly Tab[],
   sourceTabId: number,
+  paneLimit: number,
 ): TerminalTab[] {
   return tabs.filter(
-    (t): t is TerminalTab => planMoveTabIntoSplit(tabs, sourceTabId, t.id).ok,
+    (t): t is TerminalTab =>
+      planMoveTabIntoSplit(tabs, sourceTabId, t.id, paneLimit).ok,
   );
 }
 
@@ -655,8 +661,14 @@ export function applyMoveTabIntoSplit(
   destinationTabId: number,
   position: SplitPosition,
   newSplitId: number,
+  paneLimit: number,
 ): Tab[] | null {
-  const plan = planMoveTabIntoSplit(tabs, sourceTabId, destinationTabId);
+  const plan = planMoveTabIntoSplit(
+    tabs,
+    sourceTabId,
+    destinationTabId,
+    paneLimit,
+  );
   if (!plan.ok) return null;
   const { source, destination, leaf } = plan;
   const paneTree = insertLeafAt(
@@ -747,6 +759,11 @@ export function applyMovePaneToNewTab(
     ...(source.private && { private: true }),
   };
   return tabs.flatMap((t) => (t.id === tabId ? [rest, moved] : [t]));
+}
+
+/** The pane limit in force now (Settings); read when a pane is added. */
+function paneLimit(): number {
+  return usePreferencesStore.getState().terminalPaneLimit;
 }
 
 export function useTabs(initial?: Partial<TerminalTab>) {
@@ -957,7 +974,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     (cwd: string | undefined, title: string, instances: AgentInstanceCount) => {
       const tabId = nextIdRef.current++;
       const { paneTree, leafIds: agentLeafIds } = createAgentPanePlan(
-        instances,
+        Math.min(instances, paneLimit()) as AgentInstanceCount,
         () => nextIdRef.current++,
         cwd,
       );
@@ -1516,7 +1533,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
       setTabs((curr) =>
         curr.map((t) => {
           if (t.id !== tabId || t.kind !== "terminal" || t.blocks) return t;
-          if (!canSplitPane(t.paneTree)) return t;
+          if (!canSplitPane(t.paneTree, paneLimit())) return t;
           const splitId = nextIdRef.current++;
           const leafId = nextIdRef.current++;
           newLeafId = leafId;
@@ -1546,10 +1563,12 @@ export function useTabs(initial?: Partial<TerminalTab>) {
       destinationTabId: number,
       position: SplitPosition,
     ): number | null => {
+      const limit = paneLimit();
       const plan = planMoveTabIntoSplit(
         tabsRef.current,
         sourceTabId,
         destinationTabId,
+        limit,
       );
       if (!plan.ok) return null;
       const next = applyMoveTabIntoSplit(
@@ -1558,6 +1577,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         destinationTabId,
         position,
         nextIdRef.current++,
+        limit,
       );
       if (!next) return null;
       tabsRef.current = next;

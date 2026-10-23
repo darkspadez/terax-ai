@@ -28,6 +28,7 @@ import {
 } from "@/modules/ai/lib/reasoningEffort";
 import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
 import { parseFontFeatures } from "@/modules/terminal/lib/fontFeatures";
+import { clampPaneLimit, MAX_PANES_PER_TAB } from "@/modules/terminal/lib/panes";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import {
@@ -218,6 +219,8 @@ export type Preferences = {
   terminalLigatures: boolean;
   terminalFontSize: number;
   terminalScrollback: number;
+  /** Panes a terminal tab may be split into, 1 to `MAX_PANES_PER_TAB`. */
+  terminalPaneLimit: number;
   terminalBehavior: TerminalBehavior;
   confirmCloseRunningTerminal: boolean;
   lastWslDistro: string | null;
@@ -327,6 +330,7 @@ const KEY_TERMINAL_CUSTOM_SHADER = "terminalCustomShader";
 const KEY_TERMINAL_LIGATURES = "terminalLigatures";
 const KEY_TERMINAL_FONT_SIZE = "terminalFontSize";
 const KEY_TERMINAL_SCROLLBACK = "terminalScrollback";
+const KEY_TERMINAL_PANE_LIMIT = "terminalPaneLimit";
 const KEY_TERMINAL_BEHAVIOR = "terminalBehavior";
 const KEY_CONFIRM_CLOSE_RUNNING_TERMINAL = "confirmCloseRunningTerminal";
 const KEY_LAST_WSL_DISTRO = "lastWslDistro";
@@ -492,6 +496,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   terminalLigatures: true,
   terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT,
   terminalScrollback: TERMINAL_SCROLLBACK_DEFAULT,
+  terminalPaneLimit: MAX_PANES_PER_TAB,
   terminalBehavior: defaultTerminalBehavior(currentPlatform()),
   confirmCloseRunningTerminal: true,
   lastWslDistro: null,
@@ -700,6 +705,7 @@ export async function loadPreferences(): Promise<Preferences> {
       get<number>(KEY_TERMINAL_SCROLLBACK) ??
         DEFAULT_PREFERENCES.terminalScrollback,
     ),
+    terminalPaneLimit: clampPaneLimit(get<unknown>(KEY_TERMINAL_PANE_LIMIT)),
     terminalBehavior: normalizeTerminalBehavior(
       get<unknown>(KEY_TERMINAL_BEHAVIOR),
       DEFAULT_PREFERENCES.terminalBehavior,
@@ -1118,6 +1124,10 @@ export async function setTerminalScrollback(value: number): Promise<void> {
   await writePref(KEY_TERMINAL_SCROLLBACK, clampScrollback(value));
 }
 
+export async function setTerminalPaneLimit(value: number): Promise<void> {
+  await writePref(KEY_TERMINAL_PANE_LIMIT, clampPaneLimit(value));
+}
+
 /** Changes some terminal behaviour switches, keeping the others. */
 export async function setTerminalBehavior(
   patch: Partial<TerminalBehavior>,
@@ -1299,6 +1309,7 @@ export async function onPreferencesChange(
     [KEY_TERMINAL_LIGATURES]: "terminalLigatures",
     [KEY_TERMINAL_FONT_SIZE]: "terminalFontSize",
     [KEY_TERMINAL_SCROLLBACK]: "terminalScrollback",
+    [KEY_TERMINAL_PANE_LIMIT]: "terminalPaneLimit",
     [KEY_TERMINAL_BEHAVIOR]: "terminalBehavior",
     [KEY_CONFIRM_CLOSE_RUNNING_TERMINAL]: "confirmCloseRunningTerminal",
     [KEY_LAST_WSL_DISTRO]: "lastWslDistro",

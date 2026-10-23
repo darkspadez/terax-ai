@@ -1485,6 +1485,7 @@ export default function App() {
             openSettings: () => void openSettingsWindow(),
             openKeyboardShortcuts: () => void openSettingsWindow("shortcuts"),
             spaces: useSpaces.getState().spaces,
+            paneLimit: usePreferencesStore.getState().terminalPaneLimit,
             activeSpaceId,
             openSpacesOverview: () => setSwitcherOpen(true),
             newSpace: () => void handleNewSpace(),

@@ -27,6 +27,7 @@ function baseContext(
     explorerRoot: "/workspace",
     home: "/home/me",
     spaces: [],
+    paneLimit: 8,
     activeSpaceId: null,
     openNewTab: noop,
     openNewWindow: noop,
@@ -75,6 +76,29 @@ describe("createCommandItems", () => {
     expect(reasonById({ tabs: [editorTab] }, "pane.splitRight")).toBe(
       "No terminal tab",
     );
+  });
+
+  // crynta/terax-ai#1150: the pane limit is a setting.
+  it("disables split at the configured pane limit, also above it", () => {
+    const split = {
+      ...terminalTab(1),
+      paneTree: {
+        kind: "split",
+        id: 5,
+        dir: "row",
+        children: [
+          { kind: "leaf", id: 10 },
+          { kind: "leaf", id: 11 },
+          { kind: "leaf", id: 12 },
+        ],
+      },
+    } as unknown as Tab;
+    const reason = (paneLimit: number) =>
+      reasonById({ tabs: [split], paneLimit }, "pane.splitRight");
+    expect(reason(4)).toBeUndefined();
+    expect(reason(3)).toBe("Pane limit");
+    expect(reason(2)).toBe("Pane limit");
+    expect(reasonById({ paneLimit: 1 }, "pane.splitDown")).toBe("Pane limit");
   });
 
   it("disables move pane to new tab on a single-pane terminal", () => {
