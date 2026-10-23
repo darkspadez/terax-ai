@@ -1,20 +1,20 @@
 # Code of conduct
 
-Terax is a small open-source project and we want it to stay a place people enjoy contributing to.
+Oarlock is a small open-source project and we want it to stay a place people enjoy contributing to.
 
 ## The rules, briefly
 
 - **Be respectful.** Disagreement is fine; rudeness, condescension, and personal attacks are not.
 - **Assume good faith.** Most miscommunication isn't malicious - clarify before escalating.
-- **Stay on topic.** Issues, PRs, and discussions are about Terax. Take off-topic conversations elsewhere.
+- **Stay on topic.** Issues, PRs, and discussions are about Oarlock. Take off-topic conversations elsewhere.
 - **No harassment.** Targeted insults, slurs, sustained disruption, sexualized comments, doxxing, or threats are not tolerated - anywhere, against anyone.
 - **No spam.** That includes promotional links, irrelevant cross-posting, and AI-generated noise that doesn't engage with the actual conversation.
 
-This applies to everything inside the project: issues, PRs, discussions, commits, and any community space we create later (Discord, etc.).
+This applies to everything inside the project: issues, PRs, discussions, commits, and any community space we create later.
 
 ## Enforcement
 
-If you see a violation - or experience one - email **crynta.dev@gmail.com** with subject `[Terax conduct]`. Include links and context.
+If you see a violation, or experience one, report it privately to the maintainers through GitHub: message the maintainer, [@darkspadez](https://github.com/darkspadez). Include links and context. Please don't report it in a public issue.
 
 Maintainers may, at their discretion:
 

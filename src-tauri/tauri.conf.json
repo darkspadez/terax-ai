@@ -43,6 +43,8 @@
       "binaries/oarlock-cli"
     ],
     "resources": {
+      "../LICENSE": "LICENSE",
+      "../NOTICE": "NOTICE",
       "../packages/ghostty-core/LICENSE": "licenses/terminal/ghostty-web.txt",
       "../packages/ghostty-core/adapted/LICENSE.ghostty": "licenses/terminal/ghostty.txt",
       "../packages/ghostty-core/adapted/LICENSE.restty": "licenses/terminal/restty.txt",
@@ -53,9 +55,10 @@
     },
     "targets": "all",
     "createUpdaterArtifacts": false,
-    "copyright": "Copyright 2026 Crynta",
+    "copyright": "Copyright 2026 Quantum Ops Consulting, LLC",
     "license": "Apache-2.0",
-    "publisher": "Crynta",
+    "licenseFile": "../LICENSE",
+    "publisher": "Quantum Ops Consulting, LLC",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

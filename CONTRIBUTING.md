@@ -1,12 +1,12 @@
-# Contributing to Terax
+# Contributing to Oarlock
 
-Terax is a solo-maintained project with a strong product direction. Contributions are welcome, but **alignment matters more than volume**.
+Oarlock is a solo-maintained project with a strong product direction. Contributions are welcome, but **alignment matters more than volume**.
 
 This document helps you decide *whether* and *how* to contribute in a way that's likely to get merged, so neither of us wastes time.
 
 ## How this project is run
 
-- Terax has one active maintainer ([@crynta](https://github.com/crynta)).
+- Oarlock has one active maintainer ([@darkspadez](https://github.com/darkspadez)).
 - Review bandwidth is limited.
 - Not every contribution can be accepted, even if it's technically correct. Alignment with project direction matters as much as code quality.
 - For scope and direction, see [ROADMAP.md](ROADMAP.md). Read it before opening anything non-trivial.
@@ -26,9 +26,7 @@ For the architecture and how to contribute safely, see [AGENTS.md](AGENTS.md) an
 
 ## Where to discuss
 
-Discord: [Crynta OS](https://discord.gg/tyveTUyEp7)
-
-Use Discord for design discussion, scope questions, "should I work on X?", quick feedback. Use GitHub Issues for tracking concrete bugs and features.
+Use [GitHub Issues](https://github.com/qopsc/oarlock/issues) for design discussion, scope questions and "should I work on X?", as well as for tracking concrete bugs and features. There is no chat community yet.
 
 ## What makes a good contribution
 
@@ -36,7 +34,7 @@ These get merged fast:
 
 - **Bug fixes** with clear reproduction steps.
 - **Docs / typos / small UX fixes** - open a PR directly.
-- **Pre-discussed features** - alignment in an issue or Discord first.
+- **Pre-discussed features** - alignment in an issue first.
 - **Small, focused changes** - easy to review, low risk.
 
 If your change is small and obvious (typo, narrow bugfix, small docs change), open a PR directly. No issue required.
@@ -74,7 +72,7 @@ A 10-minute conversation saves a 500-line PR that doesn't fit the roadmap.
 
 ## Quality bar
 
-Terax positions itself as **lightweight, fast, production-grade**. Every PR is reviewed against:
+Oarlock positions itself as **lightweight, fast, production-grade**. Every PR is reviewed against:
 
 - `bun run lint` clean
 - `bun run check-types` clean
@@ -87,11 +85,11 @@ Terax positions itself as **lightweight, fast, production-grade**. Every PR is r
 - Platform parity preserved (macOS / Linux / Windows / WSL still work)
 - Security review for changes to AI tool surface, file system access, network paths, IPC commands
 
-If you're not sure how to measure perf or what counts as a hot path, ask in Discord or an issue. Better to confirm than get bounced.
+If you're not sure how to measure perf or what counts as a hot path, ask in an issue. Better to confirm than get bounced.
 
 ## Changes to core subsystems require a test
 
-The most common way a PR breaks Terax is a **local fix with global blast radius**: the diff solves one reported case, reads fine, passes type-check and clippy, and silently breaks the same subsystem in every other case. Review alone does not catch these. A test does.
+The most common way a PR breaks Oarlock is a **local fix with global blast radius**: the diff solves one reported case, reads fine, passes type-check and clippy, and silently breaks the same subsystem in every other case. Review alone does not catch these. A test does.
 
 So if your change touches behavior in any of these load-bearing paths, the PR must add or extend a test that locks the invariant you're relying on:
 
@@ -102,15 +100,15 @@ So if your change touches behavior in any of these load-bearing paths, the PR mu
 - **IPC command surface and AI tool surface**: anything the webview or the agent can invoke.
 - **Pure logic with wide reach**: cwd inheritance, tab/split tree transforms, OSC/prompt parsing, the command guard.
 
-The bar for the test is real coverage of the contract, not a placeholder. Test the case that would actually break: the edge, the deny path, the "what happens one level above home". If you can't see how to test it, ask in Discord before opening the PR. That conversation is usually shorter than the revert.
+The bar for the test is real coverage of the contract, not a placeholder. Test the case that would actually break: the edge, the deny path, the "what happens one level above home". If you can't see how to test it, ask in an issue before opening the PR. That conversation is usually shorter than the revert.
 
 UI rendering, themes, syntax-highlight tables, and anything the type-checker already guarantees do not need tests.
 
-## What Terax is not
+## What Oarlock is not
 
 To set expectations:
 
-- Terax is terminal-first, not an IDE clone. Focused capabilities such as LSP, AI autocomplete, formatting, source control, and previews belong when they stay fast, lazy, and resource-bounded.
+- Oarlock is terminal-first, not an IDE clone. Focused capabilities such as LSP, AI autocomplete, formatting, source control, and previews belong when they stay fast, lazy, and resource-bounded.
 - Not building: Jupyter-style workspaces, integrated debugger and profiler suites, package manager UIs, a full web browser, unbounded background indexing, or an IDE-scale extension host.
 - This is not a curated "first open-source contribution" project. Beginners are welcome but expect normal review.
 - Mechanical refactors, broad style changes, drive-by rewrites are not helpful.
@@ -184,7 +182,7 @@ Within a PR, individual commit messages can be free-form (they get squashed or g
 
 ```
 src-tauri/                  Rust backend
-  crates/                   terax-cli and its control protocol
+  crates/                   oarlock-cli and its control protocol
   src/
     lib.rs                  Tauri command registration
     modules/
@@ -250,7 +248,7 @@ src/                        React frontend
 A: No, open a PR directly.
 
 **Q: I have an idea for a new feature.**
-A: Open a GitHub issue or bring it to Discord. Don't open a PR without prior discussion.
+A: Open a GitHub issue. Don't open a PR without prior discussion.
 
 **Q: My PR was closed without detailed feedback.**
 A: Usually means it didn't align with project direction, or scope was too large to review responsibly. This is normal for a solo project. Reopen is welcome if you want to take another pass at a smaller scope.

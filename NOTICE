@@ -1,0 +1,32 @@
+Oarlock
+Copyright 2026 Quantum Ops Consulting, LLC
+
+Oarlock is a modified version of Terax (https://github.com/crynta/terax-ai),
+Copyright 2026 Crynta, licensed under the Apache License, Version 2.0.
+Quantum Ops Consulting, LLC has modified it; the git history records the
+changes.
+
+Third-party notices
+
+Oarlock includes third-party code, fonts and colour schemes under their own
+licenses. Their notices are kept at the paths below in the source tree and
+ship with the application under licenses/, at the path in parentheses:
+
+- xterm.js (MIT): src/modules/terminal/ghostty/webgl/LICENSE.xterm-js
+  (licenses/terminal/xterm-js.txt)
+- ghostty-web (MIT): packages/ghostty-core/LICENSE
+  (licenses/terminal/ghostty-web.txt)
+- Ghostty (MIT): packages/ghostty-core/adapted/LICENSE.ghostty
+  (licenses/terminal/ghostty.txt)
+- Restty (MIT): packages/ghostty-core/adapted/LICENSE.restty
+  (licenses/terminal/restty.txt)
+- Symbols Nerd Font and the icon sets in it (MIT, CC BY 4.0, Apache 2.0,
+  SIL OFL 1.1 and the Unlicense, by set): src/assets/fonts/symbols/NOTICE.txt
+  (licenses/fonts/oarlock-symbols.txt)
+- JetBrains Mono (SIL Open Font License 1.1):
+  src/assets/fonts/jetbrains-mono/OFL.txt (licenses/fonts/jetbrains-mono.txt)
+- The bundled terminal colour schemes (MIT):
+  src/modules/theme/themes/NOTICE.txt (licenses/themes/terminal-themes.txt)
+
+Test fixtures that never ship carry their own notice in
+src/modules/theme/schemes/__fixtures__/NOTICE.txt.

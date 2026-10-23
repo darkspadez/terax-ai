@@ -2,7 +2,14 @@
   "name": "oarlock",
   "private": true,
   "version": "0.1.0",
+  "description": "Oarlock, an open-source AI-native terminal emulator",
+  "author": "Quantum Ops Consulting, LLC",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/qopsc/oarlock.git"
+  },
+  "homepage": "https://github.com/qopsc/oarlock",
   "type": "module",
   "packageManager": "bun@1.4.3",
   "workspaces": ["packages/*"],
