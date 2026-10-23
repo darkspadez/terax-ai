@@ -94,6 +94,11 @@ keyring3 = { package = "keyring", version = "3.6", default-features = false, fea
 [target.'cfg(target_os = "windows")'.dev-dependencies]
 keyring3 = { package = "keyring", version = "3.6", default-features = false, features = ["windows-native"] }
 
+# secrets.rs tests the split of long values over keyring-core's in-memory
+# store, which macOS and Windows get through their keychain dependency.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+keyring-core = "1"
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 

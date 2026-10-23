@@ -53,7 +53,7 @@ pub fn lsp_host_pid() -> u32 {
 pub async fn lsp_detect(command: String, shell: Option<String>) -> Option<String> {
     tauri::async_runtime::spawn_blocking(move || {
         let env = env::server_env_overlay(shell);
-        env::resolve_binary(&command, &env).map(|p| p.to_string_lossy().into_owned())
+        env::detect_binary(&command, &env)
     })
     .await
     .ok()
@@ -87,8 +87,14 @@ pub async fn lsp_spawn(
     let spawn_log = format!("cmd={command} root={}", root.display());
     let session = tauri::async_runtime::spawn_blocking(move || {
         let server_env = env::server_env_overlay(shell);
-        let binary = env::resolve_binary(&command, &server_env)
-            .ok_or_else(|| format!("lsp: binary not found: {command}"))?;
+        // A relative command is the project's, the folder the server runs in.
+        let binary = env::resolve_binary(&command, &server_env, &root).ok_or_else(|| {
+            if env::is_relative_path(command.trim()) {
+                format!("lsp: {command} was not found in {}", root.display())
+            } else {
+                format!("lsp: binary not found: {command}")
+            }
+        })?;
         let extra_env = env.unwrap_or_default();
         session::spawn(
             id,

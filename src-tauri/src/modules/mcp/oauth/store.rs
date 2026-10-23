@@ -1,11 +1,8 @@
 //! What sign-in keeps, in the keychain under the MCP service, per server: the tokens with what
-//! they are bound to, and a dynamically registered client. Never in a store file, never sent to
-//! a page.
-//!
-//! A record is JSON split into chunks of at most `CHUNK_UNITS` UTF-16 units, one keychain item
-//! each (`<server>/oauth/tokens`, `<server>/oauth/tokens.1`, ...): Windows Credential Manager
-//! holds at most 2,560 bytes of UTF-16 per item, and access tokens are often longer. The first
-//! chunk says how many there are.
+//! they are bound to, and a dynamically registered client, each one JSON record
+//! (`<server>/oauth/tokens`, `<server>/oauth/client`). Never in a store file, never sent to a
+//! page. Access tokens are often longer than Windows keeps in one item; `secrets` splits such a
+//! record like any long value.
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -13,11 +10,6 @@ use tauri::AppHandle;
 
 use super::super::names::{oauth_account, OauthItem, SECRET_SERVICE};
 use crate::modules::secrets;
-
-/// Below the 1,280 UTF-16 units Windows allows per item, with room for the header.
-const CHUNK_UNITS: usize = 1200;
-pub const MAX_CHUNKS: usize = 24;
-const VERSION: &str = "1";
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -116,52 +108,6 @@ impl Registration {
     }
 }
 
-/// Splits `value` into chunks, the first prefixed with the version and the count.
-pub fn encode_chunks(value: &str) -> Result<Vec<String>, String> {
-    let mut chunks = Vec::new();
-    let mut current = String::new();
-    let mut units = 0;
-    for ch in value.chars() {
-        let len = ch.len_utf16();
-        if units + len > CHUNK_UNITS {
-            chunks.push(std::mem::take(&mut current));
-            units = 0;
-        }
-        current.push(ch);
-        units += len;
-    }
-    chunks.push(current);
-    if chunks.len() > MAX_CHUNKS {
-        return Err("mcp: the sign-in record is too large to keep".into());
-    }
-    let count = chunks.len();
-    chunks[0] = format!("{VERSION}:{count}:{}", chunks[0]);
-    Ok(chunks)
-}
-
-/// The number of chunks the first one announces, and its own data.
-pub fn chunk_header(first: &str) -> Result<(usize, &str), String> {
-    let mut parts = first.splitn(3, ':');
-    let (Some(VERSION), Some(count), Some(data)) = (parts.next(), parts.next(), parts.next())
-    else {
-        return Err("mcp: the sign-in record is damaged".into());
-    };
-    let count: usize = count
-        .parse()
-        .ok()
-        .filter(|n| (1..=MAX_CHUNKS).contains(n))
-        .ok_or("mcp: the sign-in record is damaged")?;
-    Ok((count, data))
-}
-
-fn accounts(
-    server: &str,
-    item: OauthItem,
-    range: std::ops::Range<usize>,
-) -> Result<Vec<String>, String> {
-    range.map(|i| oauth_account(server, item, i)).collect()
-}
-
 /// Reads a record; None when there is none. A damaged one reads as none (signing in again
 /// writes a fresh one).
 pub async fn read<T: DeserializeOwned>(
@@ -169,55 +115,22 @@ pub async fn read<T: DeserializeOwned>(
     server: &str,
     item: OauthItem,
 ) -> Result<Option<T>, String> {
-    let first = secrets::backend_get(app.clone(), SECRET_SERVICE, accounts(server, item, 0..1)?)
+    let account = oauth_account(server, item)?;
+    let Some(json) = secrets::backend_get(app.clone(), SECRET_SERVICE, vec![account])
         .await?
         .pop()
-        .flatten();
-    let Some(first) = first else {
-        return Ok(None);
-    };
-    let Ok((count, data)) = chunk_header(&first) else {
-        log::warn!("mcp: a sign-in record of {server} is damaged");
-        return Ok(None);
-    };
-    let mut json = data.to_owned();
-    if count > 1 {
-        let rest = secrets::backend_get(
-            app.clone(),
-            SECRET_SERVICE,
-            accounts(server, item, 1..count)?,
-        )
-        .await?;
-        for part in rest {
-            let Some(part) = part else {
-                log::warn!("mcp: a sign-in record of {server} is incomplete");
-                return Ok(None);
-            };
-            json.push_str(&part);
-        }
-    }
-    Ok(serde_json::from_str(&json).ok())
-}
-
-async fn stored_count(app: &AppHandle, server: &str, item: OauthItem) -> usize {
-    let Ok(first) = secrets::backend_get(
-        app.clone(),
-        SECRET_SERVICE,
-        accounts(server, item, 0..1).unwrap_or_default(),
-    )
-    .await
-    else {
-        return 0;
-    };
-    first
-        .into_iter()
         .flatten()
-        .next()
-        .and_then(|first| chunk_header(&first).ok().map(|(count, _)| count))
-        .unwrap_or(0)
+    else {
+        return Ok(None);
+    };
+    let record = serde_json::from_str(&json).ok();
+    if record.is_none() {
+        log::warn!("mcp: a sign-in record of {server} is damaged");
+    }
+    Ok(record)
 }
 
-/// Writes a record, then removes the chunks of a longer previous one.
+/// Writes a record over the previous one.
 pub async fn write<T: Serialize>(
     app: &AppHandle,
     server: &str,
@@ -225,36 +138,16 @@ pub async fn write<T: Serialize>(
     value: &T,
 ) -> Result<(), String> {
     let json = serde_json::to_string(value).map_err(|e| e.to_string())?;
-    let chunks = encode_chunks(&json)?;
-    let previous = stored_count(app, server, item).await;
-    // The tail first, so a reader never finds a new head with old chunks.
-    for (i, chunk) in chunks.iter().enumerate().rev() {
-        secrets::backend_set(
-            app.clone(),
-            SECRET_SERVICE,
-            oauth_account(server, item, i)?,
-            chunk.clone(),
-        )
-        .await?;
-    }
-    if previous > chunks.len() {
-        secrets::backend_delete(
-            app.clone(),
-            SECRET_SERVICE,
-            accounts(server, item, chunks.len()..previous)?,
-        )
-        .await?;
-    }
-    Ok(())
+    secrets::backend_set(app.clone(), SECRET_SERVICE, oauth_account(server, item)?, json)
+        .await
+        .map_err(|e| format!("mcp: the sign-in could not be kept: {e}"))
 }
 
-/// Deletes a record, every chunk of it.
 pub async fn delete(app: &AppHandle, server: &str, item: OauthItem) -> Result<(), String> {
-    let count = stored_count(app, server, item).await.max(1);
     secrets::backend_delete(
         app.clone(),
         SECRET_SERVICE,
-        accounts(server, item, 0..count)?,
+        vec![oauth_account(server, item)?],
     )
     .await
 }
@@ -262,44 +155,6 @@ pub async fn delete(app: &AppHandle, server: &str, item: OauthItem) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn join(chunks: &[String]) -> String {
-        let (count, first) = chunk_header(&chunks[0]).unwrap();
-        assert_eq!(count, chunks.len());
-        let mut out = first.to_owned();
-        for chunk in &chunks[1..] {
-            out.push_str(chunk);
-        }
-        out
-    }
-
-    #[test]
-    fn records_split_into_chunks_windows_can_hold() {
-        for len in [0, 1, CHUNK_UNITS - 1, CHUNK_UNITS, CHUNK_UNITS + 1, 5000] {
-            let value: String = "x".repeat(len);
-            let chunks = encode_chunks(&value).unwrap();
-            for chunk in &chunks {
-                // Windows: 2,560 bytes of UTF-16 at most.
-                assert!(chunk.encode_utf16().count() * 2 <= 2560, "{len}");
-            }
-            assert_eq!(join(&chunks), value);
-        }
-        // Characters outside the BMP take two units and are never split.
-        let wide = "\u{1F600}".repeat(CHUNK_UNITS);
-        let chunks = encode_chunks(&wide).unwrap();
-        assert!(chunks.iter().all(|c| c.encode_utf16().count() * 2 <= 2560));
-        assert_eq!(join(&chunks), wide);
-        assert!(encode_chunks(&"x".repeat(CHUNK_UNITS * MAX_CHUNKS + 1)).is_err());
-    }
-
-    #[test]
-    fn a_damaged_header_is_refused() {
-        for bad in ["", "2:1:x", "1:0:x", "1:99:x", "1:x:y", "plain"] {
-            assert!(chunk_header(bad).is_err(), "{bad}");
-        }
-        assert_eq!(chunk_header("1:1:{}").unwrap(), (1, "{}"));
-        assert_eq!(chunk_header("1:2:a:b").unwrap(), (2, "a:b"));
-    }
 
     fn tokens() -> TokenSet {
         TokenSet {

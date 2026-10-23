@@ -322,7 +322,7 @@ struct StdioStart {
     command: String,
     args: Vec<String>,
     configured: Vec<(String, String)>,
-    cwd: std::path::PathBuf,
+    cwd: stdio::WorkingFolder,
     shell: Option<String>,
 }
 
@@ -347,7 +347,7 @@ async fn start_stdio(
     let spawn_id = server_id.clone();
     let session = tauri::async_runtime::spawn_blocking(move || {
         let shell_env = crate::modules::lsp::env::server_env_overlay(shell);
-        let binary = match stdio::resolve_program(&command, &shell_env) {
+        let binary = match stdio::resolve_program(&command, &shell_env, &cwd) {
             Ok(binary) => binary,
             Err(e) => {
                 logs.push(&spawn_id, logs::Stream::Terax, e.clone());
@@ -359,7 +359,7 @@ async fn start_stdio(
             owner,
             binary,
             args,
-            cwd,
+            cwd: cwd.path().to_owned(),
             env: stdio::environment(
                 &shell_env,
                 crate::modules::workspace::child_env_overrides(),
@@ -564,6 +564,12 @@ pub async fn mcp_secret_set(
 ) -> Result<(), String> {
     require_settings(&window)?;
     let account = secret_account(&server_id, kind, &name)?;
+    if value.len() > crate::modules::secrets::MAX_VALUE_BYTES {
+        return Err(format!(
+            "mcp: the value of {name} is longer than {} KiB",
+            crate::modules::secrets::MAX_VALUE_BYTES / 1024
+        ));
+    }
     if value.is_empty() || !names::valid_value(&value, kind) {
         return Err(format!("mcp: invalid value for {name}"));
     }
@@ -727,10 +733,10 @@ pub async fn mcp_project_spawn(
         StdioStart {
             owner,
             server_id,
-            command: project::command_in(&project.real, &launch.command),
+            command: launch.command,
             args: launch.args,
             configured,
-            cwd: project.real.clone(),
+            cwd: stdio::WorkingFolder::Set(project.real.clone()),
             shell,
         },
         on_message,
