@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { trustItem, trustStatus } from "./fixtures";
-import { askingItems, promptKey, trustDecisions } from "./trust";
+import {
+  acceptLabel,
+  askingItems,
+  isSkillsItem,
+  promptKey,
+  promptTitle,
+  trustDecisions,
+} from "./trust";
 
 describe("project trust prompt", () => {
   it("asks about items never decided and items changed since", () => {
@@ -35,5 +42,22 @@ describe("project trust prompt", () => {
       { kind: "claude-skills", hash: "a", allow: false },
       { kind: "terax-skills", hash: "b", allow: true },
     ]);
+  });
+});
+
+describe("prompt wording", () => {
+  it("names what the project provides", () => {
+    const skills = trustItem();
+    const servers = trustItem({ kind: "mcp-json" });
+    expect(promptTitle([skills], "p")).toBe("Use the skills in p?");
+    expect(promptTitle([servers], "p")).toBe("Use the MCP servers in p?");
+    expect(promptTitle([skills, servers], "p")).toBe(
+      "Use the skills and MCP servers in p?",
+    );
+    expect(acceptLabel([skills])).toBe("Use skills");
+    expect(acceptLabel([servers])).toBe("Use servers");
+    expect(acceptLabel([skills, servers])).toBe("Use selected");
+    expect(isSkillsItem("terax-skills")).toBe(true);
+    expect(isSkillsItem("mcp-json")).toBe(false);
   });
 });

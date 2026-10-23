@@ -80,10 +80,12 @@ fn user_dir() -> Option<PathBuf> {
     Some(dirs::home_dir()?.join(".claude").join("skills"))
 }
 
-fn source_kind(kind: ItemKind) -> SourceKind {
+/// The skills source of a project item; None for an item that holds no skills.
+fn source_kind(kind: ItemKind) -> Option<SourceKind> {
     match kind {
-        ItemKind::ClaudeSkills => SourceKind::ClaudeProject,
-        ItemKind::TeraxSkills => SourceKind::TeraxProject,
+        ItemKind::ClaudeSkills => Some(SourceKind::ClaudeProject),
+        ItemKind::TeraxSkills => Some(SourceKind::TeraxProject),
+        ItemKind::McpJson => None,
     }
 }
 
@@ -119,6 +121,7 @@ fn global_sources(app: &AppHandle) -> Vec<Source> {
 /// The project's skills folder at its real path, unless it is the user's own `~/.claude/skills`
 /// (a project opened at the home folder) or not a folder.
 fn project_item_dir(root: &Path, kind: ItemKind) -> Option<Result<PathBuf, String>> {
+    source_kind(kind)?;
     let found = item_path(root, kind)?;
     if let Ok(real) = &found {
         if !real.is_dir() {
@@ -132,12 +135,12 @@ fn project_item_dir(root: &Path, kind: ItemKind) -> Option<Result<PathBuf, Strin
     Some(found)
 }
 
-fn project_source(project: &OpenProject, kind: ItemKind, dir: PathBuf) -> Source {
+fn project_source(project: &OpenProject, kind: SourceKind, item: ItemKind, dir: PathBuf) -> Source {
     Source {
-        kind: source_kind(kind),
+        kind,
         confine: Some(dir.clone()),
         dir,
-        display: project.display_path(kind.relative_path()),
+        display: project.display_path(item.relative_path()),
     }
 }
 
@@ -152,6 +155,7 @@ fn truncate(text: &str, max: usize) -> String {
 
 /// What a project's skills item holds, for the trust prompt (`project_trust::inspect`).
 pub fn inspect_project_item(root: &Path, kind: ItemKind) -> Option<Inspected> {
+    let source = source_kind(kind)?;
     let real = match project_item_dir(root, kind)? {
         Ok(real) => real,
         Err(problem) => {
@@ -166,7 +170,7 @@ pub fn inspect_project_item(root: &Path, kind: ItemKind) -> Option<Inspected> {
     let hash = project_trust::tree_hash(&real);
     let scanned = discover::scan(
         &Source {
-            kind: source_kind(kind),
+            kind: source,
             dir: real.clone(),
             display: kind.relative_path().to_owned(),
             confine: Some(real.clone()),
@@ -436,8 +440,10 @@ fn collect_from(
     }
     for project in projects {
         let start = snapshot.skills.len();
-        for kind in ItemKind::ALL {
-            let Some(Ok(dir)) = project_item_dir(&project.real, kind) else {
+        for kind in ItemKind::SKILLS {
+            let (Some(skills_kind), Some(Ok(dir))) =
+                (source_kind(kind), project_item_dir(&project.real, kind))
+            else {
                 continue;
             };
             let trusted =
@@ -445,7 +451,7 @@ fn collect_from(
             if !trusted && !all {
                 continue;
             }
-            let source = project_source(project, kind, dir);
+            let source = project_source(project, skills_kind, kind, dir);
             let scanned = discover::scan(&source, &mut parse_cache());
             views(
                 scanned,

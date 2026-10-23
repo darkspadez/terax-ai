@@ -22,8 +22,8 @@ type Props = {
 
 /**
  * Registers the project this window works in and asks once whether to trust what it provides
- * (its skills), again when that content changes; opens the SKILL.md Settings hands over. The
- * prompt loads only when needed.
+ * (its skills, its `.mcp.json` servers), again when that content changes; opens the SKILL.md
+ * Settings hands over. The prompt loads only when needed.
  */
 export function SkillsWatcher({ root, openFileTab }: Props) {
   useSkillEditRequests(openFileTab);

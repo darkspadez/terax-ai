@@ -23,8 +23,8 @@ pub struct Target {
 }
 
 /// What to watch for `targets`: each target's real path (for matching events), and the watches:
-/// an existing target recursively, a missing one through its nearest existing parent up to its
-/// `stop`, without recursion.
+/// an existing folder recursively, an existing file through its folder and a missing target
+/// through its nearest existing parent up to its `stop`, both without recursion.
 pub fn plan(targets: &[Target]) -> (Vec<PathBuf>, Vec<(PathBuf, bool)>) {
     let mut real_targets = Vec::new();
     let mut watches: Vec<(PathBuf, bool)> = Vec::new();
@@ -49,6 +49,16 @@ pub fn plan(targets: &[Target]) -> (Vec<PathBuf>, Vec<(PathBuf, bool)>) {
         };
         let Some(real) = real else { continue };
         if !real.is_dir() {
+            // A file target (a project's `.mcp.json`) is watched through its folder.
+            if missing.is_empty() && real.is_file() {
+                if let Some(parent) = real.parent() {
+                    let watch = (parent.to_path_buf(), false);
+                    real_targets.push(real.clone());
+                    if !watches.contains(&watch) {
+                        watches.push(watch);
+                    }
+                }
+            }
             continue;
         }
         let full = missing
@@ -412,6 +422,28 @@ mod tests {
             stop: home.join("gone"),
         }]);
         assert!(real.is_empty() && watches.is_empty());
+    }
+
+    #[test]
+    fn a_file_target_is_watched_through_its_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = std::fs::canonicalize(dir.path()).unwrap();
+        std::fs::write(project.join(".mcp.json"), "{}").unwrap();
+        let (real, watches) = plan(&[Target {
+            path: project.join(".mcp.json"),
+            stop: project.clone(),
+        }]);
+        assert_eq!(real, vec![project.join(".mcp.json")]);
+        assert_eq!(watches, vec![(project.clone(), false)]);
+        assert!(relevant(&project.join(".mcp.json"), &real));
+        assert!(!relevant(&project.join("src/main.rs"), &real));
+        std::fs::remove_file(project.join(".mcp.json")).unwrap();
+        let (real, watches) = plan(&[Target {
+            path: project.join(".mcp.json"),
+            stop: project.clone(),
+        }]);
+        assert_eq!(real, vec![project.join(".mcp.json")]);
+        assert_eq!(watches, vec![(project, false)]);
     }
 
     #[test]

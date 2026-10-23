@@ -15,6 +15,11 @@ export type StdioLaunch = {
   cwd: string | null;
   /** The terminal shell set in Settings, whose environment the server gets. */
   shell: string | null;
+  /**
+   * A server of the window's project: the backend starts it as the project's
+   * trusted `.mcp.json` declares it, ignoring the command and values here.
+   */
+  project?: boolean;
 };
 
 export type StdioExit = {
@@ -81,17 +86,24 @@ export class TauriStdioTransport implements Transport {
       this.exit = exit;
       this.finish();
     };
-    this.id = await invoke<number>("mcp_spawn", {
-      serverId: this.launch.serverId,
-      command: this.launch.command,
-      args: this.launch.args,
-      env: this.launch.env,
-      secretEnv: this.launch.secretEnv,
-      cwd: this.launch.cwd,
-      shell: this.launch.shell,
-      onMessage,
-      onExit,
-    });
+    this.id = this.launch.project
+      ? await invoke<number>("mcp_project_spawn", {
+          serverId: this.launch.serverId,
+          shell: this.launch.shell,
+          onMessage,
+          onExit,
+        })
+      : await invoke<number>("mcp_spawn", {
+          serverId: this.launch.serverId,
+          command: this.launch.command,
+          args: this.launch.args,
+          env: this.launch.env,
+          secretEnv: this.launch.secretEnv,
+          cwd: this.launch.cwd,
+          shell: this.launch.shell,
+          onMessage,
+          onExit,
+        });
     // It may have exited (or been closed) before the id arrived.
     if (this.closed) void invoke("mcp_kill", { id: this.id }).catch(() => {});
   }

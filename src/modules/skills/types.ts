@@ -46,7 +46,7 @@ export type InvalidSkill = {
   errors: string[];
 };
 
-export type TrustItemKind = "claude-skills" | "terax-skills";
+export type TrustItemKind = "claude-skills" | "terax-skills" | "mcp-json";
 
 type TrustItemState =
   | "allowed"

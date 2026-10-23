@@ -1,3 +1,4 @@
+import { isSkillsItem } from "./trust";
 import type {
   InvalidSkill,
   OpenProject,
@@ -12,6 +13,7 @@ export type SkillGroup = {
   title: string;
   /** The folder it lists. */
   path: string | null;
+  /** A project's trust state, its skill items only (Settings > MCP has its `.mcp.json`). */
   project: ProjectTrustStatus | null;
   skills: Skill[];
   invalid: InvalidSkill[];
@@ -61,7 +63,10 @@ export function skillGroups(snapshot: SkillsSnapshot): SkillGroup[] {
       id: `project:${key}`,
       title: folderName(status.project.root),
       path: status.project.root,
-      project: status,
+      project: {
+        ...status,
+        items: status.items.filter((item) => isSkillsItem(item.kind)),
+      },
       skills: snapshot.skills
         .filter((s) => inProject(s.project, key))
         .sort(byName),

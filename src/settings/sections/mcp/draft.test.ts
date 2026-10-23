@@ -117,3 +117,67 @@ describe("draft", () => {
     expect(hasErrors(draftErrors(draft, []))).toBe(false);
   });
 });
+
+describe("sign-in client", () => {
+  const remote: McpServerConfig = {
+    ...server,
+    transport: {
+      type: "http",
+      url: "https://mcp.example.com/mcp",
+      headers: [],
+      oauth: {
+        clientId: "my-app",
+        clientSecret: true,
+        scopes: "read",
+        callbackPort: 8080,
+      },
+    },
+  };
+
+  it("edits a configured client and saves it back unchanged", () => {
+    const draft = draftFromServer(remote, new Set(["oauth:client-secret"]));
+    expect(draft.oauthClientId).toBe("my-app");
+    expect(draft.oauthSecretSaved).toBe(true);
+    expect(draft.oauthPort).toBe("8080");
+    expect(serverFromDraft(draft)).toEqual(remote);
+    expect(secretChanges(draft)).toEqual({ set: [], remove: [] });
+    expect(hasErrors(draftErrors(draft, []))).toBe(false);
+  });
+
+  it("writes a new client secret to the keychain, and deletes it with the client", () => {
+    const draft = {
+      ...draftFromServer(remote, new Set()),
+      oauthSecret: "shh",
+    };
+    expect(secretChanges(draft).set).toEqual([
+      { kind: "oauth", name: "client-secret", value: "shh" },
+    ]);
+    const cleared = {
+      ...draftFromServer(remote, new Set(["oauth:client-secret"])),
+      oauthClientId: "",
+      oauthScopes: "",
+      oauthPort: "",
+      oauthSecretSaved: false,
+    };
+    expect(serverFromDraft(cleared).transport).not.toHaveProperty("oauth");
+    expect(secretChanges(cleared).remove).toEqual([
+      { kind: "oauth", name: "client-secret" },
+    ]);
+  });
+
+  it("asks for a client id behind any other client field, and a real port", () => {
+    const base = { ...emptyDraft(), name: "r", type: "http" as const };
+    const draft = { ...base, url: "https://x.example/mcp" };
+    expect(
+      draftErrors({ ...draft, oauthScopes: "read" }, []).oauth,
+    ).toBeTruthy();
+    expect(
+      draftErrors({ ...draft, oauthClientId: "c", oauthPort: "70000" }, [])
+        .oauth,
+    ).toBeTruthy();
+    expect(
+      draftErrors({ ...draft, oauthClientId: "c", oauthPort: "8080" }, [])
+        .oauth,
+    ).toBeUndefined();
+  });
+});

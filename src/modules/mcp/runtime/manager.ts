@@ -7,9 +7,14 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { SignInRequiredError } from "../lib/auth";
 import { type McpToolInfo, useMcpCatalog } from "../lib/catalog";
 import { launchKey, type McpServerConfig } from "../lib/config";
-import { loadServers, onMcpChanged, saveKnownTools } from "../lib/configStore";
+import {
+  loadWindowServers,
+  onMcpChanged,
+  saveKnownTools,
+} from "../lib/configStore";
 import {
   afterCrash,
   planConfigChange,
@@ -122,7 +127,7 @@ export class McpManager {
     this.listening ??= (async () => {
       await onMcpChanged((change) => {
         if (change.kind === "servers") {
-          void loadServers().then((servers) => this.sync(servers));
+          void loadWindowServers().then((servers) => this.sync(servers));
         }
       });
       await listen<{ serverId: string }>(MCP_RESTART_EVENT, (event) => {
@@ -270,7 +275,13 @@ export class McpManager {
         !signal?.aborted
       ) {
         void connection.close();
-        this.crash(run, generation, text);
+        const signIn = connection.signInRequired();
+        this.crash(
+          run,
+          generation,
+          signIn ? new SignInRequiredError().message : text,
+          signIn,
+        );
       }
       throw new Error(errorText(null, text));
     }
@@ -376,18 +387,31 @@ export class McpManager {
         await connection.close().catch(() => {});
       }
       if (!this.current(run, generation)) return;
-      this.crash(run, generation, message(error));
+      this.crash(
+        run,
+        generation,
+        message(error),
+        error instanceof SignInRequiredError,
+      );
     }
   }
 
-  private crash(run: ServerRun, generation: number, error: string): void {
+  /** A failure; one that needs sign-in waits for it instead of retrying. */
+  private crash(
+    run: ServerRun,
+    generation: number,
+    error: string,
+    signIn = false,
+  ): void {
     if (!this.current(run, generation) || run.state === "crashed") return;
     const connection = run.connection;
     run.connection = null;
     if (connection) void connection.close();
     if (run.refreshTimer) clearTimeout(run.refreshTimer);
     const now = Date.now();
-    const next = afterCrash(run.crashes, now);
+    const next = signIn
+      ? { crashes: run.crashes, delayMs: null }
+      : afterCrash(run.crashes, now);
     run.state = "crashed";
     run.error = error;
     run.tools = [];
@@ -395,9 +419,11 @@ export class McpManager {
     run.retryAt = next.delayMs === null ? null : now + next.delayMs;
     this.note(
       run.server.id,
-      next.delayMs === null
-        ? `Stopped after ${next.crashes.length} failures: ${error}. Restart it from Settings.`
-        : `Failed: ${error}. Restarting in ${Math.round(next.delayMs / 1000)} s`,
+      signIn
+        ? `Stopped: ${error}`
+        : next.delayMs === null
+          ? `Stopped after ${next.crashes.length} failures: ${error}. Restart it from Settings.`
+          : `Failed: ${error}. Restarting in ${Math.round(next.delayMs / 1000)} s`,
     );
     this.report(run);
     this.publish();

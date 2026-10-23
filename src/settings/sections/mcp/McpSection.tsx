@@ -12,20 +12,31 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { type AuthStatus, isSignInError } from "@/modules/mcp/lib/auth";
 import { joinCommandLine } from "@/modules/mcp/lib/commandLine";
 import {
   type McpServerConfig,
   type McpToolOverride,
   secretRefs,
+  usesSignIn,
 } from "@/modules/mcp/lib/config";
 import {
   forgetKnownTools,
   type KnownTool,
+  listProjectServers,
   loadKnownTools,
+  loadProjectRecords,
   loadServers,
   onMcpChanged,
+  saveProjectRecord,
   saveServers,
 } from "@/modules/mcp/lib/configStore";
+import {
+  type ProjectServerRecord,
+  type ProjectServers,
+  projectConfigs,
+  recordOf,
+} from "@/modules/mcp/lib/projectServers";
 import {
   applyStatusEvent,
   MCP_RESTART_EVENT,
@@ -40,6 +51,7 @@ import {
   Add01Icon,
   ArrowDown01Icon,
   ArrowRight01Icon,
+  Download01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
@@ -55,8 +67,11 @@ import {
   secretId,
   serverFromDraft,
 } from "./draft";
+import { ImportDialog } from "./ImportDialog";
+import { ProjectServersSection } from "./ProjectServers";
 import { ServerDialog } from "./ServerDialog";
 import { ServerLogs } from "./ServerLogs";
+import { SignInRow, useSignIn } from "./SignIn";
 
 type StatusEvent = {
   window: string;
@@ -66,13 +81,23 @@ type StatusEvent = {
 
 function useMcpState() {
   const [servers, setServers] = useState<McpServerConfig[] | null>(null);
+  const [projects, setProjects] = useState<ProjectServers[]>([]);
+  const [records, setRecords] = useState<Record<string, ProjectServerRecord>>(
+    {},
+  );
   const [knownTools, setKnownTools] = useState<Record<string, KnownTool[]>>({});
   const [statuses, setStatuses] = useState<WindowStatus[]>([]);
 
   useEffect(() => {
     let alive = true;
-    const reloadServers = () =>
+    const reloadServers = () => {
       void loadServers().then((s) => alive && setServers(s));
+      void loadProjectRecords().then((r) => alive && setRecords(r));
+      void listProjectServers(true).then(
+        (p) => alive && setProjects(p),
+        () => alive && setProjects([]),
+      );
+    };
     const reloadTools = () =>
       void loadKnownTools().then((t) => alive && setKnownTools(t));
     reloadServers();
@@ -94,7 +119,7 @@ function useMcpState() {
     };
   }, []);
 
-  return { servers, setServers, knownTools, statuses };
+  return { servers, setServers, projects, records, knownTools, statuses };
 }
 
 /** Writes the list; every window running a server follows it. */
@@ -107,11 +132,22 @@ async function persist(
 }
 
 export function McpSection() {
-  const { servers, setServers, knownTools, statuses } = useMcpState();
+  const { servers, setServers, projects, records, knownTools, statuses } =
+    useMcpState();
   const [dialog, setDialog] = useState<ServerDraft | null>(null);
+  const [importing, setImporting] = useState(false);
   const [removing, setRemoving] = useState<McpServerConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
   const report = useCallback((e: unknown) => setError(String(e)), []);
+  const projectServers = useMemo(
+    () => projectConfigs(projects, records),
+    [projects, records],
+  );
+  const everyServer = useMemo(
+    () => [...(servers ?? []), ...projectServers],
+    [servers, projectServers],
+  );
+  const auth = useSignIn(everyServer);
 
   const update = useCallback(
     (id: string, change: (s: McpServerConfig) => McpServerConfig) => {
@@ -163,6 +199,18 @@ export function McpSection() {
       });
     }
     const server = serverFromDraft(draft);
+    // A sign-in belongs to the URL it was made for.
+    const before = draft.base?.transport;
+    const after = server.transport;
+    if (
+      before &&
+      before.type !== "stdio" &&
+      (after.type === "stdio" || after.url !== before.url)
+    ) {
+      await invoke("mcp_oauth_sign_out", { serverId: server.id }).catch(
+        () => {},
+      );
+    }
     // Switches flipped while the dialog was open are kept.
     const latest = current.find((s) => s.id === server.id);
     if (latest) {
@@ -189,6 +237,11 @@ export function McpSection() {
         serverId: server.id,
         secrets: refs,
       }).catch(() => {});
+    }
+    if (server.transport.type !== "stdio") {
+      await invoke("mcp_oauth_sign_out", { serverId: server.id }).catch(
+        () => {},
+      );
     }
     await persist(
       (servers ?? []).filter((s) => s.id !== server.id),
@@ -221,15 +274,27 @@ export function McpSection() {
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <Label>Servers</Label>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-6 gap-1 px-2 text-[11px]"
-            onClick={() => void openEditor(null)}
-          >
-            <HugeiconsIcon icon={Add01Icon} size={11} strokeWidth={2} />
-            Add server
-          </Button>
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 gap-1 px-2 text-[11px]"
+              onClick={() => setImporting(true)}
+              title="Import from Claude Desktop, Claude Code, Cursor or VS Code"
+            >
+              <HugeiconsIcon icon={Download01Icon} size={11} strokeWidth={2} />
+              Import
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 gap-1 px-2 text-[11px]"
+              onClick={() => void openEditor(null)}
+            >
+              <HugeiconsIcon icon={Add01Icon} size={11} strokeWidth={2} />
+              Add server
+            </Button>
+          </div>
         </div>
         {servers === null ? null : servers.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border/70 px-3 py-6 text-center text-[11.5px] text-muted-foreground">
@@ -249,6 +314,7 @@ export function McpSection() {
                 server.enabled,
                 statuses.filter((s) => s.serverId === server.id),
               )}
+              signIn={signInProps(auth, server)}
               onUpdate={(change) => update(server.id, change)}
               onEdit={() => void openEditor(server)}
               onRemove={() => setRemoving(server)}
@@ -256,6 +322,51 @@ export function McpSection() {
           ))
         )}
       </div>
+
+      {projects.map((listing) => (
+        <ProjectServersSection
+          key={listing.project.key}
+          listing={listing}
+          records={records}
+          onError={report}
+          card={(server, view) => (
+            <ServerCard
+              key={server.id}
+              server={server}
+              tools={knownTools[server.id] ?? []}
+              status={statusView(
+                server.enabled,
+                statuses.filter((s) => s.serverId === server.id),
+              )}
+              signIn={signInProps(auth, server)}
+              note={
+                view.variables.length > 0
+                  ? `Reads ${view.variables.join(", ")} from your environment when it starts.`
+                  : null
+              }
+              onUpdate={(change) => {
+                setError(null);
+                saveProjectRecord(
+                  server.id,
+                  recordOf(change(server), view.entryHash),
+                ).catch(report);
+              }}
+            />
+          )}
+        />
+      ))}
+
+      {importing ? (
+        <ImportDialog
+          existing={servers ?? []}
+          onImport={async (imported) => {
+            if (imported.length === 0) return;
+            const current = await loadServers();
+            await persist([...current, ...imported], setServers);
+          }}
+          onClose={() => setImporting(false)}
+        />
+      ) : null}
 
       {dialog ? (
         <ServerDialog
@@ -295,6 +406,35 @@ export function McpSection() {
   );
 }
 
+type SignInProps = {
+  status: AuthStatus | undefined;
+  error: string | undefined;
+  onSignIn: () => void;
+  onSignOut: () => void;
+  onCancel: () => void;
+};
+
+function signInProps(
+  auth: ReturnType<typeof useSignIn>,
+  server: McpServerConfig,
+): SignInProps | null {
+  if (!usesSignIn(server)) return null;
+  return {
+    status: auth.statuses[server.id],
+    error: auth.errors[server.id],
+    onSignIn: () => auth.signIn(server),
+    onSignOut: () => auth.signOut(server),
+    onCancel: () => auth.cancel(server),
+  };
+}
+
+const IMPORTED_FROM: Record<string, string> = {
+  "imported:claude-desktop": "Imported from Claude Desktop",
+  "imported:claude-code": "Imported from Claude Code",
+  "imported:cursor": "Imported from Cursor",
+  "imported:vscode": "Imported from VS Code",
+};
+
 function describeTransport(server: McpServerConfig): string {
   const t = server.transport;
   if (t.type === "stdio") return joinCommandLine([t.command, ...t.args]);
@@ -320,6 +460,7 @@ function statusText(status: StatusView, now: number): string {
       return parts.length > 0 ? `Running: ${parts.join(", ")}` : "Running";
     }
     case "crashed": {
+      if (isSignInError(status.error)) return status.error ?? "";
       const error = status.error ?? "it stopped unexpectedly";
       if (status.retryAtMs === null) {
         return `Stopped after repeated failures: ${error}. Restart it to try again.`;
@@ -352,6 +493,8 @@ function ServerCard({
   server,
   tools,
   status,
+  signIn,
+  note,
   onUpdate,
   onEdit,
   onRemove,
@@ -359,14 +502,23 @@ function ServerCard({
   server: McpServerConfig;
   tools: KnownTool[];
   status: StatusView;
+  /** A remote server's sign-in; null when it does not use one. */
+  signIn: SignInProps | null;
+  note?: string | null;
   onUpdate: (change: (s: McpServerConfig) => McpServerConfig) => void;
-  onEdit: () => void;
-  onRemove: () => void;
+  /** Absent for a project server: its file is its configuration. */
+  onEdit?: () => void;
+  onRemove?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [logs, setLogs] = useState(false);
   const now = useNow(status.state === "crashed" && status.retryAtMs !== null);
   const canRestart = status.state !== "disabled" && status.state !== "idle";
+  const needsSignIn =
+    signIn?.status?.state === "required" &&
+    !signIn.status.signingIn &&
+    status.state !== "running";
+  const origin = IMPORTED_FROM[server.source] ?? null;
 
   return (
     <div className="rounded-lg border border-border/60 bg-card/60">
@@ -389,7 +541,7 @@ function ServerCard({
             <span
               className={cn(
                 "size-1.5 shrink-0 rounded-full",
-                DOT[status.state],
+                needsSignIn ? "bg-amber-500" : DOT[status.state],
               )}
             />
             <span className="truncate text-[12.5px] font-medium">
@@ -407,14 +559,32 @@ function ServerCard({
           <span
             className={cn(
               "text-[10.5px] leading-relaxed",
-              status.state === "crashed"
-                ? "text-destructive"
-                : "text-muted-foreground",
+              needsSignIn
+                ? "text-amber-700 dark:text-amber-400"
+                : status.state === "crashed"
+                  ? "text-destructive"
+                  : "text-muted-foreground",
             )}
           >
-            {statusText(status, now)}
+            {needsSignIn
+              ? "Sign in required. Sign in to let the agent use it."
+              : statusText(status, now)}
           </span>
+          {origin || note ? (
+            <span className="text-[10px] text-muted-foreground/80">
+              {[origin, note].filter(Boolean).join(" · ")}
+            </span>
+          ) : null}
         </div>
+        {needsSignIn && signIn ? (
+          <Button
+            size="sm"
+            className="h-6 px-2 text-[11px]"
+            onClick={signIn.onSignIn}
+          >
+            Sign in
+          </Button>
+        ) : null}
         <Switch
           checked={server.enabled}
           onCheckedChange={(enabled) => onUpdate((s) => ({ ...s, enabled }))}
@@ -424,14 +594,16 @@ function ServerCard({
       {open ? (
         <div className="flex flex-col gap-3 border-t border-border/60 px-3 py-3">
           <div className="flex flex-wrap items-center gap-1.5">
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-6 px-2 text-[11px]"
-              onClick={onEdit}
-            >
-              Edit
-            </Button>
+            {onEdit ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 px-2 text-[11px]"
+                onClick={onEdit}
+              >
+                Edit
+              </Button>
+            ) : null}
             <Button
               size="sm"
               variant="outline"
@@ -456,15 +628,18 @@ function ServerCard({
             >
               Logs
             </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="ml-auto h-6 px-2 text-[11px] text-destructive hover:text-destructive"
-              onClick={onRemove}
-            >
-              Remove
-            </Button>
+            {onRemove ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="ml-auto h-6 px-2 text-[11px] text-destructive hover:text-destructive"
+                onClick={onRemove}
+              >
+                Remove
+              </Button>
+            ) : null}
           </div>
+          {signIn ? <SignInRow {...signIn} /> : null}
           <SettingRow
             title="Trusted"
             description="Its tools follow the conversation's Ask or Auto-approve mode. Untrusted servers ask before every call, even in Auto-approve. What a server says about its tools (read-only and so on) never changes this."

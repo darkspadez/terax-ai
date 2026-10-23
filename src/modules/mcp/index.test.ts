@@ -8,7 +8,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("./lib/configStore", () => ({
-  loadServers: async () => state.servers,
+  loadWindowServers: async () => state.servers,
 }));
 vi.mock("./runtime", () => {
   state.runtimeLoaded = true;

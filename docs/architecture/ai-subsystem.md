@@ -102,7 +102,7 @@ Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalRespons
 
 ### MCP tools
 
-Tools of MCP servers come from the window's MCP client (`src/modules/mcp/`). On every run `transport.ts` calls `mcpToolsForRun`: with no server enabled it only reads the configuration; otherwise it loads the client chunk, brings the window's servers in line with Settings (starting them on the first run, which waits up to 15 s for servers still starting) and returns their tools. `runAgentStream` adds them beside the built-in tools:
+Tools of MCP servers come from the window's MCP client (`src/modules/mcp/`). The window's servers are the ones configured in Settings (added there or imported from Claude Desktop, Claude Code, Cursor or VS Code, which start off) and those of its project's `.mcp.json` while the user allows that file (`loadWindowServers`; on unless turned off, never trusted until the user says so). On every run `transport.ts` calls `mcpToolsForRun`: with no server enabled it only reads the configuration; otherwise it loads the client chunk, brings the window's servers in line (starting them on the first run, which waits up to 15 s for servers still starting) and returns their tools. A remote server that needs sign-in (OAuth, run by the backend in Settings) contributes no tools until the user signs in; its tokens never reach the page or the model. `runAgentStream` adds them beside the built-in tools:
 
 - Names are `mcp__<server>__<tool>` (sanitized, at most 64 characters), each a `dynamicTool` with the server's input schema, a capped description and `metadata.mcp` (server and tool), which UI parts carry as `toolMetadata`.
 - Gates (`mcpToolGate`, `mcpToolsWithGates` in `tools.ts`): an untrusted server's tools ask in every mode; a Trusted server's follow the conversation's mode (plan mode asks); Always allow runs a tool unasked; Never allow keeps it from the model. Annotations are shown, never used. Sub-agents get no MCP tools.
@@ -128,7 +128,7 @@ AI-proposed file edits open in an `ai-diff` tab. The user accepts or rejects per
 - Keys only via `secrets_*` commands; never disk, settings store, or `localStorage`.
 - New providers must justify their bundle cost and unique value.
 - Mutating tools require approval unless the conversation is in Auto-approve; the coding-agent tools always do, and no mode skips a deny-list. Read-only tools still pass the deny-list.
-- MCP tools of an untrusted server ask in every mode; an MCP tool is never offered without its gate, and server annotations never relax one.
+- MCP tools of an untrusted server ask in every mode; an MCP tool is never offered without its gate, and server annotations never relax one. Imported and project servers are untrusted until the user says otherwise; a project's servers run only while the user allows its `.mcp.json`.
 - A project's skills reach the model only while the user trusts that content; a skill's text never changes approval.
 
 ## See also

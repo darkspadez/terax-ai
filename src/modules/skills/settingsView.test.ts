@@ -67,3 +67,23 @@ describe("skillGroups", () => {
     expect(sourceLabel("terax-project")).toBe(".terax/skills");
   });
 });
+
+describe("project groups", () => {
+  it("decide only the project's skills: its .mcp.json belongs to Settings > MCP", () => {
+    const groups = skillGroups({
+      teraxDir: "/t",
+      userDir: null,
+      skills: [],
+      invalid: [],
+      projects: [
+        trustStatus([
+          trustItem(),
+          trustItem({ kind: "mcp-json", path: "/work/proj/.mcp.json" }),
+        ]),
+      ],
+    });
+    expect(groups[2].project?.items.map((i) => i.kind)).toEqual([
+      "claude-skills",
+    ]);
+  });
+});

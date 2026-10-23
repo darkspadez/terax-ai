@@ -7,6 +7,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { SignInRequiredError } from "../lib/auth";
 import type { McpServerConfig } from "../lib/config";
 import { toToolOutput } from "../lib/results";
 
@@ -39,6 +40,9 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: async () => "9.9.9" }));
 
 import { connectServer } from "./connect";
+
+/** `${NAME}` as written in a configuration file. */
+const ref = (name: string) => ["$", "{", name, "}"].join("");
 
 const encoder = new TextEncoder();
 
@@ -271,5 +275,154 @@ describe("connectServer over HTTP through the backend proxy", () => {
       urls.some((u) => u.startsWith("POST https://mcp.example.test/mcp")),
     ).toBe(true);
     expect(urls.every((u) => u.includes(origin))).toBe(true);
+  });
+});
+
+/** Answers every request of the emulated backend with `status`. */
+function answerEvery(
+  status: number,
+  headers: Record<string, string>,
+  seen: { url: string; headers: Record<string, string> }[],
+) {
+  host.handlers.set("mcp_http_close", () => undefined);
+  host.handlers.set("mcp_http_ack", () => undefined);
+  host.handlers.set("mcp_http_cancel", () => undefined);
+  host.handlers.set(
+    "mcp_http_stream",
+    async (_body: Uint8Array, options: { headers: Record<string, string> }) => {
+      const meta = JSON.parse(options.headers["x-terax-mcp-request"]);
+      seen.push({ url: meta.url, headers: meta.headers });
+      const channel = host.channels.get(meta.onEvent);
+      const send = (kind: number, bytes: Uint8Array = new Uint8Array()) => {
+        const packet = new Uint8Array(bytes.length + 1);
+        packet[0] = kind;
+        packet.set(bytes, 1);
+        channel?.onmessage(packet.buffer);
+      };
+      send(0, encoder.encode(JSON.stringify({ status, headers })));
+      send(1, encoder.encode('{"error":"unauthorized"}'));
+      send(2);
+    },
+  );
+}
+
+function httpServer(overrides: Partial<McpServerConfig> = {}): McpServerConfig {
+  return {
+    ...stdioServer(),
+    transport: {
+      type: "http",
+      url: "https://mcp.example.test/mcp",
+      headers: [],
+    },
+    ...overrides,
+  };
+}
+
+describe("signing in", () => {
+  it("fails a server that refuses the connection with sign-in required, never retrying it as a crash", async () => {
+    const seen: { url: string; headers: Record<string, string> }[] = [];
+    host.handlers.set("mcp_http_open", () => 4);
+    answerEvery(
+      401,
+      {
+        "www-authenticate":
+          'Bearer resource_metadata="https://mcp.example.test/.well-known/oauth-protected-resource"',
+        "x-terax-sign-in": "required",
+      },
+      seen,
+    );
+    const failed = await connectServer(httpServer(), null).catch((e) => e);
+    expect(failed).toBeInstanceOf(SignInRequiredError);
+    expect(seen.length).toBeGreaterThan(0);
+  });
+
+  it("treats a 401 the backend does not mark (a wrong API key) as an ordinary failure", async () => {
+    host.handlers.set("mcp_http_open", () => 4);
+    answerEvery(401, {}, []);
+    const failed = await connectServer(httpServer(), null).catch((e) => e);
+    expect(failed).toBeInstanceOf(Error);
+    expect(failed).not.toBeInstanceOf(SignInRequiredError);
+  });
+
+  it("never puts a token in a request: the backend adds it", async () => {
+    const seen: { url: string; headers: Record<string, string> }[] = [];
+    host.handlers.set("mcp_http_open", () => 4);
+    answerEvery(401, {}, seen);
+    await connectServer(httpServer(), null).catch(() => {});
+    for (const request of seen) {
+      expect(
+        Object.keys(request.headers).map((h) => h.toLowerCase()),
+      ).not.toContain("authorization");
+    }
+  });
+});
+
+describe("project servers", () => {
+  it("start a local one in the backend from the trusted entry, never from the page's copy", async () => {
+    const spawned: Record<string, unknown>[] = [];
+    host.handlers.set("mcp_spawn", () => {
+      throw new Error(
+        "a project server is never spawned from the page's command",
+      );
+    });
+    host.handlers.set("mcp_project_spawn", (args: Record<string, unknown>) => {
+      spawned.push(args);
+      const exit = args.onExit as { onmessage: (v: unknown) => void };
+      queueMicrotask(() =>
+        exit.onmessage({ code: 1, signal: null, reason: null, stderrTail: "" }),
+      );
+      return 9;
+    });
+    host.handlers.set("mcp_send", () => undefined);
+    host.handlers.set("mcp_kill", () => undefined);
+    await expect(
+      connectServer(
+        {
+          ...stdioServer(),
+          id: "prj-0123456789ab-0123456789ab",
+          source: "project:/work/p",
+        },
+        "/bin/zsh",
+      ),
+    ).rejects.toThrow("Exited with code 1");
+    expect(Object.keys(spawned[0]).sort()).toEqual([
+      "onExit",
+      "onMessage",
+      "serverId",
+      "shell",
+    ]);
+    expect(spawned[0].serverId).toBe("prj-0123456789ab-0123456789ab");
+  });
+
+  it("open a remote one at the URL the backend expanded", async () => {
+    const seen: { url: string; headers: Record<string, string> }[] = [];
+    const opened: unknown[] = [];
+    host.handlers.set("mcp_http_open", () => {
+      throw new Error("a project server is never opened from the page's URL");
+    });
+    host.handlers.set(
+      "mcp_project_http_open",
+      (args: Record<string, unknown>) => {
+        opened.push(args);
+        return { id: 8, url: "https://expanded.example.test/mcp" };
+      },
+    );
+    answerEvery(401, {}, seen);
+    await connectServer(
+      httpServer({
+        id: "prj-0123456789ab-0123456789ab",
+        source: "project:/work/p",
+        transport: {
+          type: "http",
+          url: `https://${ref("HOST")}/mcp`,
+          headers: [],
+        },
+      }),
+      null,
+    ).catch(() => {});
+    expect(opened).toEqual([
+      { serverId: "prj-0123456789ab-0123456789ab", shell: null },
+    ]);
+    expect(seen[0].url).toBe("https://expanded.example.test/mcp");
   });
 });

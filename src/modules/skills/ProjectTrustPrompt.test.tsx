@@ -46,6 +46,39 @@ describe("ProjectTrustPrompt", () => {
     expect(html).toContain("Use selected");
   });
 
+  it("asks about a project's MCP servers, listing each command or URL", () => {
+    const html = render([
+      trustItem({
+        kind: "mcp-json",
+        label: "MCP servers in .mcp.json",
+        path: "/work/proj/.mcp.json",
+        entries: [
+          {
+            title: "db",
+            detail: "npx -y db-mcp · reads DB_URL from your environment",
+          },
+        ],
+      }),
+    ]);
+    expect(html).toContain("Use the MCP servers in proj?");
+    expect(html).toContain("/work/proj/.mcp.json");
+    expect(html).toContain("npx -y db-mcp");
+    expect(html).toContain("programs Terax starts with your rights");
+    expect(html).not.toContain("Skills are instructions");
+    expect(html).toContain("Use servers");
+  });
+
+  it("asks about skills and servers together", () => {
+    const html = render([
+      trustItem(),
+      trustItem({ kind: "mcp-json", path: "/work/proj/.mcp.json" }),
+    ]);
+    expect(html).toContain("Use the skills and MCP servers in proj?");
+    expect(html).toContain("Skills are instructions");
+    expect(html).toContain("programs Terax starts with your rights");
+    expect(html).toContain("Use selected");
+  });
+
   it("names what cannot be used and why", () => {
     const html = render([
       trustItem(),

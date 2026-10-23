@@ -17,6 +17,8 @@ type FakeClient = {
 const fakes = vi.hoisted(() => ({
   tools: new Map<string, unknown[]>(),
   failing: new Set<string>(),
+  signIn: new Set<string>(),
+  refused: new Set<string>(),
   remote: new Set<string>(),
   connects: [] as string[],
   closes: [] as string[],
@@ -27,38 +29,46 @@ const fakes = vi.hoisted(() => ({
   releases: [] as (() => void)[],
 }));
 
-vi.mock("./connect", () => ({
-  connectServer: async (server: McpServerConfig) => {
-    fakes.connects.push(server.id);
-    if (fakes.failing.has(server.id)) throw new Error("spawn failed");
-    const client: FakeClient = {
-      getServerVersion: () => ({ name: `${server.name}-srv`, version: "1.0" }),
-      getInstructions: () => `Use ${server.name} wisely.`,
-      getServerCapabilities: () => ({ tools: { listChanged: true } }),
-      setNotificationHandler: (_schema, handler) => {
-        client.listChanged = handler;
-      },
-      listTools: async () => {
-        if (fakes.held.has(server.id)) {
-          await new Promise<void>((resolve) => fakes.releases.push(resolve));
-        }
-        return { tools: fakes.tools.get(server.id) ?? [] };
-      },
-      callTool: vi.fn(async () => ({
-        content: [{ type: "text", text: "ok" }],
-      })),
-    };
-    fakes.clients.set(server.id, client);
-    return {
-      client,
-      remote: fakes.remote.has(server.id),
-      endReason: () => "Exited with code 1: boom",
-      close: async () => {
-        fakes.closes.push(server.id);
-      },
-    };
-  },
-}));
+vi.mock("./connect", async () => {
+  const { SignInRequiredError } = await import("../lib/auth");
+  return {
+    connectServer: async (server: McpServerConfig) => {
+      fakes.connects.push(server.id);
+      if (fakes.failing.has(server.id)) throw new Error("spawn failed");
+      if (fakes.signIn.has(server.id)) throw new SignInRequiredError();
+      const client: FakeClient = {
+        getServerVersion: () => ({
+          name: `${server.name}-srv`,
+          version: "1.0",
+        }),
+        getInstructions: () => `Use ${server.name} wisely.`,
+        getServerCapabilities: () => ({ tools: { listChanged: true } }),
+        setNotificationHandler: (_schema, handler) => {
+          client.listChanged = handler;
+        },
+        listTools: async () => {
+          if (fakes.held.has(server.id)) {
+            await new Promise<void>((resolve) => fakes.releases.push(resolve));
+          }
+          return { tools: fakes.tools.get(server.id) ?? [] };
+        },
+        callTool: vi.fn(async () => ({
+          content: [{ type: "text", text: "ok" }],
+        })),
+      };
+      fakes.clients.set(server.id, client);
+      return {
+        client,
+        remote: fakes.remote.has(server.id),
+        endReason: () => "Exited with code 1: boom",
+        signInRequired: () => fakes.refused.has(server.id),
+        close: async () => {
+          fakes.closes.push(server.id);
+        },
+      };
+    },
+  };
+});
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: async (command: string, args: Record<string, unknown>) => {
     fakes.invokes.push([command, args]);
@@ -68,7 +78,7 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: async () => () => {},
 }));
 vi.mock("../lib/configStore", () => ({
-  loadServers: async () => [],
+  loadWindowServers: async () => [],
   onMcpChanged: async () => () => {},
   saveKnownTools: async (id: string) => {
     fakes.saved.push(id);
@@ -129,6 +139,8 @@ async function settle(manager: McpManager) {
 beforeEach(() => {
   fakes.tools.clear();
   fakes.failing.clear();
+  fakes.signIn.clear();
+  fakes.refused.clear();
   fakes.remote.clear();
   fakes.connects.length = 0;
   fakes.closes.length = 0;
@@ -231,6 +243,47 @@ describe("McpManager", () => {
     expect(last.error).toBe("spawn failed");
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(fakes.connects).toHaveLength(MAX_CRASHES + 1);
+  });
+
+  it("waits for sign-in instead of retrying a server that refuses it", async () => {
+    vi.useFakeTimers();
+    fakes.signIn.add("s");
+    const manager = new McpManager();
+    manager.sync([server("s")]);
+    await vi.waitFor(() => expect(statuses("s").slice(-1)[0]).toBe("crashed"));
+    const last = fakes.invokes
+      .filter(([command]) => command === "mcp_status_report")
+      .slice(-1)[0]?.[1].report as { retryAtMs: number | null; error: string };
+    expect(last.retryAtMs).toBe(null);
+    expect(last.error).toContain("Sign in required");
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(fakes.connects).toEqual(["s"]);
+    // Settings restarts it once the user signed in.
+    fakes.signIn.delete("s");
+    manager.restart("s");
+    await vi.waitFor(() => expect(statuses("s").slice(-1)[0]).toBe("running"));
+  });
+
+  it("stops a running remote server whose sign-in lapsed, without retrying", async () => {
+    vi.useFakeTimers();
+    fakes.remote.add("r");
+    fakes.tools.set("r", [tool("a")]);
+    const manager = new McpManager();
+    manager.sync([server("r")]);
+    await vi.waitFor(() => expect(statuses("r").slice(-1)[0]).toBe("running"));
+    fakes.refused.add("r");
+    fakes.clients
+      .get("r")
+      ?.callTool.mockRejectedValueOnce(new Error("HTTP 401"));
+    await expect(manager.callTool("r", "a", {})).rejects.toThrow("HTTP 401");
+    expect(statuses("r").slice(-1)[0]).toBe("crashed");
+    const last = fakes.invokes
+      .filter(([command]) => command === "mcp_status_report")
+      .slice(-1)[0]?.[1].report as { retryAtMs: number | null; error: string };
+    expect(last).toMatchObject({ retryAtMs: null });
+    expect(last.error).toContain("Sign in required");
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(fakes.connects).toEqual(["r"]);
   });
 
   it("treats a closed connection as a crash and starts it again", async () => {

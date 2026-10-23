@@ -1,5 +1,5 @@
 //! Project trust: content a project folder provides that Terax uses only after the user allows
-//! it (a project's skills now, its `.mcp.json` later). A project is a workspace root a window has
+//! it (its skills, its `.mcp.json` MCP servers). A project is a workspace root a window has
 //! open. Each kind of content is an `ItemKind`; for each project the user's decision on each item
 //! is kept with the content hash it was made for, so a change asks again. One prompt lists
 //! everything a project provides, and Settings revokes a decision.
@@ -20,7 +20,8 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::modules::fs::{blocking, to_canon};
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
-/// Sent to every window when a decision is made or revoked.
+/// Sent to every window when a decision is made or revoked, or a window opens or leaves a
+/// project.
 pub const CHANGED_EVENT: &str = "project-trust:changed";
 const FILE_NAME: &str = "project-trust.json";
 
@@ -29,16 +30,24 @@ const FILE_NAME: &str = "project-trust.json";
 pub enum ItemKind {
     ClaudeSkills,
     TeraxSkills,
+    McpJson,
 }
 
 impl ItemKind {
-    pub const ALL: [ItemKind; 2] = [ItemKind::ClaudeSkills, ItemKind::TeraxSkills];
+    pub const ALL: [ItemKind; 3] = [
+        ItemKind::ClaudeSkills,
+        ItemKind::TeraxSkills,
+        ItemKind::McpJson,
+    ];
+    /// The kinds that hold skills.
+    pub const SKILLS: [ItemKind; 2] = [ItemKind::ClaudeSkills, ItemKind::TeraxSkills];
 
     /// The key a decision is stored under.
     pub fn id(self) -> &'static str {
         match self {
             ItemKind::ClaudeSkills => "claude-skills",
             ItemKind::TeraxSkills => "terax-skills",
+            ItemKind::McpJson => "mcp-json",
         }
     }
 
@@ -51,6 +60,7 @@ impl ItemKind {
         match self {
             ItemKind::ClaudeSkills => ".claude/skills",
             ItemKind::TeraxSkills => ".terax/skills",
+            ItemKind::McpJson => crate::modules::mcp::project::FILE,
         }
     }
 
@@ -58,6 +68,7 @@ impl ItemKind {
         match self {
             ItemKind::ClaudeSkills => "Skills in .claude/skills",
             ItemKind::TeraxSkills => "Skills in .terax/skills",
+            ItemKind::McpJson => "MCP servers in .mcp.json",
         }
     }
 }
@@ -87,6 +98,7 @@ pub fn inspect(root: &Path, kind: ItemKind) -> Option<Inspected> {
         ItemKind::ClaudeSkills | ItemKind::TeraxSkills => {
             crate::modules::skills::inspect_project_item(root, kind)
         }
+        ItemKind::McpJson => crate::modules::mcp::project::inspect(root),
     }
 }
 
@@ -207,8 +219,17 @@ pub fn release_window(app: &AppHandle, label: &str) {
         let app = app.clone();
         tauri::async_runtime::spawn_blocking(move || {
             crate::modules::skills::open_projects_changed(&app);
+            let _ = app.emit(CHANGED_EVENT, ());
         });
     }
+}
+
+/// The project a window has open, if it registered one.
+pub fn window_project(app: &AppHandle, label: &str) -> Option<OpenProject> {
+    app.try_state::<ProjectTrustState>()?
+        .open_lock()
+        .get(label)
+        .cloned()
 }
 
 /// The projects windows have open, each once.
@@ -272,6 +293,16 @@ fn now_secs() -> u64 {
 /// Whether the user allowed `kind` of the project `key` with exactly this content.
 pub fn is_allowed(app: &AppHandle, key: &str, kind: ItemKind, hash: &str) -> bool {
     with_file(app, |file| decided(file, key, kind, hash) == Some(true)).unwrap_or(false)
+}
+
+/// The state of an item of the project `key` whose content hash (or problem) is `hash`.
+pub fn decision_state(
+    app: &AppHandle,
+    key: &str,
+    kind: ItemKind,
+    hash: &Result<String, String>,
+) -> ItemState {
+    with_file(app, |file| item_state(file, key, kind, hash)).unwrap_or(ItemState::Pending)
 }
 
 /// The decision on this content, if one was made for it.
@@ -621,6 +652,7 @@ pub async fn project_trust_status(
         let Ok(project) = resolve_project(&root, workspace) else {
             if app.state::<ProjectTrustState>().release_window(&label) {
                 crate::modules::skills::open_projects_changed(&app);
+                let _ = app.emit(CHANGED_EVENT, ());
             }
             return Ok(None);
         };
@@ -632,6 +664,8 @@ pub async fn project_trust_status(
         };
         if moved {
             crate::modules::skills::open_projects_changed(&app);
+            // What windows run from a project (its MCP servers) follows the open projects.
+            let _ = app.emit(CHANGED_EVENT, ());
         }
         status(&app, &project).map(Some)
     })
@@ -842,7 +876,7 @@ mod tests {
         let path = dir.path().join(FILE_NAME);
         std::fs::write(
             &path,
-            r#"{"projects":{"/p":{"display":"/p","items":{"mcp-json":{"allowed":true,"hash":"x","at":3}}}}}"#,
+            r#"{"projects":{"/p":{"display":"/p","items":{"future-kind":{"allowed":true,"hash":"x","at":3},"mcp-json":{"allowed":false,"hash":"m","at":3}}}}}"#,
         )
         .unwrap();
         let mut file = load(&path);
@@ -857,11 +891,13 @@ mod tests {
         save(&path, &file).unwrap();
         let reread = load(&path);
         assert_eq!(reread, file);
-        assert!(reread.projects["/p"].items.contains_key("mcp-json"));
+        assert!(reread.projects["/p"].items.contains_key("future-kind"));
+        assert_eq!(decided(&reread, "/p", ItemKind::McpJson, "m"), Some(false));
         let listed = recorded(&reread, |_| true);
-        assert_eq!(listed[0].items.len(), 2);
+        assert_eq!(listed[0].items.len(), 3);
         assert_eq!(listed[0].items[0].label, "Skills in .claude/skills");
-        assert_eq!(listed[0].items[1].label, "mcp-json");
+        assert_eq!(listed[0].items[1].label, "future-kind");
+        assert_eq!(listed[0].items[2].label, "MCP servers in .mcp.json");
         std::fs::write(&path, b"{not json").unwrap();
         assert_eq!(load(&path), TrustFile::default());
         assert_eq!(load(&dir.path().join("missing.json")), TrustFile::default());

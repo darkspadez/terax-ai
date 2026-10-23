@@ -130,7 +130,7 @@ Three distinct surfaces:
 - `skills_load` / `skills_read_file` - a usable skill's `SKILL.md` body and file list, or one of its text files, read only inside its real folder
 - `skills_set_enabled` / `skills_create` / `skills_edit` / `skills_delete` - turn a skill on or off, create one from the template, open its `SKILL.md` in the editor of the window in front, delete one of Terax's folder (to the trash)
 - `skills_install_git` / `skills_install_zip` / `skills_install_commit` / `skills_install_cancel` - stage skills from a Git repository or a zip the user picks, then install the reviewed ones
-- `project_trust_status` / `project_trust_decide` / `project_trust_list` / `project_trust_revoke` - what a project provides and the user's decision on each item, kept with its content hash
+- `project_trust_status` / `project_trust_decide` / `project_trust_list` / `project_trust_revoke` - what a project provides (its skills, its `.mcp.json`) and the user's decision on each item, kept with its content hash
 
 ### Language servers (`src-tauri/src/modules/lsp/`)
 
@@ -146,6 +146,9 @@ Three distinct surfaces:
 - `mcp_logs` / `mcp_logs_clear` / `mcp_log_note` - the bounded log of each server (stderr and lifecycle notes)
 - `mcp_status_report` / `mcp_status_list` - what each window's client reports, for Settings (`terax://mcp-status`)
 - `mcp_secret_set` / `mcp_secret_delete` / `mcp_secret_status` - secret values of servers, written from Settings and never read back by a page
+- `mcp_oauth_status` / `mcp_oauth_probe` / `mcp_oauth_sign_in` / `mcp_oauth_cancel` / `mcp_oauth_sign_out` - OAuth sign-in of remote servers, run in the backend (settings window only; the page sees a status, never a token; `terax://mcp-auth`)
+- `mcp_import_scan` / `mcp_import_secrets` - servers other apps configure (Claude Desktop, Claude Code, Cursor, VS Code), read from their fixed paths; secret values go from those files to the keychain without passing the page (settings window only)
+- `mcp_project_servers` / `mcp_project_spawn` / `mcp_project_http_open` - the servers of a project's `.mcp.json` while the user allows it: listed for the calling window's project (Settings: every open project), started from the trusted file with its variables expanded in the backend
 
 ### Secrets (`src-tauri/src/modules/secrets.rs`)
 

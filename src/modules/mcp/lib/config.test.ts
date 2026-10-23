@@ -2,14 +2,21 @@ import { describe, expect, it } from "vitest";
 import {
   isAbsolutePath,
   isHttpUrl,
+  isProjectServer,
   isValidHeaderName,
   launchKey,
   type McpServerConfig,
+  OAUTH_CLIENT_SECRET,
   parseServers,
+  parseTransport,
   secretRefs,
   splitValues,
+  usesSignIn,
   validateServer,
 } from "./config";
+
+/** `${NAME}` as written in a configuration file. */
+const ref = (name: string) => ["$", "{", name, "}"].join("");
 
 const ID = "6f1c2a5e-0b9d-4c3e-8f7a-1d2e3f4a5b6c";
 
@@ -250,5 +257,84 @@ describe("helpers", () => {
     expect(isAbsolutePath("C:\\tools")).toBe(true);
     expect(isAbsolutePath("\\\\server\\share")).toBe(true);
     expect(isAbsolutePath("tools")).toBe(false);
+  });
+});
+
+describe("sign-in configuration", () => {
+  const remote = (oauth?: unknown): McpServerConfig =>
+    ({
+      ...stdio(),
+      transport: {
+        type: "http",
+        url: "https://mcp.example.com/mcp",
+        headers: [],
+        ...(oauth === undefined ? {} : { oauth }),
+      },
+    }) as McpServerConfig;
+
+  it("keeps a client the user configured, and drops a damaged one", () => {
+    const client = {
+      clientId: "abc",
+      clientSecret: true,
+      scopes: "read write",
+      callbackPort: 8080,
+    };
+    const [server] = parseServers([remote(client)]);
+    expect(server.transport).toMatchObject({ oauth: client });
+    expect(secretRefs(server.transport)).toEqual([
+      { kind: "oauth", name: OAUTH_CLIENT_SECRET },
+    ]);
+    const [damaged] = parseServers([
+      remote({ clientId: " ", callbackPort: 99999 }),
+    ]);
+    expect(damaged.transport).not.toHaveProperty("oauth");
+    const [noPort] = parseServers([
+      remote({ clientId: "x", callbackPort: 0, scopes: "" }),
+    ]);
+    expect(noPort.transport).toMatchObject({
+      oauth: {
+        clientId: "x",
+        clientSecret: false,
+        scopes: null,
+        callbackPort: null,
+      },
+    });
+  });
+
+  it("signs in only where no Authorization header is configured", () => {
+    expect(usesSignIn(remote())).toBe(true);
+    expect(usesSignIn(stdio())).toBe(false);
+    const keyed = remote();
+    if (keyed.transport.type !== "stdio") {
+      keyed.transport.headers = [{ name: "authorization", secret: true }];
+    }
+    expect(usesSignIn(keyed)).toBe(false);
+  });
+
+  it("tells project servers apart", () => {
+    expect(isProjectServer(stdio())).toBe(false);
+    expect(isProjectServer(stdio({ source: "project:/work/p" }))).toBe(true);
+    expect(isProjectServer(stdio({ source: "imported:cursor" }))).toBe(false);
+  });
+
+  it("reads a project server's URL with variables only when asked to", () => {
+    const raw = { type: "http", url: ref("MCP_URL"), headers: [] };
+    expect(parseTransport(raw)).toBe(null);
+    expect(parseTransport(raw, { strictUrl: false })).toMatchObject({
+      url: ref("MCP_URL"),
+    });
+  });
+
+  it("refuses an empty client id when saving", () => {
+    const server = remote();
+    if (server.transport.type !== "stdio") {
+      server.transport.oauth = {
+        clientId: "",
+        clientSecret: false,
+        scopes: null,
+        callbackPort: null,
+      };
+    }
+    expect(validateServer(server, []).oauth).toBeTruthy();
   });
 });

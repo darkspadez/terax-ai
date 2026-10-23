@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use bytes::Bytes;
 use futures_util::StreamExt;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::Url;
 
 use super::names::{valid_header_name, valid_value, SecretKind};
@@ -37,6 +37,7 @@ const RESERVED_HEADERS: &[&str] = &[
 
 pub struct HttpSession {
     pub owner: String,
+    pub server_id: String,
     pub url: Url,
     /// The configured host is local or private, so its requests may resolve
     /// there (decided when the session opened, from that host).
@@ -44,6 +45,11 @@ pub struct HttpSession {
     /// The configured headers, secret values resolved; they replace any
     /// header of the same name the page sends.
     pub headers: HeaderMap,
+    /// Sign-in applies (no `Authorization` header is configured): what its
+    /// token requests may reach.
+    pub oauth: Option<super::oauth::Policy>,
+    /// A project server: what it was opened from, checked on every request.
+    pub project: Option<super::project::Binding>,
 }
 
 /// A server URL as configured: http or https, a host, no user info.
@@ -109,6 +115,24 @@ pub fn request_headers(
     let mut map = crate::modules::net::sanitize_headers(page)?;
     for (name, value) in session {
         map.insert(name.clone(), value.clone());
+    }
+    Ok(map)
+}
+
+/// Whether the configuration sets `Authorization` itself (an API key), which
+/// sign-in then leaves alone.
+pub fn sets_authorization(headers: &HeaderMap) -> bool {
+    headers.contains_key(AUTHORIZATION)
+}
+
+/// Adds the sign-in token, replacing whatever the page sent; marked sensitive so
+/// no debug output shows it.
+pub fn with_bearer(mut map: HeaderMap, token: Option<&str>) -> Result<HeaderMap, String> {
+    if let Some(token) = token {
+        let mut value = HeaderValue::from_str(&format!("Bearer {token}"))
+            .map_err(|_| "mcp: the sign-in token cannot be sent as a header".to_owned())?;
+        value.set_sensitive(true);
+        map.insert(AUTHORIZATION, value);
     }
     Ok(map)
 }
@@ -246,6 +270,34 @@ mod tests {
             &HeaderMap::new()
         )
         .is_err());
+    }
+
+    #[test]
+    fn the_sign_in_token_replaces_what_the_page_sent() {
+        let page = request_headers(
+            Some(HashMap::from([(
+                "authorization".to_string(),
+                "Bearer from-the-page".to_string(),
+            )])),
+            &HeaderMap::new(),
+        )
+        .unwrap();
+        let signed = with_bearer(page.clone(), Some("tok")).unwrap();
+        assert_eq!(signed["authorization"], "Bearer tok");
+        assert!(signed["authorization"].is_sensitive());
+        assert!(
+            !format!("{signed:?}").contains("tok"),
+            "never in debug output"
+        );
+        assert_eq!(
+            with_bearer(page, None).unwrap()["authorization"],
+            "Bearer from-the-page"
+        );
+        assert!(with_bearer(HeaderMap::new(), Some("a\r\nX: y")).is_err());
+        let configured =
+            session_headers(vec![("Authorization".into(), "Bearer key".into())]).unwrap();
+        assert!(sets_authorization(&configured));
+        assert!(!sets_authorization(&HeaderMap::new()));
     }
 
     #[test]

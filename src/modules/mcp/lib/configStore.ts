@@ -1,11 +1,22 @@
+import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { type McpServerConfig, parseServers } from "./config";
+import {
+  type ProjectServerRecord,
+  type ProjectServers,
+  parseRecords,
+  projectConfigs,
+} from "./projectServers";
 import { capText, cleanAnnotations, type McpAnnotations } from "./toolSchema";
 
-/** Servers, and the tools each listed when it last ran (for Settings). */
+/**
+ * Servers, what the user chose for project servers, and the tools each listed
+ * when it last ran (for Settings).
+ */
 const STORE_PATH = "terax-mcp.json";
 const KEY_SERVERS = "servers";
+const KEY_PROJECT_SERVERS = "projectServers";
 const TOOLS_PREFIX = "tools:";
 const MAX_KNOWN_TOOLS = 500;
 
@@ -14,6 +25,12 @@ const MAX_KNOWN_TOOLS = 500;
  * announced: windows restart what changed, Settings re-reads.
  */
 const MCP_CHANGED_EVENT = "terax://mcp-changed";
+/**
+ * What a window may run from its project changes with trust decisions
+ * (`project_trust::CHANGED_EVENT`, also sent when a window opens or leaves a
+ * project) and with the project's files (`skills::CHANGED_EVENT`).
+ */
+const PROJECT_EVENTS = ["project-trust:changed", "skills:changed"];
 
 export type McpChange =
   | { kind: "servers" }
@@ -31,6 +48,44 @@ export async function saveServers(
   await store.set(KEY_SERVERS, servers);
   await store.save();
   await emit(MCP_CHANGED_EVENT, { kind: "servers" } satisfies McpChange);
+}
+
+export async function loadProjectRecords(): Promise<
+  Record<string, ProjectServerRecord>
+> {
+  return parseRecords(await store.get<unknown>(KEY_PROJECT_SERVERS));
+}
+
+/** Keeps what the user chose for one project server. */
+export async function saveProjectRecord(
+  id: string,
+  record: ProjectServerRecord,
+): Promise<void> {
+  const records = await loadProjectRecords();
+  await store.set(KEY_PROJECT_SERVERS, { ...records, [id]: record });
+  await store.save();
+  await emit(MCP_CHANGED_EVENT, { kind: "servers" } satisfies McpChange);
+}
+
+/**
+ * The servers of the calling window's project, or with `all` (Settings) of
+ * every open project; listed only while the user allows their `.mcp.json`.
+ */
+export function listProjectServers(all: boolean): Promise<ProjectServers[]> {
+  return invoke<ProjectServers[]>("mcp_project_servers", { all });
+}
+
+/** What this window runs: the configured servers and its project's. */
+export async function loadWindowServers(): Promise<McpServerConfig[]> {
+  const [servers, records, projects] = await Promise.all([
+    loadServers(),
+    loadProjectRecords(),
+    listProjectServers(false).catch((error) => {
+      console.warn("[mcp] project servers unavailable", error);
+      return [];
+    }),
+  ]);
+  return [...servers, ...projectConfigs(projects, records)];
 }
 
 /** A tool as Settings lists it for per-tool choices. */
@@ -97,10 +152,17 @@ export async function forgetKnownTools(serverId: string): Promise<void> {
   await store.save();
 }
 
-export function onMcpChanged(
+/** Configuration changes, and changes of what the open projects provide. */
+export async function onMcpChanged(
   handler: (change: McpChange) => void,
 ): Promise<UnlistenFn> {
-  return listen<McpChange>(MCP_CHANGED_EVENT, (event) =>
-    handler(event.payload),
-  );
+  const stops = await Promise.all([
+    listen<McpChange>(MCP_CHANGED_EVENT, (event) => handler(event.payload)),
+    ...PROJECT_EVENTS.map((name) =>
+      listen(name, () => handler({ kind: "servers" })),
+    ),
+  ]);
+  return () => {
+    for (const stop of stops) stop();
+  };
 }

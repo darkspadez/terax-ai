@@ -21,11 +21,27 @@ type McpStdioTransport = {
   cwd: string | null;
 };
 
+/**
+ * A client the user registered with the server's authorization server, for
+ * sign-in. Without one, Terax registers itself (dynamic client registration).
+ */
+export type McpOAuthClient = {
+  clientId: string;
+  /** Its secret is in the keychain (`<server>/oauth/client-secret`). */
+  clientSecret: boolean;
+  /** Space-separated; null lets the server's metadata decide. */
+  scopes: string | null;
+  /** The loopback port its redirect URI was registered with; null: any. */
+  callbackPort: number | null;
+};
+
 type McpHttpTransport = {
   /** Streamable HTTP, or the legacy HTTP+SSE transport. */
   type: "http" | "sse";
   url: string;
   headers: McpNamedValue[];
+  /** Sign-in with a client of the user's own; absent when Terax registers. */
+  oauth?: McpOAuthClient;
 };
 
 export type McpTransportConfig = McpStdioTransport | McpHttpTransport;
@@ -112,7 +128,38 @@ function parseNamedValues(
   return out;
 }
 
-function parseTransport(raw: unknown): McpTransportConfig | null {
+const MAX_SCOPES = 2048;
+
+function parseOAuthClient(raw: unknown): McpOAuthClient | undefined {
+  if (!isRecord(raw) || typeof raw.clientId !== "string") return undefined;
+  const clientId = raw.clientId.trim();
+  if (!clientId || clientId.length > 2048) return undefined;
+  const scopes =
+    typeof raw.scopes === "string" && raw.scopes.trim()
+      ? raw.scopes.trim().slice(0, MAX_SCOPES)
+      : null;
+  return {
+    clientId,
+    clientSecret: raw.clientSecret === true,
+    scopes,
+    callbackPort: isPort(raw.callbackPort) ? raw.callbackPort : null,
+  };
+}
+
+export function isPort(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value > 0 &&
+    value < 65536
+  );
+}
+
+/** Parses a transport as stored (or as a project's `.mcp.json` declares it). */
+export function parseTransport(
+  raw: unknown,
+  opts: { strictUrl?: boolean } = {},
+): McpTransportConfig | null {
   if (!isRecord(raw)) return null;
   if (raw.type === "stdio") {
     if (typeof raw.command !== "string" || !raw.command.trim()) return null;
@@ -128,11 +175,15 @@ function parseTransport(raw: unknown): McpTransportConfig | null {
     };
   }
   if (raw.type === "http" || raw.type === "sse") {
-    if (typeof raw.url !== "string" || !isHttpUrl(raw.url)) return null;
+    if (typeof raw.url !== "string") return null;
+    // A project server's URL may hold `${VAR}`s the backend expands.
+    if (opts.strictUrl !== false && !isHttpUrl(raw.url)) return null;
+    const oauth = parseOAuthClient(raw.oauth);
     return {
       type: raw.type,
       url: raw.url,
       headers: parseNamedValues(raw.headers, isValidHeaderName),
+      ...(oauth ? { oauth } : {}),
     };
   }
   return null;
@@ -229,7 +280,10 @@ export function launchKey(server: McpServerConfig): string {
   return JSON.stringify([server.transport, server.secretsRevision]);
 }
 
-export type SecretRef = { kind: "env" | "header"; name: string };
+export type SecretRef = { kind: "env" | "header" | "oauth"; name: string };
+
+/** The name of the one OAuth secret Settings keeps (`names::OAUTH_CLIENT_SECRET`). */
+export const OAUTH_CLIENT_SECRET = "client-secret";
 
 export function secretRefs(transport: McpTransportConfig): SecretRef[] {
   if (transport.type === "stdio") {
@@ -237,9 +291,27 @@ export function secretRefs(transport: McpTransportConfig): SecretRef[] {
       .filter((e) => e.secret)
       .map((e) => ({ kind: "env" as const, name: e.name }));
   }
-  return transport.headers
+  const refs: SecretRef[] = transport.headers
     .filter((h) => h.secret)
     .map((h) => ({ kind: "header" as const, name: h.name }));
+  if (transport.oauth?.clientSecret) {
+    refs.push({ kind: "oauth", name: OAUTH_CLIENT_SECRET });
+  }
+  return refs;
+}
+
+/** A server a project's `.mcp.json` declares (its id is the backend's). */
+export function isProjectServer(server: Pick<McpServerConfig, "source">) {
+  return server.source.startsWith("project:");
+}
+
+/** Remote, and configured without an `Authorization` header of its own. */
+export function usesSignIn(server: McpServerConfig): boolean {
+  const t = server.transport;
+  return (
+    t.type !== "stdio" &&
+    !t.headers.some((h) => h.name.toLowerCase() === "authorization")
+  );
 }
 
 /** Plain values by name, and the names of secret ones. */
@@ -257,7 +329,7 @@ export function splitValues(entries: readonly McpNamedValue[]): {
 }
 
 export type ServerDraftErrors = Partial<
-  Record<"name" | "command" | "url" | "cwd" | "values", string>
+  Record<"name" | "command" | "url" | "cwd" | "values" | "oauth", string>
 >;
 
 /** What Settings refuses to save, by field. */
@@ -295,6 +367,8 @@ export function validateServer(
         "Enter an http or https URL, without a user name or password.";
     const bad = t.headers.find((h) => !isValidHeaderName(h.name));
     if (bad) errors.values = `"${bad.name}" cannot be used as a header name.`;
+    if (t.oauth && !t.oauth.clientId.trim())
+      errors.oauth = "Enter the client ID, or leave sign-in to Terax.";
   }
   const entries = t.type === "stdio" ? t.env : t.headers;
   const seen = new Set<string>();

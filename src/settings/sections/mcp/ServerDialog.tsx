@@ -151,6 +151,110 @@ function ValueRows({
   );
 }
 
+/**
+ * The sign-in client of a remote server: empty unless the server's sign-in
+ * service needs a client the user registered there.
+ */
+function SignInClient({
+  draft,
+  error,
+  patch,
+}: {
+  draft: ServerDraft;
+  error?: string;
+  patch: (change: Partial<ServerDraft>) => void;
+}) {
+  const configured = Boolean(
+    draft.oauthClientId ||
+      draft.oauthScopes ||
+      draft.oauthPort ||
+      draft.oauthSecretSaved,
+  );
+  const [open, setOpen] = useState(configured);
+  const port = draft.oauthPort.trim() || "<any port>";
+  if (!open) {
+    return (
+      <div className="flex flex-col gap-1">
+        <Label className="text-[11px]">Sign-in</Label>
+        <span className="text-[10.5px] text-muted-foreground">
+          If the server asks you to sign in, Terax registers itself with its
+          sign-in service; sign in from the server's card.{" "}
+          <button
+            type="button"
+            className="cursor-pointer text-foreground underline-offset-2 hover:underline"
+            onClick={() => setOpen(true)}
+          >
+            Use a client you registered
+          </button>
+        </span>
+      </div>
+    );
+  }
+  return (
+    <Field
+      label="Sign-in client"
+      error={error}
+      hint={`For a sign-in service that needs a client you registered there. Register http://127.0.0.1:${port}/callback as its redirect URI. Leave the client ID empty to let Terax register itself.`}
+    >
+      <div className="grid grid-cols-2 gap-1.5">
+        <Input
+          value={draft.oauthClientId}
+          onChange={(e) => patch({ oauthClientId: e.target.value })}
+          placeholder="Client ID"
+          spellCheck={false}
+          className="h-7 font-mono text-[11px]"
+          aria-label="Client ID"
+        />
+        <div className="flex items-center gap-1">
+          <Input
+            type="password"
+            value={draft.oauthSecret}
+            onChange={(e) => patch({ oauthSecret: e.target.value })}
+            placeholder={
+              draft.oauthSecretSaved
+                ? "Secret saved; type to replace"
+                : "Client secret (optional)"
+            }
+            spellCheck={false}
+            autoComplete="off"
+            className="h-7 min-w-0 flex-1 font-mono text-[11px]"
+            aria-label="Client secret"
+          />
+          {draft.oauthSecretSaved ? (
+            <button
+              type="button"
+              className="cursor-pointer rounded p-1 text-muted-foreground hover:bg-accent hover:text-destructive"
+              onClick={() =>
+                patch({ oauthSecretSaved: false, oauthSecret: "" })
+              }
+              title="Remove the saved secret"
+            >
+              <HugeiconsIcon icon={Delete02Icon} size={12} strokeWidth={1.75} />
+            </button>
+          ) : null}
+        </div>
+        <Input
+          value={draft.oauthScopes}
+          onChange={(e) => patch({ oauthScopes: e.target.value })}
+          placeholder="Scopes (optional, space-separated)"
+          spellCheck={false}
+          className="h-7 font-mono text-[11px]"
+          aria-label="Scopes"
+        />
+        <Input
+          value={draft.oauthPort}
+          onChange={(e) => patch({ oauthPort: e.target.value })}
+          placeholder="Callback port (optional)"
+          inputMode="numeric"
+          spellCheck={false}
+          className="h-7 font-mono text-[11px]"
+          aria-label="Callback port"
+        />
+      </div>
+    </Field>
+  );
+}
+
 /** Adds or edits one server. `onSave` writes it; an error stays in the dialog. */
 export function ServerDialog({
   draft: initial,
@@ -312,6 +416,7 @@ export function ServerDialog({
                   addLabel="Add header"
                 />
               </Field>
+              <SignInClient draft={draft} error={shown.oauth} patch={patch} />
             </>
           )}
         </form>

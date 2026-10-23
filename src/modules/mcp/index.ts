@@ -1,4 +1,4 @@
-import { loadServers } from "./lib/configStore";
+import { loadWindowServers } from "./lib/configStore";
 import type { McpRunTools } from "./runtime";
 
 export { mcpCallTarget, useMcpCatalog } from "./lib/catalog";
@@ -8,7 +8,8 @@ export type { McpRunTools } from "./runtime";
 let runtime: Promise<typeof import("./runtime")> | null = null;
 
 /**
- * The window's MCP tools for one agent run. With no server enabled this reads
+ * The window's MCP tools for one agent run: the configured servers and those
+ * of the window's project its user allows. With no server enabled this reads
  * the configuration and nothing else: the MCP client (the SDK and the
  * runtime) loads only once a server is enabled, and servers start on the
  * first run that needs them. A failure here never fails the run; it costs
@@ -18,7 +19,7 @@ export async function mcpToolsForRun(
   opts: { signal?: AbortSignal; onWaiting?: () => void } = {},
 ): Promise<McpRunTools | null> {
   try {
-    const servers = await loadServers();
+    const servers = await loadWindowServers();
     if (!runtime && !servers.some((s) => s.enabled)) return null;
     runtime ??= import("./runtime").catch((error) => {
       runtime = null;

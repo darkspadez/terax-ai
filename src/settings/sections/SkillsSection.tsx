@@ -288,7 +288,13 @@ export function SkillsSection() {
                 ),
               )
             }
-            onRevoke={(key) => void run(() => revokeProjectTrust(key, null))}
+            onRevoke={(key) =>
+              void run(async () => {
+                // The project's skills only: its .mcp.json is MCP's.
+                await revokeProjectTrust(key, "claude-skills");
+                await revokeProjectTrust(key, "terax-skills");
+              })
+            }
           />
         ))
       )}
@@ -720,8 +726,8 @@ function TrustedProjects({
       <div className="flex flex-col">
         <GroupLabel>Project decisions</GroupLabel>
         <span className="text-[10.5px] text-muted-foreground">
-          Projects whose skills you allowed or declined. Forget one to be asked
-          again next time you open it.
+          Projects whose skills or MCP servers you allowed or declined. Forget
+          one to be asked again next time you open it.
         </span>
       </div>
       <ul className="flex flex-col gap-1.5">

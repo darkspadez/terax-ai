@@ -5,7 +5,13 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { decideProjectTrust, projectTrustStatus } from "./api";
-import { askingItems, trustDecisions } from "./trust";
+import {
+  acceptLabel,
+  askingItems,
+  isSkillsItem,
+  promptTitle,
+  trustDecisions,
+} from "./trust";
 import type { ProjectTrustStatus, TrustItem, TrustItemKind } from "./types";
 
 type Props = {
@@ -20,7 +26,10 @@ function folderName(root: string): string {
   return parts[parts.length - 1] ?? root;
 }
 
-/** Asks whether to use what a project provides. Not modal: work goes on around it. */
+/**
+ * Asks whether to use what a project provides (its skills, its `.mcp.json`
+ * servers). Not modal: work goes on around it.
+ */
 export function ProjectTrustPrompt({ status, onDismiss, onDecided }: Props) {
   const asking = askingItems(status);
   const unreviewable = status.items.filter(
@@ -57,6 +66,8 @@ export function ProjectTrustPrompt({ status, onDismiss, onDecided }: Props) {
   };
 
   const several = asking.length > 1;
+  const skills = asking.some((item) => isSkillsItem(item.kind));
+  const servers = asking.some((item) => !isSkillsItem(item.kind));
   const toggle = (kind: TrustItemKind, on: boolean) =>
     setAllowed((prev) => {
       const next = new Set(prev);
@@ -80,7 +91,7 @@ export function ProjectTrustPrompt({ status, onDismiss, onDecided }: Props) {
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span id="project-trust-title" className="text-[13px] font-medium">
-            Use the skills in {folderName(project.root)}?
+            {promptTitle(asking, folderName(project.root))}
           </span>
           <span
             className="truncate font-mono text-[10.5px] text-muted-foreground"
@@ -100,12 +111,27 @@ export function ProjectTrustPrompt({ status, onDismiss, onDecided }: Props) {
         </Button>
       </div>
 
-      <p className="text-[11px] leading-relaxed text-muted-foreground">
-        Skills are instructions the AI follows, and they can bundle scripts it
-        runs through its shell tool (each command still asks as the
-        conversation's approval mode says). Use them only from projects you
-        trust. Until then the AI never sees them.
-      </p>
+      <div className="flex flex-col gap-1.5 text-[11px] leading-relaxed text-muted-foreground">
+        {skills ? (
+          <p>
+            Skills are instructions the AI follows, and they can bundle scripts
+            it runs through its shell tool (each command still asks as the
+            conversation's approval mode says).
+          </p>
+        ) : null}
+        {servers ? (
+          <p>
+            MCP servers in .mcp.json are programs Terax starts with your rights,
+            outside its folder limits, or remote services the AI sends data to.
+            Their tools ask before every call unless you mark a server Trusted
+            in Settings.
+          </p>
+        ) : null}
+        <p>
+          Use them only from projects you trust. Until then the AI never sees
+          them.
+        </p>
+      </div>
 
       <div className="flex max-h-56 flex-col gap-2 overflow-y-auto">
         {asking.map((item) => (
@@ -143,7 +169,7 @@ export function ProjectTrustPrompt({ status, onDismiss, onDecided }: Props) {
           disabled={busy || (several && allowed.size === 0)}
           onClick={() => void decide(true)}
         >
-          {several ? "Use selected" : "Use skills"}
+          {acceptLabel(asking)}
         </Button>
       </div>
     </div>
@@ -195,7 +221,7 @@ function TrustItemCard({
         ))}
         {item.entries.length === 0 ? (
           <li className="text-[10.5px] text-muted-foreground">
-            No skills in it yet.
+            {isSkillsItem(item.kind) ? "No skills in it yet." : "No servers."}
           </li>
         ) : null}
       </ul>

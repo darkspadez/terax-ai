@@ -10,7 +10,11 @@
 //!   from a GUI launch; secret environment values read from the keychain here.
 //! - HTTP (`http.rs`): requests through the `net.rs` proxy (SSRF and DNS
 //!   rebinding defences), allowed only within the configured server origin,
-//!   secret header values added here.
+//!   secret header values and the sign-in token added here.
+//! - OAuth (`oauth/`): sign-in for remote servers, tokens in the keychain.
+//! - import (`import.rs`): other apps' server configurations, parsed here.
+//! - project servers (`project.rs`): a project's `.mcp.json`, through the
+//!   shared project trust.
 //! - status (`status.rs`): what each window's client reports, for Settings.
 //!
 //! Sessions belong to the window that opened them and end when it reloads or
@@ -19,8 +23,12 @@
 
 mod framing;
 mod http;
+pub mod import;
+mod jsonc;
 mod logs;
 mod names;
+pub mod oauth;
+pub mod project;
 mod status;
 mod stdio;
 
@@ -56,8 +64,11 @@ type StdioMap = Arc<RwLock<HashMap<u32, Arc<StdioSession>>>>;
 pub struct McpState {
     stdio: StdioMap,
     http: Mutex<HashMap<u32, Arc<http::HttpSession>>>,
+    /// The local sessions of project servers, and what each was started from.
+    projects: Mutex<HashMap<u32, project::Binding>>,
     logs: Arc<logs::LogStore>,
     statuses: Mutex<StatusRegistry>,
+    oauth: oauth::OAuthState,
     next_id: AtomicU32,
 }
 
@@ -66,8 +77,10 @@ impl Default for McpState {
         Self {
             stdio: Arc::default(),
             http: Mutex::default(),
+            projects: Mutex::default(),
             logs: Arc::default(),
             statuses: Mutex::default(),
+            oauth: oauth::OAuthState::default(),
             next_id: AtomicU32::new(1),
         }
     }
@@ -138,6 +151,10 @@ impl McpState {
         for session in stopped {
             session.stop();
         }
+        self.projects
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|_, b| b.window != window);
         self.http
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -277,6 +294,53 @@ pub async fn mcp_spawn(
     }
     let secrets = resolve_secrets(&app, &server_id, SecretKind::Env, &secret_env).await?;
     let cwd = stdio::resolve_cwd(cwd.as_deref())?;
+    let mut configured: Vec<(String, String)> = env.into_iter().collect();
+    configured.sort();
+    configured.extend(secrets);
+    start_stdio(
+        &state,
+        StdioStart {
+            owner,
+            server_id,
+            command,
+            args,
+            configured,
+            cwd,
+            shell,
+        },
+        on_message,
+        on_exit,
+    )
+    .await
+}
+
+/// A local server to start: the command as given, its configured environment
+/// (values resolved) and folder.
+struct StdioStart {
+    owner: String,
+    server_id: String,
+    command: String,
+    args: Vec<String>,
+    configured: Vec<(String, String)>,
+    cwd: std::path::PathBuf,
+    shell: Option<String>,
+}
+
+async fn start_stdio(
+    state: &McpState,
+    start: StdioStart,
+    on_message: Channel<Response>,
+    on_exit: Channel<StdioExit>,
+) -> Result<u32, String> {
+    let StdioStart {
+        owner,
+        server_id,
+        command,
+        args,
+        configured,
+        cwd,
+        shell,
+    } = start;
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
     let sessions = state.stdio.clone();
     let logs = state.logs.clone();
@@ -290,9 +354,6 @@ pub async fn mcp_spawn(
                 return Err(e);
             }
         };
-        let mut configured: Vec<(String, String)> = env.into_iter().collect();
-        configured.sort();
-        configured.extend(secrets);
         let spec = stdio::SpawnSpec {
             server_id: spawn_id.clone(),
             owner,
@@ -345,9 +406,11 @@ pub async fn mcp_spawn(
     Ok(id)
 }
 
-/// Async so a server that stopped reading never blocks the main thread.
+/// Async so a server that stopped reading never blocks the main thread. A
+/// project server stops once its project's `.mcp.json` is no longer allowed.
 #[tauri::command]
 pub async fn mcp_send(
+    app: AppHandle,
     window: WebviewWindow,
     state: State<'_, McpState>,
     id: u32,
@@ -355,10 +418,35 @@ pub async fn mcp_send(
 ) -> Result<(), String> {
     let session = state.stdio_session(window.label(), id)?;
     let framed = framing::encode(&message)?;
-    tauri::async_runtime::spawn_blocking(move || session.write(&framed))
-        .await
-        .map_err(|e| e.to_string())?
+    let binding = state
+        .projects
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&id)
+        .cloned();
+    let written = tauri::async_runtime::spawn_blocking(move || {
+        if let Some(binding) = binding {
+            if !project::still_allowed(&app, &binding) {
+                session.stop();
+                return Err(NOT_ALLOWED.to_owned());
+            }
+        }
+        session.write(&framed)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    if written.as_ref().err().map(String::as_str) == Some(NOT_ALLOWED) {
+        state
+            .projects
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&id);
+    }
+    written
 }
+
+const NOT_ALLOWED: &str =
+    "mcp: the project's .mcp.json is no longer allowed in this window; the server stopped";
 
 #[tauri::command]
 pub fn mcp_kill(window: WebviewWindow, state: State<'_, McpState>, id: u32) {
@@ -541,27 +629,175 @@ pub async fn mcp_http_open(
     if state.sessions_of(&owner) >= MAX_SESSIONS_PER_WINDOW {
         return Err("mcp: too many servers in this window".into());
     }
-    let url = http::parse_server_url(&url)?;
-    let host = url.host_str().ok_or("mcp: the URL has no host")?.to_owned();
-    let allow_private = net::host_is_private(&host)
-        .await
-        .map_err(|e| format!("mcp: {e}"))?;
     let secrets = resolve_secrets(&app, &server_id, SecretKind::Header, &secret_headers).await?;
     let mut entries: Vec<(String, String)> = headers.into_iter().collect();
     entries.sort();
     entries.extend(secrets);
+    open_http(&state, owner, server_id, &url, entries, None).await
+}
+
+/// Opens a session: the one origin its requests may reach, private
+/// addresses only when that host is local or private, and sign-in unless the
+/// configuration sets `Authorization` itself.
+async fn open_http(
+    state: &McpState,
+    owner: String,
+    server_id: String,
+    url: &str,
+    entries: Vec<(String, String)>,
+    project: Option<project::Binding>,
+) -> Result<u32, String> {
+    let url = http::parse_server_url(url)?;
+    let host = url.host_str().ok_or("mcp: the URL has no host")?.to_owned();
+    let allow_private = net::host_is_private(&host)
+        .await
+        .map_err(|e| format!("mcp: {e}"))?;
     let headers = http::session_headers(entries)?;
+    let oauth = (!http::sets_authorization(&headers))
+        .then(|| oauth::Policy::for_server(&url, allow_private));
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
     state.http.lock().unwrap_or_else(|e| e.into_inner()).insert(
         id,
         Arc::new(http::HttpSession {
             owner,
+            server_id,
             url,
             allow_private,
             headers,
+            oauth,
+            project,
         }),
     );
     Ok(id)
+}
+
+/// Starts a server of the calling window's project, as its trusted
+/// `.mcp.json` declares it: variables expanded here from the shell
+/// environment, in the project's folder, with `CLAUDE_PROJECT_DIR` set.
+#[tauri::command]
+pub async fn mcp_project_spawn(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: State<'_, McpState>,
+    server_id: String,
+    shell: Option<String>,
+    on_message: Channel<Response>,
+    on_exit: Channel<StdioExit>,
+) -> Result<u32, String> {
+    require_app_window(&window)?;
+    require_server_id(&server_id)?;
+    let owner = window.label().to_owned();
+    if state.sessions_of(&owner) >= MAX_SESSIONS_PER_WINDOW {
+        return Err("mcp: too many servers in this window".into());
+    }
+    let resolve_app = app.clone();
+    let resolve_owner = owner.clone();
+    let resolve_id = server_id.clone();
+    let resolve_shell = shell.clone();
+    let (launch, project, binding) = crate::modules::fs::blocking(move || {
+        let (entry, project, binding) =
+            project::resolve(&resolve_app, &resolve_owner, &resolve_id)?;
+        if project.workspace.is_wsl() {
+            return Err(
+                "mcp: a WSL project's local servers are not started; add the server in Settings"
+                    .to_owned(),
+            );
+        }
+        let env = crate::modules::lsp::env::server_env_overlay(resolve_shell);
+        let launch = project::stdio_launch(&entry, &project::lookup(&env))?;
+        Ok((launch, project, binding))
+    })
+    .await?;
+    if !launch.missing.is_empty() {
+        state.logs.push(
+            &server_id,
+            logs::Stream::Terax,
+            format!("Not set in the environment: {}", launch.missing.join(", ")),
+        );
+    }
+    let mut configured = launch.env;
+    configured.push((
+        "CLAUDE_PROJECT_DIR".to_owned(),
+        project.real.to_string_lossy().into_owned(),
+    ));
+    let env: HashMap<String, String> = configured.iter().cloned().collect();
+    check_spawn_input(&launch.command, &launch.args, &env, &[])?;
+    let id = start_stdio(
+        &state,
+        StdioStart {
+            owner,
+            server_id,
+            command: project::command_in(&project.real, &launch.command),
+            args: launch.args,
+            configured,
+            cwd: project.real.clone(),
+            shell,
+        },
+        on_message,
+        on_exit,
+    )
+    .await?;
+    state
+        .projects
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id, binding);
+    Ok(id)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSession {
+    id: u32,
+    /// The URL with its variables expanded, which the client connects to.
+    url: String,
+}
+
+/// Opens a session with a remote server of the calling window's project.
+#[tauri::command]
+pub async fn mcp_project_http_open(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: State<'_, McpState>,
+    server_id: String,
+    shell: Option<String>,
+) -> Result<ProjectSession, String> {
+    require_app_window(&window)?;
+    require_server_id(&server_id)?;
+    let owner = window.label().to_owned();
+    if state.sessions_of(&owner) >= MAX_SESSIONS_PER_WINDOW {
+        return Err("mcp: too many servers in this window".into());
+    }
+    let resolve_owner = owner.clone();
+    let resolve_id = server_id.clone();
+    let (launch, binding) = crate::modules::fs::blocking(move || {
+        let (entry, _, binding) = project::resolve(&app, &resolve_owner, &resolve_id)?;
+        let env = crate::modules::lsp::env::server_env_overlay(shell);
+        let launch = project::remote_launch(&entry, &project::lookup(&env))?;
+        Ok((launch, binding))
+    })
+    .await?;
+    if !launch.missing.is_empty() {
+        state.logs.push(
+            &server_id,
+            logs::Stream::Terax,
+            format!("Not set in the environment: {}", launch.missing.join(", ")),
+        );
+    }
+    if launch.headers.len() > MAX_ENTRIES {
+        return Err("mcp: too many headers".into());
+    }
+    let url = http::parse_server_url(&launch.url)?.to_string();
+    let id = open_http(
+        &state,
+        owner,
+        server_id,
+        &url,
+        launch.headers,
+        Some(binding),
+    )
+    .await?;
+    Ok(ProjectSession { id, url })
 }
 
 #[tauri::command]
@@ -587,6 +823,7 @@ struct StreamRequest {
 /// (`net::ai_http_stream`: packets 0 headers, 1 body, 2 end, 3 error).
 #[tauri::command]
 pub async fn mcp_http_stream(
+    app: AppHandle,
     window: WebviewWindow,
     streams: State<'_, McpHttpStreams>,
     state: State<'_, McpState>,
@@ -624,23 +861,96 @@ pub async fn mcp_http_stream(
                     session.url.origin().ascii_serialization()
                 ));
             }
+            if let Some(binding) = &session.project {
+                if !project::still_allowed(&app, binding) {
+                    return Err(NOT_ALLOWED.to_owned());
+                }
+            }
             let host = url.host_str().ok_or("missing host")?.to_string();
             let ips = net::classify_and_collect_safe_ips(&host, session.allow_private).await?;
             let client = net::client_for(net::Profile::Mcp, &host, &ips, session.allow_private)?;
             let method =
                 reqwest::Method::from_bytes(method.as_bytes()).map_err(|e| e.to_string())?;
-            let mut request = client
-                .request(method, url)
-                .headers(http::request_headers(headers, &session.headers)?);
-            if let Some(body) = body {
-                request = request.body(body);
+            let base = http::request_headers(headers, &session.headers)?;
+            let send = |token: Option<String>| {
+                let mut request = client
+                    .request(method.clone(), url.clone())
+                    .headers(http::with_bearer(base.clone(), token.as_deref())?);
+                if let Some(body) = body.clone() {
+                    request = request.body(body);
+                }
+                Ok::<_, String>(request.send())
+            };
+            let token = match &session.oauth {
+                Some(policy) => oauth::bearer(&app, &session.server_id, &session.url, policy).await,
+                None => None,
+            };
+            let mut response = send(token.clone())?
+                .await
+                .map_err(|e| net::error_chain(&e))?;
+            let mut sign_in = false;
+            if let Some(policy) = &session.oauth {
+                response = match response.status().as_u16() {
+                    401 => {
+                        let challenge = oauth::challenge::from_headers(response.headers());
+                        let outcome = oauth::after_unauthorized(
+                            &app,
+                            &session.server_id,
+                            &session.url,
+                            policy,
+                            token.as_deref(),
+                            challenge,
+                        )
+                        .await;
+                        match outcome {
+                            oauth::Unauthorized::Retry(fresh) => {
+                                let again =
+                                    send(Some(fresh))?.await.map_err(|e| net::error_chain(&e))?;
+                                if again.status() == reqwest::StatusCode::UNAUTHORIZED {
+                                    sign_in = true;
+                                    oauth::note_required(
+                                        &app,
+                                        &session.server_id,
+                                        session.url.as_str(),
+                                        oauth::Reason::Unauthorized,
+                                        oauth::challenge::from_headers(again.headers()),
+                                    );
+                                }
+                                again
+                            }
+                            oauth::Unauthorized::SignIn => {
+                                sign_in = true;
+                                response
+                            }
+                            oauth::Unauthorized::Other => response,
+                        }
+                    }
+                    403 => {
+                        if let Some(challenge) = oauth::challenge::from_headers(response.headers())
+                            .filter(oauth::challenge::Challenge::insufficient_scope)
+                        {
+                            oauth::note_required(
+                                &app,
+                                &session.server_id,
+                                session.url.as_str(),
+                                oauth::Reason::Scope,
+                                Some(challenge),
+                            );
+                        }
+                        response
+                    }
+                    _ => response,
+                };
             }
-            let response = request.send().await.map_err(|e| net::error_chain(&e))?;
             let cap =
                 (!http::is_event_stream(response.headers())).then_some(http::MAX_RESPONSE_BYTES);
+            let mut headers = net::header_map_to_strings(response.headers());
+            if sign_in {
+                headers.insert(oauth::SIGN_IN_HEADER.to_owned(), "required".to_owned());
+            }
             let metadata = serde_json::to_vec(&serde_json::json!({
                 "status": response.status().as_u16(),
-                "headers": net::header_map_to_strings(response.headers()),
+                "headers": headers,
             }))
             .map_err(|e| e.to_string())?;
             on_event

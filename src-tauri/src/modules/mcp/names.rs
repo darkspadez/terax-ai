@@ -39,10 +39,17 @@ pub fn valid_header_name(name: &str) -> bool {
 pub enum SecretKind {
     Env,
     Header,
+    /// The secret of an OAuth client the user registered for the server.
+    Oauth,
 }
 
-/// The keychain account of one secret: `<server>/env/<NAME>` or
-/// `<server>/header/<name>` (header names compare case-insensitively).
+/// The one OAuth secret Settings writes. Tokens and dynamic registrations
+/// live under backend-only accounts (`oauth_account`) no page can name.
+pub const OAUTH_CLIENT_SECRET: &str = "client-secret";
+
+/// The keychain account of one secret: `<server>/env/<NAME>`,
+/// `<server>/header/<name>` (header names compare case-insensitively) or
+/// `<server>/oauth/client-secret`.
 pub fn secret_account(server: &str, kind: SecretKind, name: &str) -> Result<String, String> {
     if !valid_server_id(server) {
         return Err("mcp: invalid server id".into());
@@ -52,8 +59,38 @@ pub fn secret_account(server: &str, kind: SecretKind, name: &str) -> Result<Stri
         SecretKind::Header if valid_header_name(name) => {
             Ok(format!("{server}/header/{}", name.to_ascii_lowercase()))
         }
+        SecretKind::Oauth if name == OAUTH_CLIENT_SECRET => {
+            Ok(format!("{server}/oauth/{OAUTH_CLIENT_SECRET}"))
+        }
         _ => Err(format!("mcp: invalid name {name:?}")),
     }
+}
+
+/// What the backend keeps for a server's sign-in, each a record of its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OauthItem {
+    /// The tokens, with what they are bound to.
+    Tokens,
+    /// A client registered dynamically with the authorization server.
+    Client,
+}
+
+/// The keychain account of chunk `chunk` of a sign-in record:
+/// `<server>/oauth/tokens`, then `<server>/oauth/tokens.1`, ... Only the
+/// backend reads and writes these: `secret_account` never names them.
+pub fn oauth_account(server: &str, item: OauthItem, chunk: usize) -> Result<String, String> {
+    if !valid_server_id(server) {
+        return Err("mcp: invalid server id".into());
+    }
+    let name = match item {
+        OauthItem::Tokens => "tokens",
+        OauthItem::Client => "client",
+    };
+    Ok(if chunk == 0 {
+        format!("{server}/oauth/{name}")
+    } else {
+        format!("{server}/oauth/{name}.{chunk}")
+    })
 }
 
 /// A value placed in a child's environment or a request header: no NUL (it
@@ -62,7 +99,7 @@ pub fn valid_value(value: &str, kind: SecretKind) -> bool {
     value.len() <= 32 * 1024
         && !value.bytes().any(|b| match kind {
             SecretKind::Env => b == 0,
-            SecretKind::Header => matches!(b, 0 | b'\r' | b'\n'),
+            SecretKind::Header | SecretKind::Oauth => matches!(b, 0 | b'\r' | b'\n'),
         })
 }
 
@@ -112,6 +149,34 @@ mod tests {
         assert!(secret_account("S1", SecretKind::Env, "A").is_err());
         assert!(secret_account("s1", SecretKind::Env, "../A").is_err());
         assert!(secret_account("s1", SecretKind::Header, "a/b").is_err());
+        assert_eq!(
+            secret_account("s1", SecretKind::Oauth, "client-secret").unwrap(),
+            "s1/oauth/client-secret"
+        );
+    }
+
+    #[test]
+    fn the_page_can_never_name_a_token_or_registration_account() {
+        for name in ["tokens", "client", "tokens.1", "../tokens", "Client-Secret"] {
+            assert!(
+                secret_account("s1", SecretKind::Oauth, name).is_err(),
+                "{name}"
+            );
+        }
+        let tokens = oauth_account("s1", OauthItem::Tokens, 0).unwrap();
+        let client = oauth_account("s1", OauthItem::Client, 2).unwrap();
+        assert_eq!(tokens, "s1/oauth/tokens");
+        assert_eq!(client, "s1/oauth/client.2");
+        // No env, header or OAuth name the page may use maps onto them.
+        for kind in [SecretKind::Env, SecretKind::Header, SecretKind::Oauth] {
+            for name in ["tokens", "client", "oauth/tokens", "x"] {
+                if let Ok(account) = secret_account("s1", kind, name) {
+                    assert_ne!(account, tokens);
+                    assert_ne!(account, client);
+                }
+            }
+        }
+        assert!(oauth_account("../s1", OauthItem::Tokens, 0).is_err());
     }
 
     #[test]
