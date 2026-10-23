@@ -75,10 +75,10 @@ pub enum OauthItem {
     Client,
 }
 
-/// The keychain account of chunk `chunk` of a sign-in record:
-/// `<server>/oauth/tokens`, then `<server>/oauth/tokens.1`, ... Only the
-/// backend reads and writes these: `secret_account` never names them.
-pub fn oauth_account(server: &str, item: OauthItem, chunk: usize) -> Result<String, String> {
+/// The keychain account of a sign-in record: `<server>/oauth/tokens` or
+/// `<server>/oauth/client`. Only the backend reads and writes these:
+/// `secret_account` never names them.
+pub fn oauth_account(server: &str, item: OauthItem) -> Result<String, String> {
     if !valid_server_id(server) {
         return Err("mcp: invalid server id".into());
     }
@@ -86,17 +86,13 @@ pub fn oauth_account(server: &str, item: OauthItem, chunk: usize) -> Result<Stri
         OauthItem::Tokens => "tokens",
         OauthItem::Client => "client",
     };
-    Ok(if chunk == 0 {
-        format!("{server}/oauth/{name}")
-    } else {
-        format!("{server}/oauth/{name}.{chunk}")
-    })
+    Ok(format!("{server}/oauth/{name}"))
 }
 
 /// A value placed in a child's environment or a request header: no NUL (it
 /// would cut the value) and, for headers, no line breaks.
 pub fn valid_value(value: &str, kind: SecretKind) -> bool {
-    value.len() <= 32 * 1024
+    value.len() <= crate::modules::secrets::MAX_VALUE_BYTES
         && !value.bytes().any(|b| match kind {
             SecretKind::Env => b == 0,
             SecretKind::Header | SecretKind::Oauth => matches!(b, 0 | b'\r' | b'\n'),
@@ -163,10 +159,10 @@ mod tests {
                 "{name}"
             );
         }
-        let tokens = oauth_account("s1", OauthItem::Tokens, 0).unwrap();
-        let client = oauth_account("s1", OauthItem::Client, 2).unwrap();
+        let tokens = oauth_account("s1", OauthItem::Tokens).unwrap();
+        let client = oauth_account("s1", OauthItem::Client).unwrap();
         assert_eq!(tokens, "s1/oauth/tokens");
-        assert_eq!(client, "s1/oauth/client.2");
+        assert_eq!(client, "s1/oauth/client");
         // No env, header or OAuth name the page may use maps onto them.
         for kind in [SecretKind::Env, SecretKind::Header, SecretKind::Oauth] {
             for name in ["tokens", "client", "oauth/tokens", "x"] {
@@ -176,7 +172,28 @@ mod tests {
                 }
             }
         }
-        assert!(oauth_account("../s1", OauthItem::Tokens, 0).is_err());
+        assert!(oauth_account("../s1", OauthItem::Tokens).is_err());
+    }
+
+    /// `secrets` keeps the chunks of a long value under `<account>:<n>`;
+    /// no account here may look like one.
+    #[test]
+    fn no_account_is_named_like_a_chunk_of_another() {
+        use crate::modules::secrets::is_chunk_account;
+        for (kind, name) in [
+            (SecretKind::Env, "API_KEY_1"),
+            (SecretKind::Header, "x-api-key.1"),
+            (SecretKind::Header, "x~1"),
+            (SecretKind::Oauth, OAUTH_CLIENT_SECRET),
+        ] {
+            let account = secret_account("s1", kind, name).unwrap();
+            assert!(!is_chunk_account(&account), "{account}");
+        }
+        for item in [OauthItem::Tokens, OauthItem::Client] {
+            assert!(!is_chunk_account(&oauth_account("s1", item).unwrap()));
+        }
+        assert!(secret_account("s1", SecretKind::Header, "x:1").is_err());
+        assert!(secret_account("s1", SecretKind::Env, "X:1").is_err());
     }
 
     #[test]

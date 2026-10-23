@@ -564,6 +564,12 @@ pub async fn mcp_secret_set(
 ) -> Result<(), String> {
     require_settings(&window)?;
     let account = secret_account(&server_id, kind, &name)?;
+    if value.len() > crate::modules::secrets::MAX_VALUE_BYTES {
+        return Err(format!(
+            "mcp: the value of {name} is longer than {} KiB",
+            crate::modules::secrets::MAX_VALUE_BYTES / 1024
+        ));
+    }
     if value.is_empty() || !names::valid_value(&value, kind) {
         return Err(format!("mcp: invalid value for {name}"));
     }
