@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   checkReadable,
   checkReadableCanonical,
+  isNotFoundError,
   checkShellCommand,
   checkWritable,
   checkWritableCanonical,
@@ -346,7 +347,8 @@ describe("checkWritable — layered refusals", () => {
 describe("checkReadableCanonical — parent-directory fallback", () => {
   it("canonicalizes the parent when the target does not exist yet", async () => {
     const canonicalize = async (p: string) => {
-      if (p === "/home/me/link/newfile.txt") throw new Error("enoent");
+      if (p === "/home/me/link/newfile.txt")
+        throw "No such file or directory (os error 2)";
       return p === "/home/me/link" ? "/home/me/.ssh" : p;
     };
     const r = await checkWritableCanonical(
@@ -358,13 +360,76 @@ describe("checkReadableCanonical — parent-directory fallback", () => {
 
   it("passes through when neither target nor parent resolves", async () => {
     const failing = async () => {
-      throw new Error("enoent");
+      throw "No such file or directory (os error 2)";
     };
     const r = await checkWritableCanonical(
       "/home/me/project/newfile.txt",
       failing,
     );
     expect(r.ok).toBe(true);
+  });
+});
+
+describe("canonical checks fail closed", () => {
+  const failingWith = (error: unknown) => async () => {
+    throw error;
+  };
+
+  it("tells a missing path from other failures", () => {
+    expect(isNotFoundError("No such file or directory (os error 2)")).toBe(
+      true,
+    );
+    expect(
+      isNotFoundError(
+        "The system cannot find the path specified. (os error 3)",
+      ),
+    ).toBe(true);
+    expect(
+      isNotFoundError(new Error("Datei nicht gefunden (os error 2)")),
+    ).toBe(true);
+    expect(isNotFoundError("Permission denied (os error 13)")).toBe(false);
+    expect(isNotFoundError("/etc/x is outside the authorized folders")).toBe(
+      false,
+    );
+    expect(
+      isNotFoundError("Too many levels of symbolic links (os error 40)"),
+    ).toBe(false);
+  });
+
+  it("refuses a read whose path cannot be resolved for another reason", async () => {
+    for (const error of [
+      "Permission denied (os error 13)",
+      "/srv/x is outside the authorized folders",
+      new Error("Too many levels of symbolic links (os error 40)"),
+    ]) {
+      const r = await checkReadableCanonical(
+        "/home/me/project/link",
+        failingWith(error),
+      );
+      expect(r.ok).toBe(false);
+    }
+    const missing = await checkReadableCanonical(
+      "/home/me/project/new.txt",
+      failingWith("No such file or directory (os error 2)"),
+    );
+    expect(missing.ok).toBe(true);
+  });
+
+  it("refuses a write whose target or parent cannot be resolved for another reason", async () => {
+    const target = await checkWritableCanonical(
+      "/home/me/project/link",
+      failingWith("Permission denied (os error 13)"),
+    );
+    expect(target.ok).toBe(false);
+    const parent = await checkWritableCanonical(
+      "/home/me/project/sub/new.txt",
+      async (p) => {
+        if (p.endsWith("new.txt"))
+          throw "No such file or directory (os error 2)";
+        throw "/home/me/project/sub is outside the authorized folders";
+      },
+    );
+    expect(parent.ok).toBe(false);
   });
 });
 

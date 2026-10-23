@@ -289,6 +289,35 @@ export function checkWritable(path: string): SafetyResult {
  * Returns the canonical path on success so callers can use it for the actual
  * read — avoids TOCTOU between the safety check and the read.
  */
+/**
+ * Whether resolving a path failed only because it does not exist. The backend
+ * reports that as the OS error, whose text ends in its code whatever the
+ * language: ENOENT (2) on Unix, ERROR_FILE_NOT_FOUND (2) or
+ * ERROR_PATH_NOT_FOUND (3) on Windows.
+ */
+export function isNotFoundError(error: unknown): boolean {
+  const text =
+    typeof error === "string"
+      ? error
+      : error instanceof Error
+        ? error.message
+        : String(error);
+  return /\(os error [23]\)\s*$/.test(text);
+}
+
+function unresolved(path: string, error: unknown) {
+  const detail =
+    typeof error === "string"
+      ? error
+      : error instanceof Error
+        ? error.message
+        : String(error);
+  return {
+    ok: false as const,
+    reason: `Refused: could not resolve ${path} (${detail}).`,
+  };
+}
+
 export async function checkReadableCanonical(
   path: string,
   canonicalize: (p: string) => Promise<string>,
@@ -298,8 +327,11 @@ export async function checkReadableCanonical(
   let canonical: string;
   try {
     canonical = await canonicalize(path);
-  } catch {
-    // Path doesn't exist yet — fine for the read tool to surface ENOENT.
+  } catch (error) {
+    // A missing path is the read's to report. Any other failure (outside the
+    // authorized folders, no permission, a link loop) refuses: the read would
+    // follow links the recheck never saw.
+    if (!isNotFoundError(error)) return unresolved(path, error);
     return { ok: true, canonical: path };
   }
   // Always recheck — even when canonicalize returns the same string, the
@@ -328,7 +360,8 @@ export async function checkWritableCanonical(
     const recheck = checkWritable(canonical);
     if (!recheck.ok) return recheck;
     return { ok: true, canonical };
-  } catch {
+  } catch (error) {
+    if (!isNotFoundError(error)) return unresolved(path, error);
     // Target doesn't exist — canonicalize the parent so we still catch a
     // symlinked parent directory (`./project -> /Users/me/.ssh`).
     const lastSep = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
@@ -340,7 +373,8 @@ export async function checkWritableCanonical(
         const recheckParent = checkWritable(canonParent + tail);
         if (!recheckParent.ok) return recheckParent;
         return { ok: true, canonical: canonParent + tail };
-      } catch {
+      } catch (error) {
+        if (!isNotFoundError(error)) return unresolved(parent, error);
         // Parent doesn't exist either — let the caller surface the actual error.
       }
     }

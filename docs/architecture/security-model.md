@@ -27,7 +27,7 @@ Blocked categories include:
 
 The comparison surface normalizes paths: backslashes to forward slashes, strips Windows drive letters, strips NTFS alternate data streams, strips trailing dots/spaces, lowercases, and collapses duplicate slashes. Protected directories are matched as exact path or descendant, not raw substring.
 
-`checkReadableCanonical` and `checkWritableCanonical` also canonicalize the path and re-check the resolved form so a symlink at an innocent path pointing into `~/.ssh` is caught.
+`checkReadableCanonical` and `checkWritableCanonical` also canonicalize the path and re-check the resolved form so a symlink at an innocent path pointing into `~/.ssh` is caught. A path that cannot be resolved is let through only when it does not exist (the OS's not-found error, `isNotFoundError`); any other failure (outside the authorized folders, no permission, a link loop) refuses, since the read or write would follow links the recheck never saw.
 
 ## Workspace authorization registry
 
