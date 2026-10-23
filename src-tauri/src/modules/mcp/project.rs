@@ -12,6 +12,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use reqwest::Url;
 use serde::Serialize;
@@ -499,15 +500,60 @@ pub struct Binding {
     pub window: String,
     pub key: String,
     pub path: PathBuf,
-    pub hash: String,
+    /// The server's id and the hash of its own entry as it started.
+    pub server_id: String,
+    pub entry_hash: String,
+    /// The file content last found to allow it. Shared by the clones taken per message, so an
+    /// allowed edit to the file is checked once, not on every message.
+    hash: Arc<Mutex<String>>,
 }
 
-/// Whether the server may still run: its window still has the project open, and the user
-/// still allows the file's content as it was when the server started.
+/// Whether the server may still run: its window still has the project open, the user allows
+/// the file's current content, and that content declares this server exactly as it started.
+/// An edit to the file that the user allows (Terax's own edits keep the trust) and that leaves
+/// this server's entry alone keeps it running; any other change stops it.
 pub fn still_allowed(app: &AppHandle, binding: &Binding) -> bool {
-    project_trust::window_project(app, &binding.window).is_some_and(|p| p.key == binding.key)
-        && project_trust::file_hash(&binding.path).is_ok_and(|hash| hash == binding.hash)
-        && project_trust::is_allowed(app, &binding.key, ItemKind::McpJson, &binding.hash)
+    let Some(project) =
+        project_trust::window_project(app, &binding.window).filter(|p| p.key == binding.key)
+    else {
+        return false;
+    };
+    let known = binding
+        .hash
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    if project_trust::file_hash(&binding.path).is_ok_and(|hash| hash == known) {
+        return project_trust::is_allowed(app, &binding.key, ItemKind::McpJson, &known);
+    }
+    let Some(Ok(file)) = read(&project.real, &project.key) else {
+        return false;
+    };
+    let allowed =
+        |hash: &str| project_trust::is_allowed(app, &binding.key, ItemKind::McpJson, hash);
+    match rebound_hash(&file, binding, allowed) {
+        Some(hash) => {
+            *binding.hash.lock().unwrap_or_else(|e| e.into_inner()) = hash;
+            true
+        }
+        None => false,
+    }
+}
+
+/// The content hash a running server is bound to once its `.mcp.json` changed: the new
+/// content's, when the user allows it and it declares the server exactly as before (same
+/// file, same id, same entry, still usable). None stops the server.
+fn rebound_hash(
+    file: &McpJson,
+    binding: &Binding,
+    allowed: impl Fn(&str) -> bool,
+) -> Option<String> {
+    let entry = file.entries.iter().find(|e| e.id == binding.server_id)?;
+    (file.path == binding.path
+        && entry.raw.fingerprint == binding.entry_hash
+        && entry.raw.problem.is_none()
+        && allowed(&file.hash))
+    .then(|| file.hash.clone())
 }
 
 /// A server of an allowed `.mcp.json` of `project`.
@@ -533,15 +579,15 @@ fn allowed_entry(
     if let Some(problem) = &entry.raw.problem {
         return Err(format!("{}: {problem}", entry.raw.name));
     }
-    Ok((
-        entry,
-        Binding {
-            window: String::new(),
-            key: project.key.clone(),
-            path,
-            hash,
-        },
-    ))
+    let binding = Binding {
+        window: String::new(),
+        key: project.key.clone(),
+        path,
+        server_id: entry.id.clone(),
+        entry_hash: entry.raw.fingerprint.clone(),
+        hash: Arc::new(Mutex::new(hash)),
+    };
+    Ok((entry, binding))
 }
 
 /// A project server of the calling window's project, with what it is bound to.
@@ -702,6 +748,87 @@ mod tests {
         "broken": {"type": "ws", "url": "wss://x"}
       }
     }"#;
+
+    fn mcp_json(text: &str) -> McpJson {
+        let digest = Sha256::digest(text.as_bytes());
+        McpJson {
+            path: PathBuf::from("/p/.mcp.json"),
+            hash: digest.iter().map(|b| format!("{b:02x}")).collect(),
+            entries: parse(text.as_bytes(), "/p").unwrap(),
+        }
+    }
+
+    fn bound(file: &McpJson, name: &str) -> Binding {
+        let entry = file.entries.iter().find(|e| e.raw.name == name).unwrap();
+        Binding {
+            window: "main".into(),
+            key: "/p".into(),
+            path: file.path.clone(),
+            server_id: entry.id.clone(),
+            entry_hash: entry.raw.fingerprint.clone(),
+            hash: Arc::new(Mutex::new(file.hash.clone())),
+        }
+    }
+
+    #[test]
+    fn an_allowed_edit_elsewhere_in_the_file_keeps_a_server_running() {
+        let before = mcp_json(FILE_TEXT);
+        let after = mcp_json(&FILE_TEXT.replace(
+            r#""mcpServers": {"#,
+            r#""mcpServers": {
+        "extra": {"command": "uvx", "args": ["extra-mcp"]},"#,
+        ));
+        assert_ne!(before.hash, after.hash);
+        for name in ["db", "api"] {
+            assert_eq!(
+                rebound_hash(&after, &bound(&before, name), |_| true),
+                Some(after.hash.clone()),
+                "{name}"
+            );
+        }
+        // Layout alone is no change to an entry.
+        let reflowed = mcp_json(&FILE_TEXT.replace(",\n               \"env\"", ", \"env\""));
+        assert_ne!(before.hash, reflowed.hash);
+        assert!(rebound_hash(&reflowed, &bound(&before, "db"), |_| true).is_some());
+    }
+
+    #[test]
+    fn a_change_the_user_has_not_allowed_stops_it() {
+        let before = mcp_json(FILE_TEXT);
+        let after = mcp_json(&FILE_TEXT.replace("api.example.com", "api.example.org"));
+        let db = bound(&before, "db");
+        assert_eq!(rebound_hash(&after, &db, |hash| hash == before.hash), None);
+    }
+
+    #[test]
+    fn a_change_to_its_own_entry_stops_it() {
+        let before = mcp_json(FILE_TEXT);
+        let changed = mcp_json(&FILE_TEXT.replace("db-mcp", "evil-mcp"));
+        assert_eq!(
+            rebound_hash(&changed, &bound(&before, "db"), |_| true),
+            None
+        );
+        assert!(rebound_hash(&changed, &bound(&before, "api"), |_| true).is_some());
+
+        let renamed = mcp_json(&FILE_TEXT.replace(r#""db":"#, r#""database":"#));
+        assert_eq!(
+            rebound_hash(&renamed, &bound(&before, "db"), |_| true),
+            None
+        );
+
+        let mut moved = mcp_json(FILE_TEXT);
+        moved.path = PathBuf::from("/p/sub/.mcp.json");
+        assert_eq!(rebound_hash(&moved, &bound(&before, "db"), |_| true), None);
+    }
+
+    #[test]
+    fn a_binding_and_its_per_message_clones_share_the_hash() {
+        let file = mcp_json(FILE_TEXT);
+        let binding = bound(&file, "db");
+        let per_message = binding.clone();
+        *binding.hash.lock().unwrap() = "next".into();
+        assert_eq!(*per_message.hash.lock().unwrap(), "next");
+    }
 
     #[test]
     fn the_file_lists_each_server_with_what_it_runs() {
