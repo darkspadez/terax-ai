@@ -159,6 +159,11 @@ Three distinct surfaces:
 - `window_backdrop_kind` / `window_set_backdrop` - native window backdrop (vibrancy on macOS, Mica on Windows 11)
 - `window_presentation_state` - the calling window's native occlusion, sleep and live-resize state
 
+### macOS privacy (`src-tauri/src/modules/mac_privacy.rs`, macOS only)
+
+- `mac_privacy_status` - whether Terax has Full Disk Access, from files only that grant opens (never prompts)
+- `mac_privacy_open_settings` - Privacy & Security in System Settings at a named pane (`fullDiskAccess`, `filesAndFolders`); the page never passes a URL
+
 ### Terminal clipboard, scrollback and fonts
 
 - `clipboard_image_read` / `clipboard_image_write` - clipboard images as PNG for the Kitty clipboard protocol (`clipboard_image.rs`)

@@ -127,6 +127,10 @@ The terminal parses OSC sequences from the PTY byte stream:
 
 The agent detector (`src-tauri/src/modules/pty/agent_detect.rs`) is armed by `OSC 133;C;<cmd>` or by a self-armed marker and emits `terax:agent-signal` events. It is driven **only by OSC sequences**, never by raw output, so a repainting TUI never flaps. The agent name a marker carries is untrusted: any name is shown, but only as plain text with control and bidi characters removed and at most 32 characters, with the generic icon unless it is exactly a known agent id. It never selects a command, path, hook file or icon file.
 
+## macOS privacy controls
+
+macOS privacy controls (TCC) sit below the registry: a folder the registry authorizes can still be refused by macOS, and TCC counts Terax and every program its terminals start as one app. Checking what Terax may reach never makes macOS ask: the status check (`mac_privacy.rs`) opens only files that Full Disk Access guards, which macOS refuses silently (`EPERM`) without that grant, and never the folders macOS asks about (Desktop, Documents, Downloads, iCloud Drive, removable and network volumes, other apps' containers). The page opens System Settings only at a pane the backend names (`SettingsPane`), never at a URL it supplies, so the opener's URL scope stays as it is.
+
 ## Invariants
 
 - The deny-list in `security.ts` applies on both read and write. Never bypass it.

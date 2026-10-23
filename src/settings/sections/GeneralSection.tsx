@@ -60,6 +60,7 @@ import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { useEffect, useRef, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
+import { MacPrivacySettings } from "./MacPrivacySettings";
 import { TerminalBehaviorSettings } from "./TerminalBehaviorSettings";
 
 const APPEARANCE: {
@@ -726,6 +727,8 @@ export function GeneralSection() {
           </SettingRow>
         </div>
       </div>
+
+      <MacPrivacySettings />
     </div>
   );
 }
