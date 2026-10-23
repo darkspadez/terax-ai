@@ -279,11 +279,13 @@ fn open_file(path: &Path) -> Result<std::fs::File, String> {
     {
         return Err(not_a_file());
     }
-    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    if !file.metadata().map_err(|e| e.to_string())?.is_file() {
-        return Err(not_a_file());
-    }
-    Ok(file)
+    project_trust::open_regular(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::InvalidInput {
+            not_a_file()
+        } else {
+            error.to_string()
+        }
+    })
 }
 
 fn scan_file(path: &Path) -> Result<Scanned, String> {

@@ -13,6 +13,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -573,45 +574,180 @@ fn recorded(file: &TrustFile, exists: impl Fn(&str) -> bool) -> Vec<RecordedProj
 const MAX_TREE_ENTRIES: usize = 10_000;
 const MAX_TREE_BYTES: u64 = 64 * 1024 * 1024;
 const DIGEST_CACHE_CAP: usize = 8192;
+/// How long a file must have been left alone before its digest is kept: longer than the
+/// coarsest timestamps a filesystem stores (FAT's two seconds), so any later write to it carries
+/// other times even when it keeps the length.
+const SETTLED: Duration = Duration::from_secs(3);
 
 type FileDigest = [u8; 32];
-/// A file's size and modification time when its digest was taken.
-type Stamp = (u64, Option<std::time::SystemTime>);
-type DigestCache = Mutex<HashMap<PathBuf, (Stamp, FileDigest)>>;
 
-/// File digests by path, reused while a file keeps its size and modification time.
-fn digest_cache() -> &'static DigestCache {
-    static CACHE: OnceLock<DigestCache> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+/// What a kept digest is checked against: the file's size and modification time, and the times
+/// and identity no program sets (Unix: the change time and the inode; Windows: the change time),
+/// so content replaced with its old length and modification time restored (an archive extracted
+/// over it, `cp -p`, `touch -r`) is never taken for the old content.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Stamp {
+    len: u64,
+    modified: SystemTime,
+    changed: Option<SystemTime>,
+    inode: Option<(u64, u64)>,
 }
 
-fn file_digest(path: &Path, meta: &std::fs::Metadata) -> std::io::Result<FileDigest> {
-    let len = meta.len();
-    let modified = meta.modified().ok();
-    {
-        let cache = digest_cache().lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(((cached_len, cached_modified), digest)) = cache.get(path) {
-            if *cached_len == len && *cached_modified == modified && modified.is_some() {
-                return Ok(*digest);
-            }
-        }
+impl Stamp {
+    /// The stamp of an open file; None when it has no modification time (its digest is never
+    /// kept).
+    fn of(file: &std::fs::File) -> std::io::Result<Option<Stamp>> {
+        let meta = file.metadata()?;
+        let Ok(modified) = meta.modified() else {
+            return Ok(None);
+        };
+        #[cfg(unix)]
+        let (changed, inode) = {
+            use std::os::unix::fs::MetadataExt;
+            let changed = u64::try_from(meta.ctime()).ok().and_then(|secs| {
+                UNIX_EPOCH.checked_add(Duration::new(secs, meta.ctime_nsec() as u32))
+            });
+            (changed, Some((meta.dev(), meta.ino())))
+        };
+        #[cfg(windows)]
+        let (changed, inode) = (change_time(file), None);
+        #[cfg(not(any(unix, windows)))]
+        let (changed, inode) = (None, None);
+        Ok(Some(Stamp {
+            len: meta.len(),
+            modified,
+            changed,
+            inode,
+        }))
     }
+
+    /// Whether the file had been left alone long enough at `now` that a later write to it would
+    /// carry other times.
+    fn settled(&self, now: SystemTime) -> bool {
+        let old = |time: SystemTime| {
+            now.duration_since(time)
+                .is_ok_and(|elapsed| elapsed >= SETTLED)
+        };
+        old(self.modified) && self.changed.is_none_or(old)
+    }
+}
+
+/// The change time of an open file (`FILE_BASIC_INFO.ChangeTime`), which the Windows API
+/// updates on every write and rename and which `SetFileTime` does not set.
+#[cfg(windows)]
+fn change_time(file: &std::fs::File) -> Option<SystemTime> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FileBasicInfo, GetFileInformationByHandleEx, FILE_BASIC_INFO,
+    };
+    let mut info = FILE_BASIC_INFO::default();
+    // SAFETY: the handle is open for the duration of the call, and the buffer is a
+    // FILE_BASIC_INFO of the size passed, as FileBasicInfo requires.
+    let ok = unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle(),
+            FileBasicInfo,
+            (&mut info as *mut FILE_BASIC_INFO).cast(),
+            std::mem::size_of::<FILE_BASIC_INFO>() as u32,
+        )
+    };
+    if ok == 0 {
+        return None;
+    }
+    // 100-nanosecond ticks since 1601.
+    const UNIX_EPOCH_TICKS: i64 = 116_444_736_000_000_000;
+    let ticks = u64::try_from(info.ChangeTime.checked_sub(UNIX_EPOCH_TICKS)?).ok()?;
+    UNIX_EPOCH.checked_add(Duration::from_nanos(ticks.checked_mul(100)?))
+}
+
+/// File digests by path, each with the stamp of the file it was taken of, reused only while the
+/// file has that stamp.
+#[derive(Default)]
+struct DigestCache {
+    entries: HashMap<PathBuf, (Stamp, FileDigest)>,
+}
+
+impl DigestCache {
+    fn get(&self, path: &Path, stamp: &Stamp) -> Option<FileDigest> {
+        self.entries
+            .get(path)
+            .filter(|(kept, _)| kept == stamp)
+            .map(|(_, digest)| *digest)
+    }
+
+    /// Keeps the digest of the file at `path` with `stamp`, unless it changed too recently
+    /// before `now` for a later write to be told apart: then it is read again next time.
+    fn keep(&mut self, path: &Path, stamp: Stamp, digest: FileDigest, now: SystemTime) {
+        if !stamp.settled(now) {
+            self.entries.remove(path);
+            return;
+        }
+        if self.entries.len() >= DIGEST_CACHE_CAP {
+            self.entries.clear();
+        }
+        self.entries.insert(path.to_path_buf(), (stamp, digest));
+    }
+}
+
+fn digest_cache() -> MutexGuard<'static, DigestCache> {
+    static CACHE: OnceLock<Mutex<DigestCache>> = OnceLock::new();
+    CACHE
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+/// Opens the regular file at `path` for reading, an error for anything else, without waiting on
+/// a pipe or device put in its place.
+pub fn open_regular(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // Opening a pipe for reading would wait for a writer; regular files ignore the flag.
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "not a regular file",
+        ));
+    }
+    Ok(file)
+}
+
+fn digest_of(file: &mut impl Read) -> std::io::Result<FileDigest> {
     let mut hasher = Sha256::new();
-    let mut file = std::fs::File::open(path)?;
     let mut buffer = vec![0u8; 64 * 1024];
     loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
+        let read = match file.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        };
         hasher.update(&buffer[..read]);
     }
-    let digest: FileDigest = hasher.finalize().into();
-    let mut cache = digest_cache().lock().unwrap_or_else(|e| e.into_inner());
-    if cache.len() >= DIGEST_CACHE_CAP {
-        cache.clear();
+    Ok(hasher.finalize().into())
+}
+
+/// The digest of a file's content, reused while the file keeps the stamp it had when it was last
+/// read (`DigestCache`).
+fn file_digest(path: &Path) -> std::io::Result<FileDigest> {
+    let mut file = open_regular(path)?;
+    let stamp = Stamp::of(&file)?;
+    if let Some(digest) = stamp.and_then(|stamp| digest_cache().get(path, &stamp)) {
+        return Ok(digest);
     }
-    cache.insert(path.to_path_buf(), ((len, modified), digest));
+    let digest = digest_of(&mut file)?;
+    // Kept only when nothing wrote to it while it was read.
+    if let (Some(before), Some(after)) = (stamp, Stamp::of(&file)?) {
+        if before == after {
+            digest_cache().keep(path, before, digest, SystemTime::now());
+        }
+    }
     Ok(digest)
 }
 
@@ -676,7 +812,7 @@ fn hash_dir(
                     MAX_TREE_BYTES / (1024 * 1024)
                 ));
             }
-            let digest = file_digest(&path, &meta).map_err(|e| e.to_string())?;
+            let digest = file_digest(&path).map_err(|e| e.to_string())?;
             hasher.update(b"f\0");
             hasher.update(relative.as_bytes());
             hasher.update(b"\0");
@@ -688,8 +824,7 @@ fn hash_dir(
 
 /// SHA-256 of one file's content (a project's `.mcp.json`, for one).
 pub fn file_hash(path: &Path) -> Result<String, String> {
-    let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
-    file_digest(path, &meta)
+    file_digest(path)
         .map(|digest| hex(&digest))
         .map_err(|e| e.to_string())
 }
@@ -1047,6 +1182,129 @@ mod tests {
             std::os::unix::fs::symlink("/etc/hosts", root.join("a/link")).unwrap();
             assert_ne!(tree_hash(root).unwrap(), linked, "a link's target counts");
         }
+    }
+
+    /// Writes `content` to `path` and gives it the modification time `modified`, as an archive
+    /// extracted over it or `cp -p` would.
+    fn write_with_time(path: &Path, content: &str, modified: SystemTime) {
+        std::fs::write(path, content).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+    }
+
+    #[test]
+    fn a_same_length_edit_with_the_old_time_is_read_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("SKILL.md");
+        let old = SystemTime::now() - Duration::from_secs(3600);
+        write_with_time(&file, "echo safe", old);
+        let first = file_hash(&file).unwrap();
+        let tree = tree_hash(dir.path()).unwrap();
+        // Same length, same modification time: only the content differs.
+        write_with_time(&file, "rm -rf ~/", old);
+        assert_ne!(file_hash(&file).unwrap(), first);
+        assert_ne!(tree_hash(dir.path()).unwrap(), tree);
+    }
+
+    #[test]
+    fn a_kept_digest_needs_the_whole_stamp_and_a_settled_file() {
+        let now = SystemTime::now();
+        let stamp = Stamp {
+            len: 9,
+            modified: now - Duration::from_secs(60),
+            changed: Some(now - Duration::from_secs(60)),
+            inode: Some((1, 2)),
+        };
+        let path = Path::new("/p/.claude/skills/a/SKILL.md");
+        let mut cache = DigestCache::default();
+        cache.keep(path, stamp, [7; 32], now);
+        assert_eq!(cache.get(path, &stamp), Some([7; 32]));
+        for other in [
+            Stamp { len: 10, ..stamp },
+            Stamp {
+                modified: now,
+                ..stamp
+            },
+            Stamp {
+                changed: Some(now),
+                ..stamp
+            },
+            Stamp {
+                inode: Some((1, 3)),
+                ..stamp
+            },
+        ] {
+            assert_eq!(cache.get(path, &other), None, "{other:?}");
+        }
+
+        // Written within the last few seconds: a later write of the same length could carry
+        // the same times on a filesystem with coarse timestamps, so it is read again.
+        let recent = Stamp {
+            modified: now - Duration::from_secs(1),
+            ..stamp
+        };
+        cache.keep(path, recent, [8; 32], now);
+        assert_eq!(cache.get(path, &recent), None);
+        assert_eq!(
+            cache.get(path, &stamp),
+            None,
+            "the older digest is gone too"
+        );
+        let changed = Stamp {
+            changed: Some(now - Duration::from_secs(1)),
+            ..stamp
+        };
+        assert!(!changed.settled(now));
+        assert!(stamp.settled(now));
+        assert!(
+            !Stamp {
+                modified: now + Duration::from_secs(60),
+                ..stamp
+            }
+            .settled(now),
+            "a time in the future is not settled"
+        );
+    }
+
+    #[test]
+    fn a_file_s_stamp_follows_what_programs_cannot_restore() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.sh");
+        let old = SystemTime::now() - Duration::from_secs(3600);
+        write_with_time(&path, "echo safe", old);
+        let stamp = Stamp::of(&open_regular(&path).unwrap()).unwrap().unwrap();
+        assert_eq!((stamp.len, stamp.modified), (9, old));
+        #[cfg(any(unix, windows))]
+        assert!(stamp.changed.is_some());
+        // Kept as though it had been left alone for long.
+        let mut cache = DigestCache::default();
+        let later = SystemTime::now() + Duration::from_secs(3600);
+        cache.keep(&path, stamp, [1; 32], later);
+        assert_eq!(cache.get(&path, &stamp), Some([1; 32]));
+        // Replaced with the same length and the old modification time restored.
+        std::thread::sleep(Duration::from_millis(20));
+        let replacement = dir.path().join("run.sh.new");
+        write_with_time(&replacement, "rm -rf ~/", old);
+        std::fs::rename(&replacement, &path).unwrap();
+        let now = Stamp::of(&open_regular(&path).unwrap()).unwrap().unwrap();
+        assert_eq!((now.len, now.modified), (stamp.len, stamp.modified));
+        #[cfg(any(unix, windows))]
+        assert_eq!(cache.get(&path, &now), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pipe_is_refused_without_waiting_for_a_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("SKILL.md");
+        let fifo = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        assert!(file_hash(&path).is_err());
+        assert!(open_regular(dir.path()).is_err(), "a folder");
     }
 
     #[test]
