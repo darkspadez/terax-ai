@@ -12,3 +12,4 @@ export {
   PrivacyRefusalNotice,
   usePrivacyRefusal,
 } from "./PrivacyRefusal";
+export { useFullDiskAccessSuggestion } from "./useFullDiskAccessSuggestion";

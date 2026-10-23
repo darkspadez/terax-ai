@@ -317,6 +317,7 @@ const KEY_TERMINAL_SCROLLBACK = "terminalScrollback";
 const KEY_TERMINAL_BEHAVIOR = "terminalBehavior";
 const KEY_CONFIRM_CLOSE_RUNNING_TERMINAL = "confirmCloseRunningTerminal";
 const KEY_LAST_WSL_DISTRO = "lastWslDistro";
+const KEY_MAC_FULL_DISK_ACCESS_SUGGESTED = "macFullDiskAccessSuggested";
 const KEY_ZOOM_LEVEL = "zoomLevel";
 const KEY_AGENT_NOTIFICATIONS = "agentNotifications";
 const KEY_AGENT_NOTIFICATION_SOUND = "agentNotificationSound";
@@ -1116,6 +1117,21 @@ export async function setConfirmCloseRunningTerminal(
 
 export async function setLastWslDistro(value: string | null): Promise<void> {
   await writePref(KEY_LAST_WSL_DISTRO, value);
+}
+
+/**
+ * Whether the first-run notice suggesting Full Disk Access (macOS) has been
+ * answered. App state rather than a preference: read once by the main window.
+ */
+export async function macFullDiskAccessSuggested(): Promise<boolean> {
+  return (
+    (await store.get<boolean>(KEY_MAC_FULL_DISK_ACCESS_SUGGESTED)) === true
+  );
+}
+
+export async function setMacFullDiskAccessSuggested(): Promise<void> {
+  await store.set(KEY_MAC_FULL_DISK_ACCESS_SUGGESTED, true);
+  await store.save();
 }
 
 export async function setZoomLevel(value: number): Promise<void> {
