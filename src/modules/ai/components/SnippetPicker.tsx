@@ -1,18 +1,23 @@
 import { PopoverContent } from "@/components/ui/popover";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { HugeiconsIcon } from "@hugeicons/react";
+import type { McpPromptCommand } from "@/modules/mcp/lib/promptCommands";
 import type { Skill } from "@/modules/skills/types";
-import { BookOpenTextIcon } from "@hugeicons/core-free-icons";
+import { BookOpenTextIcon, McpServerIcon } from "@hugeicons/core-free-icons";
 import type { SlashCommandMeta } from "../lib/slashCommands";
 import type { Snippet } from "../lib/snippets";
 
 export type PickerItem =
   | { kind: "snippet"; snippet: Snippet }
   | { kind: "command"; command: SlashCommandMeta }
-  | { kind: "skill"; skill: Skill };
+  | { kind: "skill"; skill: Skill }
+  | { kind: "prompt"; prompt: McpPromptCommand };
 
 type Props = {
   items: readonly PickerItem[];
+  /** MCP servers are starting: their prompts may still appear. */
+  mcpStarting?: boolean;
   activeIndex: number;
   onPick: (item: PickerItem) => void;
   onHover: (index: number) => void;
@@ -20,6 +25,7 @@ type Props = {
 
 export function SnippetPickerContent({
   items,
+  mcpStarting = false,
   activeIndex,
   onPick,
   onHover,
@@ -27,6 +33,7 @@ export function SnippetPickerContent({
   const commands = items.filter((it) => it.kind === "command");
   const skills = items.filter((it) => it.kind === "skill");
   const snippets = items.filter((it) => it.kind === "snippet");
+  const prompts = items.filter((it) => it.kind === "prompt");
   let cursor = -1;
 
   return (
@@ -40,9 +47,13 @@ export function SnippetPickerContent({
       className="w-72 overflow-hidden rounded-lg border border-border/60 bg-popover p-0 shadow-xl"
     >
       {items.length === 0 ? (
-        <div className="px-3 py-2.5 text-[11px] text-muted-foreground">
-          No matches. Add snippets in Settings → Agents.
-        </div>
+        mcpStarting ? (
+          <McpStartingRow />
+        ) : (
+          <div className="px-3 py-2.5 text-[11px] text-muted-foreground">
+            No matches. Add snippets in Settings → Agents.
+          </div>
+        )
       ) : (
         <div className="max-h-64 overflow-y-auto py-1">
           {commands.length > 0 && (
@@ -136,6 +147,61 @@ export function SnippetPickerContent({
               </ul>
             </>
           )}
+          {prompts.length > 0 && (
+            <>
+              <SectionHeader label="MCP prompts" />
+              <ul>
+                {prompts.map((it) => {
+                  cursor += 1;
+                  const i = cursor;
+                  if (it.kind !== "prompt") return null;
+                  const p = it.prompt;
+                  return (
+                    <li key={`prompt-${p.serverId}-${p.command}`}>
+                      <button
+                        type="button"
+                        onMouseEnter={() => onHover(i)}
+                        onClick={() => onPick(it)}
+                        title={`A prompt of the MCP server ${p.serverName}: its text is the server's`}
+                        className={cn(
+                          "flex w-full items-start gap-2 px-2 py-1.5 text-left text-[12px]",
+                          i === activeIndex
+                            ? "bg-accent"
+                            : "hover:bg-accent/60",
+                        )}
+                      >
+                        <HugeiconsIcon
+                          icon={McpServerIcon}
+                          size={13}
+                          strokeWidth={1.75}
+                          className="mt-0.5 shrink-0 text-muted-foreground"
+                        />
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            <span className="truncate font-mono">
+                              /{p.command}
+                            </span>
+                            {p.prompt.arguments.length > 0 ? (
+                              <span className="shrink-0 text-[10.5px] text-muted-foreground">
+                                {p.prompt.arguments.length} argument
+                                {p.prompt.arguments.length === 1 ? "" : "s"}
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className="line-clamp-1 text-[10.5px] text-muted-foreground">
+                            {p.prompt.description ??
+                              p.prompt.title ??
+                              `From ${p.serverName}`}
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
+          {mcpStarting && <McpStartingRow />}
           {snippets.length > 0 && (
             <>
               <SectionHeader label="Snippets" />
@@ -179,6 +245,15 @@ export function SnippetPickerContent({
         </div>
       )}
     </PopoverContent>
+  );
+}
+
+function McpStartingRow() {
+  return (
+    <div className="flex items-center gap-2 px-3 py-2 text-[11px] text-muted-foreground">
+      <Spinner className="size-3" />
+      <span>Starting MCP servers…</span>
+    </div>
   );
 }
 

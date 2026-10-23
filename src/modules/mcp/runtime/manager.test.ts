@@ -89,6 +89,7 @@ vi.mock("@/modules/settings/preferences", () => ({
 }));
 
 import { useMcpCatalog } from "../lib/catalog";
+import { useMcpExtras } from "../lib/extrasCatalog";
 import { MAX_CRASHES, RESTART_DELAYS_MS } from "../lib/lifecycle";
 import { McpManager, otherFeatures } from "./manager";
 
@@ -150,6 +151,7 @@ beforeEach(() => {
   fakes.held.clear();
   fakes.releases.length = 0;
   useMcpCatalog.getState().setTools({});
+  useMcpExtras.getState().setServers([]);
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -389,6 +391,34 @@ describe("McpManager", () => {
     expect(manager.offeredTools()).toEqual([]);
     for (const release of fakes.releases) release();
     await vi.waitFor(() => expect(manager.offeredTools()).toHaveLength(1));
+  });
+
+  it("keeps the composer's view of running servers: started, renamed, stopped, crashed", async () => {
+    vi.useFakeTimers();
+    const names = () =>
+      useMcpExtras.getState().servers.map((s) => [s.serverId, s.serverName]);
+    const manager = new McpManager();
+    manager.sync([server("a"), server("b")]);
+    await vi.waitFor(() =>
+      expect(names()).toEqual([
+        ["a", "a"],
+        ["b", "b"],
+      ]),
+    );
+    manager.sync([server("a", { name: "Zed" }), server("b")]);
+    expect(names()).toEqual([
+      ["b", "b"],
+      ["a", "Zed"],
+    ]);
+    manager.sync([
+      server("a", { name: "Zed" }),
+      server("b", { enabled: false }),
+    ]);
+    expect(names()).toEqual([["a", "Zed"]]);
+    fakes.clients.get("a")?.onclose?.();
+    expect(names()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(RESTART_DELAYS_MS[0]);
+    await vi.waitFor(() => expect(names()).toEqual([["a", "Zed"]]));
   });
 
   it("stops waiting as soon as the starting servers are up", async () => {

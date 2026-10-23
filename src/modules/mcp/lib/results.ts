@@ -10,7 +10,8 @@ export const MAX_RESULT_IMAGES = 4;
 export const MAX_IMAGE_BASE64 = 5 * 1024 * 1024;
 const MAX_IMAGES_BASE64_TOTAL = 8 * 1024 * 1024;
 const MAX_ERROR_TEXT = 4000;
-const IMAGE_TYPES = new Set([
+/** Image types every provider takes. */
+export const IMAGE_TYPES: ReadonlySet<string> = new Set([
   "image/png",
   "image/jpeg",
   "image/gif",

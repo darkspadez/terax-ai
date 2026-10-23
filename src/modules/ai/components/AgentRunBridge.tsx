@@ -11,6 +11,7 @@ import {
   type AgentRunStatus,
 } from "../store/chatStore";
 import { getOrCreateChat } from "../store/chatRuntime";
+import { McpRequestsHost } from "@/modules/mcp/components/McpRequestsHost";
 
 /**
  * Headless bridge that mirrors chat lifecycle into the store, so the status
@@ -40,8 +41,13 @@ export type AgentRunBridgeProps = {
 
 export function AgentRunBridge(props: AgentRunBridgeProps) {
   const sessionId = useChatStore((s) => s.activeSessionId);
-  if (!sessionId) return null;
-  return <Bridge sessionId={sessionId} {...props} />;
+  const openMini = useChatStore((s) => s.openMini);
+  return (
+    <>
+      <McpRequestsHost onShowChat={openMini} />
+      {sessionId ? <Bridge sessionId={sessionId} {...props} /> : null}
+    </>
+  );
 }
 
 type BridgeProps = { sessionId: string } & AgentRunBridgeProps;

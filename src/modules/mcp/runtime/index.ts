@@ -1,7 +1,10 @@
 import { dynamicTool, jsonSchema, type Tool } from "ai";
 import type { McpServerConfig } from "../lib/config";
 import { mcpToModelOutput } from "../lib/results";
+import type { McpExtras } from "./extras";
 import { McpManager, type OfferedTool } from "./manager";
+
+export type { CompletionRef } from "./extras";
 
 export type McpToolAccess = { trusted: boolean; alwaysAllow: boolean };
 
@@ -59,4 +62,28 @@ export async function toolsForRun(
     };
   }
   return { tools, access, instructions: current.instructions() };
+}
+
+/**
+ * Brings this window's servers in line with `servers` for the composer (its
+ * `@` and `/` lists) and waits briefly for any still starting.
+ */
+export async function prepareExtras(
+  servers: readonly McpServerConfig[],
+  onWaiting?: () => void,
+): Promise<void> {
+  manager ??= new McpManager();
+  const current = manager;
+  await current.listen();
+  current.sync(servers);
+  if (current.hasStarting()) {
+    onWaiting?.();
+    await current.waitForStarting();
+  }
+}
+
+/** Resources, prompts and completions of the window's running servers. */
+export function extras(): McpExtras {
+  manager ??= new McpManager();
+  return manager.extras;
 }

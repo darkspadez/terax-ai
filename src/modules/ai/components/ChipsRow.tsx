@@ -10,6 +10,7 @@ type CommandChip = {
   label: string;
   icon: typeof HashtagIcon;
   skill?: boolean;
+  prompt?: boolean;
 };
 
 type Props = {
@@ -44,9 +45,15 @@ export function ChipsRow({
           icon={cmd.icon}
           title={cmd.label}
           onRemove={() => onRemoveCommand(cmd.name)}
-          removeLabel={cmd.skill ? "Remove skill" : "Remove command"}
+          removeLabel={
+            cmd.skill
+              ? "Remove skill"
+              : cmd.prompt
+                ? "Remove prompt"
+                : "Remove command"
+          }
         >
-          {cmd.skill ? "/" : "#"}
+          {cmd.skill || cmd.prompt ? "/" : "#"}
           {cmd.name}
         </Chip>
       ))}
@@ -66,6 +73,12 @@ export function ChipsRow({
         <Chip
           key={f.id}
           iconNode={fileIcon(f)}
+          label={f.mcp?.server}
+          title={
+            f.mcp
+              ? `From the MCP server ${f.mcp.server} (outside content): ${f.mcp.uri}`
+              : undefined
+          }
           onRemove={() => onRemoveFile(f.id)}
         >
           {f.name}
