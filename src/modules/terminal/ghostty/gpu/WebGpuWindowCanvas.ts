@@ -1,4 +1,5 @@
 import { smoothHooks } from "@/bench/smoothHooks";
+import { subscribeTerminalAreaMoved } from "@/modules/terminal/lib/terminalAreaMoved";
 import { noteTerminalHostResize } from "@/modules/terminal/lib/terminalResizeGesture";
 import {
   subscribeTerminalResizeInteraction,
@@ -164,6 +165,7 @@ export class WebGpuWindowCanvas {
   private readonly observer: ResizeObserver;
   private readonly pixelRatioMonitor: DevicePixelRatioMonitor;
   private readonly unsubscribeGesture: () => void;
+  private readonly unsubscribeAreaMoved: () => void;
   private area: HTMLElement | null = null;
   private areaCss: CssRect | null = null;
   private areaDevice: { width: number; height: number } | null = null;
@@ -233,6 +235,12 @@ export class WebGpuWindowCanvas {
       }
       // The gesture is over: shrink the backing to the area, once.
       this.restage();
+      this.requestFrame();
+    });
+    // A move fires no observer: check the geometry at the next frame, whatever the interval.
+    this.unsubscribeAreaMoved = subscribeTerminalAreaMoved(() => {
+      if (!this.area) return;
+      this.lastGeometryCheck = Number.NEGATIVE_INFINITY;
       this.requestFrame();
     });
   }
@@ -508,6 +516,7 @@ export class WebGpuWindowCanvas {
     this.observer.disconnect();
     this.pixelRatioMonitor.stop();
     this.unsubscribeGesture();
+    this.unsubscribeAreaMoved();
     if (this.hideTimer !== null) clearTimeout(this.hideTimer);
     window.removeEventListener?.("resize", this.handleWindowResize);
     this.panes.clear();

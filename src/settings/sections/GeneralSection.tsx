@@ -16,6 +16,7 @@ import {
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { ThemePref } from "@/modules/settings/store";
 import {
+  parseSidebarPosition,
   setAgentNotificationSound,
   setAgentNotifications,
   setAutostart,
@@ -26,6 +27,7 @@ import {
   setTerminalLinksInPreview,
   setRestoreWindowState,
   setShowHidden,
+  setSidebarPosition,
   setTerminalCursorBlink,
   setTerminalCursorStyle,
   setTerminalCustomShader,
@@ -113,6 +115,7 @@ export function GeneralSection() {
   const explorerGitDecorations = usePreferencesStore(
     (s) => s.explorerGitDecorations,
   );
+  const sidebarPosition = usePreferencesStore((s) => s.sidebarPosition);
   const terminalLinksInPreview = usePreferencesStore(
     (s) => s.terminalLinksInPreview,
   );
@@ -278,6 +281,33 @@ export function GeneralSection() {
             onValueChange={(v) => void setZoomLevel(v[0] ?? 1)}
           />
         </div>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label>Layout</Label>
+        <SettingRow
+          title="Sidebar position"
+          description="The side of the window the sidebar docks to."
+        >
+          <Select
+            value={parseSidebarPosition(sidebarPosition)}
+            onValueChange={(v) =>
+              void setSidebarPosition(parseSidebarPosition(v))
+            }
+          >
+            <SelectTrigger className="h-8 w-28 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="left" className="text-[12px]">
+                Left
+              </SelectItem>
+              <SelectItem value="right" className="text-[12px]">
+                Right
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingRow>
       </div>
 
       <div className="flex flex-col gap-2">

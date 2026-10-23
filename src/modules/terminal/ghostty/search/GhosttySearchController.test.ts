@@ -3,7 +3,11 @@ import type {
   GhosttySearchStatus,
   GhosttyTerminalModelApi,
 } from "../GhosttyTerminalModel";
-import { GhosttySearchController } from "./GhosttySearchController";
+import {
+  GhosttySearchController,
+  searchMatchCount,
+} from "./GhosttySearchController";
+import { MAX_REGEX_MATCHES } from "./RegexTerminalSearch";
 
 const pendingStatus: GhosttySearchStatus = {
   active: true,
@@ -207,6 +211,77 @@ describe("GhosttySearchController", () => {
     controller.invalidate();
     controller.dispose();
     expect(callback).toBeNull();
+  });
+
+  it("reports the match count while it grows, once selected, and clears it", () => {
+    const callbacks: (() => void)[] = [];
+    let selectedIndex = -1;
+    const model = {
+      cols: 5,
+      rows: 2,
+      setSearchQuery: vi.fn(() => pendingStatus),
+      stepSearch: vi
+        .fn<() => GhosttySearchStatus>()
+        .mockReturnValueOnce(pendingStatus)
+        .mockImplementation(() => ({ ...completeStatus, selectedIndex })),
+      selectSearchMatch: vi.fn(() => {
+        selectedIndex = 1;
+        return { ...completeStatus, selectedIndex };
+      }),
+      searchViewportMatches: vi.fn(() => []),
+      clearSearch: vi.fn(),
+    } as unknown as GhosttyTerminalModelApi;
+    const controller = new GhosttySearchController(model, vi.fn(), {
+      request: (callback) => callbacks.push(callback),
+      cancel: () => {},
+    });
+    const listener = vi.fn();
+    const unsubscribe = controller.subscribeMatchCount(listener);
+    expect(controller.matchCount()).toBeNull();
+
+    controller.findNext("agent");
+    expect(controller.matchCount()).toEqual({
+      current: 0,
+      total: 1,
+      capped: false,
+      pending: true,
+    });
+    callbacks.shift()?.();
+    expect(controller.matchCount()).toEqual({
+      current: 2,
+      total: 2,
+      capped: false,
+      pending: false,
+    });
+    expect(listener).toHaveBeenCalledTimes(2);
+
+    // Streaming output steps the search again: an unchanged count is not news.
+    const before = controller.matchCount();
+    controller.refresh();
+    expect(controller.matchCount()).toBe(before);
+    expect(listener).toHaveBeenCalledTimes(2);
+
+    controller.clearDecorations();
+    expect(controller.matchCount()).toBeNull();
+    expect(listener).toHaveBeenCalledTimes(3);
+    unsubscribe();
+    controller.findNext("again");
+    expect(listener).toHaveBeenCalledTimes(3);
+  });
+
+  it("counts from the selected index and marks the regex engine's cap", () => {
+    expect(searchMatchCount(completeStatus, false)).toEqual({
+      current: 0,
+      total: 2,
+      capped: false,
+      pending: false,
+    });
+    expect(
+      searchMatchCount({ ...completeStatus, selectedIndex: 0 }, false).current,
+    ).toBe(1);
+    const full = { ...completeStatus, totalMatches: MAX_REGEX_MATCHES };
+    expect(searchMatchCount(full, true).capped).toBe(true);
+    expect(searchMatchCount(full, false).capped).toBe(false);
   });
 
   it("cancels pending work and clears Ghostty search state", () => {

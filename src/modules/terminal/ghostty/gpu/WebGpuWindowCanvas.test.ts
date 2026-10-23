@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { notifyTerminalAreaMoved } from "@/modules/terminal/lib/terminalAreaMoved";
 import { resetTerminalResizeGestureForTest } from "@/modules/terminal/lib/terminalResizeGesture";
 import type { CssRect } from "./PaneRects";
 import {
@@ -614,6 +615,33 @@ describe("WebGpuWindowCanvas", () => {
     });
     t.canvas.beginFrame();
     expect(t.canvas.encode(t.encoder, t.resources).revealed).toEqual([a]);
+  });
+
+  it("checks its geometry at the next frame when the area moved without resizing", () => {
+    const t = setup({ scale: 1.25 });
+    t.area.rect = { left: 100.4, top: 20, width: 700, height: 500 };
+    t.resizeArea(700, 500);
+    expect(t.canvases[0].style.transform).toBe("translate(0.4px, 0px)");
+    t.canvas.verifyGeometry(0);
+    // The sidebar changed sides: same size, so no observer fires.
+    t.area.rect = { left: 8, top: 20, width: 700, height: 500 };
+    t.requestFrame.mockClear();
+    notifyTerminalAreaMoved();
+    expect(t.requestFrame).toHaveBeenCalled();
+    t.canvas.verifyGeometry(1);
+    expect(t.canvases[0].style.transform).toBe("");
+    // Only the frame right after the move skips the interval.
+    t.area.rect = { left: 100.4, top: 20, width: 700, height: 500 };
+    t.canvas.verifyGeometry(2);
+    expect(t.canvases[0].style.transform).toBe("");
+  });
+
+  it("stops listening for moves once disposed", () => {
+    const t = setup();
+    t.canvas.dispose();
+    t.requestFrame.mockClear();
+    notifyTerminalAreaMoved();
+    expect(t.requestFrame).not.toHaveBeenCalled();
   });
 
   it("asks for a frame when its area changes", () => {

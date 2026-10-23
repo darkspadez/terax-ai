@@ -27,6 +27,10 @@ import {
   type ReasoningEffort,
 } from "@/modules/ai/lib/reasoningEffort";
 import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
+import {
+  type ChangeViewMode,
+  parseChangeViewMode,
+} from "@/modules/source-control/changeViewMode";
 import { parseFontFeatures } from "@/modules/terminal/lib/fontFeatures";
 import {
   clampPaneLimit,
@@ -193,6 +197,10 @@ export type Preferences = {
   editorDefaultIndent: EditorDefaultIndent;
   showHidden: boolean;
   explorerGitDecorations: boolean;
+  /** Which edge of the window the sidebar docks to. */
+  sidebarPosition: SidebarPosition;
+  /** Source Control's changed files as a flat list or a folder tree. */
+  sourceControlViewMode: ChangeViewMode;
   /**
    * The app's own file features (explorer, editor, previews, search,
    * watching, path completion, Open in Default App) reach every folder, not
@@ -326,6 +334,8 @@ const KEY_EDITOR_DEFAULT_INDENT = "editorDefaultIndent";
 const KEY_SHOW_HIDDEN = "showHidden";
 const LEGACY_KEY_SHOW_HIDDEN_DIRS = "showHiddenDirectories";
 const KEY_EXPLORER_GIT_DECORATIONS = "explorerGitDecorations";
+const KEY_SIDEBAR_POSITION = "sidebarPosition";
+const KEY_SOURCE_CONTROL_VIEW_MODE = "sourceControlViewMode";
 const KEY_APP_ALL_FOLDERS = "appAllFolders";
 const KEY_AI_ALL_FOLDERS = "aiAllFolders";
 const KEY_TERMINAL_LINKS_IN_PREVIEW = "terminalLinksInPreview";
@@ -501,6 +511,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   editorDefaultIndent: "spaces2",
   showHidden: false,
   explorerGitDecorations: true,
+  sidebarPosition: "left",
+  sourceControlViewMode: "list",
   appAllFolders: false,
   aiAllFolders: false,
   terminalLinksInPreview: false,
@@ -682,6 +694,10 @@ export async function loadPreferences(): Promise<Preferences> {
     explorerGitDecorations:
       get<boolean>(KEY_EXPLORER_GIT_DECORATIONS) ??
       DEFAULT_PREFERENCES.explorerGitDecorations,
+    sidebarPosition: parseSidebarPosition(get<unknown>(KEY_SIDEBAR_POSITION)),
+    sourceControlViewMode: parseChangeViewMode(
+      get<unknown>(KEY_SOURCE_CONTROL_VIEW_MODE),
+    ),
     // Only a stored `true` widens access; anything else is the default, off.
     appAllFolders: get<unknown>(KEY_APP_ALL_FOLDERS) === true,
     aiAllFolders: get<unknown>(KEY_AI_ALL_FOLDERS) === true,
@@ -1018,6 +1034,24 @@ export async function setNewTabPosition(value: NewTabPosition): Promise<void> {
   await writePref(KEY_NEW_TAB_POSITION, parseNewTabPosition(value));
 }
 
+export type SidebarPosition = "left" | "right";
+
+export function parseSidebarPosition(value: unknown): SidebarPosition {
+  return value === "right" ? "right" : "left";
+}
+
+export async function setSidebarPosition(
+  value: SidebarPosition,
+): Promise<void> {
+  await writePref(KEY_SIDEBAR_POSITION, parseSidebarPosition(value));
+}
+
+export async function setSourceControlViewMode(
+  value: ChangeViewMode,
+): Promise<void> {
+  await writePref(KEY_SOURCE_CONTROL_VIEW_MODE, parseChangeViewMode(value));
+}
+
 export type DiffViewMode = "inline" | "split";
 
 export function parseDiffViewMode(value: unknown): DiffViewMode {
@@ -1349,6 +1383,8 @@ export async function onPreferencesChange(
     [KEY_EDITOR_DEFAULT_INDENT]: "editorDefaultIndent",
     [KEY_SHOW_HIDDEN]: "showHidden",
     [KEY_EXPLORER_GIT_DECORATIONS]: "explorerGitDecorations",
+    [KEY_SIDEBAR_POSITION]: "sidebarPosition",
+    [KEY_SOURCE_CONTROL_VIEW_MODE]: "sourceControlViewMode",
     [KEY_APP_ALL_FOLDERS]: "appAllFolders",
     [KEY_AI_ALL_FOLDERS]: "aiAllFolders",
     [KEY_TERMINAL_LINKS_IN_PREVIEW]: "terminalLinksInPreview",

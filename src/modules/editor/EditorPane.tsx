@@ -1,3 +1,4 @@
+import type { MatchCount } from "@/lib/matchCount";
 import { IS_MAC } from "@/lib/platform";
 import { endpointIdFromCompatModel } from "@/modules/ai/config";
 import { getCustomEndpointKey, getKey } from "@/modules/ai/lib/keyring";
@@ -69,6 +70,7 @@ import { onHeadMoved } from "./lib/gitSignals";
 import { defaultIndentUnit, detectIndentUnit } from "./lib/indent";
 import { type LanguageResult, resolveLanguage } from "./lib/languageResolver";
 import { mediaPreviewKind } from "./lib/mediaPreview";
+import { SearchCountHub, searchCountHub } from "./lib/searchCount";
 import { FORCE_READ_LIMIT, useDocument } from "./lib/useDocument";
 import { useEditorThemeExt } from "./lib/useEditorThemeExt";
 import { applyFormattedContent, syncViewText } from "./lib/viewSync";
@@ -84,6 +86,9 @@ export type EditorPaneHandle = {
   clearQuery: () => void;
   /** Open CodeMirror's find/replace panel. */
   openSearch: () => void;
+  /** Matches of the current find, counted only while someone subscribes. */
+  searchCount: () => MatchCount | null;
+  subscribeSearchCount: (listener: () => void) => () => void;
   focus: () => void;
   getSelection: () => string | null;
   getPath: () => string;
@@ -162,6 +167,8 @@ export const EditorPane = memo(
     const adoptDiskTextRef = useRef(adoptDiskText);
     adoptDiskTextRef.current = adoptDiskText;
     const cmRef = useRef<ReactCodeMirrorRef>(null);
+    // Outlives the views the pane creates, so a subscriber keeps its count.
+    const [searchCounts] = useState(() => new SearchCountHub());
     const themeExt = useEditorThemeExt();
     const vimMode = usePreferencesStore((s) => s.vimMode);
     const wordWrapColumn = usePreferencesStore((s) =>
@@ -379,6 +386,7 @@ export const EditorPane = memo(
           close: () => onCloseRef.current?.(),
         })),
         ...buildSharedExtensions(),
+        searchCountHub.of(searchCounts),
         indentCompartment.of(DEFAULT_INDENT),
         languageCompartment.of([]),
         lspCompartment.of([]),
@@ -428,7 +436,7 @@ export const EditorPane = memo(
         }),
         editorKeymap(() => void performSaveRef.current()),
       ],
-      [],
+      [searchCounts],
     );
 
     useEffect(() => {
@@ -605,6 +613,8 @@ export const EditorPane = memo(
           const view = cmRef.current?.view;
           if (view) openSearchPanel(view);
         },
+        searchCount: () => searchCounts.get(),
+        subscribeSearchCount: (listener) => searchCounts.subscribe(listener),
         focus: () => {
           pendingFocusRef.current = path;
           applyPendingFocus();
@@ -646,7 +656,7 @@ export const EditorPane = memo(
           startCompletion(view);
         },
       }),
-      [path, applyPendingFocus, applyPendingGoto],
+      [path, applyPendingFocus, applyPendingGoto, searchCounts],
     );
 
     const mediaKind =
