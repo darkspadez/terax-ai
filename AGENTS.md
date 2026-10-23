@@ -17,7 +17,7 @@ This file is the project's instructions for coding agents and its living archite
 Production-grade or it does not ship. Every change is judged against all of these, not just "it works":
 
 - **Correctness**: edge cases, failure modes, concurrent access. No "works for now".
-- **Performance**: ultra-lightweight is the product. ~7-8 MB bundle, high-performance terminal. For every change ask: how much RAM it costs, whether it adds IPC round-trips or redundant requests, whether it triggers extra re-renders or wasted work, whether it pulls a heavy dependency. Unused features consume zero resources.
+- **Performance**: ultra-lightweight is the product: every dependency justified, heavy code loaded lazily, size budgets enforced in CI, and a high-performance terminal. For every change ask: how much RAM it costs, whether it adds IPC round-trips or redundant requests, whether it triggers extra re-renders or wasted work, whether it pulls a heavy dependency. Unused features consume zero resources.
 - **Security**: no critical security holes. Validate at every boundary (IPC, fs, network, AI tool surface). The secret-path deny-list applies on both read and write and is never bypassed.
 - **UI/UX**: polished, professional, premium. Every state and detail considered.
 - **Architecture**: new or changed logic lives in pure, dependency-light functions (functional core); tauri commands and React components stay thin (imperative shell). Keeps it testable without a later rewrite.

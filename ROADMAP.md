@@ -1,18 +1,18 @@
 # Roadmap
 
-Terax direction, what's shipped, what's coming, and what's deliberately out of scope.
+Oarlock direction, what's shipped, what's coming, and what's deliberately out of scope.
 
-This file is updated as direction evolves. For day-to-day work, see [GitHub Issues](https://github.com/darkspadez/terax-ai/issues).
+This file is updated as direction evolves. For day-to-day work, see [GitHub Issues](https://github.com/qopsc/oarlock/issues).
 
-## What Terax is
+## What Oarlock is
 
-Terax is a fast, lightweight, terminal-first AI-native development environment (ADE). It pairs a native PTY backend with a modern UI: multi-tab terminals, an integrated code editor, a file explorer, source control, and a first-class AI agent system that works with your own API keys or fully local models. About 7-8 MB on disk. No telemetry. Keys stored in the OS keychain.
+Oarlock is a fast, lightweight, terminal-first AI-native development environment (ADE). It pairs a native PTY backend with a modern UI: multi-tab terminals, an integrated code editor, a file explorer, source control, and a first-class AI agent system that works with your own API keys or fully local models. No telemetry. Keys stored in the OS keychain.
 
 The product is opinionated: terminal-first, AI as a primitive (not a sidebar), lightweight always, cross-platform without compromise.
 
-## What Terax is not
+## What Oarlock is not
 
-- Not an IDE clone. Terax selectively integrates high-value editor capabilities such as LSP, AI autocomplete, formatting, source control, and previews without adopting the heavyweight runtime and always-on background services of a traditional IDE.
+- Not an IDE clone. Oarlock selectively integrates high-value editor capabilities such as LSP, AI autocomplete, formatting, source control, and previews without adopting the heavyweight runtime and always-on background services of a traditional IDE.
 - Not a browser. Web preview exists for local dev servers and lightweight doc viewing only.
 - Not a general workspace. Tools and formats that pull the product away from the terminal-first surface are out of scope.
 - Not a one-size-fits-all CLI replacement. The goal is the best terminal-first AI-native development environment, not a shell with extras.
@@ -22,7 +22,7 @@ The product is opinionated: terminal-first, AI as a primitive (not a sidebar), l
 The themes below frame every scope decision.
 
 1. **AI as a native primitive.** Agents, tools, autocomplete, voice - first-class, not a panel bolted onto a regular terminal.
-2. **Lightweight always.** 7-8 MB binary. Every dependency justified. Per-tab memory budget enforced.
+2. **Lightweight always.** Every dependency justified, heavy code loaded lazily, size budgets enforced in CI. Per-tab memory budget enforced.
 3. **Terminal-first.** Terminal emulation correctness, PTY fidelity, TUI app compatibility are non-negotiable.
 4. **Cross-platform parity.** macOS, Linux, Windows, WSL. No platform-specific exclusives.
 5. **Security by default.** Path guards, SSRF protection, OSC trust, IPC sandboxing. Defaults safe out of the box.
@@ -88,10 +88,8 @@ The themes below frame every scope decision.
 
 ### Platform Integration
 
-- [x] macOS, Linux (.deb / .rpm / AppImage), Windows (NSIS), WSL
-- [x] AUR (Arch)
+- [x] macOS, Linux (.deb / .rpm / AppImage), Windows (NSIS, built from source for now), WSL
 - [x] Windows Explorer context-menu integration
-- [x] Auto-updater
 - [x] OS keychain for API keys
 - [x] No telemetry
 
@@ -118,6 +116,7 @@ The themes below frame every scope decision.
 - [ ] Complete, extensible slash-command and reusable skills system
 - [ ] Approval flow improvements (YOLO / auto-approve, project-scoped policies, per-tool trust)
 - [ ] Persistent terminal processes across app restarts
+- [ ] Releases and auto-updates from Oarlock's own release feed (the updater is built in but not set up)
 
 ### Longer horizon
 
@@ -126,12 +125,12 @@ The themes below frame every scope decision.
 
 ## Wanted contributions
 
-Strategic areas where help is welcome. Pick something and propose an approach in Discord or via an issue first.
+Strategic areas where help is welcome. Pick something and propose an approach in an issue first.
 
 - **Regression tests.** Add focused coverage for bug fixes and critical PTY, security, AI tool, and native-boundary invariants.
 - **Measured performance work.** Profile first and propose focused changes that preserve startup time, bundle size, memory use, and hot-path latency.
 - **Platform-specific bugs.** Rendering issues on niche distros, shell quirks, WSL edge cases.
-- **Documentation and translations.** Improvements, screenshots, examples, non-English README sections.
+- **Documentation.** Improvements, screenshots, examples.
 - **Themes.** Terminal and editor themes, UI accent palettes that fit the lightweight aesthetic.
 - **Provider integrations.** Only providers that add unique value beyond existing coverage. Justify the case before implementing.
 
@@ -139,20 +138,20 @@ See `good-first-issue` and `help-wanted` labels on GitHub Issues for concrete ta
 
 ## Out of scope
 
-Categories that will not be built into Terax. Individual feature requests in these categories will be closed.
+Categories that will not be built into Oarlock. Individual feature requests in these categories will be closed.
 
 - **Heavyweight IDE infrastructure.** Integrated debugger and profiler suites, unbounded background indexing, and always-resident extension hosts are out of scope. Focused LSP, autocomplete, formatting, and editor workflows remain in scope when they are opt-in, lazy, and resource-bounded.
-- **Notebook and document workspaces.** Anything that turns Terax into a document host rather than a terminal.
+- **Notebook and document workspaces.** Anything that turns Oarlock into a document host rather than a terminal.
 - **Package manager and toolchain UIs.** Use `npm`, `pip`, `cargo` and friends in the terminal directly.
 - **Full web browser features.** Preview pane stays scoped to local dev servers and lightweight doc viewing. No navigation history, no bookmarks, no dev tools. Sandbox and WebView cookie policies can prevent cookie-based sign-in, so preview offers an external browser fallback instead of relaxing its security boundary.
-- **Telemetry, analytics, accounts.** Terax stays BYOK and offline-respectful.
+- **Telemetry, analytics, accounts.** Oarlock stays BYOK and offline-respectful.
 - **Extension marketplaces at IDE scale.** Narrowly-scoped AI tool / skill bundles may happen eventually. Arbitrary UI or behavior extensions will not.
-- **Third-party subscription session bridges.** Forwarding cloud subscription auth (provider-managed login sessions) through Terax is not technically feasible for third-party clients.
+- **Third-party subscription session bridges.** Forwarding cloud subscription auth (provider-managed login sessions) through Oarlock is not technically feasible for third-party clients.
 
 ## Decision authority
 
-Direction and scope decisions are made by [@crynta](https://github.com/crynta). Trusted reviewers (informal, no fixed roles yet) provide input on security, performance, and platform-specific areas.
+Direction and scope decisions are made by [@darkspadez](https://github.com/darkspadez). Trusted reviewers (informal, no fixed roles yet) provide input on security, performance, and platform-specific areas.
 
-If a PR is closed and you disagree, raise it in Discord. Happy to discuss, not happy to be ambushed in a PR comment thread.
+If a PR is closed and you disagree, raise it in an issue. Happy to discuss, not happy to be ambushed in a PR comment thread.
 
 This will likely formalize over time as the project grows.

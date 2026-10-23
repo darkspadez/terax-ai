@@ -89,7 +89,8 @@ reviews:
         wasted re-renders, quadratic work on hot paths, unnecessary allocations or RAM
         growth, work done while the feature is idle.
         (4) Bundle size and dependencies: flag every new dependency and whether it is
-        justified, prefer std/platform or existing deps; the bundle stays ~7-8MB.
+        justified, prefer std/platform or existing deps, load heavy code lazily, and
+        keep within the size budgets CI enforces.
         (5) Security: validation at boundaries (IPC, fs, network, AI tool surface),
         injection, path traversal, secret exposure.
         (6) Correctness: edge cases, error and failure handling, race conditions,

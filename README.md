@@ -1,35 +1,20 @@
 <div align="center">
-  <img src="public/logo.png" width="144" height="144" alt="Terax" />
-  <h1>Terax</h1>
+  <img src="public/logo.png" width="144" height="144" alt="Oarlock" />
+  <h1>Oarlock</h1>
 
-  <p><strong>Lightweight Terminal-first AI-native dev workspace.</strong></p>
-  <p>
-    <a href="https://terax.app">Website</a>
-    ·
-    <a href="https://terax.app/docs">Docs</a>
-    ·
-    <a href="https://github.com/crynta/Terax-website">Website's source code</a>
-  </p>
+  <p><strong>Lightweight terminal-first AI-native dev workspace.</strong></p>
 
   <p>
-    <img src="https://img.shields.io/github/v/release/darkspadez/terax-ai?label=version&color=blue" alt="version" />
-    <img src="https://img.shields.io/github/downloads/darkspadez/terax-ai/total?label=downloads&color=blue" alt="downloads" />
+    <a href="https://github.com/qopsc/oarlock/releases"><img src="https://img.shields.io/github/v/release/qopsc/oarlock?label=version&color=blue" alt="version" /></a>
+    <a href="https://github.com/qopsc/oarlock/actions/workflows/ci.yml"><img src="https://github.com/qopsc/oarlock/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="platform" />
-    <a href="https://discord.gg/tyveTUyEp7"><img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
-    <a href="https://www.youtube.com/@crynta"><img src="https://img.shields.io/badge/Youtube-FF0000?logo=youtube&logoColor=white" alt="YouTube" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="license" /></a>
   </p>
 </div>
 
 ---
 
-Terax is a lightweight open-source terminal-first AI-native development environment (ADE) built on Tauri 2 + Rust and React 19. A native PTY backend with a WebGL renderer, an agentic AI side-panel that runs against your own keys or fully local models, plus a code editor, file explorer, source control with a git graph, and a web preview pane built in. About 7-8 MB on disk. No telemetry. No account.
-
-> [!NOTE]
-> Over the past few months, most of my development time went into building [Zephium](https://zephium.app), a new browser-native work environment rebuilt for humans and agents.
->
-> Terax is back in active development. The **v0.9.0** release brought substantial architectural changes, including the move from **xterm.js to libghostty + WebGPU**.
->
-> More updates soon.
+Oarlock is a lightweight open-source terminal-first AI-native development environment (ADE) built on Tauri 2 + Rust and React 19. A native PTY backend with a libghostty-vt terminal drawn by WebGPU (WebGL as the fallback), an agentic AI side-panel that runs against your own keys or fully local models, plus a code editor, file explorer, source control with a git graph, and a web preview pane built in. No telemetry. No account.
 
 ## Screenshots
 
@@ -43,7 +28,7 @@ Terax is a lightweight open-source terminal-first AI-native development environm
     <td align="center"><img src="docs/source-control.png" alt="Source control and git graph" style="margin-top: 12px;"/><br/><sub>Source control panel with git graph in history</sub></td>
   </tr>
   <tr>
-    <td colspan="2" align="center"><img src="docs/terminal.png" alt="Terminal" style="border-radius: 4px; margin-top: 12px;" /><br/><sub>Block-based WebGL terminal with editor-like input panel</sub></td>
+    <td colspan="2" align="center"><img src="docs/terminal.png" alt="Terminal" style="border-radius: 4px; margin-top: 12px;" /><br/><sub>Block-based GPU terminal with editor-like input panel</sub></td>
   </tr>
 </table>
 
@@ -55,8 +40,9 @@ Terax is a lightweight open-source terminal-first AI-native development environm
 - GPU-accelerated block-based terminal with editor-like command input
 - Native PTY backend via `portable-pty` (zsh, bash, pwsh, fish, cmd)
 - Split panels (horizontal and vertical)
-- Inline search, link detection, true-color
+- Inline search, link detection, true-color, Kitty graphics and keyboard protocols
 - Drag files from the explorer or desktop into a terminal as shell-safe quoted paths
+- The `oarlock` command in native terminal panes opens a file in the editor of the window it runs in
 - Per-tab workspace environments on Windows (Local, or any installed WSL distro)
 - Spaces restore tabs, working directories, and split layouts across launches
 
@@ -92,7 +78,7 @@ Terax is a lightweight open-source terminal-first AI-native development environm
 ### Themes and customization
 
 - Custom themes built in-app, switch between bundled presets and your own
-- Create your own themes, share them or import from the community
+- Create your own themes and share them as `.oarlock-theme` files, or import Ghostty, iTerm2, Alacritty and Windows Terminal color schemes
 - Background images with adjustable opacity and blur
 - Editor theme is independent from the app theme
 
@@ -100,7 +86,9 @@ Terax is a lightweight open-source terminal-first AI-native development environm
 
 - **BYOK providers:** OpenAI, Anthropic, Google (Gemini), Groq, xAI (Grok), Cerebras, OpenRouter, DeepSeek, Mistral, plus any OpenAI-compatible endpoint
 - **Local / offline:** LM Studio, MLX, Ollama
-- **Agentic workflow:** plans, sub-agents, project memory via `AGENTS.md`, file read / write / edit / multi-edit / grep / glob, bash with approval gating, background processes
+- **Agentic workflow:** plans, sub-agents, file read / write / edit / multi-edit / grep / glob, bash with approval gating, background processes
+- **Project instructions and skills:** a project's `AGENTS.md`, its skills (`.claude/skills`, `.oarlock/skills`) and its `.mcp.json` servers are used once you allow them, and asked about again when they change
+- **MCP servers:** local and remote Model Context Protocol servers, each tool call approved unless you trust the server
 - **Coding-agent orchestration:** spawn Claude Code in a terminal, inspect its output, and send follow-up work through approval-gated tools
 - **Composer:** prompt snippets via `#handle`, files via `@path`, voice input, attach-to-agent from explorer or selection
 - **Custom agents** with their own system prompt and tool subset
@@ -108,7 +96,7 @@ Terax is a lightweight open-source terminal-first AI-native development environm
 
 ## Install
 
-Latest installers are on the [Releases](https://github.com/darkspadez/terax-ai/releases/latest) page. Builds of this repository do not update themselves until it publishes its own releases.
+There are no releases yet: until the first one, build Oarlock from source (below). Releases will be published on the [Releases](https://github.com/qopsc/oarlock/releases) page with builds for macOS and Linux; Windows builds from source. Updates are not set up yet, so a build does not update itself.
 
 ### Windows notes
 
@@ -117,15 +105,14 @@ Latest installers are on the [Releases](https://github.com/darkspadez/terax-ai/r
 
 ### Linux notes
 
-- **Arch / AUR:** `yay -S terax-bin` (or `paru`, etc.). Tracks the latest release.
-- **NixOS / Nix**: use the official flake - `nix profile install github:crynta/terax-ai` (non-NixOS), or import the flake and add `inputs.terax.packages.${pkgs.system}.terax` to `environment.systemPackages` (NixOS). The `nixosModules.terax` output is also available for a simpler setup.
-- **AppImage:** needs FUSE. Without it: `./Terax_*.AppImage --appimage-extract-and-run`. On Wayland with rendering glitches, try `WEBKIT_DISABLE_DMABUF_RENDERER=1`. Otherwise the `.deb` / `.rpm` packages link against the system GTK stack and tend to be smoother.
+- **NixOS / Nix** (once the first release is out; the flake installs release builds): `nix profile install github:qopsc/oarlock` (non-NixOS), or import the flake and add `inputs.oarlock.packages.${pkgs.system}.oarlock` to `environment.systemPackages` (NixOS). The `nixosModules.oarlock` output is also available for a simpler setup.
+- **AppImage:** needs FUSE. Without it: `./Oarlock_*.AppImage --appimage-extract-and-run`. On Wayland with rendering glitches, try `WEBKIT_DISABLE_DMABUF_RENDERER=1`. Otherwise the `.deb` / `.rpm` packages link against the system GTK stack and tend to be smoother.
 
 ## Configure AI
 
 1. Open **Settings -> AI**.
-2. Pick a provider and paste your API key. For local inference, point Terax at your LM Studio / MLX / Ollama endpoint.
-3. Keys are written to the OS keychain via `keyring`. They never touch disk or localStorage.
+2. Pick a provider and paste your API key. For local inference, point Oarlock at your LM Studio / MLX / Ollama endpoint.
+3. Keys go to the OS keychain (the macOS Keychain, the Windows Credential Manager); on Linux they go to a file in the app's data folder that only your user can read. They never go to localStorage or the logs.
 
 ## Build from source
 
@@ -156,8 +143,12 @@ Tauri 2, Rust, `portable-pty`, React 19, TypeScript, Vite, libghostty-vt, WebGPU
 
 ## Contributing
 
-Issues and PRs are welcome! Feel free to open issues, suggest features, or submit pull requests. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [architecture docs](docs/README.md) for more details.
+Issues and PRs are welcome! Feel free to open issues, suggest features, or submit pull requests. See [CONTRIBUTING.md](CONTRIBUTING.md), [AGENTS.md](AGENTS.md) (the architecture guide) and the [architecture docs](docs/README.md) for more details.
+
+## Based on Terax
+
+Oarlock is based on [Terax](https://github.com/crynta/terax-ai) by Crynta, licensed under the Apache License 2.0. Oarlock is published by Quantum Ops Consulting, LLC, which has modified it; the git history records the changes.
 
 ## License
 
-Terax is licensed under the Apache-2.0 License. For more information on our dependencies, see [Apache License 2.0](LICENSE).
+Oarlock is licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for the attribution notices, including the third-party ones.
