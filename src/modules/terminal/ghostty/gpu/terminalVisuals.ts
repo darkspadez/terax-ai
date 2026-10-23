@@ -48,6 +48,11 @@ export type TerminalGpuTheme = {
    * renderer applies it (`webgl/customShader.ts`).
    */
   readonly customShader?: string | null;
+  /**
+   * The window shows through the default background (`theme/terminalTranslucency.ts`):
+   * cells on it are left transparent, the page paints the colour behind them.
+   */
+  readonly translucent?: boolean;
 };
 
 let colorCanvas: HTMLCanvasElement | null = null;
@@ -173,6 +178,7 @@ export function readTerminalGpuTheme(
   options: {
     readonly minimumContrast?: number;
     readonly customShader?: string | null;
+    readonly translucent?: boolean;
   } = {},
 ): TerminalGpuTheme {
   const tokens = readTerminalTokens();
@@ -180,6 +186,7 @@ export function readTerminalGpuTheme(
   return {
     minimumContrast: options.minimumContrast ?? 1,
     customShader: options.customShader ?? null,
+    translucent: options.translucent ?? false,
     background: cssColorToRgb(tokens.background),
     foreground: cssColorToRgb(tokens.foreground),
     cursor: cssColorToRgb(tokens.cursor),

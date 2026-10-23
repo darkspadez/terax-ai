@@ -2485,6 +2485,23 @@ pub export fn restty_mode(handle: ?*Restty, value: u16, ansi: u8) u8 {
     return @intFromBool(h.term.modes.get(mode));
 }
 
+/// Sets the value a mode returns to on RIS and DECSTR, as Ghostty's
+/// `mode_default` option does for the modes it lets an embedder configure. A
+/// terminal still at the old default takes the new one now; one whose program
+/// changed the mode keeps the program's choice until it resets.
+pub export fn restty_set_mode_default(handle: ?*Restty, value: u16, ansi: u8, enabled: u8) u32 {
+    const h = handle orelse return @intFromEnum(ErrorCode.invalid_handle);
+    const mode = ghostty.modes.modeFromInt(value, ansi != 0) orelse
+        return @intFromEnum(ErrorCode.invalid_arg);
+    if (!ghostty.modes.defaultConfigurable(mode)) return @intFromEnum(ErrorCode.invalid_arg);
+    const modes = &h.term.modes;
+    const current = modes.get(mode);
+    const changed_by_program = current != modes.getDefault(mode);
+    modes.setDefault(mode, enabled != 0);
+    if (changed_by_program) modes.set(mode, current);
+    return @intFromEnum(ErrorCode.ok);
+}
+
 pub export fn restty_mode_bits(handle: ?*Restty) u8 {
     const h = handle orelse return 0;
     var result: u8 = 0;

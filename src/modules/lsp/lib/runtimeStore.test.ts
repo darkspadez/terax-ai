@@ -91,4 +91,19 @@ describe("LSP runtime store", () => {
     store.clearDetected("rust-analyzer");
     expect(useLspRuntimeStore.getState().detected).toEqual({ gopls: null });
   });
+
+  // crynta/terax-ai#1039: another terminal shell can find other servers.
+  it("resetDetections forgets lookups and retries enabled servers without a session", () => {
+    const store = useLspRuntimeStore.getState();
+    store.upsertSession(session);
+    store.setDetected("rust-analyzer", "/bin/ra");
+    store.setDetected("gopls", null);
+
+    store.resetDetections(["rust-analyzer", "gopls", "pyright"]);
+
+    const state = useLspRuntimeStore.getState();
+    expect(state.detected).toEqual({});
+    expect(state.generations).toEqual({ gopls: 1, pyright: 1 });
+    expect(state.sessions[session.key]).toBeDefined();
+  });
 });

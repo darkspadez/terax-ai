@@ -11,10 +11,10 @@ per-terminal frame loop, or per-pane GPU lifecycle.
 - Restty commit: `7700b14a7643ba9240818209ef1e0aa90d83ad77`
 - Zig: `0.16.0`
 - Optimization: `ReleaseFast`, WebAssembly SIMD and scalar variants
-- SIMD artifact size: `1072727` bytes
-- Scalar artifact size: `1013690` bytes
-- SIMD SHA-256: `1200acd942b4dc51229fbe991c3891f2ec10d864a3f33254740792e674af891f`
-- Scalar SHA-256: `8ec5283ac45c932b39a65ba8f8ce7c6cfeedf6aa6d588f88c3c63de16efe0a72`
+- SIMD artifact size: `1073291` bytes
+- Scalar artifact size: `1014254` bytes
+- SIMD SHA-256: `7373650d0c1cb2a57a4c2e907dccffaab2b731364e11a08c0909581dc060b976`
+- Scalar SHA-256: `10a35e9fed91d27834b822a0ed5ed22b825d857ae594cd08d1b66083c7ba827e`
 
 Terax-specific changes include:
 
@@ -114,6 +114,11 @@ XTVERSION, OSC 9;4 progress), instead of answering only a hand-picked set:
   follow Ghostty's renderer (pinned, relative and Unicode-placeholder virtual
   placements) and carry each image's generation for texture caching. Image
   storage is 64 MB per screen (`restty_set_image_storage_limit`).
+- Configurable mode defaults (`restty_set_mode_default`), Ghostty's
+  `mode_default` terminal option for the modes it marks configurable: the
+  value a mode returns to on RIS. A terminal still at the old default takes
+  the new one at once; one whose program changed the mode keeps it. Terax
+  sets mode 1007 (alternate scroll) from its scroll wheel setting.
 - Mode 2048 in-band size reports on enable, on every resize (one report, with
   the current cell size) and on cell-size changes; mode 2027 grapheme
   clustering on by default and across RIS, like Ghostty's

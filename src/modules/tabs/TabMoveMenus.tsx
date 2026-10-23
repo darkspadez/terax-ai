@@ -4,6 +4,7 @@ import {
   ContextMenuSubContent,
   ContextMenuSubTrigger,
 } from "@/components/ui/context-menu";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   type SplitPosition,
   type TerminalLeafStatus,
@@ -49,7 +50,8 @@ export function MoveToSplitMenu({
     position: SplitPosition,
   ) => void;
 }) {
-  const targets = moveToSplitTargets(tabs, sourceId);
+  const paneLimit = usePreferencesStore((s) => s.terminalPaneLimit);
+  const targets = moveToSplitTargets(tabs, sourceId, paneLimit);
   if (targets.length === 0) return null;
   const leaves = useTerminalStatusStore.getState().leaves;
   return (

@@ -22,6 +22,7 @@ import {
   setConfirmCloseRunningTerminal,
   setDefaultWorkspaceEnv,
   setExplorerGitDecorations,
+  setNewTabPosition,
   setTerminalLinksInPreview,
   setRestoreWindowState,
   setShowHidden,
@@ -36,11 +37,13 @@ import {
   setTerminalLigatures,
   setTerminalLineHeight,
   setTerminalMinimumContrast,
+  setTerminalPaneLimit,
   setTerminalRenderer,
   setTerminalScreenReader,
   setTerminalScrollback,
   setTerminalShell,
   setZoomLevel,
+  parseNewTabPosition,
   TERMINAL_CUSTOM_SHADER_MAX_BYTES,
   TERMINAL_FONT_SIZES,
   TERMINAL_LINE_HEIGHTS,
@@ -48,6 +51,7 @@ import {
   TERMINAL_SCROLLBACK_PRESETS,
 } from "@/modules/settings/store";
 import { parseFontFeatures } from "@/modules/terminal/lib/fontFeatures";
+import { MAX_PANES_PER_TAB } from "@/modules/terminal/lib/panes";
 import { useTheme } from "@/modules/theme";
 import {
   ComputerIcon,
@@ -164,6 +168,8 @@ export function GeneralSection() {
   );
   const terminalLigatures = usePreferencesStore((s) => s.terminalLigatures);
   const terminalScrollback = usePreferencesStore((s) => s.terminalScrollback);
+  const terminalPaneLimit = usePreferencesStore((s) => s.terminalPaneLimit);
+  const newTabPosition = usePreferencesStore((s) => s.newTabPosition);
   const confirmCloseRunningTerminal = usePreferencesStore(
     (s) => s.confirmCloseRunningTerminal,
   );
@@ -272,6 +278,33 @@ export function GeneralSection() {
             onValueChange={(v) => void setZoomLevel(v[0] ?? 1)}
           />
         </div>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label>Tabs</Label>
+        <SettingRow
+          title="Open new tabs"
+          description="Where a tab you open goes: terminals, files, previews and diffs. Tabs opened in the background or in another space go to the end."
+        >
+          <Select
+            value={newTabPosition}
+            onValueChange={(v) =>
+              void setNewTabPosition(parseNewTabPosition(v))
+            }
+          >
+            <SelectTrigger size="sm" className="h-8 w-44 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="end" className="text-[12px]">
+                At the end
+              </SelectItem>
+              <SelectItem value="afterCurrent" className="text-[12px]">
+                After the current tab
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingRow>
       </div>
 
       <div className="flex flex-col gap-2">
@@ -653,6 +686,32 @@ export function GeneralSection() {
                   {lines.toLocaleString()} lines
                 </SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+        </SettingRow>
+        <SettingRow
+          title="Panes per tab"
+          description="How many panes a terminal tab can be split into. Tabs that already have more keep them."
+        >
+          <Select
+            value={String(terminalPaneLimit)}
+            onValueChange={(v) => void setTerminalPaneLimit(Number(v))}
+          >
+            <SelectTrigger size="sm" className="h-8 w-36 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Array.from({ length: MAX_PANES_PER_TAB }, (_, i) => i + 1).map(
+                (count) => (
+                  <SelectItem
+                    key={count}
+                    value={String(count)}
+                    className="text-[12px]"
+                  >
+                    {count === 1 ? "1 (no splits)" : `Up to ${count}`}
+                  </SelectItem>
+                ),
+              )}
             </SelectContent>
           </Select>
         </SettingRow>

@@ -28,6 +28,10 @@ import {
 } from "@/modules/ai/lib/reasoningEffort";
 import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
 import { parseFontFeatures } from "@/modules/terminal/lib/fontFeatures";
+import {
+  clampPaneLimit,
+  MAX_PANES_PER_TAB,
+} from "@/modules/terminal/lib/panes";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import {
@@ -143,6 +147,11 @@ export type Preferences = {
   backgroundOpacity: number;
   backgroundBlur: number;
   windowVibrancy: boolean;
+  /**
+   * Opacity of terminal backgrounds, times the theme's own alpha; below 1 the
+   * window shows what is behind it there (`theme/terminalTranslucency.ts`).
+   */
+  terminalOpacity: number;
   /** A catalog model id or a custom endpoint's `compat-<id>`. */
   defaultModelId: string;
   editorTheme: EditorThemePref;
@@ -220,6 +229,10 @@ export type Preferences = {
   terminalLigatures: boolean;
   terminalFontSize: number;
   terminalScrollback: number;
+  /** Panes a terminal tab may be split into, 1 to `MAX_PANES_PER_TAB`. */
+  terminalPaneLimit: number;
+  /** Where a tab the user opens goes in the tab strip. */
+  newTabPosition: NewTabPosition;
   terminalBehavior: TerminalBehavior;
   confirmCloseRunningTerminal: boolean;
   lastWslDistro: string | null;
@@ -273,6 +286,7 @@ const KEY_BG_IMAGE_ID = "backgroundImageId";
 const KEY_BG_OPACITY = "backgroundOpacity";
 const KEY_BG_BLUR = "backgroundBlur";
 const KEY_WINDOW_VIBRANCY = "windowVibrancy";
+const KEY_TERMINAL_OPACITY = "terminalOpacity";
 const KEY_DEFAULT_MODEL = "defaultModelId";
 const KEY_EDITOR_THEME = "editorTheme";
 const KEY_EDITOR_FONT_SIZE = "editorFontSize";
@@ -330,6 +344,8 @@ const KEY_TERMINAL_CUSTOM_SHADER = "terminalCustomShader";
 const KEY_TERMINAL_LIGATURES = "terminalLigatures";
 const KEY_TERMINAL_FONT_SIZE = "terminalFontSize";
 const KEY_TERMINAL_SCROLLBACK = "terminalScrollback";
+const KEY_TERMINAL_PANE_LIMIT = "terminalPaneLimit";
+const KEY_NEW_TAB_POSITION = "newTabPosition";
 const KEY_TERMINAL_BEHAVIOR = "terminalBehavior";
 const KEY_CONFIRM_CLOSE_RUNNING_TERMINAL = "confirmCloseRunningTerminal";
 const KEY_LAST_WSL_DISTRO = "lastWslDistro";
@@ -455,6 +471,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   // whole frame every present. An explicitly stored choice (either value)
   // always wins; only an absent key falls back to this.
   windowVibrancy: false,
+  // Opaque by default, for the same reason.
+  terminalOpacity: 1,
   restoreWindowState: true,
   autocompleteEnabled: false,
   autocompleteTrigger: "auto",
@@ -501,6 +519,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   terminalLigatures: true,
   terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT,
   terminalScrollback: TERMINAL_SCROLLBACK_DEFAULT,
+  terminalPaneLimit: MAX_PANES_PER_TAB,
+  newTabPosition: "end",
   terminalBehavior: defaultTerminalBehavior(currentPlatform()),
   confirmCloseRunningTerminal: true,
   lastWslDistro: null,
@@ -595,6 +615,7 @@ export async function loadPreferences(): Promise<Preferences> {
       DEFAULT_PREFERENCES.restoreWindowState,
     windowVibrancy:
       get<boolean>(KEY_WINDOW_VIBRANCY) ?? DEFAULT_PREFERENCES.windowVibrancy,
+    terminalOpacity: clampTerminalOpacity(get<unknown>(KEY_TERMINAL_OPACITY)),
     autocompleteEnabled:
       get<boolean>(KEY_AUTOCOMPLETE_ENABLED) ??
       DEFAULT_PREFERENCES.autocompleteEnabled,
@@ -710,6 +731,8 @@ export async function loadPreferences(): Promise<Preferences> {
       get<number>(KEY_TERMINAL_SCROLLBACK) ??
         DEFAULT_PREFERENCES.terminalScrollback,
     ),
+    terminalPaneLimit: clampPaneLimit(get<unknown>(KEY_TERMINAL_PANE_LIMIT)),
+    newTabPosition: parseNewTabPosition(get<unknown>(KEY_NEW_TAB_POSITION)),
     terminalBehavior: normalizeTerminalBehavior(
       get<unknown>(KEY_TERMINAL_BEHAVIOR),
       DEFAULT_PREFERENCES.terminalBehavior,
@@ -875,6 +898,20 @@ export async function setWindowVibrancy(value: boolean): Promise<void> {
   await writePref(KEY_WINDOW_VIBRANCY, value);
 }
 
+/** Below this, terminal text over a busy desktop is no longer readable. */
+export const TERMINAL_OPACITY_MIN = 0.3;
+
+/** A stored terminal opacity, in hundredths from the minimum to 1 (opaque). */
+export function clampTerminalOpacity(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(1, Math.max(TERMINAL_OPACITY_MIN, Math.round(value * 100) / 100))
+    : 1;
+}
+
+export async function setTerminalOpacity(value: number): Promise<void> {
+  await writePref(KEY_TERMINAL_OPACITY, clampTerminalOpacity(value));
+}
+
 export async function setAutocompleteTrigger(
   value: AutocompleteTrigger,
 ): Promise<void> {
@@ -968,6 +1005,17 @@ export async function setRecentModelIds(value: string[]): Promise<void> {
 
 export async function setVimMode(value: boolean): Promise<void> {
   await writePref(KEY_VIM_MODE, value);
+}
+
+/** At the end of the strip, or right after the active tab. */
+export type NewTabPosition = "end" | "afterCurrent";
+
+export function parseNewTabPosition(value: unknown): NewTabPosition {
+  return value === "afterCurrent" ? "afterCurrent" : "end";
+}
+
+export async function setNewTabPosition(value: NewTabPosition): Promise<void> {
+  await writePref(KEY_NEW_TAB_POSITION, parseNewTabPosition(value));
 }
 
 export type DiffViewMode = "inline" | "split";
@@ -1132,6 +1180,10 @@ export async function setTerminalScrollback(value: number): Promise<void> {
   await writePref(KEY_TERMINAL_SCROLLBACK, clampScrollback(value));
 }
 
+export async function setTerminalPaneLimit(value: number): Promise<void> {
+  await writePref(KEY_TERMINAL_PANE_LIMIT, clampPaneLimit(value));
+}
+
 /** Changes some terminal behaviour switches, keeping the others. */
 export async function setTerminalBehavior(
   patch: Partial<TerminalBehavior>,
@@ -1260,6 +1312,7 @@ export async function onPreferencesChange(
     [KEY_BG_OPACITY]: "backgroundOpacity",
     [KEY_BG_BLUR]: "backgroundBlur",
     [KEY_WINDOW_VIBRANCY]: "windowVibrancy",
+    [KEY_TERMINAL_OPACITY]: "terminalOpacity",
     [KEY_DEFAULT_MODEL]: "defaultModelId",
     [KEY_EDITOR_THEME]: "editorTheme",
     [KEY_EDITOR_FONT_SIZE]: "editorFontSize",
@@ -1314,6 +1367,8 @@ export async function onPreferencesChange(
     [KEY_TERMINAL_LIGATURES]: "terminalLigatures",
     [KEY_TERMINAL_FONT_SIZE]: "terminalFontSize",
     [KEY_TERMINAL_SCROLLBACK]: "terminalScrollback",
+    [KEY_TERMINAL_PANE_LIMIT]: "terminalPaneLimit",
+    [KEY_NEW_TAB_POSITION]: "newTabPosition",
     [KEY_TERMINAL_BEHAVIOR]: "terminalBehavior",
     [KEY_CONFIRM_CLOSE_RUNNING_TERMINAL]: "confirmCloseRunningTerminal",
     [KEY_LAST_WSL_DISTRO]: "lastWslDistro",

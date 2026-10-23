@@ -47,10 +47,13 @@ pub fn lsp_host_pid() -> u32 {
     std::process::id()
 }
 
+/// `shell` is the terminal shell set in Settings, whose environment servers
+/// get; an unlisted one is ignored (`terminal_shell_path`).
 #[tauri::command]
-pub async fn lsp_detect(command: String) -> Option<String> {
+pub async fn lsp_detect(command: String, shell: Option<String>) -> Option<String> {
     tauri::async_runtime::spawn_blocking(move || {
-        env::resolve_binary(&command).map(|p| p.to_string_lossy().into_owned())
+        let env = env::server_env_overlay(shell);
+        env::resolve_binary(&command, &env).map(|p| p.to_string_lossy().into_owned())
     })
     .await
     .ok()
@@ -69,6 +72,7 @@ pub async fn lsp_spawn(
     root: String,
     max_rss_mb: Option<u64>,
     workspace: Option<WorkspaceEnv>,
+    shell: Option<String>,
     on_message: Channel<Response>,
     on_exit: Channel<session::LspExit>,
 ) -> Result<u32, String> {
@@ -82,11 +86,21 @@ pub async fn lsp_spawn(
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
     let spawn_log = format!("cmd={command} root={}", root.display());
     let session = tauri::async_runtime::spawn_blocking(move || {
-        let binary = env::resolve_binary(&command)
+        let server_env = env::server_env_overlay(shell);
+        let binary = env::resolve_binary(&command, &server_env)
             .ok_or_else(|| format!("lsp: binary not found: {command}"))?;
         let extra_env = env.unwrap_or_default();
         session::spawn(
-            id, app, &binary, &args, &extra_env, &root, max_rss_mb, on_message, on_exit,
+            id,
+            app,
+            &binary,
+            &args,
+            &server_env,
+            &extra_env,
+            &root,
+            max_rss_mb,
+            on_message,
+            on_exit,
         )
     })
     .await

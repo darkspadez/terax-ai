@@ -69,6 +69,8 @@ export type CommandPaletteActionContext = {
   openSettings: () => void;
   openKeyboardShortcuts: () => void;
   spaces: { id: string; name: string }[];
+  /** Panes a terminal tab may hold (Settings). */
+  paneLimit: number;
   activeSpaceId: string | null;
   openSpacesOverview: () => void;
   newSpace: () => void;
@@ -89,7 +91,7 @@ export function createCommandItems(
   const noWorkspaceRoot = !ctx.explorerRoot && !ctx.home;
   const splitDisabled = !activeTerminalTab
     ? "No terminal tab"
-    : !canSplitPane(activeTerminalTab.paneTree)
+    : !canSplitPane(activeTerminalTab.paneTree, ctx.paneLimit)
       ? "Pane limit"
       : undefined;
   const moveToNewTabDisabled = !activeTerminalTab

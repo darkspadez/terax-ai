@@ -29,7 +29,7 @@ export interface WebGlRuntimeSurface {
 }
 
 export type WebGlRuntimeDependencies = {
-  readonly createRenderer: () => WebGlCellRenderer;
+  readonly createRenderer: (translucent: boolean) => WebGlCellRenderer;
   readonly now: () => number;
   readonly isVisible: () => boolean;
   readonly isWindowFocused: () => boolean;
@@ -101,7 +101,13 @@ export class WebGlTerminalRuntime {
   ): WebGlCellRenderer {
     this.assertLive();
     surface.handleWindowFocus?.(this.windowFocused);
-    const existing = this.leases.get(surface);
+    const translucent = profile.theme.translucent === true;
+    let existing = this.leases.get(surface);
+    // A context's alpha channel is fixed: another translucency needs another renderer.
+    if (existing && existing.renderer.translucent !== translucent) {
+      this.discard(surface);
+      existing = undefined;
+    }
     if (existing) {
       const key = rendererProfileKey(profile);
       try {
@@ -124,13 +130,18 @@ export class WebGlTerminalRuntime {
     }
 
     const key = rendererProfileKey(profile);
+    const free = (candidate: RendererSlot) =>
+      !candidate.owner && candidate.renderer.translucent === translucent;
     let slot = this.slots.find(
-      (candidate) => !candidate.owner && candidate.profileKey === key,
+      (candidate) => free(candidate) && candidate.profileKey === key,
     );
-    slot ??= this.slots.find((candidate) => !candidate.owner);
+    slot ??= this.slots.find(free);
+    if (!slot && this.slots.length >= MAX_WEBGL_RENDERER_SLOTS) {
+      this.disposeIdleSlot();
+    }
     if (!slot && this.slots.length < MAX_WEBGL_RENDERER_SLOTS) {
       slot = {
-        renderer: this.dependencies.createRenderer(),
+        renderer: this.dependencies.createRenderer(translucent),
         profileKey: key,
         owner: null,
         lastUsed: this.dependencies.now(),
@@ -187,6 +198,14 @@ export class WebGlTerminalRuntime {
     this.slots.splice(this.slots.indexOf(slot), 1);
     if (this.dirtySurfaces.size === 0) this.cancelScheduledFrame();
     return true;
+  }
+
+  /** Frees room for a renderer of the other translucency. */
+  private disposeIdleSlot(): void {
+    const idle = this.slots.find((candidate) => !candidate.owner);
+    if (!idle) return;
+    idle.renderer.dispose();
+    this.slots.splice(this.slots.indexOf(idle), 1);
   }
 
   trimForHiddenDocument(): void {
@@ -424,7 +443,7 @@ function toError(error: unknown): Error {
 
 function browserDependencies(): WebGlRuntimeDependencies {
   return {
-    createRenderer: () => new WebGlCellRenderer(),
+    createRenderer: (translucent) => new WebGlCellRenderer(translucent),
     now: () => performance.now(),
     isVisible: () => terminalWindowPresentation().visible,
     isWindowFocused: terminalWindowFocused,

@@ -4,6 +4,7 @@ import {
   type AgentInstanceCount,
   createAgentPanePlan,
 } from "@/modules/agents/lib/launcher";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   canSplitPane,
   findLeafCwd,
@@ -32,6 +33,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { appendTab, newTabInserter, type TabInserter } from "./newTabPosition";
 
 type TabBase = {
   spaceId: string;
@@ -181,6 +183,7 @@ export function planMarkdownTabOpen(
   path: string,
   spaceId: string,
   allocId: () => number,
+  insert: TabInserter = appendTab,
 ): { tabs: Tab[]; tabId: number } {
   const key = pathKey(path);
   const existing = tabs.find(
@@ -193,16 +196,13 @@ export function planMarkdownTabOpen(
 
   const tabId = allocId();
   return {
-    tabs: [
-      ...tabs,
-      {
-        id: tabId,
-        kind: "markdown",
-        spaceId,
-        title: basename(path),
-        path,
-      },
-    ],
+    tabs: insert(tabs, {
+      id: tabId,
+      kind: "markdown",
+      spaceId,
+      title: basename(path),
+      path,
+    }),
     tabId,
   };
 }
@@ -213,6 +213,7 @@ export function planFileTabOpen(
   pin: boolean,
   spaceId: string,
   allocId: () => number,
+  insert: TabInserter = appendTab,
 ): { tabs: Tab[]; tabId: number } {
   // One file, one tab: paths from language servers, git and the OS spell
   // separators and the drive letter differently.
@@ -237,18 +238,15 @@ export function planFileTabOpen(
 
     const tabId = allocId();
     return {
-      tabs: [
-        ...tabs,
-        {
-          id: tabId,
-          kind: "editor",
-          spaceId,
-          title: basename(path),
-          path,
-          dirty: false,
-          preview: false,
-        },
-      ],
+      tabs: insert(tabs, {
+        id: tabId,
+        kind: "editor",
+        spaceId,
+        title: basename(path),
+        path,
+        dirty: false,
+        preview: false,
+      }),
       tabId,
     };
   }
@@ -284,7 +282,7 @@ export function planFileTabOpen(
     dirty: false,
     preview: true,
   };
-  if (previewIndex === -1) return { tabs: [...tabs, tab], tabId };
+  if (previewIndex === -1) return { tabs: insert(tabs, tab), tabId };
 
   const next = [...tabs];
   next[previewIndex] = tab;
@@ -432,6 +430,7 @@ export function planGitDiffOpen(
   spaceId: string,
   pin: boolean,
   allocId: () => number,
+  insert: TabInserter = appendTab,
 ): { tabs: Tab[]; targetId: number } {
   const title = input.title ?? `${basename(input.path)} (${input.mode})`;
   const originalPath = input.originalPath ?? null;
@@ -476,7 +475,7 @@ export function planGitDiffOpen(
     preview: !pin,
   } satisfies GitDiffTab;
 
-  if (pin) return { tabs: [...tabs, tab], targetId: id };
+  if (pin) return { tabs: insert(tabs, tab), targetId: id };
 
   const previewIndex = tabs.findIndex(
     (candidate) =>
@@ -484,7 +483,7 @@ export function planGitDiffOpen(
       candidate.spaceId === spaceId &&
       candidate.preview,
   );
-  if (previewIndex === -1) return { tabs: [...tabs, tab], targetId: id };
+  if (previewIndex === -1) return { tabs: insert(tabs, tab), targetId: id };
 
   const next = [...tabs];
   next[previewIndex] = tab;
@@ -496,6 +495,7 @@ export function planCommitHistoryOpen(
   input: { repoRoot: string; branch?: string | null },
   spaceId: string,
   allocId: () => number,
+  insert: TabInserter = appendTab,
 ): { tabs: Tab[]; targetId: number } {
   const existing = tabs.find(
     (tab) =>
@@ -516,16 +516,13 @@ export function planCommitHistoryOpen(
 
   const id = allocId();
   return {
-    tabs: [
-      ...tabs,
-      {
-        id,
-        kind: "git-history",
-        spaceId,
-        title,
-        repoRoot: input.repoRoot,
-      } satisfies GitHistoryTab,
-    ],
+    tabs: insert(tabs, {
+      id,
+      kind: "git-history",
+      spaceId,
+      title,
+      repoRoot: input.repoRoot,
+    } satisfies GitHistoryTab),
     targetId: id,
   };
 }
@@ -612,6 +609,7 @@ export function planMoveTabIntoSplit(
   tabs: readonly Tab[],
   sourceTabId: number,
   destinationTabId: number,
+  paneLimit: number,
 ): MoveTabIntoSplitPlan {
   const reject = (reason: MoveTabIntoSplitRejection) =>
     ({ ok: false, reason }) as const;
@@ -630,7 +628,9 @@ export function planMoveTabIntoSplit(
   if (!!source.private !== !!destination.private) {
     return reject("private-mismatch");
   }
-  if (!canSplitPane(destination.paneTree)) return reject("pane-limit");
+  if (!canSplitPane(destination.paneTree, paneLimit)) {
+    return reject("pane-limit");
+  }
   return { ok: true, source, destination, leaf: source.paneTree };
 }
 
@@ -638,9 +638,11 @@ export function planMoveTabIntoSplit(
 export function moveToSplitTargets(
   tabs: readonly Tab[],
   sourceTabId: number,
+  paneLimit: number,
 ): TerminalTab[] {
   return tabs.filter(
-    (t): t is TerminalTab => planMoveTabIntoSplit(tabs, sourceTabId, t.id).ok,
+    (t): t is TerminalTab =>
+      planMoveTabIntoSplit(tabs, sourceTabId, t.id, paneLimit).ok,
   );
 }
 
@@ -655,8 +657,14 @@ export function applyMoveTabIntoSplit(
   destinationTabId: number,
   position: SplitPosition,
   newSplitId: number,
+  paneLimit: number,
 ): Tab[] | null {
-  const plan = planMoveTabIntoSplit(tabs, sourceTabId, destinationTabId);
+  const plan = planMoveTabIntoSplit(
+    tabs,
+    sourceTabId,
+    destinationTabId,
+    paneLimit,
+  );
   if (!plan.ok) return null;
   const { source, destination, leaf } = plan;
   const paneTree = insertLeafAt(
@@ -747,6 +755,20 @@ export function applyMovePaneToNewTab(
     ...(source.private && { private: true }),
   };
   return tabs.flatMap((t) => (t.id === tabId ? [rest, moved] : [t]));
+}
+
+/** The pane limit in force now (Settings); read when a pane is added. */
+function paneLimit(): number {
+  return usePreferencesStore.getState().terminalPaneLimit;
+}
+
+/** Places a tab the user opens now, as Settings says (read at the time). */
+function placeNew(activeId: number, activates = true): TabInserter {
+  return newTabInserter(
+    usePreferencesStore.getState().newTabPosition,
+    activeId,
+    activates,
+  );
 }
 
 export function useTabs(initial?: Partial<TerminalTab>) {
@@ -910,9 +932,9 @@ export function useTabs(initial?: Partial<TerminalTab>) {
   const newTab = useCallback((cwd?: string) => {
     const tabId = nextIdRef.current++;
     const leafId = nextIdRef.current++;
-    setTabs((t) => [
-      ...t,
-      {
+    const insert = placeNew(activeIdRef.current);
+    setTabs((t) =>
+      insert(t, {
         id: tabId,
         kind: "terminal",
         spaceId: activeSpaceIdRef.current,
@@ -920,8 +942,8 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         cwd,
         paneTree: { kind: "leaf", id: leafId, cwd },
         activeLeafId: leafId,
-      },
-    ]);
+      }),
+    );
     setActiveId(tabId);
     return tabId;
   }, []);
@@ -929,9 +951,9 @@ export function useTabs(initial?: Partial<TerminalTab>) {
   const newBlockTab = useCallback((cwd?: string) => {
     const tabId = nextIdRef.current++;
     const leafId = nextIdRef.current++;
-    setTabs((t) => [
-      ...t,
-      {
+    const insert = placeNew(activeIdRef.current);
+    setTabs((t) =>
+      insert(t, {
         id: tabId,
         kind: "terminal",
         spaceId: activeSpaceIdRef.current,
@@ -940,8 +962,8 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         paneTree: { kind: "leaf", id: leafId, cwd },
         activeLeafId: leafId,
         blocks: true,
-      },
-    ]);
+      }),
+    );
     setActiveId(tabId);
     return tabId;
   }, []);
@@ -957,13 +979,13 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     (cwd: string | undefined, title: string, instances: AgentInstanceCount) => {
       const tabId = nextIdRef.current++;
       const { paneTree, leafIds: agentLeafIds } = createAgentPanePlan(
-        instances,
+        Math.min(instances, paneLimit()) as AgentInstanceCount,
         () => nextIdRef.current++,
         cwd,
       );
-      setTabs((t) => [
-        ...t,
-        {
+      const insert = placeNew(activeIdRef.current);
+      setTabs((t) =>
+        insert(t, {
           id: tabId,
           kind: "terminal",
           spaceId: activeSpaceIdRef.current,
@@ -972,8 +994,8 @@ export function useTabs(initial?: Partial<TerminalTab>) {
           cwd,
           paneTree,
           activeLeafId: agentLeafIds[0],
-        },
-      ]);
+        }),
+      );
       setActiveId(tabId);
       return { tabId, leafIds: agentLeafIds };
     },
@@ -991,9 +1013,9 @@ export function useTabs(initial?: Partial<TerminalTab>) {
   const newPrivateTab = useCallback((cwd?: string) => {
     const tabId = nextIdRef.current++;
     const leafId = nextIdRef.current++;
-    setTabs((t) => [
-      ...t,
-      {
+    const insert = placeNew(activeIdRef.current);
+    setTabs((t) =>
+      insert(t, {
         id: tabId,
         kind: "terminal",
         spaceId: activeSpaceIdRef.current,
@@ -1002,8 +1024,8 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         paneTree: { kind: "leaf", id: leafId, cwd },
         activeLeafId: leafId,
         private: true,
-      },
-    ]);
+      }),
+    );
     setActiveId(tabId);
     return tabId;
   }, []);
@@ -1028,6 +1050,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         pin,
         targetSpaceId,
         () => nextIdRef.current++,
+        placeNew(activeIdRef.current, activate),
       );
       tabsRef.current = plan.tabs;
       setTabs(plan.tabs);
@@ -1062,6 +1085,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
       isNewFile: boolean;
     }) => {
       let targetId: number | null = null;
+      const insert = placeNew(activeIdRef.current);
       setTabs((curr) => {
         const existing = curr.find(
           (t) => t.kind === "ai-diff" && t.approvalId === input.approvalId,
@@ -1073,21 +1097,18 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         const id = nextIdRef.current++;
         targetId = id;
         const title = `${basename(input.path)} (AI diff)`;
-        return [
-          ...curr,
-          {
-            id,
-            kind: "ai-diff",
-            spaceId: activeSpaceIdRef.current,
-            title,
-            path: input.path,
-            originalContent: input.originalContent,
-            proposedContent: input.proposedContent,
-            approvalId: input.approvalId,
-            status: "pending",
-            isNewFile: input.isNewFile,
-          },
-        ];
+        return insert(curr, {
+          id,
+          kind: "ai-diff",
+          spaceId: activeSpaceIdRef.current,
+          title,
+          path: input.path,
+          originalContent: input.originalContent,
+          proposedContent: input.proposedContent,
+          approvalId: input.approvalId,
+          status: "pending",
+          isNewFile: input.isNewFile,
+        });
       });
       if (targetId !== null) setActiveId(targetId);
       return targetId as number | null;
@@ -1130,16 +1151,16 @@ export function useTabs(initial?: Partial<TerminalTab>) {
 
   const newPreviewTab = useCallback((url: string) => {
     const id = nextIdRef.current++;
-    setTabs((t) => [
-      ...t,
-      {
+    const insert = placeNew(activeIdRef.current);
+    setTabs((t) =>
+      insert(t, {
         id,
         kind: "preview",
         spaceId: activeSpaceIdRef.current,
         title: titleFromUrl(url),
         url,
-      },
-    ]);
+      }),
+    );
     setActiveId(id);
     return id;
   }, []);
@@ -1155,6 +1176,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
       path,
       activeSpaceIdRef.current,
       () => nextIdRef.current++,
+      placeNew(activeIdRef.current),
     );
     if (plan.tabs !== curr) {
       tabsRef.current = plan.tabs;
@@ -1223,6 +1245,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
       activeSpaceIdRef.current,
       pin,
       () => nextIdRef.current++,
+      placeNew(activeIdRef.current),
     );
     if (plan.tabs !== curr) {
       tabsRef.current = plan.tabs;
@@ -1240,6 +1263,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         input,
         activeSpaceIdRef.current,
         () => nextIdRef.current++,
+        placeNew(activeIdRef.current),
       );
       if (plan.tabs !== curr) {
         tabsRef.current = plan.tabs;
@@ -1286,21 +1310,18 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         return existing.id;
       }
       const id = nextIdRef.current++;
-      const nextTabs = [
-        ...curr,
-        {
-          id,
-          kind: "git-commit-file",
-          spaceId: activeSpaceIdRef.current,
-          title,
-          repoRoot: input.repoRoot,
-          sha: input.sha,
-          shortSha: input.shortSha,
-          subject: input.subject,
-          path: input.path,
-          originalPath: input.originalPath,
-        } satisfies GitCommitFileDiffTab,
-      ];
+      const nextTabs = placeNew(activeIdRef.current)(curr, {
+        id,
+        kind: "git-commit-file",
+        spaceId: activeSpaceIdRef.current,
+        title,
+        repoRoot: input.repoRoot,
+        sha: input.sha,
+        shortSha: input.shortSha,
+        subject: input.subject,
+        path: input.path,
+        originalPath: input.originalPath,
+      } satisfies GitCommitFileDiffTab);
       tabsRef.current = nextTabs;
       setTabs(nextTabs);
       setActiveId(id);
@@ -1516,7 +1537,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
       setTabs((curr) =>
         curr.map((t) => {
           if (t.id !== tabId || t.kind !== "terminal" || t.blocks) return t;
-          if (!canSplitPane(t.paneTree)) return t;
+          if (!canSplitPane(t.paneTree, paneLimit())) return t;
           const splitId = nextIdRef.current++;
           const leafId = nextIdRef.current++;
           newLeafId = leafId;
@@ -1546,10 +1567,12 @@ export function useTabs(initial?: Partial<TerminalTab>) {
       destinationTabId: number,
       position: SplitPosition,
     ): number | null => {
+      const limit = paneLimit();
       const plan = planMoveTabIntoSplit(
         tabsRef.current,
         sourceTabId,
         destinationTabId,
+        limit,
       );
       if (!plan.ok) return null;
       const next = applyMoveTabIntoSplit(
@@ -1558,6 +1581,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
         destinationTabId,
         position,
         nextIdRef.current++,
+        limit,
       );
       if (!next) return null;
       tabsRef.current = next;

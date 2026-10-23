@@ -56,6 +56,12 @@ export type TerminalBehavior = {
   readonly bellSound: boolean;
   /** Lines per mouse-wheel notch; trackpads scroll by distance. */
   readonly scrollMultiplier: number;
+  /**
+   * The wheel sends arrow keys to full-screen programs that do not track the
+   * mouse (alternate scroll, mode 1007): the mode's default, so a program that
+   * sets the mode itself still decides.
+   */
+  readonly alternateScroll: boolean;
   /** Save each pane's recent history and show it again after a restart. */
   readonly restoreScrollback: boolean;
   /** Global hotkey that shows and hides the quick terminal, or "off". */
@@ -89,6 +95,7 @@ export function defaultTerminalBehavior(
     notifyAfterSeconds: 10,
     bellSound: false,
     scrollMultiplier: 3,
+    alternateScroll: true,
     restoreScrollback: true,
     quickTerminalHotkey: "off",
     quickTerminalAutohide: true,
@@ -184,6 +191,10 @@ export function normalizeTerminalBehavior(
       SCROLL_MULTIPLIER_MAX,
       defaults.scrollMultiplier,
     ),
+    alternateScroll:
+      typeof raw.alternateScroll === "boolean"
+        ? raw.alternateScroll
+        : defaults.alternateScroll,
     restoreScrollback:
       typeof raw.restoreScrollback === "boolean"
         ? raw.restoreScrollback

@@ -712,6 +712,24 @@ describe("GhosttyCoreRuntime", () => {
     model.dispose();
   });
 
+  it("applies the alternate scroll default to live and later models", async () => {
+    const runtime = new GhosttyCoreRuntime(() =>
+      TeraxGhostty.loadBytes(wasmBytes.slice(0)),
+    );
+    try {
+      const live = await runtime.createModel({ leafId: 40, cols: 8, rows: 2 });
+      expect(live.mode(1007)).toBe(true);
+      runtime.setAlternateScroll(false);
+      expect(live.mode(1007)).toBe(false);
+      const later = await runtime.createModel({ leafId: 41, cols: 8, rows: 2 });
+      expect(later.mode(1007)).toBe(false);
+      runtime.setAlternateScroll(true);
+      expect([live.mode(1007), later.mode(1007)]).toEqual([true, true]);
+    } finally {
+      runtime.dispose();
+    }
+  });
+
   it("applies the ligature switch to live models and to models created later", async () => {
     const runtime = new GhosttyCoreRuntime(() =>
       TeraxGhostty.loadBytes(wasmBytes.slice(0)),

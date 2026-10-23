@@ -30,11 +30,25 @@ export function leafIds(n: PaneNode): PaneId[] {
   return n.children.flatMap(leafIds);
 }
 
-/** Panes one terminal tab holds at most; the WebGL fallback sizes its pool from it. */
+/**
+ * Panes one terminal tab can hold at most, the top of the pane limit setting;
+ * the WebGL fallback sizes its pool from it.
+ */
 export const MAX_PANES_PER_TAB = 8;
 
-export function canSplitPane(tree: PaneNode): boolean {
-  return leafIds(tree).length < MAX_PANES_PER_TAB;
+/** A stored pane limit as one a tab can use: 1 (no splits) to the maximum. */
+export function clampPaneLimit(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(MAX_PANES_PER_TAB, Math.max(1, Math.round(value)))
+    : MAX_PANES_PER_TAB;
+}
+
+/**
+ * Whether a tab may get another pane under `limit`. A tab that already holds
+ * more (the limit was lowered after it was split) keeps its panes, gets none.
+ */
+export function canSplitPane(tree: PaneNode, limit: number): boolean {
+  return leafIds(tree).length < clampPaneLimit(limit);
 }
 
 export function firstLeafSlotId(n: PaneNode): PaneId {

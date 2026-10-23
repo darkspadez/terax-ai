@@ -38,10 +38,10 @@ export const ADAPTED_GHOSTTY_COMMIT =
 export const ADAPTED_RESTTY_COMMIT =
   "7700b14a7643ba9240818209ef1e0aa90d83ad77";
 export const ADAPTED_GHOSTTY_WASM_SHA256 =
-  "1200acd942b4dc51229fbe991c3891f2ec10d864a3f33254740792e674af891f";
+  "7373650d0c1cb2a57a4c2e907dccffaab2b731364e11a08c0909581dc060b976";
 
 export const ADAPTED_GHOSTTY_SCALAR_WASM_SHA256 =
-  "8ec5283ac45c932b39a65ba8f8ce7c6cfeedf6aa6d588f88c3c63de16efe0a72";
+  "10a35e9fed91d27834b822a0ed5ed22b825d857ae594cd08d1b66083c7ba827e";
 
 let wasmSimdAvailable: boolean | undefined;
 
@@ -129,6 +129,7 @@ const requiredExports = [
   "restty_set_palette",
   "restty_reset_palette",
   "restty_mode",
+  "restty_set_mode_default",
   "restty_mode_bits",
   "restty_kitty_keyboard_flags",
   "restty_modify_other_keys",
@@ -1265,6 +1266,24 @@ export class TeraxGhosttyTerminal {
         clampInteger(value, 0, 0xffff),
         ansi ? 1 : 0,
       ) !== 0
+    );
+  }
+
+  /**
+   * The value `value` (a DEC private mode unless `ansi`) returns to on a
+   * reset, for the modes Ghostty lets an embedder configure. A terminal still
+   * at the old default takes it now; a program's own choice stays until reset.
+   */
+  setModeDefault(value: number, enabled: boolean, ansi = false): void {
+    this.assertLive();
+    checkResult(
+      this.exports.restty_set_mode_default(
+        this.handle,
+        clampInteger(value, 0, 0xffff),
+        ansi ? 1 : 0,
+        enabled ? 1 : 0,
+      ),
+      "set mode default",
     );
   }
 

@@ -569,6 +569,11 @@ export class WebGpuTerminalSurface
     return this.theme.background;
   }
 
+  /** As the uniform on the GPU says, which may trail the theme until the pane prepares. */
+  translucent(): boolean {
+    return this.lastScreenState?.translucent === true;
+  }
+
   /** Called inside the window pass; viewport and scissor already cover the pane's rectangle. */
   encode(pass: GPURenderPassEncoder, resources: WebGpuSharedResources): void {
     if (!this.bindGroup) return;
@@ -1540,6 +1545,7 @@ export class WebGpuTerminalSurface
         : null,
       cursorColor: theme.cursor,
       background: theme.background,
+      translucent: theme.translucent,
       selection: bounds
         ? selectionUniform(bounds, viewportOriginLine, frame.rows)
         : NO_SELECTION,

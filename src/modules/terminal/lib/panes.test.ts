@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canSplitPane,
+  clampPaneLimit,
   findLeafNode,
   firstLeafSlotId,
   insertLeafAt,
@@ -230,13 +231,36 @@ describe("pane limit", () => {
   it("splits a tab into eight panes and no further", () => {
     let tree: PaneNode = { kind: "leaf", id: 1 };
     let next = 2;
-    while (canSplitPane(tree)) {
+    while (canSplitPane(tree, MAX_PANES_PER_TAB)) {
       const ids = leafIds(tree);
       const target = ids[ids.length - 1];
       tree = splitLeaf(tree, target, next++, next++, next % 2 ? "row" : "col");
     }
     expect(leafIds(tree)).toHaveLength(8);
     expect(MAX_PANES_PER_TAB).toBe(8);
+  });
+
+  // crynta/terax-ai#1150: the limit is a setting, 1 to the maximum.
+  it("splits up to a configured limit, never past the maximum", () => {
+    const three = row(1, 2, 3);
+    expect(leafIds(three)).toHaveLength(3);
+    expect(canSplitPane(three, 4)).toBe(true);
+    expect(canSplitPane(three, 3)).toBe(false);
+    expect(canSplitPane(three, 2)).toBe(false);
+    expect(canSplitPane({ kind: "leaf", id: 1 }, 1)).toBe(false);
+    expect(canSplitPane({ kind: "leaf", id: 1 }, 0)).toBe(false);
+    expect(canSplitPane(three, 99)).toBe(true);
+  });
+
+  it("reads a stored limit as one a tab can use", () => {
+    expect(clampPaneLimit(4)).toBe(4);
+    expect(clampPaneLimit(4.6)).toBe(5);
+    expect(clampPaneLimit(0)).toBe(1);
+    expect(clampPaneLimit(-3)).toBe(1);
+    expect(clampPaneLimit(64)).toBe(MAX_PANES_PER_TAB);
+    expect(clampPaneLimit(undefined)).toBe(MAX_PANES_PER_TAB);
+    expect(clampPaneLimit("4")).toBe(MAX_PANES_PER_TAB);
+    expect(clampPaneLimit(Number.NaN)).toBe(MAX_PANES_PER_TAB);
   });
 
   it("leaves the WebGL fallback a renderer for every pane and one more", () => {

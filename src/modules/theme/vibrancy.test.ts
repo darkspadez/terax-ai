@@ -6,7 +6,8 @@ const bridge = vi.hoisted(() => ({
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: bridge.invoke }));
 
-import { parseCssColor, toHex } from "./vibrancy";
+import { terminalBackgroundOpacity } from "./terminalTranslucency";
+import { cssColorAlpha, parseCssColor, toHex } from "./vibrancy";
 
 describe("parseCssColor", () => {
   it("reads rgb() in its legacy and modern spellings", () => {
@@ -88,7 +89,12 @@ describe("applyVibrancy", () => {
     expect(backdropCalls()).toEqual([
       [
         "window_set_backdrop",
-        { enabled: false, dark: true, background: "#141414" },
+        {
+          enabled: false,
+          dark: true,
+          background: "#141414",
+          seeThrough: false,
+        },
       ],
     ]);
   });
@@ -112,9 +118,13 @@ describe("applyVibrancy", () => {
       enabled: true,
       dark: false,
       background: undefined,
+      seeThrough: true,
     });
     await mod.applyVibrancy(false, false);
-    expect(backdropCalls()[1][1]).toMatchObject({ enabled: false });
+    expect(backdropCalls()[1][1]).toMatchObject({
+      enabled: false,
+      seeThrough: false,
+    });
   });
 
   it("falls back to opaque if the native call fails", async () => {
@@ -125,5 +135,38 @@ describe("applyVibrancy", () => {
     const mod = await import("./vibrancy");
     await expect(mod.applyVibrancy(true, true)).resolves.toBeUndefined();
     expect(document.documentElement.style.backgroundColor).toBe("#141414");
+  });
+});
+
+describe("cssColorAlpha", () => {
+  it("reads the alpha of every spelling the webview computes", () => {
+    expect(cssColorAlpha("rgb(20, 20, 20)")).toBe(1);
+    expect(cssColorAlpha("rgba(20, 20, 20, 0.5)")).toBe(0.5);
+    expect(cssColorAlpha("rgba(0, 0, 0, 0)")).toBe(0);
+    expect(cssColorAlpha("rgb(1 2 3 / 40%)")).toBe(0.4);
+    expect(cssColorAlpha("color(srgb 0.1 0.2 0.3 / 0.25)")).toBe(0.25);
+    expect(cssColorAlpha("oklch(0.5 0.1 120 / 0.7)")).toBe(0.7);
+  });
+
+  it("treats anything it cannot read as opaque", () => {
+    for (const value of [
+      "",
+      "transparent",
+      "rgb(",
+      "rgba(1, 2, 3)",
+      "x(1 / y)",
+    ]) {
+      expect(cssColorAlpha(value)).toBe(1);
+    }
+  });
+});
+
+describe("terminalBackgroundOpacity", () => {
+  it("multiplies the theme's alpha by the setting", () => {
+    expect(terminalBackgroundOpacity(1, 1)).toBe(1);
+    expect(terminalBackgroundOpacity(1, 0.8)).toBe(0.8);
+    expect(terminalBackgroundOpacity(0.5, 0.8)).toBeCloseTo(0.4);
+    expect(terminalBackgroundOpacity(Number.NaN, 0.8)).toBe(0.8);
+    expect(terminalBackgroundOpacity(2, 1)).toBe(1);
   });
 });

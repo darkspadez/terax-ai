@@ -1,6 +1,10 @@
 // crynta/terax-ai#1319: move a live terminal into another tab's split.
 import { describe, expect, it } from "vitest";
-import { leafIds, type PaneNode } from "@/modules/terminal/lib/panes";
+import {
+  leafIds,
+  MAX_PANES_PER_TAB,
+  type PaneNode,
+} from "@/modules/terminal/lib/panes";
 import {
   applyMoveTabIntoSplit,
   moveToSplitTargets,
@@ -8,6 +12,8 @@ import {
   type Tab,
   type TerminalTab,
 } from "./useTabs";
+
+const LIMIT = MAX_PANES_PER_TAB;
 
 function term(
   id: number,
@@ -53,7 +59,7 @@ function destinationOf(tabs: Tab[] | null, id: number): TerminalTab {
 
 describe("planMoveTabIntoSplit", () => {
   it("accepts a single-pane terminal moving into a compatible tab", () => {
-    const plan = planMoveTabIntoSplit([term(1), term(2)], 2, 1);
+    const plan = planMoveTabIntoSplit([term(1), term(2)], 2, 1, LIMIT);
     expect(plan.ok).toBe(true);
     if (plan.ok) expect(plan.leaf).toEqual({ kind: "leaf", id: 20 });
   });
@@ -87,10 +93,9 @@ describe("planMoveTabIntoSplit", () => {
       1,
     ],
   ] as const)("rejects %s", (reason, tabs, source, destination) => {
-    expect(planMoveTabIntoSplit([...tabs], source, destination)).toEqual({
-      ok: false,
-      reason,
-    });
+    expect(planMoveTabIntoSplit([...tabs], source, destination, LIMIT)).toEqual(
+      { ok: false, reason },
+    );
   });
 
   it("treats undefined and false flags as equal", () => {
@@ -98,7 +103,19 @@ describe("planMoveTabIntoSplit", () => {
       term(1, { blocks: false, private: false }),
       term(2, { blocks: undefined, private: undefined }),
     ];
-    expect(planMoveTabIntoSplit(tabs, 2, 1).ok).toBe(true);
+    expect(planMoveTabIntoSplit(tabs, 2, 1, LIMIT).ok).toBe(true);
+  });
+
+  // crynta/terax-ai#1150: a lowered limit leaves fuller tabs as they are.
+  it("follows the configured pane limit", () => {
+    const tabs = [term(1, { paneTree: row(99, 10, 11, 12) }), term(2)];
+    expect(planMoveTabIntoSplit(tabs, 2, 1, 4).ok).toBe(true);
+    expect(planMoveTabIntoSplit(tabs, 2, 1, 3)).toEqual({
+      ok: false,
+      reason: "pane-limit",
+    });
+    expect(planMoveTabIntoSplit(tabs, 2, 1, 2).ok).toBe(false);
+    expect(moveToSplitTargets([term(1), term(2)], 2, 1)).toEqual([]);
   });
 
   it("allows filling the destination up to the pane cap", () => {
@@ -106,7 +123,7 @@ describe("planMoveTabIntoSplit", () => {
       term(1, { paneTree: row(99, 10, 11, 12, 13, 14, 15, 16) }),
       term(2),
     ];
-    expect(planMoveTabIntoSplit(tabs, 2, 1).ok).toBe(true);
+    expect(planMoveTabIntoSplit(tabs, 2, 1, LIMIT).ok).toBe(true);
   });
 });
 
@@ -121,12 +138,12 @@ describe("moveToSplitTargets", () => {
       term(5, { paneTree: row(99, 50, 51, 52, 53, 54, 55, 56, 57) }),
       term(6),
     ];
-    expect(moveToSplitTargets(tabs, 2).map((t) => t.id)).toEqual([1, 6]);
+    expect(moveToSplitTargets(tabs, 2, LIMIT).map((t) => t.id)).toEqual([1, 6]);
   });
 
   it("returns nothing for a multi-pane source", () => {
     const tabs = [term(1), term(2, { paneTree: row(99, 20, 21) })];
-    expect(moveToSplitTargets(tabs, 2)).toEqual([]);
+    expect(moveToSplitTargets(tabs, 2, LIMIT)).toEqual([]);
   });
 });
 
@@ -134,7 +151,7 @@ describe("applyMoveTabIntoSplit", () => {
   it("removes the source and grafts its leaf with the same id", () => {
     const leaf = { kind: "leaf", id: 20, slotId: 7, cwd: "/src" } as const;
     const tabs = [term(1), term(2, { paneTree: leaf }), term(3)];
-    const next = applyMoveTabIntoSplit(tabs, 2, 1, "right", 500);
+    const next = applyMoveTabIntoSplit(tabs, 2, 1, "right", 500, LIMIT);
     expect(next?.map((t) => t.id)).toEqual([1, 3]);
     const dest = destinationOf(next, 1);
     expect(leafIds(dest.paneTree)).toEqual([10, 20]);
@@ -158,6 +175,7 @@ describe("applyMoveTabIntoSplit", () => {
         1,
         position,
         500,
+        LIMIT,
       );
       const dest = destinationOf(next, 1);
       expect(dest.paneTree).toMatchObject({ kind: "split", id: 500, dir });
@@ -171,7 +189,7 @@ describe("applyMoveTabIntoSplit", () => {
       term(2),
     ];
     const dest = destinationOf(
-      applyMoveTabIntoSplit(tabs, 2, 1, "left", 500),
+      applyMoveTabIntoSplit(tabs, 2, 1, "left", 500, LIMIT),
       1,
     );
     expect(leafIds(dest.paneTree)).toEqual([10, 20, 11, 12]);
@@ -190,6 +208,7 @@ describe("applyMoveTabIntoSplit", () => {
       1,
       "right",
       500,
+      LIMIT,
     );
     expect(destinationOf(withLeafCwd, 1).cwd).toBe("/leaf");
 
@@ -199,6 +218,7 @@ describe("applyMoveTabIntoSplit", () => {
       1,
       "right",
       500,
+      LIMIT,
     );
     expect(destinationOf(withTabCwd, 1).cwd).toBe("/tab");
 
@@ -208,6 +228,7 @@ describe("applyMoveTabIntoSplit", () => {
       1,
       "right",
       500,
+      LIMIT,
     );
     expect(destinationOf(withDestCwd, 1).cwd).toBe("/dest");
   });
@@ -219,13 +240,14 @@ describe("applyMoveTabIntoSplit", () => {
       1,
       "right",
       500,
+      LIMIT,
     );
     expect(destinationOf(next, 1).cold).toBe(true);
   });
 
   it("returns null when the plan is rejected", () => {
     const tabs = [term(1), term(2, { private: true })];
-    expect(applyMoveTabIntoSplit(tabs, 2, 1, "right", 500)).toBeNull();
+    expect(applyMoveTabIntoSplit(tabs, 2, 1, "right", 500, LIMIT)).toBeNull();
   });
 
   it("leaves pane zoom, so the moved pane shows", () => {
@@ -235,6 +257,7 @@ describe("applyMoveTabIntoSplit", () => {
       1,
       "right",
       500,
+      LIMIT,
     );
     expect(destinationOf(next, 1).zoomedLeafId).toBeUndefined();
   });

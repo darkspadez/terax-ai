@@ -22,8 +22,11 @@ import {
   setBackgroundKind,
   setBackgroundOpacity,
   setEditorTheme,
+  setTerminalOpacity,
   setWindowVibrancy,
+  TERMINAL_OPACITY_MIN,
 } from "@/modules/settings/store";
+import { currentPlatform } from "@/modules/settings/terminalBehavior";
 import { useTheme } from "@/modules/theme";
 import {
   deleteBgImage,
@@ -86,6 +89,7 @@ export function ThemesSection() {
   const backgroundOpacity = usePreferencesStore((s) => s.backgroundOpacity);
   const backgroundBlur = usePreferencesStore((s) => s.backgroundBlur);
   const windowVibrancy = usePreferencesStore((s) => s.windowVibrancy);
+  const terminalOpacity = usePreferencesStore((s) => s.terminalOpacity);
 
   const [backdrop, setBackdrop] = useState<Backdrop>("none");
   useEffect(() => {
@@ -208,6 +212,25 @@ export function ThemesSection() {
           />
         </SettingRow>
       )}
+
+      <SettingRow
+        title="Terminal opacity"
+        description={terminalOpacityDescription(backdrop)}
+      >
+        <div className="flex w-40 items-center gap-2.5">
+          <Slider
+            value={[terminalOpacity]}
+            min={TERMINAL_OPACITY_MIN}
+            max={1}
+            step={0.05}
+            aria-label="Terminal opacity"
+            onValueChange={(v) => void setTerminalOpacity(v[0] ?? 1)}
+          />
+          <span className="w-9 shrink-0 text-right tabular-nums text-[11px] text-muted-foreground">
+            {Math.round(terminalOpacity * 100)}%
+          </span>
+        </div>
+      </SettingRow>
 
       <div
         role="presentation"
@@ -506,6 +529,15 @@ export function ThemesSection() {
       </div>
     </div>
   );
+}
+
+/** What lowering the terminal opacity shows, on this platform. */
+function terminalOpacityDescription(backdrop: Backdrop): string {
+  const base =
+    "Let what is behind the window show through terminal backgrounds and the frame around them. Text and coloured cells stay solid; a theme's own transparency adds to this.";
+  if (backdrop === "vibrancy") return `${base} Frosted while vibrancy is on.`;
+  if (backdrop === "mica") return `${base} Mica shows through while it is on.`;
+  return currentPlatform() === "linux" ? `${base} Needs a compositor.` : base;
 }
 
 function Label({ children }: { children: React.ReactNode }) {

@@ -140,6 +140,19 @@ describe("ScreenUniform", () => {
     }
   });
 
+  // crynta/terax-ai#556: the page paints a translucent terminal's background.
+  it("leaves the default background to the page while the terminal is translucent", () => {
+    const uniform = new ScreenUniform();
+    const at = (offset: number) => offset / 4 + 3;
+    uniform.pack(STATE);
+    expect(view(uniform).f[at(SCREEN_OFFSET.themeBackground)]).toBe(1);
+    uniform.markUploaded();
+    uniform.pack({ ...STATE, translucent: true });
+    expect(view(uniform).f[at(SCREEN_OFFSET.themeBackground)]).toBe(0);
+    expect(uniform.changed()).toBe(true);
+    expect(BACKGROUND_SHADER).toContain("screen.theme_background.a < 1.0");
+  });
+
   it("hides the cursor by zeroing its rectangle", () => {
     const uniform = new ScreenUniform();
     uniform.pack({ ...STATE, cursor: null });

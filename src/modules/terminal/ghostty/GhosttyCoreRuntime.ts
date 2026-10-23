@@ -65,6 +65,7 @@ export class GhosttyCoreRuntime {
   private idleReleaseTimer: ReturnType<typeof setTimeout> | null = null;
   private scrollbackBudgetBytes: number;
   private ligatures = true;
+  private alternateScroll = true;
   /** Refused until the app applies the user's choice. */
   private clipboardPolicy: GhosttyClipboardPolicy = {
     readsToHost: false,
@@ -120,6 +121,7 @@ export class GhosttyCoreRuntime {
         },
       });
       model.setLigatures(this.ligatures);
+      model.setAlternateScroll(this.alternateScroll);
       model.setClipboardPolicy(this.clipboardPolicy);
       this.models.set(options.leafId, model);
       this.rebalanceScrollback();
@@ -162,6 +164,17 @@ export class GhosttyCoreRuntime {
   setLigatures(enabled: boolean): void {
     this.ligatures = enabled;
     for (const model of this.models.values()) model.setLigatures(enabled);
+  }
+
+  /**
+   * Alternate scroll (mode 1007) as every model's default, live and future
+   * (`GhosttyTerminalModelApi.setAlternateScroll`).
+   */
+  setAlternateScroll(enabled: boolean): void {
+    this.alternateScroll = enabled;
+    for (const model of this.models.values()) {
+      model.setAlternateScroll(enabled);
+    }
   }
 
   /**

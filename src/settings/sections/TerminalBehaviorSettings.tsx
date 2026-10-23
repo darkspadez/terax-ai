@@ -240,6 +240,15 @@ export function TerminalBehaviorSettings() {
         />
       </SettingRow>
       <SettingRow
+        title="Scroll wheel sends arrow keys"
+        description="In full-screen programs that do not use the mouse, such as less or man, the wheel sends up and down arrows so they scroll. Off, the wheel leaves them alone. A program that sets this itself still decides."
+      >
+        <Switch
+          checked={behavior.alternateScroll}
+          onCheckedChange={(alternateScroll) => set({ alternateScroll })}
+        />
+      </SettingRow>
+      <SettingRow
         title="Dim unfocused split panes"
         description="In a split tab, panes other than the one you type into fade into the background, so the focused one stands out."
       >

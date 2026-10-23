@@ -243,6 +243,27 @@ html[data-vibrancy="on"] {
   --frame: color-mix(in oklab, var(--card) 55%, transparent);
 }
 
+/* Translucent terminals (Themes, "Terminal opacity", times the alpha of the
+ * theme's terminal background; set by `applyVibrancy`). The window is
+ * see-through and the frame becomes the terminal background at that opacity.
+ * The workspace card shows the frame while a terminal tab is active and the
+ * renderers leave default-background cells transparent, so the terminal and
+ * the frame are one sheet: anything painted between them would stack its
+ * opacity onto the terminal's. Other panes keep `--background`. */
+html[data-terminal-translucent],
+html[data-terminal-translucent] body,
+html[data-terminal-translucent][data-chrome="borderless"] #root,
+html[data-terminal-translucent] .terax-pane[data-terminal-surface] {
+  background: transparent;
+}
+html[data-terminal-translucent] {
+  --frame: color-mix(
+    in srgb,
+    var(--terminal-background) calc(var(--terminal-opacity, 1) * 100%),
+    transparent
+  );
+}
+
 html[data-chrome="borderless"] .terax-bg-surface {
   border-radius: 12px;
 }

@@ -370,7 +370,11 @@ export class WebGlTerminalSurface
     this.updateRootBackground();
     if (!this.renderer || !this.host || this.documentSuspended) return;
     try {
-      this.acquireRenderer().resetModel();
+      const previous = this.renderer;
+      const renderer = this.acquireRenderer();
+      // Another translucency takes another renderer, which has no size yet.
+      if (renderer === previous) renderer.resetModel();
+      else this.resizeToHost();
       this.runtime.schedule(this);
     } catch (error) {
       this.handleRendererError(toError(error));
@@ -917,8 +921,11 @@ export class WebGlTerminalSurface
     this.textBlinkTimer = null;
   }
 
+  /** Behind the canvas and the slack around it; the page paints it for translucent terminals. */
   private updateRootBackground(): void {
-    this.root.style.backgroundColor = rgbToCss(this.theme.background);
+    this.root.style.backgroundColor = this.theme.translucent
+      ? "transparent"
+      : rgbToCss(this.theme.background);
   }
 
   private assertLive(): void {

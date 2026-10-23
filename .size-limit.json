@@ -15,7 +15,7 @@
     "path": [
       "dist/assets/*.js"
     ],
-    "limit": "2667.9 KB",
+    "limit": "2671 KB",
     "gzip": true
   },
   {

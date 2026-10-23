@@ -216,7 +216,11 @@ export class WebGlCellRenderer {
   private shaderFailedSource: string | null = null;
   private shader: CustomShaderRunner | null = null;
 
-  constructor() {
+  /**
+   * The drawing buffer has an alpha channel, for translucent terminals: cells on the default
+   * background stay transparent. Fixed for the context's life; the pool matches it to the theme.
+   */
+  constructor(readonly translucent = false) {
     this.canvas.className = "block";
     this.canvas.setAttribute("aria-hidden", "true");
     const context = this.canvas.getContext(
@@ -225,6 +229,7 @@ export class WebGlCellRenderer {
         detectPlatform(
           typeof navigator === "undefined" ? "" : navigator.userAgent,
         ),
+        translucent,
       ),
     );
     if (!context) throw new Error("WebGL2 is unavailable in this webview");
@@ -1133,12 +1138,16 @@ export class WebGlCellRenderer {
     shader?.begin(this.canvas.width, this.canvas.height);
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.STENCIL_TEST);
-    gl.clearColor(
-      background[0] / 255,
-      background[1] / 255,
-      background[2] / 255,
-      1,
-    );
+    // Only explicit backgrounds are rectangles: the clear colour is the default background, or
+    // nothing while the window shows through it. A custom shader gets an opaque frame.
+    if (this.translucent && !shader) gl.clearColor(0, 0, 0, 0);
+    else
+      gl.clearColor(
+        background[0] / 255,
+        background[1] / 255,
+        background[2] / 255,
+        1,
+      );
     gl.clear(gl.COLOR_BUFFER_BIT);
 
     // Ghostty's layering: images under the cell backgrounds (only explicit backgrounds are
@@ -1168,7 +1177,14 @@ export class WebGlCellRenderer {
     }
 
     gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    // Destination alpha accumulates as "over" does, so text on a transparent background
+    // composites premultiplied.
+    gl.blendFuncSeparate(
+      gl.SRC_ALPHA,
+      gl.ONE_MINUS_SRC_ALPHA,
+      gl.ONE,
+      gl.ONE_MINUS_SRC_ALPHA,
+    );
     // biome-ignore lint/correctness/useHookAtTopLevel: WebGL method, not a React hook.
     gl.useProgram(resources.glyphProgram.value);
     gl.bindVertexArray(resources.glyphVao);
@@ -1198,6 +1214,13 @@ export class WebGlCellRenderer {
     );
     images?.draw(IMAGES_ABOVE_TEXT, gridWidth, gridHeight);
     shader?.finish(profile.theme);
+    if (shader && this.translucent) {
+      // Whatever alpha the shader wrote, its pane stays opaque.
+      gl.colorMask(false, false, false, true);
+      gl.clearColor(0, 0, 0, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.colorMask(true, true, true, true);
+    }
   }
 
   /**
@@ -1545,9 +1568,11 @@ function runTextAt(
  */
 export function webGlContextAttributes(
   platform: ReturnType<typeof detectPlatform>,
+  translucent = false,
 ): WebGLContextAttributes {
   return {
-    alpha: false,
+    alpha: translucent,
+    premultipliedAlpha: true,
     antialias: false,
     depth: false,
     desynchronized: true,

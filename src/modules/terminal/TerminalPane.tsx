@@ -1,6 +1,7 @@
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { TerminalSearchController } from "@/modules/terminal/search/TerminalSearchController";
 import { useTheme } from "@/modules/theme";
+import { useTerminalTranslucent } from "@/modules/theme/terminalTranslucency";
 import {
   forwardRef,
   lazy,
@@ -81,6 +82,7 @@ const GhosttyTerminalPane = memo(
     const customShader = usePreferencesStore(
       (state) => state.terminalCustomShader,
     );
+    const translucent = useTerminalTranslucent();
     const ligatures = usePreferencesStore((state) =>
       ligaturesApply(state.terminalLigatures, state.terminalLetterSpacing),
     );
@@ -88,6 +90,12 @@ const GhosttyTerminalPane = memo(
     useEffect(() => {
       getGhosttyCoreRuntime().setLigatures(ligatures);
     }, [ligatures]);
+    const alternateScroll = usePreferencesStore(
+      (state) => state.terminalBehavior.alternateScroll,
+    );
+    useEffect(() => {
+      getGhosttyCoreRuntime().setAlternateScroll(alternateScroll);
+    }, [alternateScroll]);
     const clipboardRead = usePreferencesStore(
       (state) => state.terminalBehavior.clipboardRead,
     );
@@ -114,9 +122,17 @@ const GhosttyTerminalPane = memo(
       void activeTheme;
       void minimumContrast;
       void customShader;
+      void translucent;
       const id = requestAnimationFrame(() => session.applyTheme());
       return () => cancelAnimationFrame(id);
-    }, [resolvedMode, activeTheme, minimumContrast, customShader, session]);
+    }, [
+      resolvedMode,
+      activeTheme,
+      minimumContrast,
+      customShader,
+      translucent,
+      session,
+    ]);
 
     useImperativeHandle(
       ref,

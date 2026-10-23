@@ -100,6 +100,7 @@ pub fn spawn(
     app: tauri::AppHandle,
     binary: &std::path::Path,
     args: &[String],
+    server_env: &super::env::ServerEnv,
     extra_env: &std::collections::HashMap<String, String>,
     root: &std::path::Path,
     max_rss_mb: Option<u64>,
@@ -109,7 +110,7 @@ pub fn spawn(
     let mut cmd = Command::new(binary);
     cmd.args(args)
         .current_dir(root)
-        .envs(super::env::server_env_overlay())
+        .envs(server_env)
         .envs(extra_env)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

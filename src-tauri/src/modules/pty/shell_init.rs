@@ -88,6 +88,14 @@ fn sanitize_shell_override(shell: Option<String>) -> Option<String> {
     }
 }
 
+/// The shell a new terminal runs: the configured one when it is an enumerated
+/// shell that exists, else the user's login shell. Language servers capture
+/// their environment through it.
+#[cfg(unix)]
+pub fn terminal_shell_path(shell: Option<String>) -> String {
+    unix::Shell::resolve(sanitize_shell_override(shell)).1
+}
+
 pub fn detect_shell_name() -> String {
     #[cfg(unix)]
     {
@@ -1415,6 +1423,24 @@ mod tests {
     fn empty_or_missing_override_is_none() {
         assert_eq!(sanitize_shell_override(Some("   ".into())), None);
         assert_eq!(sanitize_shell_override(None), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_shell_is_the_configured_one_only_when_enumerated() {
+        use super::{list_shells, terminal_shell_path};
+
+        let login = terminal_shell_path(None);
+        assert!(!login.is_empty());
+        let exe = std::env::current_exe()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(terminal_shell_path(Some(exe)), login);
+        assert_eq!(terminal_shell_path(Some(" ".into())), login);
+        if let Some(listed) = list_shells().into_iter().find(|s| s.path != login) {
+            assert_eq!(terminal_shell_path(Some(listed.path.clone())), listed.path);
+        }
     }
 
     #[test]

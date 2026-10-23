@@ -18,6 +18,7 @@ describe("terminal behaviour preferences", () => {
       notifyAfterSeconds: 10,
       bellSound: false,
       scrollMultiplier: 3,
+      alternateScroll: true,
       restoreScrollback: true,
       quickTerminalHotkey: "off",
       quickTerminalAutohide: true,
@@ -36,6 +37,17 @@ describe("terminal behaviour preferences", () => {
     expect(normalize(0.01)).toBe(0.15);
     expect(normalize(3)).toBe(1);
     expect(normalize("0.5")).toBe(0.7);
+  });
+
+  // crynta/terax-ai#781: the wheel can stop sending arrows to pagers.
+  it("keeps alternate scroll on unless it was turned off", () => {
+    const defaults = defaultTerminalBehavior("linux");
+    const normalize = (alternateScroll: unknown) =>
+      normalizeTerminalBehavior({ alternateScroll }, defaults).alternateScroll;
+    expect(normalize(false)).toBe(false);
+    expect(normalize(true)).toBe(true);
+    expect(normalize(undefined)).toBe(true);
+    expect(normalize("false")).toBe(true);
   });
 
   it("fills missing and invalid fields from the defaults", () => {

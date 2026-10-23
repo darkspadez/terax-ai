@@ -59,6 +59,20 @@ describe("WebGL surface renderer ownership", () => {
     },
   );
 
+  // crynta/terax-ai#556: a translucent terminal needs a renderer with alpha.
+  it("sizes the renderer a translucency change brings and stops painting the root", () => {
+    const h = harness();
+    const translucent = renderer();
+    h.acquire.mockReturnValue(translucent);
+    h.surface.setTheme({ ...THEME, translucent: true });
+    expect(translucent.resize).toHaveBeenCalledOnce();
+    expect(translucent.resetModel).not.toHaveBeenCalled();
+    expect(h.surface.eventTarget().style.backgroundColor).toBe("transparent");
+    h.surface.setTheme({ ...THEME, translucent: true, background: [1, 2, 3] });
+    expect(translucent.resize).toHaveBeenCalledOnce();
+    expect(translucent.resetModel).toHaveBeenCalledOnce();
+  });
+
   it("replaces a failed renderer once while retaining model and selection", () => {
     const h = harness();
     const replacement = renderer();

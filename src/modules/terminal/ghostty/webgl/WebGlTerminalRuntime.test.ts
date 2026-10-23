@@ -134,6 +134,54 @@ describe("WebGlTerminalRuntime", () => {
     runtime.dispose();
   });
 
+  // crynta/terax-ai#556: a context's alpha channel cannot change.
+  it("gives translucent terminals renderers with an alpha channel", () => {
+    const h = createHarness();
+    const runtime = new WebGlTerminalRuntime(h.dependencies);
+    const translucent = { ...PROFILE, theme: { ...THEME, translucent: true } };
+    const surface = createSurface();
+    const opaque = runtime.acquire(surface, {} as HTMLElement, PROFILE);
+    expect(opaque.translucent).toBe(false);
+
+    const clear = runtime.acquire(surface, {} as HTMLElement, translucent);
+    expect(clear.translucent).toBe(true);
+    expect(h.renderers[0].dispose).toHaveBeenCalledOnce();
+    expect(runtime.acquire(surface, {} as HTMLElement, translucent)).toBe(
+      clear,
+    );
+
+    runtime.release(surface);
+    const other = createSurface();
+    expect(runtime.acquire(other, {} as HTMLElement, PROFILE).translucent).toBe(
+      false,
+    );
+    expect(h.renderers).toHaveLength(3);
+    runtime.dispose();
+  });
+
+  it("frees an idle renderer of the other kind when the pool is full", () => {
+    const h = createHarness();
+    const runtime = new WebGlTerminalRuntime(h.dependencies);
+    const surfaces = Array.from(
+      { length: MAX_WEBGL_RENDERER_SLOTS },
+      createSurface,
+    );
+    for (const surface of surfaces) {
+      runtime.acquire(surface, {} as HTMLElement, PROFILE);
+    }
+    runtime.release(surfaces[0]);
+    const translucent = { ...PROFILE, theme: { ...THEME, translucent: true } };
+    const renderer = runtime.acquire(
+      createSurface(),
+      {} as HTMLElement,
+      translucent,
+    );
+    expect(renderer.translucent).toBe(true);
+    expect(h.renderers[0].dispose).toHaveBeenCalledOnce();
+    expect(runtime.diagnostics().slotCount).toBe(MAX_WEBGL_RENDERER_SLOTS);
+    runtime.dispose();
+  });
+
   it("keeps idle reclamation scheduled when another surface acquires a renderer", () => {
     const h = createHarness();
     const runtime = new WebGlTerminalRuntime(h.dependencies);
@@ -244,6 +292,7 @@ describe("WebGlTerminalRuntime", () => {
 });
 
 type RendererDouble = {
+  readonly translucent: boolean;
   readonly configure: ReturnType<typeof vi.fn>;
   readonly resetModel: ReturnType<typeof vi.fn>;
   readonly attach: ReturnType<typeof vi.fn>;
@@ -265,8 +314,9 @@ function createHarness(options: { failFirstConfigure?: boolean } = {}) {
   const cancelledFrames: number[] = [];
 
   const dependencies: WebGlRuntimeDependencies = {
-    createRenderer: () => {
+    createRenderer: (translucent) => {
       const renderer: RendererDouble = {
+        translucent,
         configure: vi.fn(() => {
           if (options.failFirstConfigure && !failedConfigure) {
             failedConfigure = true;
