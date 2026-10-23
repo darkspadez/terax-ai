@@ -246,6 +246,28 @@ describe("auto-title", () => {
     expect(titles).toEqual(["name this chat"]);
     expect(saveSessionsList).toHaveBeenCalledTimes(1);
   });
+
+  it("retitles a conversation an earlier version named after a command's marker, keeping its place", async () => {
+    const mod = await import("@/modules/ai/lib/sessions");
+    vi.spyOn(mod, "saveSessionsList").mockResolvedValue(undefined);
+    const marker = '<terax-command name="claude-code" />';
+    useChatStore.setState({
+      sessions: [{ id: "s-1", title: marker, createdAt: 1, updatedAt: 2 }],
+    });
+
+    useChatStore.getState().persistMessages("s-1", []);
+    expect(useChatStore.getState().sessions[0].title).toBe(marker);
+
+    useChatStore
+      .getState()
+      .persistMessages("s-1", [
+        userMsg(`${marker}\n\nTheir request:\n\n<request>\nship it\n</request>`),
+      ]);
+    expect(useChatStore.getState().sessions[0]).toMatchObject({
+      title: "ship it",
+      updatedAt: 2,
+    });
+  });
 });
 
 describe("approval / prefill / selections plumbing", () => {

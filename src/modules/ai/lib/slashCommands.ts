@@ -4,6 +4,7 @@ import {
   SparklesIcon,
 } from "@hugeicons/core-free-icons";
 import { usePlanStore } from "../store/planStore";
+import { COMMAND_LABELS, quoteRequest } from "./commandMessage";
 
 /**
  * Outcome of intercepting a slash command from the composer.
@@ -20,9 +21,7 @@ export type SlashOutcome =
 function claudeCodeDirective(request: string): string {
   return `The user wants to drive a Claude Code agent through you. Their request:
 
-<request>
-${request}
-</request>
+${quoteRequest(request)}
 
 You are the orchestrator, not the implementer. Do not write the code yourself.
 1. Call read_agent_output to see whether a Claude Code agent is already active in this session.
@@ -56,25 +55,22 @@ export const SLASH_COMMANDS: Record<string, SlashCommandMeta> = {
   init: {
     name: "init",
     invocation: "/init",
-    label: "Initialize workspace",
+    label: COMMAND_LABELS.init,
     icon: SparklesIcon,
   },
   plan: {
     name: "plan",
     invocation: "/plan",
-    label: "Plan mode",
+    label: COMMAND_LABELS.plan,
     icon: CheckListIcon,
   },
   "claude-code": {
     name: "claude-code",
     invocation: "/claude-code",
-    label: "Delegate to Claude Code",
+    label: COMMAND_LABELS["claude-code"],
     icon: ClaudeIcon,
   },
 };
-
-export const TERAX_CMD_RE =
-  /^<terax-command\s+name="([a-z0-9-]+)"(?:\s+state="([a-z]+)")?\s*\/>(?:\n+|$)/;
 
 export function tryRunSlashCommand(input: string): SlashOutcome {
   const trimmed = input.trim();

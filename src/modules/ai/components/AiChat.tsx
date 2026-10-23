@@ -40,7 +40,8 @@ import {
 import { type MessageImage, messageImages } from "../lib/imageAttachment";
 import { type ContextChip, messageChips } from "../lib/messageChips";
 import { mergeInterleavedReasoning } from "../lib/reasoningDisplay";
-import { SLASH_COMMANDS, TERAX_CMD_RE } from "../lib/slashCommands";
+import { TERAX_CMD_RE } from "../lib/commandMessage";
+import { SLASH_COMMANDS } from "../lib/slashCommands";
 import { Spinner } from "@/components/ui/spinner";
 import { useChatStore } from "../store/chatStore";
 import { sendMessage } from "../store/chatRuntime";

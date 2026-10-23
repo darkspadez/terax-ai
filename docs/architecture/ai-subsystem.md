@@ -76,7 +76,7 @@ Conversations are organized into sessions (`src/modules/ai/lib/sessions.ts`):
 
 `TERAX.md` documents the durability rules (flush cadence, fsync, close-time flush).
 
-`AgentRunBridge` mirrors active-session messages to disk on every change and auto-derives titles from the first user message.
+`AgentRunBridge` mirrors active-session messages to disk on every change and auto-derives titles from the first user message (`deriveTitle`): the user's own words without the blocks before them, a `/command`'s quoted request or label, or `/skill` and `server: prompt` for a message that only invokes one.
 
 ## Composer
 

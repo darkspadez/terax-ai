@@ -16,7 +16,8 @@ vi.mock("@/modules/ai/store/planStore", () => ({
   },
 }));
 
-import { TERAX_CMD_RE, tryRunSlashCommand } from "./slashCommands";
+import { TERAX_CMD_RE } from "./commandMessage";
+import { tryRunSlashCommand } from "./slashCommands";
 
 beforeEach(() => {
   vi.clearAllMocks();

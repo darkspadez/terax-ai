@@ -4,7 +4,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { toast } from "sonner";
 import type { ApprovalMode } from "./approvalMode";
+import { commandTitle, TERAX_CMD_RE } from "./commandMessage";
 import { MESSAGE_BLOCKS_RE } from "./messageBlocks";
+import { messageChips } from "./messageChips";
 
 export type SessionMeta = {
   id: string;
@@ -373,19 +375,40 @@ export function newSessionId(): string {
   return `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/**
+ * A conversation's title, from the first user text that names something: the
+ * user's own words (never the blocks before them); for a `/command`, the
+ * words its directive quotes or the command's label; for a message that
+ * only invokes a skill or an MCP prompt, `/skill` or `server: prompt`.
+ */
 export function deriveTitle(messages: UIMessage[]): string {
   for (const m of messages) {
     if (m.role !== "user") continue;
     for (const p of m.parts) {
       if (p.type !== "text") continue;
-      const text = (p as { text: string }).text
-        .replace(/<terminal-context[\s\S]*?<\/terminal-context>\s*/g, "")
-        .replace(MESSAGE_BLOCKS_RE, "")
-        .trim();
-      if (!text) continue;
-      const first = text.split("\n")[0].trim();
+      const title = textTitle((p as { text: string }).text);
+      if (!title) continue;
+      const first = title.split("\n")[0].trim();
       return first.length > 40 ? `${first.slice(0, 40)}…` : first;
     }
   }
   return "New chat";
+}
+
+function textTitle(text: string): string | null {
+  const command = TERAX_CMD_RE.exec(text);
+  const own = (command ? text.slice(command[0].length) : text)
+    .replace(/<terminal-context[\s\S]*?<\/terminal-context>\s*/g, "")
+    .replace(MESSAGE_BLOCKS_RE, "")
+    .trim();
+  if (command) return commandTitle(command[1], own);
+  if (own) return own;
+  for (const chip of messageChips(text).chips) {
+    // Names a server or a project file chose: one line however written.
+    if (chip.kind === "skill") return `/${chip.name}`.replace(/\s+/g, " ");
+    if (chip.kind === "mcp-prompt") {
+      return `${chip.server}: ${chip.name}`.replace(/\s+/g, " ");
+    }
+  }
+  return null;
 }

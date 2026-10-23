@@ -498,12 +498,18 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const sessions = get().sessions;
     const meta = sessions.find((s) => s.id === id);
     if (!meta) return;
-    const isUntitled = !meta.title || meta.title === "New chat";
+    // Earlier versions took a command's marker for the title of a
+    // conversation started with one: it gets a real title once it is open,
+    // keeping its place in the history.
+    const markerTitle = meta.title?.startsWith("<terax-command ") ?? false;
+    const isUntitled = !meta.title || meta.title === "New chat" || markerTitle;
     if (!isUntitled) return;
     const nextTitle = deriveTitle(messages);
     if (nextTitle === meta.title) return;
+    if (markerTitle && nextTitle === "New chat") return;
+    const updatedAt = markerTitle ? meta.updatedAt : Date.now();
     const next = sessions.map((s) =>
-      s.id === id ? { ...s, title: nextTitle, updatedAt: Date.now() } : s,
+      s.id === id ? { ...s, title: nextTitle, updatedAt } : s,
     );
     set({ sessions: next });
     void saveSessionsList(next);
