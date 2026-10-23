@@ -10,6 +10,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import { liveModelConfig } from "@/modules/ai/store/modelConfig";
+import type { TokenUsage } from "@/modules/ai/lib/usage";
 import {
   Cancel01Icon,
   McpServerIcon,
@@ -25,6 +26,7 @@ import {
   SAMPLING_MAX_TOKENS,
   type SamplingDraft,
   samplingDraftProblem,
+  samplingUsageNote,
   stopReasonFor,
 } from "../lib/sampling";
 import { samplingModelChoice, usableSamplingModels } from "../sampling/models";
@@ -32,7 +34,14 @@ import { samplingModelChoice, usableSamplingModels } from "../sampling/models";
 type Stage =
   | { kind: "review" }
   | { kind: "running"; model: string }
-  | { kind: "result"; text: string; finishReason: string; model: string }
+  | {
+      kind: "result";
+      text: string;
+      finishReason: string;
+      model: string;
+      usage: TokenUsage;
+      counted: boolean;
+    }
   | { kind: "failed"; error: string };
 
 const CONTEXT_NOTE: Record<"thisServer" | "allServers", string> = {
@@ -96,6 +105,8 @@ export function SamplingDialog({ request }: { request: PendingSampling }) {
     const controller = new AbortController();
     running.current = controller;
     const model = models.find((m) => m.id === modelId)?.label ?? modelId;
+    // The conversation the dialog is shown over as the user approves.
+    const conversationId = useChatStore.getState().activeSessionId;
     setStage({ kind: "running", model });
     try {
       const { runSampling } = await import("../sampling/run");
@@ -104,6 +115,7 @@ export function SamplingDialog({ request }: { request: PendingSampling }) {
         draft,
         temperature: view.temperature,
         stopSequences: view.stopSequences,
+        conversationId,
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;
@@ -112,6 +124,8 @@ export function SamplingDialog({ request }: { request: PendingSampling }) {
         text: out.text,
         finishReason: out.finishReason,
         model: out.model,
+        usage: out.usage,
+        counted: out.counted,
       });
     } catch (e) {
       if (controller.signal.aborted) return;
@@ -474,6 +488,9 @@ function ResultView({
         onChange={(e) => onChange(e.target.value)}
         className="w-full resize-y rounded-md border border-border bg-muted/40 p-2 font-mono text-[11px] leading-relaxed outline-none focus-visible:ring-1 focus-visible:ring-ring"
       />
+      <div className="text-[10.5px] text-muted-foreground">
+        {samplingUsageNote(stage.usage, stage.counted)}
+      </div>
     </section>
   );
 }

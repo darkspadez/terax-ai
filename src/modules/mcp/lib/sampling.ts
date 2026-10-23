@@ -1,4 +1,5 @@
 import type { ModelMessage } from "ai";
+import type { TokenUsage } from "@/modules/ai/lib/usage";
 import { IMAGE_TYPES, MAX_IMAGE_BASE64, MAX_RESULT_IMAGES } from "./results";
 
 /**
@@ -263,6 +264,17 @@ export function stopReasonFor(finishReason: string): string {
   if (finishReason === "stop") return "endTurn";
   if (finishReason === "length") return "maxTokens";
   return finishReason || "endTurn";
+}
+
+/**
+ * What a run used, as the dialog's result step says it, and whether the
+ * conversation's meter counted it.
+ */
+export function samplingUsageNote(usage: TokenUsage, counted: boolean): string {
+  const total = usage.inputTokens + usage.outputTokens;
+  if (total === 0) return "The model reported no token usage.";
+  const n = (value: number) => value.toLocaleString("en-US");
+  return `Used ${n(total)} ${total === 1 ? "token" : "tokens"} (${n(usage.inputTokens)} in, ${n(usage.outputTokens)} out)${counted ? ", counted in this conversation's usage" : ""}.`;
 }
 
 /** The `sampling/createMessage` result the user approved. */

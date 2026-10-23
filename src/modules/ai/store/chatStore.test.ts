@@ -50,6 +50,7 @@ vi.mock("@/modules/ai/lib/modelPrefs", () => modelPrefs);
 
 import {
   chats,
+  countConversationUsage,
   getChat,
   seedMessages,
   touchChat,
@@ -323,6 +324,29 @@ describe("agent meta and key resolution", () => {
     const meta = useChatStore.getState().agentMeta;
     expect(meta.status).toBe("idle");
     expect(meta.tokens.inputTokens).toBe(0);
+  });
+
+  it("counts usage by model for the open conversation only", () => {
+    useChatStore.setState({ activeSessionId: "s-open" });
+    useChatStore.getState().resetAgentMeta();
+    const used = { inputTokens: 10, outputTokens: 5, cachedInputTokens: 2 };
+    expect(countConversationUsage("s-open", "gpt-5.4-mini", used)).toBe(true);
+    expect(countConversationUsage("s-other", "gpt-5.4-mini", used)).toBe(false);
+    expect(countConversationUsage("s-open", "claude-haiku-4-5", used)).toBe(
+      true,
+    );
+    const meta = useChatStore.getState().agentMeta;
+    expect(meta.tokens).toEqual({
+      inputTokens: 20,
+      outputTokens: 10,
+      cachedInputTokens: 4,
+    });
+    expect([...meta.tokensByModel.keys()]).toEqual([
+      "gpt-5.4-mini",
+      "claude-haiku-4-5",
+    ]);
+    useChatStore.getState().resetAgentMeta();
+    expect(useChatStore.getState().agentMeta.tokensByModel.size).toBe(0);
   });
 
   it("getChat resolves by id or falls back to the active session", () => {

@@ -3,7 +3,12 @@ import { toast } from "sonner";
 import { create } from "zustand";
 import { DEFAULT_MODEL_ID, type ProviderId } from "../config";
 import { useTodosStore } from "./todoStore";
-import type { AgentUsage } from "../lib/agent";
+import {
+  addUsage,
+  type TokenUsage,
+  type UsageMeter,
+  ZERO_USAGE,
+} from "../lib/usage";
 import { EMPTY_PROVIDER_KEYS, type ProviderKeys, type CustomEndpointKeys } from "../lib/keyring";
 import {
   deleteSessionData,
@@ -49,17 +54,13 @@ export type AgentMeta = {
   step: string | null;
   approvalsPending: number;
   error: string | null;
-  tokens: AgentUsage;
+  tokens: TokenUsage;
+  /** The same tokens by the model that used them, for the cost. */
+  tokensByModel: UsageMeter["tokensByModel"];
   lastInputTokens: number;
   lastCachedTokens: number;
   hitStepCap: boolean;
   compactionNotice: { droppedCount: number; at: number } | null;
-};
-
-const ZERO_USAGE: AgentUsage = {
-  inputTokens: 0,
-  outputTokens: 0,
-  cachedInputTokens: 0,
 };
 
 const IDLE_META: AgentMeta = {
@@ -68,6 +69,7 @@ const IDLE_META: AgentMeta = {
   approvalsPending: 0,
   error: null,
   tokens: ZERO_USAGE,
+  tokensByModel: new Map(),
   lastInputTokens: 0,
   lastCachedTokens: 0,
   hitStepCap: false,
@@ -513,6 +515,23 @@ export function useActiveApprovalMode(): ApprovalMode {
   return useChatStore((s) =>
     sessionApprovalMode(s.sessions, s.activeSessionId),
   );
+}
+
+/**
+ * Counts what `modelId` used for a conversation in its meter. The meter is
+ * the open conversation's and starts again when another opens, so usage for
+ * any other (a run still answering after a switch) is not counted. True when
+ * it was counted.
+ */
+export function countConversationUsage(
+  sessionId: string,
+  modelId: string,
+  usage: TokenUsage,
+): boolean {
+  const state = useChatStore.getState();
+  if (state.activeSessionId !== sessionId) return false;
+  state.patchAgentMeta(addUsage(state.agentMeta, modelId, usage));
+  return true;
 }
 
 export function getChat(sessionId?: string): Chat<UIMessage> | undefined {

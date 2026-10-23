@@ -12,6 +12,7 @@ import { createContextAwareTransport } from "../lib/transport";
 import type { ToolContext } from "../tools/tools";
 import {
   chats,
+  countConversationUsage,
   seedMessages,
   sessionApprovalMode,
   touchChat,
@@ -99,17 +100,11 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     onFinishMeta: (info) => {
       useChatStore.getState().patchAgentMeta({ hitStepCap: info.hitStepCap });
     },
-    onUsage: (delta) => {
-      const cur = useChatStore.getState().agentMeta.tokens;
-      useChatStore.getState().patchAgentMeta({
-        tokens: {
-          inputTokens: cur.inputTokens + delta.inputTokens,
-          outputTokens: cur.outputTokens + delta.outputTokens,
-          cachedInputTokens: cur.cachedInputTokens + delta.cachedInputTokens,
-        },
-        lastInputTokens: delta.lastInputTokens,
-        lastCachedTokens: delta.lastCachedTokens,
-      });
+    onUsage: ({ modelId, lastInputTokens, lastCachedTokens, ...usage }) => {
+      if (!countConversationUsage(sessionId, modelId, usage)) return;
+      useChatStore
+        .getState()
+        .patchAgentMeta({ lastInputTokens, lastCachedTokens });
     },
   }) as unknown as ChatTransport<UIMessage>;
 

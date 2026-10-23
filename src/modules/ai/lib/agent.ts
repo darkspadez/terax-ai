@@ -48,6 +48,7 @@ import { opencodeSessionHeaders } from "./opencodeSession";
 import { prepareAgentPrompt } from "./prompt";
 import { type ReasoningEffort, reasoningCallOptions } from "./reasoningEffort";
 import { createProxyFetch } from "./proxyFetch";
+import { type TokenUsage, tokenUsage } from "./usage";
 
 const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
 
@@ -338,13 +339,9 @@ function buildStableSystem(
   return `${base}${memoryBlock}${skillsBlock}${mcpBlock}${personaBlock}${customBlock}`;
 }
 
-export type AgentUsage = {
-  inputTokens: number;
-  outputTokens: number;
-  cachedInputTokens: number;
-};
-
-export type AgentUsageDelta = AgentUsage & {
+export type AgentUsageDelta = TokenUsage & {
+  /** The model the step ran on, which prices it. */
+  modelId: string;
   lastInputTokens: number;
   lastCachedTokens: number;
 };
@@ -479,15 +476,12 @@ export async function runAgentStream(opts: RunAgentOptions) {
         }
       }
       if (opts.onUsage && step.usage) {
-        const u = step.usage;
-        const stepInput = u.inputTokens ?? 0;
-        const stepCached = u.inputTokenDetails?.cacheReadTokens ?? 0;
+        const usage = tokenUsage(step.usage);
         opts.onUsage({
-          inputTokens: stepInput,
-          outputTokens: u.outputTokens ?? 0,
-          cachedInputTokens: stepCached,
-          lastInputTokens: stepInput,
-          lastCachedTokens: stepCached,
+          ...usage,
+          modelId,
+          lastInputTokens: usage.inputTokens,
+          lastCachedTokens: usage.cachedInputTokens,
         });
       }
     },

@@ -9,6 +9,7 @@ import {
   samplingModelMessages,
   samplingRequestView,
   samplingResult,
+  samplingUsageNote,
   stopReasonFor,
 } from "./sampling";
 
@@ -267,5 +268,28 @@ describe("the result", () => {
       model: "gpt-5.4-mini",
       stopReason: "endTurn",
     });
+  });
+});
+
+describe("samplingUsageNote", () => {
+  const used = (input: number, output: number) => ({
+    inputTokens: input,
+    outputTokens: output,
+    cachedInputTokens: 0,
+  });
+
+  it("says how many tokens the run used and whether the conversation counted them", () => {
+    expect(samplingUsageNote(used(1200, 34), true)).toBe(
+      "Used 1,234 tokens (1,200 in, 34 out), counted in this conversation's usage.",
+    );
+    expect(samplingUsageNote(used(1, 0), false)).toBe(
+      "Used 1 token (1 in, 0 out).",
+    );
+  });
+
+  it("says so when the provider reported none", () => {
+    expect(samplingUsageNote(used(0, 0), true)).toBe(
+      "The model reported no token usage.",
+    );
   });
 });

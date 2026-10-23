@@ -204,6 +204,7 @@ describe("runAgentStream", () => {
       inputTokens: 120,
       outputTokens: 30,
       cachedInputTokens: 100,
+      modelId: "gpt-5.4-mini",
       lastInputTokens: 120,
       lastCachedTokens: 100,
     });
