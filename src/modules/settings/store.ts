@@ -182,6 +182,8 @@ export type Preferences = {
   editorDefaultIndent: EditorDefaultIndent;
   showHidden: boolean;
   explorerGitDecorations: boolean;
+  /** Which edge of the window the sidebar docks to. */
+  sidebarPosition: SidebarPosition;
   /**
    * The app's own file features (explorer, editor, previews, search,
    * watching, path completion, Open in Default App) reach every folder, not
@@ -309,6 +311,7 @@ const KEY_EDITOR_DEFAULT_INDENT = "editorDefaultIndent";
 const KEY_SHOW_HIDDEN = "showHidden";
 const LEGACY_KEY_SHOW_HIDDEN_DIRS = "showHiddenDirectories";
 const KEY_EXPLORER_GIT_DECORATIONS = "explorerGitDecorations";
+const KEY_SIDEBAR_POSITION = "sidebarPosition";
 const KEY_APP_ALL_FOLDERS = "appAllFolders";
 const KEY_AI_ALL_FOLDERS = "aiAllFolders";
 const KEY_TERMINAL_LINKS_IN_PREVIEW = "terminalLinksInPreview";
@@ -474,6 +477,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   editorDefaultIndent: "spaces2",
   showHidden: false,
   explorerGitDecorations: true,
+  sidebarPosition: "left",
   appAllFolders: false,
   aiAllFolders: false,
   terminalLinksInPreview: false,
@@ -651,6 +655,7 @@ export async function loadPreferences(): Promise<Preferences> {
     explorerGitDecorations:
       get<boolean>(KEY_EXPLORER_GIT_DECORATIONS) ??
       DEFAULT_PREFERENCES.explorerGitDecorations,
+    sidebarPosition: parseSidebarPosition(get<unknown>(KEY_SIDEBAR_POSITION)),
     // Only a stored `true` widens access; anything else is the default, off.
     appAllFolders: get<unknown>(KEY_APP_ALL_FOLDERS) === true,
     aiAllFolders: get<unknown>(KEY_AI_ALL_FOLDERS) === true,
@@ -954,6 +959,18 @@ export async function setRecentModelIds(value: string[]): Promise<void> {
 
 export async function setVimMode(value: boolean): Promise<void> {
   await writePref(KEY_VIM_MODE, value);
+}
+
+export type SidebarPosition = "left" | "right";
+
+export function parseSidebarPosition(value: unknown): SidebarPosition {
+  return value === "right" ? "right" : "left";
+}
+
+export async function setSidebarPosition(
+  value: SidebarPosition,
+): Promise<void> {
+  await writePref(KEY_SIDEBAR_POSITION, parseSidebarPosition(value));
 }
 
 export type DiffViewMode = "inline" | "split";
@@ -1281,6 +1298,7 @@ export async function onPreferencesChange(
     [KEY_EDITOR_DEFAULT_INDENT]: "editorDefaultIndent",
     [KEY_SHOW_HIDDEN]: "showHidden",
     [KEY_EXPLORER_GIT_DECORATIONS]: "explorerGitDecorations",
+    [KEY_SIDEBAR_POSITION]: "sidebarPosition",
     [KEY_APP_ALL_FOLDERS]: "appAllFolders",
     [KEY_AI_ALL_FOLDERS]: "aiAllFolders",
     [KEY_TERMINAL_LINKS_IN_PREVIEW]: "terminalLinksInPreview",

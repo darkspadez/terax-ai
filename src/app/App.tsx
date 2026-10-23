@@ -16,7 +16,7 @@ import { IS_MAC } from "@/lib/platform";
 import { cdCommandLine } from "@/lib/shellQuote";
 import { usePresence } from "@/lib/usePresence";
 import { useZoom } from "@/lib/useZoom";
-import { isMarkdownPath } from "@/lib/utils";
+import { cn, isMarkdownPath } from "@/lib/utils";
 import {
   type AgentLaunchRequest,
   AgentNotificationsBridge,
@@ -355,6 +355,8 @@ export default function App() {
   const {
     sidebarRef,
     sidebarWidthRef,
+    sidebarPosition,
+    sidebarPanelId,
     sidebarView,
     sidebarCollapsed,
     initialSidebarCollapsed,
@@ -1675,6 +1677,7 @@ export default function App() {
               onMoveToSplit={handleMoveTabIntoSplit}
               onMovePaneToNewTab={handleMovePaneToNewTab}
               onToggleSidebar={toggleSidebar}
+              sidebarPosition={sidebarPosition}
               onOpenCommandPalette={() => openCommandPalette("commands")}
               onActivateAgent={onActivateAgent}
               onActivateLocalAgent={onActivateLocalAgent}
@@ -1689,14 +1692,20 @@ export default function App() {
           <main className="zoom-content flex min-h-0 flex-1 flex-col">
             <ResizablePanelGroup
               orientation="horizontal"
-              className="min-h-0 flex-1"
+              className={cn(
+                "min-h-0 flex-1",
+                // Swapped visually, not in the DOM: nothing moves or remounts.
+                sidebarPosition === "right" &&
+                  "[&>[data-separator]]:order-1 [&>[data-sidebar-panel]]:order-2",
+              )}
               onLayoutChanged={(_, { isUserInteraction }) => {
                 const width = sidebarRef.current?.getSize().inPixels ?? 0;
                 persistSidebarWidth(width, isUserInteraction);
               }}
             >
               <ResizablePanel
-                id="sidebar"
+                id={sidebarPanelId}
+                data-sidebar-panel=""
                 panelRef={sidebarRef}
                 defaultSize={
                   initialSidebarCollapsed
@@ -1711,7 +1720,12 @@ export default function App() {
                   persistSidebarCollapsed(size.inPixels <= 0);
                 }}
               >
-                <div className="h-full min-h-0 pl-2 pr-0.5">
+                <div
+                  className={cn(
+                    "h-full min-h-0",
+                    sidebarPosition === "right" ? "pl-0.5 pr-2" : "pl-2 pr-0.5",
+                  )}
+                >
                   <div className="terax-pane flex h-full min-h-0 flex-col">
                     <div
                       key={sidebarView}
@@ -1765,7 +1779,12 @@ export default function App() {
               </ResizablePanel>
               <ResizableHandle className="w-1 rounded-full bg-transparent transition-colors duration-[var(--dur-fast)] after:w-4 hover:bg-border" />
               <ResizablePanel id="workspace" defaultSize="78%" minSize="30%">
-                <div className="h-full min-h-0 pl-0.5 pr-2">
+                <div
+                  className={cn(
+                    "h-full min-h-0",
+                    sidebarPosition === "right" ? "pl-2 pr-0.5" : "pl-0.5 pr-2",
+                  )}
+                >
                   <div className="terax-pane flex h-full min-h-0 flex-col">
                     <div className="relative min-h-0 flex-1">
                       <WorkspaceSurface

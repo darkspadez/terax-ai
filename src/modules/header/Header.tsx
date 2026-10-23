@@ -4,6 +4,7 @@ import { IS_MAC, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
 import { useWindowFrame } from "@/lib/windowFrame";
 import { NotificationBell } from "@/modules/agents";
 import type { AgentLaunchRequest } from "@/modules/agents/lib/launcher";
+import type { SidebarPosition } from "@/modules/settings/store";
 import type { Tab } from "@/modules/tabs";
 import { TabBar } from "@/modules/tabs";
 import type { SplitPosition } from "@/modules/terminal";
@@ -11,6 +12,7 @@ import {
   CommandIcon,
   Settings01Icon,
   SidebarLeftIcon,
+  SidebarRightIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -56,6 +58,7 @@ type Props = {
   onMovePaneToNewTab: (tabId: number, leafId: number) => void;
   onOverrideLanguage?: (id: number, lang: string | null) => void;
   onToggleSidebar: () => void;
+  sidebarPosition: SidebarPosition;
   onOpenCommandPalette: () => void;
   onActivateAgent: (tabId: number, leafId: number) => void;
   onActivateLocalAgent: () => void;
@@ -88,6 +91,7 @@ export function Header({
   onMovePaneToNewTab,
   onOverrideLanguage,
   onToggleSidebar,
+  sidebarPosition,
   onOpenCommandPalette,
   onActivateAgent,
   onActivateLocalAgent,
@@ -141,7 +145,13 @@ export function Header({
           size="icon-sm"
           className="shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
         >
-          <HugeiconsIcon icon={SidebarLeftIcon} size={18} strokeWidth={1.75} />
+          <HugeiconsIcon
+            icon={
+              sidebarPosition === "right" ? SidebarRightIcon : SidebarLeftIcon
+            }
+            size={18}
+            strokeWidth={1.75}
+          />
         </Button>
 
         <Button

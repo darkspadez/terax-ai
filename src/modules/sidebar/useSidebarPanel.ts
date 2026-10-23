@@ -1,3 +1,4 @@
+import { notifyTerminalAreaMoved } from "@/modules/terminal/lib/terminalAreaMoved";
 import {
   type RefObject,
   useCallback,
@@ -6,6 +7,7 @@ import {
   useState,
 } from "react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
+import { sidebarPanelId, useSidebarPosition } from "./sidebarPosition";
 import type { SidebarViewId } from "./types";
 
 const SIDEBAR_DEFAULT_WIDTH = 260;
@@ -167,6 +169,25 @@ export function useSidebarPanel(
     };
   }, []);
 
+  const sidebarPosition = useSidebarPosition();
+  const laidOutPositionRef = useRef(sidebarPosition);
+  useEffect(() => {
+    if (laidOutPositionRef.current === sidebarPosition) return;
+    laidOutPositionRef.current = sidebarPosition;
+    // The panel registered again on the other side and took whatever size the
+    // library last had for that order; put back the width and collapsed state
+    // the sidebar had, before the frame paints.
+    const frame = requestAnimationFrame(() => {
+      const panel = sidebarRef.current;
+      if (panel) {
+        if (collapsedRef.current) panel.collapse();
+        else panel.resize(`${sidebarWidthRef.current}px`);
+      }
+      notifyTerminalAreaMoved();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [sidebarPosition]);
+
   const toggleExplorerFocus = useCallback(() => {
     const explorer = explorerRef.current;
     const panel = sidebarRef.current;
@@ -202,6 +223,8 @@ export function useSidebarPanel(
   return {
     sidebarRef,
     sidebarWidthRef,
+    sidebarPosition,
+    sidebarPanelId: sidebarPanelId(sidebarPosition),
     sidebarView,
     sidebarCollapsed,
     initialSidebarCollapsed,
