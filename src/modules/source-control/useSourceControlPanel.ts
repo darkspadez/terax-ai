@@ -20,6 +20,7 @@ import {
   notifyFilesDiscarded,
   notifyHeadMoved,
 } from "@/modules/editor/lib/gitSignals";
+import { showPrivacyRefusal } from "@/modules/mac-privacy";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SourceControlSummary } from "./useSourceControl";
 
@@ -642,6 +643,10 @@ export function useSourceControlPanel(
         scheduleReconcile();
       } catch (error) {
         setActionError(normalizeError(error));
+        showPrivacyRefusal("Could not update the repository", {
+          path: repo.repoRoot,
+          error,
+        });
         cancelReconcile();
         await summary.refresh({ remote: "never" }).catch(() => {});
       } finally {
@@ -894,6 +899,7 @@ export function useSourceControlPanel(
       await summary.refresh({ remote: "never" });
     } catch (error) {
       setActionError(normalizeError(error));
+      showPrivacyRefusal("Could not commit", { path: repo.repoRoot, error });
     } finally {
       setLocalActionBusy(null);
     }

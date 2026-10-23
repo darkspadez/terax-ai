@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { toast } from "sonner";
+import { showFileError } from "@/modules/mac-privacy";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 
 /** `fs_open_default`: "cancelled" means the file runs as a program and the user said no. */
@@ -17,6 +17,10 @@ export async function openInDefaultApp(path: string): Promise<void> {
       workspace: currentWorkspaceEnv(),
     });
   } catch (e) {
-    toast.error("Could not open the file", { description: String(e) });
+    showFileError("Could not open the file", {
+      path,
+      error: e,
+      description: String(e),
+    });
   }
 }

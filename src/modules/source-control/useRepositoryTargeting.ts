@@ -1,6 +1,7 @@
 import { native } from "@/modules/ai/lib/native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { showFileError } from "@/modules/mac-privacy";
 import {
   clearRepositoryTargetForSpace,
   repositoryTargetForSpace,
@@ -65,7 +66,9 @@ export function useRepositoryTargeting({
           requestId === requestRef.current &&
           isContextCurrent(spaceId, workspaceKey)
         ) {
-          toast.error("Could not resolve Git repository", {
+          showFileError("Could not resolve Git repository", {
+            path,
+            error,
             description: String(error),
           });
         }

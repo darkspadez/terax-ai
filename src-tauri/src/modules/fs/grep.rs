@@ -11,7 +11,7 @@ use serde::Serialize;
 use tauri::{AppHandle, State};
 
 use super::supersede::Supersede;
-use super::{authorized_root, blocking, display_path, to_canon};
+use super::{authorized_root, blocking, display_path, privacy_refused_root, to_canon};
 use crate::modules::workspace::{resolve_path, Origin, WorkspaceEnv};
 
 const FILE_SIZE_CAP: u64 = 5 * 1024 * 1024;
@@ -254,6 +254,7 @@ pub async fn fs_grep_interactive(
     let ticket = supersede.begin(INTERACTIVE_KEY);
     blocking(move || {
         authorized_root(&app, &root, workspace.as_ref(), Origin::App)?;
+        privacy_refused_root(&root)?;
         run_grep_interactive(pattern, root, max_results, workspace, &|| {
             ticket.is_superseded()
         })

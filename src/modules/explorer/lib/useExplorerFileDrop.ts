@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
 import { nativeDropPoint } from "@/lib/nativeDropPoint";
+import { showFileError } from "@/modules/mac-privacy";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import {
   authorizeSources,
@@ -80,8 +80,13 @@ export function useExplorerFileDrop({
                 workspace,
               }),
             )
-            .then(reportCopyFailures)
-            .catch((err) => toast.error(`Copy failed: ${String(err)}`))
+            .then((result) => reportCopyFailures(result, dir))
+            .catch((err) =>
+              showFileError(`Copy failed: ${String(err)}`, {
+                path: dir,
+                error: err,
+              }),
+            )
             .finally(() => {
               if (
                 !disposed &&

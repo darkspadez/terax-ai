@@ -53,6 +53,7 @@ import {
   type SearchTarget,
 } from "@/modules/header";
 import { setLspNavigator } from "@/modules/lsp";
+import { useFullDiskAccessSuggestion } from "@/modules/mac-privacy";
 import {
   type PreviewPaneHandle,
   terminalLinkPreviewTarget,
@@ -389,6 +390,7 @@ export default function App() {
   const respondToApproval = useChatStore((s) => s.respondToApproval);
 
   const { hasComposer, keysLoaded } = useAiBootstrap();
+  useFullDiskAccessSuggestion();
 
   const activeTab = tabs.find((t) => t.id === activeId);
   const isTerminalTab = activeTab?.kind === "terminal";

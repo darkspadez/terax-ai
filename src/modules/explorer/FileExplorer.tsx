@@ -54,6 +54,7 @@ import {
   parentDir as parentOf,
 } from "./lib/clipboardPaste";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
+import { PrivacyRefusalNotice, usePrivacyRefusal } from "@/modules/mac-privacy";
 import { COMPACT_CONTENT, COMPACT_ITEM } from "./lib/menuItemClass";
 import { useExplorerDnd } from "./lib/useExplorerDnd";
 import { useExplorerFileDrop } from "./lib/useExplorerFileDrop";
@@ -123,6 +124,7 @@ type Row =
       depth: number;
       tone: "muted" | "error";
       message: string;
+      path?: string;
     };
 
 const ROW_HEIGHT = 24;
@@ -202,6 +204,7 @@ function buildRows(
             depth: depth + 1,
             tone: "error",
             message: child.message,
+            path,
           });
         } else if (child?.status === "loaded") {
           walk(path, depth + 1, gitignored);
@@ -240,6 +243,11 @@ export const FileExplorer = memo(
       canReplacePath,
       active: visible,
     });
+    const rootNode = rootPath ? tree.nodes[rootPath] : undefined;
+    const rootRefusal = usePrivacyRefusal(
+      rootPath,
+      rootNode?.status === "error" ? rootNode.message : null,
+    );
     const gitDecorations = usePreferencesStore((s) => s.explorerGitDecorations);
     const { lookup: lookupGitStatus } = useGitStatus(
       rootPath,
@@ -684,6 +692,7 @@ export const FileExplorer = memo(
               depth={row.depth}
               message={row.message}
               tone={row.tone}
+              path={row.path}
             />
           );
       }
@@ -850,11 +859,17 @@ export const FileExplorer = memo(
                     Loading…
                   </div>
                 )}
-                {root?.status === "error" && (
-                  <div className="px-3 py-2 text-[11px] text-destructive">
-                    {root.message}
-                  </div>
-                )}
+                {root?.status === "error" &&
+                  (rootRefusal ? (
+                    <PrivacyRefusalNotice
+                      refusal={rootRefusal}
+                      className="px-3 py-3"
+                    />
+                  ) : (
+                    <div className="px-3 py-2 text-[11px] text-destructive">
+                      {root.message}
+                    </div>
+                  ))}
                 {root?.status === "loaded" ? (
                   <div
                     style={{

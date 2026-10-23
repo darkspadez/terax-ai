@@ -523,6 +523,10 @@ pub fn run() {
             windows::app_quit_ready,
             #[cfg(target_os = "macos")]
             app_menu::app_menu_set_shortcuts,
+            #[cfg(target_os = "macos")]
+            modules::mac_privacy::mac_privacy_status,
+            #[cfg(target_os = "macos")]
+            modules::mac_privacy::mac_privacy_open_settings,
             #[cfg(feature = "bench")]
             modules::bench::bench_config,
             #[cfg(feature = "bench")]

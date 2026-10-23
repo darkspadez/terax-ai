@@ -9,6 +9,12 @@ import {
 } from "@/components/ui/command";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { FileIcon } from "@/modules/explorer/FileIcon";
+import {
+  OPEN_SETTINGS_LABEL,
+  openSettingsFor,
+  type PrivacyRefusal,
+  usePrivacyRefusal,
+} from "@/modules/mac-privacy";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   getBindingTokens,
@@ -74,6 +80,7 @@ export function CommandPalette({
     parsed.term,
     open && !inThemes && parsed.mode === "content",
   );
+  const contentRefusal = usePrivacyRefusal(workspaceRoot, content.error);
   const history = useCommandHistory(
     parsed.term,
     open && !inThemes && parsed.mode === "history",
@@ -293,6 +300,7 @@ export function CommandPalette({
                   <AsyncBody
                     loading={content.loading}
                     error={content.error}
+                    refusal={contentRefusal}
                     empty={content.results.length === 0}
                     emptyLabel="No matches"
                     onRetry={content.retry}
@@ -435,6 +443,7 @@ function ActionItem({
 function AsyncBody({
   loading,
   error,
+  refusal = null,
   empty,
   emptyLabel,
   onRetry,
@@ -442,6 +451,8 @@ function AsyncBody({
 }: {
   loading: boolean;
   error: string | null;
+  /** macOS privacy settings refused the search. */
+  refusal?: PrivacyRefusal | null;
   empty: boolean;
   emptyLabel: string;
   onRetry: () => void;
@@ -450,7 +461,16 @@ function AsyncBody({
   if (error) {
     return (
       <>
-        <StatusItem label="Search failed" tone="error" />
+        <StatusItem label={refusal?.message ?? "Search failed"} tone="error" />
+        {refusal ? (
+          <CommandItem
+            value="open-privacy-settings"
+            onSelect={() => openSettingsFor(refusal)}
+            className="text-[12.5px]"
+          >
+            <span>{OPEN_SETTINGS_LABEL}</span>
+          </CommandItem>
+        ) : null}
         <CommandItem value="retry" onSelect={onRetry} className="text-[12.5px]">
           <span>Retry</span>
         </CommandItem>

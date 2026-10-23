@@ -1,4 +1,5 @@
 import { notifyDocumentSaved } from "@/modules/lsp";
+import { dismissFileError, showFileError } from "@/modules/mac-privacy";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { workspaceEnvForPath } from "@/modules/workspace";
 import { authorizationSettled } from "@/modules/workspace/authorize";
@@ -59,13 +60,15 @@ function documentHost(
     dirty: setDirty,
     saved: (path) => {
       // A successful write supersedes any earlier failure or conflict notice.
-      toast.dismiss(`save-error:${path}`);
+      dismissFileError(`save-error:${path}`);
       toast.dismiss(`save-conflict:${path}`);
       notifyDocumentSaved(path);
     },
     saveFailed: (path, error) => {
       console.error("[save]", path, error);
-      toast.error(`Could not save ${fileName(path)}`, {
+      showFileError(`Could not save ${fileName(path)}`, {
+        path,
+        error,
         id: `save-error:${path}`,
         description: String(error),
       });

@@ -46,6 +46,19 @@ pub(crate) fn authorized_root(
         .map(drop)
 }
 
+/// A search walk skips a folder it cannot list, so a root that macOS privacy
+/// controls refuse would read as "nothing found". The interactive searches report
+/// that refusal instead, for the page to explain; elsewhere nothing changes.
+#[cfg(target_os = "macos")]
+pub(crate) fn privacy_refused_root(root: &str) -> Result<(), String> {
+    crate::modules::mac_privacy::refused(std::fs::read_dir(root))
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn privacy_refused_root(_root: &str) -> Result<(), String> {
+    Ok(())
+}
+
 /// How a path under a search root is shown to the frontend. WSL roots keep the
 /// caller's spelling so the result stays a valid path inside the distro.
 pub(crate) fn display_path(

@@ -53,6 +53,11 @@ import {
   COMPACT_ITEM,
 } from "@/modules/explorer/lib/menuItemClass";
 import { joinPath } from "@/modules/explorer/lib/useFileTree";
+import {
+  OpenPrivacySettingsButton,
+  showFileError,
+  usePrivacyRefusal,
+} from "@/modules/mac-privacy";
 import { isModChord } from "@/modules/shortcuts/lib/shortcutScope";
 import {
   AiContentGenerator02Icon,
@@ -216,6 +221,7 @@ function BranchDropdown({
   const [listing, setListing] = useState<GitBranchListResult>(EMPTY_LISTING);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const branchesRefusal = usePrivacyRefusal(repoRoot, error);
   const [checkingOut, setCheckingOut] = useState(false);
   const [worktreeDialog, setWorktreeDialog] = useState<WorktreeDialog | null>(
     null,
@@ -267,7 +273,7 @@ function BranchDropdown({
         setOpen(false);
         onRefresh();
       } catch (e) {
-        toast.error(String(e));
+        showFileError(String(e), { path: repoRoot, error: e });
       } finally {
         checkoutInFlight.current = false;
         setCheckingOut(false);
@@ -385,7 +391,13 @@ function BranchDropdown({
             </div>
           ) : error ? (
             <div className="px-3 py-3 text-[11px] leading-snug text-destructive">
-              {error}
+              {branchesRefusal?.message ?? error}
+              {branchesRefusal ? (
+                <OpenPrivacySettingsButton
+                  refusal={branchesRefusal}
+                  className="mt-2 flex"
+                />
+              ) : null}
             </div>
           ) : (
             <>
@@ -556,6 +568,10 @@ export const SourceControlPanel = memo(function SourceControlPanel({
   onOpenRepository,
 }: Props) {
   const scm = useSourceControlPanel(open, sourceControl, onOpenDiff);
+  const statusRefusal = usePrivacyRefusal(
+    scm.repo?.repoRoot ?? sourceControl.contextPath,
+    scm.statusError,
+  );
   const refreshAnimationRef = useRef<number | null>(null);
   const [refreshAnimating, setRefreshAnimating] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1006,11 +1022,24 @@ export const SourceControlPanel = memo(function SourceControlPanel({
         {panelState === "error" ? (
           <PanelCenter
             title="Source control error"
-            body={scm.statusError ?? "Unknown source control error"}
+            body={
+              statusRefusal?.message ??
+              scm.statusError ??
+              "Unknown source control error"
+            }
             action={
-              <Button size="sm" onClick={() => void scm.refresh()}>
-                Retry
-              </Button>
+              statusRefusal ? (
+                <div className="flex items-center gap-2">
+                  <OpenPrivacySettingsButton refusal={statusRefusal} />
+                  <Button size="sm" onClick={() => void scm.refresh()}>
+                    Retry
+                  </Button>
+                </div>
+              ) : (
+                <Button size="sm" onClick={() => void scm.refresh()}>
+                  Retry
+                </Button>
+              )
             }
           />
         ) : null}

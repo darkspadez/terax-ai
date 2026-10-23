@@ -9,6 +9,7 @@ import {
   onKeysChanged,
 } from "@/modules/settings/store";
 import { openInDefaultApp } from "@/modules/explorer/lib/openDefault";
+import { PrivacyRefusalNotice, usePrivacyRefusal } from "@/modules/mac-privacy";
 import { useWorkspaceAssetUrl } from "@/modules/workspace";
 import { acceptCompletion, startCompletion } from "@codemirror/autocomplete";
 import { redo, undo } from "@codemirror/commands";
@@ -653,6 +654,10 @@ export const EditorPane = memo(
         ? mediaPreviewKind(path)
         : null;
     const assetUrl = useWorkspaceAssetUrl(mediaKind ? path : null);
+    const refusal = usePrivacyRefusal(
+      path,
+      doc.status === "error" ? doc.message : null,
+    );
 
     if (doc.status === "loading") {
       return (
@@ -662,6 +667,15 @@ export const EditorPane = memo(
       );
     }
     if (doc.status === "error") {
+      if (refusal) {
+        return (
+          <PrivacyRefusalNotice
+            refusal={refusal}
+            title="Terax cannot open this file"
+            className="h-full justify-center px-6"
+          />
+        );
+      }
       return (
         <div className="flex h-full items-center justify-center px-6 text-center text-xs text-destructive">
           {doc.message}

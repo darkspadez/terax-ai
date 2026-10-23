@@ -2,6 +2,7 @@ import { MarkdownCode } from "@/components/ai-elements/markdown-code";
 import { pathKey } from "@/lib/pathKey";
 import { cn } from "@/lib/utils";
 import { listenFsChanged } from "@/modules/explorer/lib/watch";
+import { PrivacyRefusalNotice, usePrivacyRefusal } from "@/modules/mac-privacy";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { authorizationSettled } from "@/modules/workspace/authorize";
 import { invoke } from "@tauri-apps/api/core";
@@ -75,6 +76,10 @@ export function MarkdownPreviewPane({ path, visible, onSetView }: Props) {
     setShownPath(path);
     setStatus({ kind: "loading" });
   }
+  const refusal = usePrivacyRefusal(
+    path,
+    status.kind === "error" ? status.message : null,
+  );
 
   useEffect(() => {
     // Each reported change of the file reads it again.
@@ -115,11 +120,18 @@ export function MarkdownPreviewPane({ path, visible, onSetView }: Props) {
           {status.kind === "loading" && (
             <p className="text-[12px] text-muted-foreground">Loading…</p>
           )}
-          {status.kind === "error" && (
-            <p className="text-[12px] text-destructive">
-              Failed to read file: {status.message}
-            </p>
-          )}
+          {status.kind === "error" &&
+            (refusal ? (
+              <PrivacyRefusalNotice
+                refusal={refusal}
+                title="Terax cannot open this file"
+                className="items-start text-left"
+              />
+            ) : (
+              <p className="text-[12px] text-destructive">
+                Failed to read file: {status.message}
+              </p>
+            ))}
           {status.kind === "binary" && (
             <p className="text-[12px] text-muted-foreground">
               Binary file — cannot render as markdown.

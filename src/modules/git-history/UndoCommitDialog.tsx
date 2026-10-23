@@ -11,6 +11,7 @@ import {
 import { type GitLogEntry, native } from "@/modules/ai/lib/native";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { showFileError } from "@/modules/mac-privacy";
 
 type Props = {
   repoRoot: string;
@@ -63,7 +64,11 @@ export function UndoCommitDialog({
       });
       onUndone();
     } catch (e) {
-      toast.error("Could not undo the commit", { description: String(e) });
+      showFileError("Could not undo the commit", {
+        path: repoRoot,
+        error: e,
+        description: String(e),
+      });
     }
   };
 

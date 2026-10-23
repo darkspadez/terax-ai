@@ -14,6 +14,7 @@ import {
   useWorkspaceEnvStore,
   workspaceScopeKey,
 } from "@/modules/workspace";
+import { showPrivacyRefusal } from "@/modules/mac-privacy";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   executeBatchMove,
@@ -467,6 +468,10 @@ export function useFileTree(rootPath: string | null, options?: Options) {
         await fetchChildren(pendingCreate.parentPath);
       } catch (e) {
         console.error(`${cmd} failed:`, e);
+        showPrivacyRefusal(`Could not create ${trimmed}`, {
+          path: pendingCreate.parentPath,
+          error: e,
+        });
       } finally {
         setPendingCreate(null);
       }
@@ -502,6 +507,10 @@ export function useFileTree(rootPath: string | null, options?: Options) {
         if (scopeKeyRef.current === scopeKey) await fetchChildren(parent);
       } catch (e) {
         console.error("fs_rename failed:", e);
+        showPrivacyRefusal(`Could not rename ${oldName}`, {
+          path: renaming,
+          error: e,
+        });
       } finally {
         setRenaming(null);
       }
@@ -519,6 +528,10 @@ export function useFileTree(rootPath: string | null, options?: Options) {
         }
       } catch (e) {
         console.error("fs_delete failed:", e);
+        showPrivacyRefusal(`Could not delete ${path.slice(path.lastIndexOf("/") + 1)}`, {
+          path,
+          error: e,
+        });
       }
     },
     [workspace, scopeKey, fetchChildren],
