@@ -7,6 +7,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { type McpServerConfig, splitValues } from "../lib/config";
 import { AjvJsonSchemaValidator as PassThroughValidator } from "./ajvProvider";
+import { CLIENT_CAPABILITIES, handleServerRequests } from "./serverRequests";
 import { describeExit, TauriStdioTransport } from "./stdioTransport";
 
 /** The initialize handshake; a slow `npx` download counts toward it. */
@@ -31,8 +32,8 @@ function terax(): Promise<string> {
 /**
  * A connected MCP client for `server`: the transport (the native stdio host,
  * or HTTP through the backend's MCP gate), then the initialize handshake.
- * Terax offers no client capabilities yet (sampling, elicitation and roots
- * come later), so a server cannot call back into it.
+ * Terax offers sampling and form elicitation, each answered only by the user
+ * (`serverRequests.ts`); no roots.
  */
 export async function connectServer(
   server: McpServerConfig,
@@ -40,8 +41,12 @@ export async function connectServer(
 ): Promise<Connection> {
   const client = new Client(
     { name: "Terax", version: await terax() },
-    { capabilities: {}, jsonSchemaValidator: new PassThroughValidator() },
+    {
+      capabilities: CLIENT_CAPABILITIES,
+      jsonSchemaValidator: new PassThroughValidator(),
+    },
   );
+  handleServerRequests(client, server);
   const t = server.transport;
   let transport: Transport;
   let endReason: () => string | null = () => null;

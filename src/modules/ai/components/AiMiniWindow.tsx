@@ -39,6 +39,7 @@ import { useActiveApprovalMode, useChatStore } from "../store/chatStore";
 import { getOrCreateChat } from "../store/chatRuntime";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { usePlanStore } from "../store/planStore";
+import { McpElicitations } from "@/modules/mcp/components/McpElicitations";
 import { AgentSwitcher } from "./AgentSwitcher";
 import { AiChatView } from "./AiChat";
 import { PlanDiffReview } from "./PlanDiffReview";
@@ -212,6 +213,7 @@ function Body({
         )}
       </div>
 
+      <McpElicitations />
       <TodoStrip sessionId={sessionId} />
     </>
   );

@@ -38,6 +38,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: async () => "9.9.9" }));
 
+import { registerRequestHost, useMcpRequests } from "../lib/requests";
 import { connectServer } from "./connect";
 
 const encoder = new TextEncoder();
@@ -140,6 +141,52 @@ describe("connectServer over the stdio host", () => {
     const weather = await connection.client.callTool({ name: "weather" });
     expect(weather.structuredContent).toEqual({ temperature: 21 });
     await connection.close();
+  });
+
+  it("offers sampling and form elicitation, answered by the user in this window", async () => {
+    const server = demoServer();
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverSide);
+    await clientSide.start();
+    host.handlers.set("mcp_spawn", (args: Record<string, unknown>) => {
+      const channel = args.onMessage as { onmessage: (v: unknown) => void };
+      clientSide.onmessage = (message) =>
+        channel.onmessage(encoder.encode(JSON.stringify(message)).buffer);
+      return 7;
+    });
+    host.handlers.set("mcp_send", (args: { message: string }) =>
+      clientSide.send(JSON.parse(args.message) as JSONRPCMessage),
+    );
+    host.handlers.set("mcp_kill", () => undefined);
+    host.handlers.set("mcp_log_note", () => undefined);
+    const unhost = registerRequestHost();
+    try {
+      const connection = await connectServer(stdioServer(), null);
+      expect(server.server.getClientCapabilities()).toEqual({
+        sampling: {},
+        elicitation: { form: {} },
+      });
+      const asked = server.server.elicitInput({
+        message: "Name?",
+        requestedSchema: {
+          type: "object",
+          properties: { name: { type: "string" } },
+        },
+      });
+      await vi.waitFor(() =>
+        expect(useMcpRequests.getState().elicitations).toHaveLength(1),
+      );
+      useMcpRequests
+        .getState()
+        .elicitations[0].answer({ action: "accept", content: { name: "Ann" } });
+      await expect(asked).resolves.toEqual({
+        action: "accept",
+        content: { name: "Ann" },
+      });
+      await connection.close();
+    } finally {
+      unhost();
+    }
   });
 
   it("reports why a server that exits during the handshake failed", async () => {
