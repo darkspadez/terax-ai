@@ -40,14 +40,20 @@ Keys are never persisted outside the OS keychain / Linux secrets file.
 `runAgentStream` (`agent.ts`):
 
 1. Resolves the model via `buildConfiguredLanguageModel`.
-2. Builds a stable system prompt from `selectSystemPrompt(modelId)` plus optional persona, custom instructions, `TERAX.md` project memory and the "Available skills" block (see Skills).
+2. Builds a stable system prompt from `selectSystemPrompt(modelId)` plus optional persona, custom instructions, `TERAX.md` project memory (only while the user allows its current content, see Project memory) and the "Available skills" block (see Skills).
 3. Converts UI messages to model messages, prunes reasoning content if the model does not keep it, and compacts old messages if the context limit is exceeded.
 4. Streams via `streamText` with the tool set from `buildTools(ctx)`, the run's approval policy (`buildToolApproval`, see below), the chosen reasoning effort (`reasoningCallOptions`) and `stopWhen: isStepCount(MAX_AGENT_STEPS)`.
 5. Emits step labels, usage deltas, and finish metadata.
 
 The tool set is assembled in `src/modules/ai/tools/tools.ts` from the `fs`, `edit`, `search`, `shell`, `subagent`, `terminal`, `todo`, managed-agent (`agent.ts`) and `skills` builders, plus the window's MCP tools (below).
 
-`createContextAwareTransport` (`src/modules/ai/lib/transport.ts`) is the chat transport: it adds the environment block (`<env>`) to the last user message, each path as it is or, when it could start a line or end the block, as a JSON string (`pathText`), reads `TERAX.md` (capped, cached per workspace root), runs `runAgentStream` and returns `toUIMessageStream(...)` for the `Chat`.
+`createContextAwareTransport` (`src/modules/ai/lib/transport.ts`) is the chat transport: it adds the environment block (`<env>`) to the last user message, each path as it is or, when it could start a line or end the block, as a JSON string (`pathText`), asks the backend for `TERAX.md` (see Project memory), runs `runAgentStream` and returns `toUIMessageStream(...)` for the `Chat`.
+
+### Project memory
+
+A project's `TERAX.md` (at the workspace root) is an item of the shared project trust (`ItemKind::TeraxMd`, `src-tauri/src/modules/project_memory.rs`), asked about in the same prompt as the project's skills and `.mcp.json`. The prompt shows its size, line count and first lines as plain text (control, bidirectional and zero-width characters removed); a file over 32 KB, not UTF-8 text or linking out of the project is listed as not usable, and an empty one asks nothing. On every run `transport.ts` calls `project_memory_read` with the run's workspace root: the backend answers only for the calling window's open project (the root must be that project), only inside the folders the AI's file tools reach, and returns the text only when the user's decision allows the SHA-256 of exactly the bytes it read. Not allowed, declined, changed since, missing or refused: the run goes on with no project memory. Nothing is cached in the page, so allowing, revoking or a change takes effect on the next run.
+
+Terax's own writes keep the answer: `fs_write_file` (the editor's save, the AI's `write_file`, `edit` and `multi_edit` once approved or under Auto-approve, plan mode's Apply, `/init`'s write) allows the content it writes to a project's `TERAX.md` when the user allowed what the file held, or it held nothing. That is decided in the backend from the file itself, under the trust store's lock, so a decision withdrawn meanwhile holds. Any other change (git, another editor, a shell command, the explorer's rename, move or copy onto it) asks again.
 
 ### Reasoning effort
 
@@ -142,6 +148,7 @@ AI-proposed file edits open in an `ai-diff` tab. The user accepts or rejects per
 - MCP tools of an untrusted server ask in every mode; an MCP tool is never offered without its gate, and server annotations never relax one. Imported and project servers are untrusted until the user says otherwise; a project's servers run only while the user allows its `.mcp.json`.
 - A server's sampling and elicitation requests wait for the user in every mode; MCP resources and prompts reach the model only in their server-labelled blocks.
 - A project's skills reach the model only while the user trusts that content; a skill's text never changes approval.
+- A project's `TERAX.md` reaches the model only through `project_memory_read`, only while the user allows exactly the content read; only `fs_write_file` carries an allowed answer over to new content.
 
 ## See also
 

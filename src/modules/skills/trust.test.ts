@@ -4,6 +4,7 @@ import {
   acceptLabel,
   askingItems,
   isSkillsItem,
+  promptGroups,
   promptKey,
   promptTitle,
   trustDecisions,
@@ -59,5 +60,33 @@ describe("prompt wording", () => {
     expect(acceptLabel([skills, servers])).toBe("Use selected");
     expect(isSkillsItem("terax-skills")).toBe(true);
     expect(isSkillsItem("mcp-json")).toBe(false);
+  });
+
+  it("names a project's TERAX.md as its instructions, first", () => {
+    const memory = trustItem({ kind: "terax-md" });
+    const skills = trustItem();
+    const servers = trustItem({ kind: "mcp-json" });
+    expect(promptTitle([memory], "p")).toBe(
+      "Use the project instructions in p?",
+    );
+    expect(promptTitle([skills, memory], "p")).toBe(
+      "Use the project instructions and skills in p?",
+    );
+    expect(promptTitle([servers, skills, memory], "p")).toBe(
+      "Use the project instructions, skills and MCP servers in p?",
+    );
+    expect(acceptLabel([memory])).toBe("Use instructions");
+    expect(acceptLabel([memory, servers])).toBe("Use selected");
+    expect(isSkillsItem("terax-md")).toBe(false);
+    expect(promptGroups([memory])).toEqual({
+      instructions: true,
+      skills: false,
+      servers: false,
+    });
+    expect(promptGroups([skills, servers])).toEqual({
+      instructions: false,
+      skills: true,
+      servers: true,
+    });
   });
 });

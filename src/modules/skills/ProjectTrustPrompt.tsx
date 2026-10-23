@@ -9,6 +9,7 @@ import {
   acceptLabel,
   askingItems,
   isSkillsItem,
+  promptGroups,
   promptTitle,
   trustDecisions,
 } from "./trust";
@@ -27,8 +28,8 @@ function folderName(root: string): string {
 }
 
 /**
- * Asks whether to use what a project provides (its skills, its `.mcp.json`
- * servers). Not modal: work goes on around it.
+ * Asks whether to use what a project provides (its TERAX.md instructions, its
+ * skills, its `.mcp.json` servers). Not modal: work goes on around it.
  */
 export function ProjectTrustPrompt({ status, onDismiss, onDecided }: Props) {
   const asking = askingItems(status);
@@ -66,8 +67,7 @@ export function ProjectTrustPrompt({ status, onDismiss, onDecided }: Props) {
   };
 
   const several = asking.length > 1;
-  const skills = asking.some((item) => isSkillsItem(item.kind));
-  const servers = asking.some((item) => !isSkillsItem(item.kind));
+  const groups = promptGroups(asking);
   const toggle = (kind: TrustItemKind, on: boolean) =>
     setAllowed((prev) => {
       const next = new Set(prev);
@@ -112,14 +112,22 @@ export function ProjectTrustPrompt({ status, onDismiss, onDecided }: Props) {
       </div>
 
       <div className="flex flex-col gap-1.5 text-[11px] leading-relaxed text-muted-foreground">
-        {skills ? (
+        {groups.instructions ? (
+          <p>
+            TERAX.md holds the project's instructions: Terax adds them to every
+            AI run here and the AI follows them (each edit and command still
+            asks as the conversation's approval mode says). Edits made in Terax
+            keep your answer; a change from anywhere else asks again.
+          </p>
+        ) : null}
+        {groups.skills ? (
           <p>
             Skills are instructions the AI follows, and they can bundle scripts
             it runs through its shell tool (each command still asks as the
             conversation's approval mode says).
           </p>
         ) : null}
-        {servers ? (
+        {groups.servers ? (
           <p>
             MCP servers in .mcp.json are programs Terax starts with your rights,
             outside its folder limits, or remote services the AI sends data to.
@@ -208,23 +216,49 @@ function TrustItemCard({
           </span>
         ) : null}
       </div>
-      <ul className="flex flex-col gap-1">
-        {item.entries.map((entry) => (
-          <li key={entry.title} className="flex flex-col">
-            <span className="font-mono text-[11px]">{entry.title}</span>
-            {entry.detail ? (
-              <span className="line-clamp-2 text-[10.5px] text-muted-foreground">
-                {entry.detail}
-              </span>
-            ) : null}
-          </li>
-        ))}
-        {item.entries.length === 0 ? (
-          <li className="text-[10.5px] text-muted-foreground">
-            {isSkillsItem(item.kind) ? "No skills in it yet." : "No servers."}
-          </li>
-        ) : null}
-      </ul>
+      {item.kind === "terax-md" ? (
+        <MemoryPreview item={item} />
+      ) : (
+        <ItemEntries item={item} />
+      )}
     </div>
+  );
+}
+
+/** A TERAX.md's size and line count, then its first lines as plain text. */
+function MemoryPreview({ item }: { item: TrustItem }) {
+  const entry = item.entries[0];
+  if (!entry) return null;
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-[10.5px] text-muted-foreground">{entry.title}</span>
+      {entry.detail ? (
+        <pre className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-muted/40 px-2 py-1.5 font-mono text-[10.5px] leading-snug text-muted-foreground">
+          {entry.detail}
+        </pre>
+      ) : null}
+    </div>
+  );
+}
+
+function ItemEntries({ item }: { item: TrustItem }) {
+  return (
+    <ul className="flex flex-col gap-1">
+      {item.entries.map((entry) => (
+        <li key={entry.title} className="flex flex-col">
+          <span className="font-mono text-[11px]">{entry.title}</span>
+          {entry.detail ? (
+            <span className="line-clamp-2 text-[10.5px] text-muted-foreground">
+              {entry.detail}
+            </span>
+          ) : null}
+        </li>
+      ))}
+      {item.entries.length === 0 ? (
+        <li className="text-[10.5px] text-muted-foreground">
+          {isSkillsItem(item.kind) ? "No skills in it yet." : "No servers."}
+        </li>
+      ) : null}
+    </ul>
   );
 }

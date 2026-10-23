@@ -85,7 +85,7 @@ fn source_kind(kind: ItemKind) -> Option<SourceKind> {
     match kind {
         ItemKind::ClaudeSkills => Some(SourceKind::ClaudeProject),
         ItemKind::TeraxSkills => Some(SourceKind::TeraxProject),
-        ItemKind::McpJson => None,
+        ItemKind::TeraxMd | ItemKind::McpJson => None,
     }
 }
 

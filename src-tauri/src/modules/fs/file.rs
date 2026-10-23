@@ -189,7 +189,14 @@ pub async fn fs_write_file(
             .state::<WorkspaceRegistry>()
             .gates(origin.unwrap_or_default())
             .authorized_write_target(&resolve_path(&path, &workspace))?;
-        let (real, existed) = write_file_sync(&target, content.as_bytes()).map_err(|e| {
+        // Terax's own write of a project's TERAX.md keeps the user's trust in it.
+        let (real, existed) = crate::modules::project_memory::write_keeping_trust(
+            &watcher,
+            &target,
+            content.as_bytes(),
+            || write_file_sync(&target, content.as_bytes()),
+        )
+        .map_err(|e| {
             log::warn!("fs_write_file({}) failed: {e}", target.display());
             e.to_string()
         })?;

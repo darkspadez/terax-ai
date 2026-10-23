@@ -7,7 +7,7 @@ const agentMock = vi.hoisted(() => ({
 vi.mock("./agent", () => agentMock);
 
 const nativeMock = vi.hoisted(() => ({
-  readFile: vi.fn(),
+  readProjectMemory: vi.fn(),
 }));
 
 vi.mock("./native", () => ({ native: nativeMock }));
@@ -65,8 +65,8 @@ function lastUserText(messages: UIMessage[]): string {
 describe("context-aware AI transport", () => {
   beforeEach(() => {
     agentMock.runAgentStream.mockClear();
-    nativeMock.readFile.mockReset();
-    nativeMock.readFile.mockRejectedValue(new Error("missing"));
+    nativeMock.readProjectMemory.mockReset();
+    nativeMock.readProjectMemory.mockResolvedValue(null);
   });
 
   it("streams the agent run to the chat against the messages it was sent", async () => {
@@ -173,11 +173,14 @@ describe("context-aware AI transport", () => {
     expect(out).toBe(original);
   });
 
-  it("reads TERAX.md from the workspace root as project memory", async () => {
-    nativeMock.readFile.mockResolvedValue({
-      kind: "text",
-      content: "# Project rules",
-    });
+  function lastCall() {
+    return agentMock.runAgentStream.mock.calls[
+      agentMock.runAgentStream.mock.calls.length - 1
+    ][0];
+  }
+
+  it("takes project memory only from the backend's trust-checked read", async () => {
+    nativeMock.readProjectMemory.mockResolvedValue("# Project rules");
 
     await send([userMessage("hi")], {
       workspaceRoot: "/repo-read",
@@ -186,69 +189,51 @@ describe("context-aware AI transport", () => {
       terminalPrivate: false,
     });
 
-    expect(nativeMock.readFile).toHaveBeenCalledWith("/repo-read/TERAX.md");
-    const call =
-      agentMock.runAgentStream.mock.calls[
-        agentMock.runAgentStream.mock.calls.length - 1
-      ][0];
-    expect(call.projectMemory).toBe("# Project rules");
+    expect(nativeMock.readProjectMemory).toHaveBeenCalledWith("/repo-read");
+    expect(lastCall().projectMemory).toBe("# Project rules");
   });
 
-  it("caches project memory per workspace across sends", async () => {
-    nativeMock.readFile.mockResolvedValue({
-      kind: "text",
-      content: "# Rules",
-    });
+  it("asks on every run, so an answer withdrawn or a change takes effect at once", async () => {
     const live = {
-      workspaceRoot: "/repo-cache",
+      workspaceRoot: "/repo-trust",
       cwd: null,
       activeFile: null,
       terminalPrivate: false,
     };
-
+    nativeMock.readProjectMemory.mockResolvedValueOnce("# Allowed");
     await send([userMessage("a")], live);
+    expect(lastCall().projectMemory).toBe("# Allowed");
+
+    // Not allowed (never, declined, revoked) or changed since: the backend
+    // returns nothing.
+    nativeMock.readProjectMemory.mockResolvedValueOnce(null);
     await send([userMessage("b")], live);
 
-    expect(nativeMock.readFile).toHaveBeenCalledTimes(1);
+    expect(nativeMock.readProjectMemory).toHaveBeenCalledTimes(2);
+    expect(lastCall().projectMemory).toBeNull();
   });
 
-  it("caches a failed read as no memory instead of retrying", async () => {
-    nativeMock.readFile.mockRejectedValue(new Error("gone"));
-    const live = {
-      workspaceRoot: "/repo-fail",
-      cwd: null,
-      activeFile: null,
-      terminalPrivate: false,
-    };
+  it("goes on without project memory when the read fails", async () => {
+    nativeMock.readProjectMemory.mockRejectedValue(new Error("gone"));
 
-    await send([userMessage("a")], live);
-    await send([userMessage("b")], live);
-
-    expect(nativeMock.readFile).toHaveBeenCalledTimes(1);
-    const call =
-      agentMock.runAgentStream.mock.calls[
-        agentMock.runAgentStream.mock.calls.length - 1
-      ][0];
-    expect(call.projectMemory).toBeNull();
+    const transport = createContextAwareTransport(
+      makeDeps({ workspaceRoot: "/repo-fail", cwd: null }),
+    );
+    expect(await transport.sendMessages({ messages: [userMessage("a")] })).toBe(
+      "stream-ok",
+    );
+    expect(lastCall().projectMemory).toBeNull();
   });
 
-  it("truncates oversized TERAX.md content to 32 KiB", async () => {
-    nativeMock.readFile.mockResolvedValue({
-      kind: "text",
-      content: "x".repeat(40 * 1024),
-    });
-
+  it("reads no project memory without a workspace", async () => {
     await send([userMessage("hi")], {
-      workspaceRoot: "/big",
+      workspaceRoot: null,
       cwd: null,
       activeFile: null,
       terminalPrivate: false,
     });
 
-    const call =
-      agentMock.runAgentStream.mock.calls[
-        agentMock.runAgentStream.mock.calls.length - 1
-      ][0];
-    expect((call.projectMemory as string).length).toBe(32 * 1024);
+    expect(nativeMock.readProjectMemory).not.toHaveBeenCalled();
+    expect(lastCall().projectMemory).toBeNull();
   });
 });

@@ -30,9 +30,49 @@ export function trustDecisions(
   );
 }
 
-/** Whether an item holds skills (rather than a project's MCP servers). */
+/** Whether an item holds skills (rather than instructions or MCP servers). */
 export function isSkillsItem(kind: TrustItemKind): boolean {
   return kind === "claude-skills" || kind === "terax-skills";
+}
+
+/** What a project provides, as the prompt names it, in the prompt's order. */
+type ItemGroup = "instructions" | "skills" | "servers";
+
+const GROUP_ORDER: readonly ItemGroup[] = ["instructions", "skills", "servers"];
+
+const GROUP_NAME: Record<ItemGroup, string> = {
+  instructions: "project instructions",
+  skills: "skills",
+  servers: "MCP servers",
+};
+
+const GROUP_ACCEPT: Record<ItemGroup, string> = {
+  instructions: "Use instructions",
+  skills: "Use skills",
+  servers: "Use servers",
+};
+
+function itemGroup(kind: TrustItemKind): ItemGroup {
+  if (kind === "terax-md") return "instructions";
+  return isSkillsItem(kind) ? "skills" : "servers";
+}
+
+/** Which kinds of content the items provide: the prompt explains each one asked about. */
+export function promptGroups(
+  items: readonly TrustItem[],
+): Record<ItemGroup, boolean> {
+  const has = (group: ItemGroup) =>
+    items.some((item) => itemGroup(item.kind) === group);
+  return {
+    instructions: has("instructions"),
+    skills: has("skills"),
+    servers: has("servers"),
+  };
+}
+
+function listText(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
 /** The prompt's question, naming what the project provides. */
@@ -40,21 +80,15 @@ export function promptTitle(
   items: readonly TrustItem[],
   folder: string,
 ): string {
-  const skills = items.some((item) => isSkillsItem(item.kind));
-  const servers = items.some((item) => !isSkillsItem(item.kind));
-  const what =
-    skills && servers
-      ? "the skills and MCP servers"
-      : servers
-        ? "the MCP servers"
-        : "the skills";
-  return `Use ${what} in ${folder}?`;
+  const groups = promptGroups(items);
+  const names = GROUP_ORDER.filter((group) => groups[group]).map(
+    (group) => GROUP_NAME[group],
+  );
+  return `Use the ${listText(names)} in ${folder}?`;
 }
 
 /** The accept button's label. */
 export function acceptLabel(items: readonly TrustItem[]): string {
-  if (items.length > 1) return "Use selected";
-  return items.some((item) => !isSkillsItem(item.kind))
-    ? "Use servers"
-    : "Use skills";
+  if (items.length !== 1) return "Use selected";
+  return GROUP_ACCEPT[itemGroup(items[0].kind)];
 }

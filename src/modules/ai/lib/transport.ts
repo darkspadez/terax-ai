@@ -12,29 +12,19 @@ import type { ToolContext } from "../tools/tools";
 import type { ApprovalMode } from "./approvalMode";
 import type { ReasoningEffort } from "./reasoningEffort";
 
-const TERAX_MD_MAX_BYTES = 32 * 1024;
-type MemoryCacheEntry = { content: string | null; mtime: number };
-const projectMemoryCache = new Map<string, MemoryCacheEntry>();
-
-async function readTeraxMd(workspaceRoot: string | null): Promise<string | null> {
+/**
+ * The project's TERAX.md for this run. The backend reads it and returns it only
+ * while the user allows its current content (project trust), so it is asked on
+ * every run: a withdrawn answer or a changed file stops reaching the model at
+ * once. Without it the run goes on with no project memory.
+ */
+async function readTeraxMd(
+  workspaceRoot: string | null,
+): Promise<string | null> {
   if (!workspaceRoot) return null;
-  const path = `${workspaceRoot.replace(/\/$/, "")}/TERAX.md`;
-  const cached = projectMemoryCache.get(workspaceRoot);
-  if (cached && Date.now() - cached.mtime < 30_000) return cached.content;
   try {
-    const r = await native.readFile(path);
-    if (r.kind !== "text") {
-      projectMemoryCache.set(workspaceRoot, { content: null, mtime: Date.now() });
-      return null;
-    }
-    const content =
-      r.content.length > TERAX_MD_MAX_BYTES
-        ? r.content.slice(0, TERAX_MD_MAX_BYTES)
-        : r.content;
-    projectMemoryCache.set(workspaceRoot, { content, mtime: Date.now() });
-    return content;
+    return await native.readProjectMemory(workspaceRoot);
   } catch {
-    projectMemoryCache.set(workspaceRoot, { content: null, mtime: Date.now() });
     return null;
   }
 }

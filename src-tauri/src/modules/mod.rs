@@ -24,6 +24,7 @@ pub mod net;
 pub mod panics;
 pub mod primary_selection;
 pub mod proc;
+pub mod project_memory;
 pub mod project_trust;
 pub mod pty;
 pub mod quick_terminal;

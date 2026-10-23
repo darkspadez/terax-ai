@@ -208,6 +208,13 @@ export const native = {
       workspace: currentWorkspaceEnv(),
       ...AI_ORIGIN,
     }),
+  /** The window's project TERAX.md for a run in `root`, only while the user
+   *  allows its current content (`project_memory_read`); null otherwise. */
+  readProjectMemory: (root: string) =>
+    invoke<string | null>("project_memory_read", {
+      root,
+      workspace: currentWorkspaceEnv(),
+    }),
   writeFile: (path: string, content: string) =>
     invoke<void>("fs_write_file", {
       path,

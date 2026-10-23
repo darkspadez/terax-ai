@@ -523,6 +523,7 @@ pub fn run() {
             modules::project_trust::project_trust_decide,
             modules::project_trust::project_trust_list,
             modules::project_trust::project_trust_revoke,
+            modules::project_memory::project_memory_read,
             shell::shell_run_command,
             shell::shell_session_open,
             shell::shell_session_run,

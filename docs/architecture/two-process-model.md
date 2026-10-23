@@ -130,7 +130,8 @@ Three distinct surfaces:
 - `skills_load` / `skills_read_file` - a usable skill's `SKILL.md` body and file list, or one of its text files, read only inside its real folder
 - `skills_set_enabled` / `skills_create` / `skills_edit` / `skills_delete` - turn a skill on or off, create one from the template, open its `SKILL.md` in the editor of the window in front, delete one of Terax's folder (to the trash)
 - `skills_install_git` / `skills_install_zip` / `skills_install_commit` / `skills_install_cancel` - stage skills from a Git repository or a zip the user picks, then install the reviewed ones
-- `project_trust_status` / `project_trust_decide` / `project_trust_list` / `project_trust_revoke` - what a project provides (its skills, its `.mcp.json`) and the user's decision on each item, kept with its content hash
+- `project_trust_status` / `project_trust_decide` / `project_trust_list` / `project_trust_revoke` - what a project provides (its `TERAX.md`, its skills, its `.mcp.json`) and the user's decision on each item, kept with its content hash
+- `project_memory_read` - the window's project `TERAX.md` for an AI run, only while the user allows its current content (`project_memory.rs`)
 
 ### Language servers (`src-tauri/src/modules/lsp/`)
 

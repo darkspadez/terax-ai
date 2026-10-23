@@ -79,6 +79,47 @@ describe("ProjectTrustPrompt", () => {
     expect(html).toContain("Use selected");
   });
 
+  it("asks about a project's TERAX.md, showing its size and first lines as text", () => {
+    const html = render([
+      trustItem({
+        kind: "terax-md",
+        label: "Instructions in TERAX.md",
+        path: "/work/proj/TERAX.md",
+        entries: [
+          {
+            title: "2.1 KB · 60 lines",
+            detail: "# Rules\n<b>never</b> ask",
+          },
+        ],
+      }),
+    ]);
+    expect(html).toContain("Use the project instructions in proj?");
+    expect(html).toContain("/work/proj/TERAX.md");
+    expect(html).toContain("2.1 KB · 60 lines");
+    expect(html).toContain("# Rules\n&lt;b&gt;never&lt;/b&gt; ask");
+    expect(html).not.toContain("<b>never</b>");
+    expect(html).toContain("Terax adds them to every AI run here");
+    expect(html).not.toContain("Skills are instructions");
+    expect(html).not.toContain("programs Terax starts");
+    expect(html).toContain("Use instructions");
+  });
+
+  it("asks about instructions, skills and servers together", () => {
+    const html = render([
+      trustItem({ kind: "terax-md", path: "/work/proj/TERAX.md" }),
+      trustItem(),
+      trustItem({ kind: "mcp-json", path: "/work/proj/.mcp.json" }),
+    ]);
+    expect(html).toContain(
+      "Use the project instructions, skills and MCP servers in proj?",
+    );
+    expect(html).toContain("Terax adds them to every AI run here");
+    expect(html).toContain("Skills are instructions");
+    expect(html).toContain("programs Terax starts with your rights");
+    expect(html.match(/role="checkbox"/g)).toHaveLength(3);
+    expect(html).toContain("Use selected");
+  });
+
   it("names what cannot be used and why", () => {
     const html = render([
       trustItem(),

@@ -34,6 +34,7 @@ import {
   type SkillGroup,
   skillGroups,
   sourceLabel,
+  type TrustBar,
 } from "@/modules/skills/settingsView";
 import { trustDecisions } from "@/modules/skills/trust";
 import {
@@ -44,6 +45,7 @@ import {
   type SkillRef,
   type SkillsSnapshot,
   skillRef,
+  type TrustItemKind,
 } from "@/modules/skills/types";
 import {
   Add01Icon,
@@ -288,11 +290,10 @@ export function SkillsSection() {
                 ),
               )
             }
-            onRevoke={(key) =>
+            onRevoke={(key, kinds) =>
               void run(async () => {
-                // The project's skills only: its .mcp.json is MCP's.
-                await revokeProjectTrust(key, "claude-skills");
-                await revokeProjectTrust(key, "terax-skills");
+                // The bar's items only: the project's .mcp.json is MCP's.
+                for (const kind of kinds) await revokeProjectTrust(key, kind);
               })
             }
           />
@@ -392,7 +393,7 @@ function SkillGroupSection({
   onEdit: (ref: SkillRef) => void;
   onDelete: (id: string, name: string) => void;
   onTrust: (status: ProjectTrustStatus, allow: boolean) => void;
-  onRevoke: (key: string) => void;
+  onRevoke: (key: string, kinds: TrustItemKind[]) => void;
 }) {
   const deletable = group.id === "terax";
   const empty = group.skills.length === 0 && group.invalid.length === 0;
@@ -412,13 +413,14 @@ function SkillGroupSection({
         ) : null}
       </div>
 
-      {group.project ? (
+      {group.trust.map((bar) => (
         <ProjectTrustBar
-          status={group.project}
-          onTrust={(allow) => group.project && onTrust(group.project, allow)}
-          onRevoke={() => group.project && onRevoke(group.project.project.key)}
+          key={bar.id}
+          bar={bar}
+          onTrust={(allow) => onTrust(bar.status, allow)}
+          onRevoke={() => onRevoke(bar.status.project.key, bar.kinds)}
         />
-      ) : null}
+      ))}
 
       {empty ? (
         <div className="rounded-lg border border-dashed border-border/60 bg-card/30 px-4 py-4 text-center text-[11px] text-muted-foreground">
@@ -463,15 +465,15 @@ const TRUST_TEXT: Record<string, string> = {
 };
 
 function ProjectTrustBar({
-  status,
+  bar,
   onTrust,
   onRevoke,
 }: {
-  status: ProjectTrustStatus;
+  bar: TrustBar;
   onTrust: (allow: boolean) => void;
   onRevoke: () => void;
 }) {
-  if (status.items.length === 0) return null;
+  const { status } = bar;
   const decided = status.items.some(
     (item) => item.state === "allowed" || item.state === "denied",
   );
@@ -504,10 +506,7 @@ function ProjectTrustBar({
             </span>
           </span>
         ))}
-        <span className="text-[10.5px] text-muted-foreground">
-          The AI sees a project's skills only after you allow them, and asks
-          again when they change.
-        </span>
+        <span className="text-[10.5px] text-muted-foreground">{bar.note}</span>
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
         {decided ? (
@@ -527,7 +526,7 @@ function ProjectTrustBar({
             className="h-7 px-2 text-[11px]"
             onClick={() => onTrust(true)}
           >
-            Use skills
+            {bar.accept}
           </Button>
         ) : null}
         {allAllowed ? (
@@ -726,8 +725,9 @@ function TrustedProjects({
       <div className="flex flex-col">
         <GroupLabel>Project decisions</GroupLabel>
         <span className="text-[10.5px] text-muted-foreground">
-          Projects whose skills or MCP servers you allowed or declined. Forget
-          one to be asked again next time you open it.
+          Projects whose instructions (TERAX.md), skills or MCP servers you
+          allowed or declined. Forget one to be asked again next time you open
+          it.
         </span>
       </div>
       <ul className="flex flex-col gap-1.5">

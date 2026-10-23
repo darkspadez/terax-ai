@@ -1,5 +1,6 @@
 //! Project trust: content a project folder provides that Terax uses only after the user allows
-//! it (its skills, its `.mcp.json` MCP servers). A project is a workspace root a window has
+//! it (its `TERAX.md` instructions, its skills, its `.mcp.json` MCP servers). A project is a
+//! workspace root a window has
 //! open. Each kind of content is an `ItemKind`; for each project the user's decision on each item
 //! is kept with the content hash it was made for, so a change asks again. One prompt lists
 //! everything a project provides, and Settings revokes a decision.
@@ -28,13 +29,15 @@ const FILE_NAME: &str = "project-trust.json";
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]
 #[serde(rename_all = "kebab-case")]
 pub enum ItemKind {
+    TeraxMd,
     ClaudeSkills,
     TeraxSkills,
     McpJson,
 }
 
 impl ItemKind {
-    pub const ALL: [ItemKind; 3] = [
+    pub const ALL: [ItemKind; 4] = [
+        ItemKind::TeraxMd,
         ItemKind::ClaudeSkills,
         ItemKind::TeraxSkills,
         ItemKind::McpJson,
@@ -45,6 +48,7 @@ impl ItemKind {
     /// The key a decision is stored under.
     pub fn id(self) -> &'static str {
         match self {
+            ItemKind::TeraxMd => "terax-md",
             ItemKind::ClaudeSkills => "claude-skills",
             ItemKind::TeraxSkills => "terax-skills",
             ItemKind::McpJson => "mcp-json",
@@ -58,6 +62,7 @@ impl ItemKind {
     /// Where the item lives below the project root, `/`-separated.
     pub fn relative_path(self) -> &'static str {
         match self {
+            ItemKind::TeraxMd => crate::modules::project_memory::FILE,
             ItemKind::ClaudeSkills => ".claude/skills",
             ItemKind::TeraxSkills => ".terax/skills",
             ItemKind::McpJson => crate::modules::mcp::project::FILE,
@@ -66,6 +71,7 @@ impl ItemKind {
 
     pub fn label(self) -> &'static str {
         match self {
+            ItemKind::TeraxMd => "Instructions in TERAX.md",
             ItemKind::ClaudeSkills => "Skills in .claude/skills",
             ItemKind::TeraxSkills => "Skills in .terax/skills",
             ItemKind::McpJson => "MCP servers in .mcp.json",
@@ -95,6 +101,7 @@ pub struct Inspected {
 /// What `kind` holds in the project at `root` (a real path), or None when the project has none.
 pub fn inspect(root: &Path, kind: ItemKind) -> Option<Inspected> {
     match kind {
+        ItemKind::TeraxMd => crate::modules::project_memory::inspect(root),
         ItemKind::ClaudeSkills | ItemKind::TeraxSkills => {
             crate::modules::skills::inspect_project_item(root, kind)
         }
@@ -443,6 +450,61 @@ fn apply_decisions(
         );
     }
     Ok(())
+}
+
+/// Allows content Terax itself wrote over an item the user allowed with the hash `previous` (or
+/// that held nothing: `previous` None). Checked against the store as it is now, so an answer
+/// withdrawn meanwhile holds. False when nothing changed.
+fn keep_own_write(
+    file: &mut TrustFile,
+    project: &OpenProject,
+    kind: ItemKind,
+    previous: Option<&str>,
+    hash: &str,
+    at: u64,
+) -> bool {
+    if decided(file, &project.key, kind, hash) == Some(true) {
+        return false;
+    }
+    if previous.is_some_and(|previous| decided(file, &project.key, kind, previous) != Some(true)) {
+        return false;
+    }
+    let record = file.projects.entry(project.key.clone()).or_default();
+    record.display = project.root.clone();
+    record.items.insert(
+        kind.id().to_owned(),
+        Decision {
+            allowed: true,
+            hash: hash.to_owned(),
+            at,
+        },
+    );
+    true
+}
+
+/// Records that Terax's own write of `kind` (content `hash`) keeps the user's trust: see
+/// `keep_own_write`. True when it was recorded.
+pub fn allow_own_write(
+    app: &AppHandle,
+    project: &OpenProject,
+    kind: ItemKind,
+    previous: Option<&str>,
+    hash: &str,
+) -> Result<bool, String> {
+    let path = store_path(app)?;
+    let kept = with_file(app, |file| {
+        let mut next = file.clone();
+        if !keep_own_write(&mut next, project, kind, previous, hash, now_secs()) {
+            return Ok(false);
+        }
+        save(&path, &next)?;
+        *file = next;
+        Ok::<bool, String>(true)
+    })??;
+    if kept {
+        changed(app);
+    }
+    Ok(kept)
 }
 
 fn revoke_in(file: &mut TrustFile, key: &str, kind: Option<ItemKind>) -> bool {
@@ -849,6 +911,54 @@ mod tests {
     }
 
     #[test]
+    fn terax_s_own_write_keeps_only_an_answer_that_still_allows() {
+        let p = project("/p");
+        let keep = |file: &mut TrustFile, previous: Option<&str>, hash: &str, at: u64| {
+            keep_own_write(file, &p, ItemKind::TeraxMd, previous, hash, at)
+        };
+        let memory = |file: &TrustFile, hash: &str| decided(file, "/p", ItemKind::TeraxMd, hash);
+        let current = HashMap::from([(ItemKind::TeraxMd, Ok("a".to_owned()))]);
+        let mut file = TrustFile::default();
+        let allow_a = [input(ItemKind::TeraxMd, "a", true)];
+        apply_decisions(&mut file, &p, &current, &allow_a, 1).unwrap();
+        assert!(keep(&mut file, Some("a"), "b", 2));
+        assert_eq!(memory(&file, "b"), Some(true));
+        assert_eq!(memory(&file, "a"), None);
+        assert_eq!(file.projects["/p"].items["terax-md"].at, 2);
+        assert!(!keep(&mut file, Some("b"), "b", 3), "nothing changed");
+
+        // What it held before was not the content allowed (changed outside Terax since).
+        let before = file.clone();
+        assert!(!keep(&mut file, Some("x"), "c", 4));
+        assert_eq!(file, before);
+
+        // Declined, or withdrawn while the write ran: the answer holds.
+        let mut declined = TrustFile::default();
+        let decline_a = [input(ItemKind::TeraxMd, "a", false)];
+        apply_decisions(&mut declined, &p, &current, &decline_a, 1).unwrap();
+        assert!(!keep(&mut declined, Some("a"), "b", 2));
+        assert_eq!(memory(&declined, "a"), Some(false));
+        assert!(revoke_in(&mut file, "/p", Some(ItemKind::TeraxMd)));
+        assert!(!keep(&mut file, Some("b"), "c", 5));
+        assert!(file.projects.is_empty());
+
+        // A file Terax creates where there was none is allowed, whatever an older answer on
+        // other content said; the project's other items keep their answers.
+        let skills = HashMap::from([(ItemKind::ClaudeSkills, Ok("s".to_owned()))]);
+        let decline_s = [input(ItemKind::ClaudeSkills, "s", false)];
+        apply_decisions(&mut declined, &p, &skills, &decline_s, 1).unwrap();
+        assert!(keep(&mut declined, None, "new", 6));
+        assert_eq!(memory(&declined, "new"), Some(true));
+        assert_eq!(
+            decided(&declined, "/p", ItemKind::ClaudeSkills, "s"),
+            Some(false)
+        );
+        let mut empty = TrustFile::default();
+        assert!(keep(&mut empty, None, "new", 6));
+        assert_eq!(empty.projects["/p"].display, "/p");
+    }
+
+    #[test]
     fn revoking_forgets_an_item_or_the_whole_project() {
         let mut file = TrustFile::default();
         let current = HashMap::from([
@@ -893,6 +1003,8 @@ mod tests {
         assert_eq!(reread, file);
         assert!(reread.projects["/p"].items.contains_key("future-kind"));
         assert_eq!(decided(&reread, "/p", ItemKind::McpJson, "m"), Some(false));
+        assert_eq!(ItemKind::from_id("terax-md"), Some(ItemKind::TeraxMd));
+        assert_eq!(ItemKind::TeraxMd.relative_path(), "TERAX.md");
         let listed = recorded(&reread, |_| true);
         assert_eq!(listed[0].items.len(), 3);
         assert_eq!(listed[0].items[0].label, "Skills in .claude/skills");
