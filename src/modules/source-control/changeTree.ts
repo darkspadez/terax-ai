@@ -1,3 +1,5 @@
+import type { TreeNavRow } from "@/lib/treeKeyMove";
+
 type ChangedPath = { readonly key: string; readonly path: string };
 
 export type ChangeTreeRow<Entry extends ChangedPath> =
@@ -140,42 +142,27 @@ export function toggleCollapsedFolder(
   return next;
 }
 
-type TreeNavRow =
-  | {
-      readonly kind: "folder";
-      readonly key: string;
-      readonly path: string;
-      readonly collapsed: boolean;
-      readonly parentKey: string | null;
-    }
-  | {
-      readonly kind: "entry" | "file";
-      readonly key: string;
-      readonly parentKey: string | null;
-    };
-
-export type TreeKeyMove =
-  | { readonly toggle: string }
-  | { readonly focus: string }
-  | null;
-
-/**
- * What Right ("in") or Left ("out") does on the focused row, as in the
- * explorer: Right opens a closed folder, then moves into it; Left closes an
- * open folder, then moves to the folder above. `next` is the row after it.
- */
-export function treeKeyMove(
-  focused: TreeNavRow,
-  next: { readonly key: string; readonly parentKey: string | null } | undefined,
-  direction: "in" | "out",
-): TreeKeyMove {
-  if (direction === "in") {
-    if (focused.kind !== "folder") return null;
-    if (focused.collapsed) return { toggle: focused.path };
-    return next && next.parentKey === focused.key ? { focus: next.key } : null;
-  }
-  if (focused.kind === "folder" && !focused.collapsed) {
-    return { toggle: focused.path };
-  }
-  return focused.parentKey ? { focus: focused.parentKey } : null;
+/** A tree row as `treeKeyMove` reads it. */
+export function changeTreeNavRow(
+  row:
+    | {
+        readonly kind: "folder";
+        readonly key: string;
+        readonly path: string;
+        readonly collapsed: boolean;
+        readonly parentKey: string | null;
+      }
+    | {
+        readonly kind: "entry" | "file";
+        readonly key: string;
+        readonly parentKey: string | null;
+      },
+): TreeNavRow {
+  return row.kind === "folder"
+    ? {
+        key: row.key,
+        parentKey: row.parentKey,
+        branch: { id: row.path, collapsed: row.collapsed },
+      }
+    : { key: row.key, parentKey: row.parentKey };
 }

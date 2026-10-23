@@ -72,6 +72,7 @@ import {
 import {
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
+  ContentSearchView,
   SidebarRail,
   useSidebarPanel,
 } from "@/modules/sidebar";
@@ -358,6 +359,7 @@ export default function App() {
     sidebarPosition,
     sidebarPanelId,
     sidebarView,
+    sidebarViewChosen,
     sidebarCollapsed,
     initialSidebarCollapsed,
     persistSidebarView,
@@ -1752,6 +1754,12 @@ export default function App() {
                           onOpenFolder={openFolder}
                           pathDropTarget={terminalPathDropTarget}
                           visible={!sidebarCollapsed}
+                        />
+                      ) : sidebarView === "search" ? (
+                        <ContentSearchView
+                          root={explorerRoot}
+                          onOpenHit={openContentHit}
+                          autoFocus={sidebarViewChosen}
                         />
                       ) : (
                         <SourceControlPanel

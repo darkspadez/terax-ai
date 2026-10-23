@@ -3,10 +3,11 @@ import {
   type ChangeTreeRow,
   changeFolderKey,
   changeTreeRows,
+  changeTreeNavRow,
   toggleCollapsedFolder,
-  treeKeyMove,
 } from "./changeTree";
 import { parseChangeViewMode } from "./changeViewMode";
+import { treeKeyMove } from "@/lib/treeKeyMove";
 
 type Entry = { key: string; path: string };
 
@@ -162,43 +163,53 @@ describe("parseChangeViewMode", () => {
   });
 });
 
-describe("treeKeyMove", () => {
+describe("treeKeyMove on the change tree", () => {
   const rows = changeTreeRows(
     [entry("src/lib/a.ts"), entry("src/b.ts"), entry("top.ts")],
     new Set(),
   );
   const [src, lib, a, b, top] = rows;
+  const move = (
+    focused: ChangeTreeRow<Entry>,
+    next: ChangeTreeRow<Entry> | undefined,
+    direction: "in" | "out",
+  ) =>
+    treeKeyMove(
+      changeTreeNavRow(focused),
+      next && changeTreeNavRow(next),
+      direction,
+    );
 
   it("opens a closed folder on Right, then moves into it", () => {
     const closed = changeTreeRows([entry("src/b.ts")], new Set(["src"]))[0];
-    expect(treeKeyMove(closed, undefined, "in")).toEqual({ toggle: "src" });
-    expect(treeKeyMove(src, lib, "in")).toEqual({ focus: lib.key });
-    expect(treeKeyMove(lib, a, "in")).toEqual({ focus: a.key });
+    expect(move(closed, undefined, "in")).toEqual({ toggle: "src" });
+    expect(move(src, lib, "in")).toEqual({ focus: lib.key });
+    expect(move(lib, a, "in")).toEqual({ focus: a.key });
   });
 
   it("does nothing on Right for a file or an open folder with nothing under it", () => {
-    expect(treeKeyMove(a, b, "in")).toBeNull();
-    expect(treeKeyMove(top, undefined, "in")).toBeNull();
+    expect(move(a, b, "in")).toBeNull();
+    expect(move(top, undefined, "in")).toBeNull();
     // The next row belongs to another folder.
-    expect(treeKeyMove(src, top, "in")).toBeNull();
+    expect(move(src, top, "in")).toBeNull();
   });
 
   it("closes an open folder on Left, then moves to the folder above", () => {
-    expect(treeKeyMove(lib, a, "out")).toEqual({ toggle: "src/lib" });
+    expect(move(lib, a, "out")).toEqual({ toggle: "src/lib" });
     const closedLib = changeTreeRows(
       [entry("src/lib/a.ts"), entry("src/b.ts")],
       new Set(["src/lib"]),
     )[1];
-    expect(treeKeyMove(closedLib, undefined, "out")).toEqual({
+    expect(move(closedLib, undefined, "out")).toEqual({
       focus: src.key,
     });
-    expect(treeKeyMove(a, b, "out")).toEqual({ focus: lib.key });
-    expect(treeKeyMove(b, top, "out")).toEqual({ focus: src.key });
+    expect(move(a, b, "out")).toEqual({ focus: lib.key });
+    expect(move(b, top, "out")).toEqual({ focus: src.key });
   });
 
   it("stops at the top level", () => {
     const closedSrc = changeTreeRows([entry("src/b.ts")], new Set(["src"]))[0];
-    expect(treeKeyMove(closedSrc, undefined, "out")).toBeNull();
-    expect(treeKeyMove(top, undefined, "out")).toBeNull();
+    expect(move(closedSrc, undefined, "out")).toBeNull();
+    expect(move(top, undefined, "out")).toBeNull();
   });
 });

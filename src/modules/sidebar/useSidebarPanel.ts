@@ -46,7 +46,13 @@ function readSidebarWidth(): number {
 function readSidebarView(): SidebarViewId {
   try {
     const stored = window.localStorage.getItem(SIDEBAR_VIEW_STORAGE_KEY);
-    if (stored === "explorer" || stored === "source-control") return stored;
+    if (
+      stored === "explorer" ||
+      stored === "source-control" ||
+      stored === "search"
+    ) {
+      return stored;
+    }
   } catch {
     // ignore
   }
@@ -75,6 +81,9 @@ export function useSidebarPanel(
   const explorerReturnFocusRef = useRef<HTMLElement | null>(null);
   const [sidebarView, setSidebarViewState] =
     useState<SidebarViewId>(readSidebarView);
+  // A view the user picked takes focus when it opens; the one restored at
+  // launch leaves it where it is.
+  const [sidebarViewChosen, setSidebarViewChosen] = useState(false);
   const [initialSidebarCollapsed] = useState(readSidebarCollapsed);
   const collapsedRef = useRef(initialSidebarCollapsed);
   // Mirrors the panel's collapsed state for rendering: what is hidden at 0 px
@@ -85,6 +94,7 @@ export function useSidebarPanel(
 
   const persistSidebarView = useCallback((view: SidebarViewId) => {
     setSidebarViewState(view);
+    setSidebarViewChosen(true);
     try {
       window.localStorage.setItem(SIDEBAR_VIEW_STORAGE_KEY, view);
     } catch {
@@ -226,6 +236,7 @@ export function useSidebarPanel(
     sidebarPosition,
     sidebarPanelId: sidebarPanelId(sidebarPosition),
     sidebarView,
+    sidebarViewChosen,
     sidebarCollapsed,
     initialSidebarCollapsed,
     persistSidebarView,

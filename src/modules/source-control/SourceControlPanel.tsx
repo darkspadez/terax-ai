@@ -36,6 +36,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { IS_MAC } from "@/lib/platform";
+import { treeKeyMove } from "@/lib/treeKeyMove";
 import { cn } from "@/lib/utils";
 import {
   type GitBranchListResult,
@@ -96,9 +97,9 @@ import {
   type ReactNode,
 } from "react";
 import {
+  changeTreeNavRow,
   changeTreeRows,
   toggleCollapsedFolder,
-  treeKeyMove,
 } from "./changeTree";
 import { type ChangeViewMode, parseChangeViewMode } from "./changeViewMode";
 import {
@@ -875,9 +876,9 @@ export const SourceControlPanel = memo(function SourceControlPanel({
       if (!row || (row.kind !== "folder" && row.kind !== "entry")) return false;
       const next = rows[(rowKeyToIndex.get(row.key) ?? -1) + 1];
       const move = treeKeyMove(
-        row,
+        changeTreeNavRow(row),
         next && (next.kind === "folder" || next.kind === "entry")
-          ? next
+          ? changeTreeNavRow(next)
           : undefined,
         direction,
       );
