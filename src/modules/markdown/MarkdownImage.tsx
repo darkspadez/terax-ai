@@ -1,5 +1,10 @@
 import { useWorkspaceAssetUrl } from "@/modules/workspace";
-import { type ComponentProps, useEffect, useState } from "react";
+import {
+  type ComponentProps,
+  type CSSProperties,
+  useEffect,
+  useState,
+} from "react";
 import { LOCAL_IMAGE_PATH } from "./localImages";
 import { remoteImages } from "./remoteImages";
 
@@ -42,6 +47,19 @@ function useRemoteImage(url: string | null): Remote {
 }
 
 /**
+ * An HTML `height` attribute in pixels as a style: Tailwind's preflight gives
+ * every image `height: auto`, which beats the attribute that READMEs size
+ * their logos with.
+ */
+export function imageHeightStyle(height: unknown): CSSProperties | undefined {
+  const text = typeof height === "number" ? String(height) : height;
+  if (typeof text !== "string" || !/^\d+(?:\.\d+)?$/.test(text.trim())) {
+    return undefined;
+  }
+  return { height: `${Number(text)}px` };
+}
+
+/**
  * Images of the rendered Markdown preview. Files next to the document load
  * through the asset protocol (mapped for WSL); https images are fetched by
  * the backend, since the webview's CSP loads no remote images.
@@ -54,14 +72,19 @@ export function MarkdownImage({ node: _node, src, alt, ...props }: Props) {
       : null;
   const localUrl = useWorkspaceAssetUrl(localPath);
   const image = useRemoteImage(remote?.startsWith("https:") ? remote : null);
+  const style = imageHeightStyle(props.height);
 
   if (localPath !== null) {
-    return localUrl ? <img {...props} src={localUrl} alt={alt} /> : null;
+    return localUrl ? (
+      <img {...props} style={style} src={localUrl} alt={alt} />
+    ) : null;
   }
-  if (remote === null) return <img {...props} src={src} alt={alt} />;
+  if (remote === null) {
+    return <img {...props} style={style} src={src} alt={alt} />;
+  }
   if (remote.startsWith("https:") && image.status !== "failed") {
     return image.status === "ready" ? (
-      <img {...props} src={image.url} alt={alt} />
+      <img {...props} style={style} src={image.url} alt={alt} />
     ) : null;
   }
   return (
