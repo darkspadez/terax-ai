@@ -130,9 +130,18 @@ Three distinct surfaces:
 - `lsp_spawn` / `lsp_send` / `lsp_kill` - process lifecycle and the framed JSON-RPC pipe
 - `lsp_host_pid` - host process id
 
+### MCP servers (`src-tauri/src/modules/mcp/`)
+
+- `mcp_spawn` / `mcp_send` / `mcp_kill` - a local server's process and its newline-delimited JSON-RPC pipe (app windows only; secret environment values read from the keychain here)
+- `mcp_http_open` / `mcp_http_close` - a remote server's session: the one origin its requests may reach, and its configured headers (secret values read here)
+- `mcp_http_stream` / `mcp_http_cancel` / `mcp_http_ack` - one request of a session through the `net.rs` proxy, streamed like `ai_http_stream`
+- `mcp_logs` / `mcp_logs_clear` / `mcp_log_note` - the bounded log of each server (stderr and lifecycle notes)
+- `mcp_status_report` / `mcp_status_list` - what each window's client reports, for Settings (`terax://mcp-status`)
+- `mcp_secret_set` / `mcp_secret_delete` / `mcp_secret_status` - secret values of servers, written from Settings and never read back by a page
+
 ### Secrets (`src-tauri/src/modules/secrets.rs`)
 
-- `secrets_get` / `secrets_set` / `secrets_delete` / `secrets_get_all` - OS keychain access, service `terax-ai`
+- `secrets_get` / `secrets_set` / `secrets_delete` / `secrets_get_all` - OS keychain access, service `terax-ai` (they refuse the MCP service, `terax-mcp`)
 
 ### Agent hooks (`src-tauri/src/modules/agent.rs`)
 

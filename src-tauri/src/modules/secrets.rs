@@ -134,6 +134,57 @@ pub(crate) fn entry(service: &str, account: &str) -> Result<keyring_core::Entry,
         .map_err(|e| e.to_string())
 }
 
+/// Whether a page may use the `secrets_*` commands on `service`. MCP secrets
+/// (`mcp::SECRET_SERVICE`) are written through `mcp_secret_set` and read only
+/// by the backend, when it starts a server or sends a request, so no page can
+/// read them back.
+fn page_may_use_service(service: &str) -> Result<(), String> {
+    if service == crate::modules::mcp::SECRET_SERVICE {
+        return Err("secrets: this service is not readable from the page".into());
+    }
+    Ok(())
+}
+
+/// Reads secrets for the backend's own use; they never cross IPC.
+pub(crate) async fn backend_get(
+    app: AppHandle,
+    service: &'static str,
+    accounts: Vec<String>,
+) -> Result<Vec<Option<String>>, String> {
+    blocking_secret(app, move |app, state| {
+        accounts
+            .iter()
+            .map(|account| get_secret(app, state, service, account))
+            .collect()
+    })
+    .await
+}
+
+pub(crate) async fn backend_set(
+    app: AppHandle,
+    service: &'static str,
+    account: String,
+    value: String,
+) -> Result<(), String> {
+    blocking_secret(app, move |app, state| {
+        set_secret(app, state, service, &account, value)
+    })
+    .await
+}
+
+pub(crate) async fn backend_delete(
+    app: AppHandle,
+    service: &'static str,
+    accounts: Vec<String>,
+) -> Result<(), String> {
+    blocking_secret(app, move |app, state| {
+        accounts
+            .iter()
+            .try_for_each(|account| delete_secret(app, state, service, account))
+    })
+    .await
+}
+
 // The keychain and the Linux file store both block (a locked keychain can wait
 // on the user), so every command runs on the blocking pool.
 fn blocking_secret<T: Send + 'static>(
@@ -152,6 +203,7 @@ pub async fn secrets_get(
     service: String,
     account: String,
 ) -> Result<Option<String>, String> {
+    page_may_use_service(&service)?;
     blocking_secret(app, move |app, state| {
         get_secret(app, state, &service, &account)
     })
@@ -188,6 +240,7 @@ pub async fn secrets_set(
     account: String,
     password: String,
 ) -> Result<(), String> {
+    page_may_use_service(&service)?;
     blocking_secret(app, move |app, state| {
         set_secret(app, state, &service, &account, password)
     })
@@ -227,6 +280,7 @@ pub async fn secrets_delete(
     service: String,
     account: String,
 ) -> Result<(), String> {
+    page_may_use_service(&service)?;
     blocking_secret(app, move |app, state| {
         delete_secret(app, state, &service, &account)
     })
@@ -407,6 +461,7 @@ pub async fn secrets_get_all(
     service: String,
     accounts: Vec<String>,
 ) -> Result<Vec<Option<String>>, String> {
+    page_may_use_service(&service)?;
     blocking_secret(app, move |app, state| {
         get_all_secrets(app, state, &service, accounts)
     })
@@ -435,5 +490,16 @@ fn get_all_secrets(
             .into_iter()
             .map(|a| entry(service, &a).ok().and_then(|e| e.get_password().ok()))
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod page_access {
+    use super::page_may_use_service;
+
+    #[test]
+    fn pages_cannot_use_the_mcp_secret_service() {
+        assert!(page_may_use_service("terax-ai").is_ok());
+        assert!(page_may_use_service(crate::modules::mcp::SECRET_SERVICE).is_err());
     }
 }

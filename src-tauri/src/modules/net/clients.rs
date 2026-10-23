@@ -27,6 +27,9 @@ pub enum Profile {
     Ping,
     /// One bounded download; the caller follows and validates redirects.
     Fetch,
+    /// MCP over HTTP: long-lived event streams, no redirects (the client
+    /// follows only those within the server's origin, each one checked again).
+    Mcp,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -217,6 +220,12 @@ fn build_client(key: &ClientKey) -> Result<reqwest::Client, String> {
             .timeout(Duration::from_secs(20))
             .pool_idle_timeout(IDLE_TTL)
             .redirect(reqwest::redirect::Policy::none()),
+        Profile::Mcp => builder
+            .redirect(reqwest::redirect::Policy::none())
+            .pool_idle_timeout(IDLE_TTL)
+            .pool_max_idle_per_host(2)
+            .http2_initial_stream_window_size(256 * 1024)
+            .http2_initial_connection_window_size(2 * 1024 * 1024),
     };
     builder.build().map_err(|e| e.to_string())
 }
