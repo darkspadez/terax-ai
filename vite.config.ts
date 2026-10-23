@@ -61,6 +61,26 @@ function katexStylesheet(): PluginOption {
   };
 }
 
+/**
+ * The MCP SDK's client imports AJV for its default validator of structured
+ * tool output. AJV compiles schemas with `new Function`, which the CSP refuses
+ * (no `unsafe-eval`), so the SDK's AJV module resolves to a pass-through
+ * validator instead (`src/modules/mcp/runtime/ajvProvider.ts`) and AJV is
+ * not bundled. `dist-budget.test.ts` checks that it stays out.
+ */
+function mcpWithoutAjv(): PluginOption {
+  const shim = path.resolve(rootDir, "src/modules/mcp/runtime/ajvProvider.ts");
+  return {
+    name: "terax:mcp-without-ajv",
+    enforce: "pre",
+    resolveId: (source, importer) =>
+      importer?.includes("/@modelcontextprotocol/sdk/") &&
+      /(?:^|\/)validation\/ajv-provider\.js$/.test(source)
+        ? shim
+        : null,
+  };
+}
+
 // Bundle/treemap analysis is opt-in: `ANALYZE=true bun run build` emits stats.html.
 const analyze = process.env.ANALYZE === "true";
 
@@ -125,6 +145,14 @@ const AI_PROVIDER_CHUNKS: Record<string, string> = {
   "@ai-sdk/xai": "ai-xai",
 };
 
+const MCP_CLIENT_PACKAGES = new Set([
+  "@modelcontextprotocol/sdk",
+  "eventsource",
+  "eventsource-parser",
+  "pkce-challenge",
+  "zod-to-json-schema",
+]);
+
 /** Heavy features loaded on demand; each lands in its own named chunk. */
 function lazyChunk(id: string): string | null {
   const pkg = packageOf(id);
@@ -163,6 +191,8 @@ function lazyChunk(id: string): string | null {
   // overrides in package.json). Left to Rolldown it joins the streamdown
   // chunk, and the LSP client would load all of Streamdown to get it.
   if (pkg === "marked") return "marked";
+  // The MCP client and what only it uses: loaded once a server is enabled.
+  if (MCP_CLIENT_PACKAGES.has(pkg)) return "mcp-sdk";
 
   return null;
 }
@@ -176,6 +206,7 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => ({
     react({ compiler: { target: "19" } }),
     tailwindcss(),
     katexStylesheet(),
+    mcpWithoutAjv(),
     // Module-graph inspector at /__inspect (who-imports-what, per-plugin
     // transforms). Opt-in via `bun run dev:inspect`, never in a production build.
     ...(mode === "development" && inspectGraph

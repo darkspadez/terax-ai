@@ -1,8 +1,9 @@
 /**
  * Whether a conversation's gated tools wait for the user ("ask") or run
  * without asking ("auto"). Auto-approve never covers the tools that launch or
- * message coding agents and never skips a deny-list: `TOOL_GATES` in
- * `tools/tools.ts` decides what each mode covers.
+ * message coding agents, nor the tools of MCP servers the user has not
+ * trusted, and never skips a deny-list: `TOOL_GATES` and `mcpToolGate` in
+ * `tools/tools.ts` decide what each mode covers.
  */
 export type ApprovalMode = "ask" | "auto";
 
@@ -28,6 +29,6 @@ export const APPROVAL_MODE_OPTIONS: readonly {
     mode: "auto",
     label: "Auto-approve",
     description:
-      "Edits and shell commands run without asking. Launching or messaging a coding agent still asks, and blocked paths and commands stay blocked.",
+      "Edits and shell commands run without asking. Launching or messaging a coding agent still asks, as do tools of MCP servers you have not trusted, and blocked paths and commands stay blocked.",
   },
 ];

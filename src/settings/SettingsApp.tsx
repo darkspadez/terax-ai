@@ -8,6 +8,7 @@ import {
   AiScanIcon,
   InformationCircleIcon,
   KeyboardIcon,
+  McpServerIcon,
   PaintBoardIcon,
   Settings01Icon,
   SourceCodeIcon,
@@ -21,6 +22,7 @@ import { AgentsSection } from "./sections/AgentsSection";
 import { EditorSection } from "./sections/EditorSection";
 import { FolderAccessIndicator } from "./sections/FolderAccessSettings";
 import { GeneralSection } from "./sections/GeneralSection";
+import { McpTab } from "./sections/McpTab";
 import { ModelsSection } from "./sections/ModelsSection";
 import { ShortcutsSection } from "./sections/ShortcutsSection";
 import { ThemesSection } from "./sections/ThemesSection";
@@ -62,6 +64,7 @@ const TABS: {
     icon: UserMultiple02Icon,
     component: AgentsSection,
   },
+  { id: "mcp", label: "MCP", icon: McpServerIcon, component: McpTab },
   {
     id: "about",
     label: "About",
@@ -77,6 +80,7 @@ const VALID_TABS: SettingsTab[] = [
   "shortcuts",
   "models",
   "agents",
+  "mcp",
   "about",
 ];
 

@@ -49,7 +49,9 @@ import type {
   UIMessagePart,
 } from "ai";
 import { memo, useCallback, useMemo } from "react";
+import { isMcpToolName } from "@/modules/mcp";
 import { AiToolApproval } from "./AiToolApproval";
+import { McpToolApproval, McpToolCall } from "./McpTool";
 import { estimateMessageHeight } from "./messageHeightEstimate";
 
 function CommandSnippet({ name }: { name: string }) {
@@ -712,6 +714,18 @@ const RenderedTool = memo(function RenderedTool({
     part.type === "dynamic-tool"
       ? part.toolName
       : part.type.replace(/^tool-/, "");
+
+  if (isMcpToolName(toolName)) {
+    return part.state === "approval-requested" && onApproval ? (
+      <McpToolApproval
+        part={part}
+        toolName={toolName}
+        onRespond={(approved) => onApproval(part.approval.id, approved)}
+      />
+    ) : (
+      <McpToolCall part={part} toolName={toolName} />
+    );
+  }
 
   if (part.state === "approval-requested" && onApproval) {
     return (

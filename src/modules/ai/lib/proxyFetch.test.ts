@@ -212,3 +212,35 @@ describe("native AI fetch transport", () => {
     expect(calls("ai_http_cancel")).toHaveLength(count);
   });
 });
+
+describe("MCP sessions", () => {
+  it("goes through the MCP commands with the session, not the AI proxy's", async () => {
+    const { createMcpFetch } = await import("@/modules/ai/lib/proxyFetch");
+    const pending = createMcpFetch(7)("https://mcp.example.com/mcp", {
+      method: "POST",
+      body: '{"jsonrpc":"2.0"}',
+    });
+    await vi.waitFor(() =>
+      expect(
+        bridge.invoke.mock.calls.some(([c]) => c === "mcp_http_stream"),
+      ).toBe(true),
+    );
+    const [, , options] = calls("mcp_http_stream")[0] as [
+      string,
+      unknown,
+      { headers: Record<string, string> },
+    ];
+    const metadata = JSON.parse(options.headers["x-terax-mcp-request"]);
+    expect(metadata).toMatchObject({
+      session: 7,
+      url: "https://mcp.example.com/mcp",
+      method: "POST",
+    });
+    expect(metadata).not.toHaveProperty("allowPrivateNetwork");
+    expect(calls("ai_http_stream")).toEqual([]);
+    headers();
+    packet(2);
+    const response = await pending;
+    expect(await response.text()).toBe("");
+  });
+});

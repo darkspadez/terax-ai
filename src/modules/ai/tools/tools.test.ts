@@ -11,8 +11,11 @@ import {
   type ApprovalState,
   buildToolApproval,
   buildTools,
+  mcpToolGate,
+  mcpToolsWithGates,
   TOOL_APPROVAL,
   TOOL_GATES,
+  type ToolGate,
   type ToolName,
   toolApprovalStatus,
 } from "./tools";
@@ -160,5 +163,111 @@ describe("approval modes", () => {
         toolApprovalStatus(TOOL_GATES[name], { mode: "ask", planMode: false }),
       );
     }
+  });
+});
+
+const mcpTool = { description: "x" } as unknown as import("ai").Tool;
+
+describe("MCP tools", () => {
+  const status = (gate: ToolGate | undefined, state: ApprovalState) =>
+    gate === undefined ? undefined : toolApprovalStatus(gate, state);
+
+  // An MCP server is an outside program or service with no deny-list behind
+  // it: unless the user trusts it, every call asks, Auto-approve or not.
+  it("asks before every call of an untrusted server's tool, in every mode", () => {
+    const gate = mcpToolGate({ trusted: false, alwaysAllow: false });
+    for (const state of ALL_STATES) {
+      expect(status(gate, state)).toBe("user-approval");
+    }
+  });
+
+  it("lets a trusted server's tools follow the conversation's mode", () => {
+    const gate = mcpToolGate({ trusted: true, alwaysAllow: false });
+    expect(status(gate, { mode: "ask", planMode: false })).toBe(
+      "user-approval",
+    );
+    expect(status(gate, { mode: "auto", planMode: false })).toBe(
+      "not-applicable",
+    );
+    // Plan mode must not act: it keeps asking, as for shell commands.
+    expect(status(gate, { mode: "auto", planMode: true })).toBe(
+      "user-approval",
+    );
+  });
+
+  it("runs a tool the user always allows without asking, in every mode", () => {
+    for (const trusted of [false, true]) {
+      const gate = mcpToolGate({ trusted, alwaysAllow: true });
+      for (const state of ALL_STATES) {
+        expect(status(gate, state)).toBe("not-applicable");
+      }
+    }
+  });
+
+  it("gates only from the user's choices, never from what the server says", () => {
+    // Annotations ride along on the tool; the gate never reads them.
+    const annotated = {
+      trusted: false,
+      alwaysAllow: false,
+      annotations: { readOnlyHint: true, destructiveHint: false },
+    };
+    expect(mcpToolGate(annotated)).toBe("mcp");
+  });
+
+  it("offers an MCP tool only with an access entry, and gates every one offered", () => {
+    const { tools, gates } = mcpToolsWithGates({
+      tools: {
+        mcp__a__ask: mcpTool,
+        mcp__a__trusted: mcpTool,
+        mcp__a__allowed: mcpTool,
+        mcp__a__no_access: mcpTool,
+        not_mcp_name: mcpTool,
+        bash_run: mcpTool,
+      },
+      access: {
+        mcp__a__ask: { trusted: false, alwaysAllow: false },
+        mcp__a__trusted: { trusted: true, alwaysAllow: false },
+        mcp__a__allowed: { trusted: false, alwaysAllow: true },
+        not_mcp_name: { trusted: true, alwaysAllow: true },
+        bash_run: { trusted: true, alwaysAllow: true },
+      },
+      instructions: [],
+    });
+    expect(Object.keys(tools).sort()).toEqual([
+      "mcp__a__allowed",
+      "mcp__a__ask",
+      "mcp__a__trusted",
+    ]);
+    expect(gates).toEqual({
+      mcp__a__allowed: "none",
+      mcp__a__ask: "mcp",
+      mcp__a__trusted: "mcp-trusted",
+    });
+    expect(mcpToolsWithGates(null)).toEqual({ tools: {}, gates: {} });
+  });
+
+  it("adds MCP gates to a run's policy without regating built-in tools", () => {
+    let state: ApprovalState = { mode: "auto", planMode: false };
+    const policy = buildToolApproval(() => state, {
+      mcp__a__x: "mcp",
+      mcp__a__y: "mcp-trusted",
+      bash_run: "none",
+    });
+    const resolve = (name: string) => {
+      const entry = policy[name];
+      return typeof entry === "function" ? entry() : entry;
+    };
+    expect(resolve("mcp__a__x")).toBe("user-approval");
+    expect(resolve("mcp__a__y")).toBe("not-applicable");
+    expect(resolve("bash_run")).toBe("not-applicable");
+    state = { mode: "ask", planMode: false };
+    expect(resolve("bash_run")).toBe("user-approval");
+    expect(resolve("mcp__a__y")).toBe("user-approval");
+  });
+
+  it("keeps MCP tools away from sub-agents", () => {
+    expect(
+      Object.keys(TOOL_APPROVAL).filter((name) => name.startsWith("mcp__")),
+    ).toEqual([]);
   });
 });

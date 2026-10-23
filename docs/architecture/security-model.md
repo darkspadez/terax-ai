@@ -13,6 +13,7 @@ The main trust boundaries are:
 3. **Network boundary** - AI HTTP proxy in `src-tauri/src/modules/net.rs` with SSRF and DNS-rebinding defenses.
 4. **Secret-storage boundary** - keys live in the OS keychain, never on disk or in `localStorage`.
 5. **Terminal escape-sequence boundary** - OSC sequences are parsed and acted on, but never blindly trusted to mutate state.
+6. **MCP boundary** - MCP servers are programs and services the user added; their tools ask before every call unless the user trusts the server, and what they return is untrusted input (see below).
 
 ## Secret-path deny-list
 
@@ -97,6 +98,7 @@ In `src/modules/ai/tools/tools.ts`:
 - In Ask mode (the default), mutating tools (`write_file`, `edit`, `multi_edit`, `create_directory`, `bash_run`, `bash_background`) and the coding-agent tools (`spawn_coding_agent`, `send_to_agent`) are `user-approval`. The AI SDK pauses and surfaces a `tool-approval-request` part rendered as a confirmation card.
 - Auto-approve, a per-conversation opt-in shown by an always-visible composer chip, runs file and shell tools without the card. It only drops the card: `execute` still refuses protected paths and the command deny-list, plan mode keeps shell commands asking, and the coding-agent tools, which no deny-list covers, ask in every mode.
 - Plan mode queues file mutations instead; Apply re-checks each path against the deny-list where it writes.
+- MCP tools (`mcp__<server>__<tool>`) have gates of their own (`mcpToolGate`): a server the user has not marked Trusted asks before every call, in every mode, Auto-approve included; a Trusted server's tools follow the conversation's mode as shell commands do (plan mode asks); a tool set to Always allow runs unasked and one set to Never allow is never offered. `mcpToolsWithGates` offers no MCP tool without its gate, and nothing a server says about a tool (its annotations, such as `readOnlyHint`) is an input to a gate. Sub-agents never get MCP tools.
 - `edit` / `multi_edit` enforce a read-before-edit invariant: the model must have read the file earlier in the session.
 
 Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalResponses`.
@@ -116,6 +118,17 @@ The Markdown preview's remote images go through the same checks (`net/image.rs`)
 
 Formulas and diagrams in that Markdown are untrusted too. KaTeX runs with `trust` off, so `\href`, `\url`, `\includegraphics` and the `\html*` extensions render as errors, never as links or markup. Mermaid runs at its strict security level with labels as SVG text, and a diagram's own `%%{init}%%` directive or front matter cannot turn HTML labels, DOMPurify settings, theme CSS or fonts back on (`MERMAID_SECURE_KEYS`); links are removed from its output so a click never navigates the webview, and an image shape's remote URL falls to the same CSP (`src/modules/markdown/mermaidRender.ts`, `mathPlugin.ts`).
 
+## MCP servers
+
+MCP servers (`src-tauri/src/modules/mcp/`, `src/modules/mcp/`) are programs and services the user adds in Settings. Settings says so in plain words: a local server is a program running with the user's rights, outside the folder limits Terax applies to its own file features and the agent's file tools, and a remote server receives whatever the agent sends it. The protections are about Terax's part:
+
+- **Approval.** Every call of an untrusted server's tool asks, even in Auto-approve; trusting a server is an explicit switch per server, and per-tool Always allow and Never allow are explicit too (see the approval flow above). The approval card shows the server, the tool, its arguments and the server's annotations, labelled as the server's claims.
+- **Untrusted results.** A result is capped (text 50,000 characters, at most four images within size limits, anything else a note), marked as external in the transcript, and the system prompt tells the model that MCP results are data, never instructions, and never change approvals. A server's instructions are passed on as the server's words. Tool descriptions and schemas are capped.
+- **Processes.** A local server starts only from an app window, with the command the user configured, resolved through the user's shell environment; it leads its own process group (Unix) or job object (Windows), stops with its window (reload or close) and with the app, and its stderr goes to a bounded in-memory log. A message over 16 MiB stops it.
+- **Network.** A remote server is reached only through the backend (`mcp_http_stream`): every request must stay within the origin the user configured, goes through the SSRF classification and DNS pinning of `net.rs`, may reach private or loopback addresses only when the configured host itself is local or private, and is never redirected by the backend; the client follows a redirect only within that origin, as a new checked request. A server cannot make Terax fetch another host (a legacy SSE server's endpoint on another origin is refused by the client and by the backend).
+- **Secrets.** Environment variables and headers marked secret live in the keychain under the service `terax-mcp`. Settings writes them (`mcp_secret_set`, only from the settings window); the backend reads them only when it starts the server or opens its session; no page can read them back, because `secrets_get` and `secrets_get_all` refuse that service. The configuration store holds only their names.
+- **Configuration.** `terax-mcp.json` is a plain-named store in the app data folder; a damaged entry is dropped, never started. Imported and project servers (later) start disabled and untrusted.
+
 ## Secret storage
 
 API keys are stored via `secrets_*` commands (`src-tauri/src/modules/secrets.rs`):
@@ -124,7 +137,7 @@ API keys are stored via `secrets_*` commands (`src-tauri/src/modules/secrets.rs`
 - Windows: Credential Manager via `keyring`
 - Linux: a JSON file in the app's local data dir with mode `0600` (atomic write to `.tmp` then rename)
 
-Service constant: `terax-ai`. Keys never touch disk outside the keychain/Linux secrets file, never go in `localStorage`, and never appear in logs.
+Service constant: `terax-ai`. Keys never touch disk outside the keychain/Linux secrets file, never go in `localStorage`, and never appear in logs. MCP secret values use the service `terax-mcp`, which the `secrets_*` commands refuse: only the backend reads them (see MCP servers above).
 
 ## Language server docs
 
@@ -155,6 +168,7 @@ macOS privacy controls (TCC) sit below the registry: a folder the registry autho
 - New network-facing commands must go through the `net.rs` proxy or reimplement the same classification and DNS pinning.
 - New plugin APIs must be added to `src-tauri/capabilities/default.json`.
 - Keys, tokens, and credentials stay in the keychain / Linux secrets file.
+- An MCP tool is offered only with its gate; an untrusted server's tools ask in every mode, and server annotations never relax a gate. MCP requests stay within the configured server origin, and MCP secret values are read only by the backend.
 
 ## See also
 
