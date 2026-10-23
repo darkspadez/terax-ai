@@ -139,4 +139,13 @@ describe("webGlContextAttributes", () => {
       });
     }
   });
+
+  // crynta/terax-ai#556: translucent terminals need a drawing buffer with alpha.
+  it("has an alpha channel, premultiplied, only for translucent terminals", () => {
+    expect(webGlContextAttributes("mac", true)).toMatchObject({
+      alpha: true,
+      premultipliedAlpha: true,
+    });
+    expect(webGlContextAttributes("linux", false).alpha).toBe(false);
+  });
 });

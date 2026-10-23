@@ -21,6 +21,7 @@ import {
 } from "@/modules/terminal/lib/terminalScrollbackRestore";
 import { useTerminalFont } from "@/modules/terminal/lib/useTerminalFont";
 import type { TerminalSearchController } from "@/modules/terminal/search/TerminalSearchController";
+import { terminalTranslucent } from "@/modules/theme/terminalTranslucency";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { loadFeatureFamilies, useFontFeatureStack } from "../lib/fontFeatures";
@@ -143,6 +144,7 @@ function terminalThemeOptions() {
   return {
     minimumContrast: preferences.terminalMinimumContrast,
     customShader: preferences.terminalCustomShader?.source ?? null,
+    translucent: terminalTranslucent(),
   };
 }
 

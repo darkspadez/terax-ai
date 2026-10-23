@@ -525,14 +525,21 @@ describe("WebGL Kitty images", () => {
         "drawElementsInstanced",
         "drawArraysInstanced",
       ]);
-      // Premultiplied blending for images, straight alpha again for the glyphs.
+      // Premultiplied blending for images, straight alpha again for the glyphs
+      // (destination alpha accumulating as "over" does, for translucency).
       const gl = h.gl as WebGL2RenderingContext;
       const premultiplied = [gl.ONE, gl.ONE_MINUS_SRC_ALPHA];
-      expect(h.method("blendFunc").mock.calls.slice(-4)).toEqual([
+      expect(h.method("blendFunc").mock.calls.slice(-3)).toEqual([
         premultiplied,
         premultiplied,
-        [gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA],
         premultiplied,
+      ]);
+      const separate = h.method("blendFuncSeparate").mock.calls;
+      expect(separate[separate.length - 1]).toEqual([
+        gl.SRC_ALPHA,
+        gl.ONE_MINUS_SRC_ALPHA,
+        gl.ONE,
+        gl.ONE_MINUS_SRC_ALPHA,
       ]);
     } finally {
       h.renderer.dispose();

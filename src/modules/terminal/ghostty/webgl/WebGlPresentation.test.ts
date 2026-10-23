@@ -166,3 +166,105 @@ it("keeps unchanged WebGL frames idle, retains cursor buffers, and presents cach
     renderer.dispose();
   }
 });
+
+// crynta/terax-ai#556: the page paints the default background behind a
+// translucent terminal, so the canvas clears to nothing.
+it("clears a translucent terminal's canvas transparent and an opaque one to the theme", () => {
+  for (const translucent of [false, true]) {
+    const calls: unknown[][] = [];
+    const attributes: unknown[] = [];
+    const gl = new Proxy(
+      {},
+      {
+        get: (_, key: string) => {
+          if (/^[A-Z_0-9]+$/.test(key)) return 1;
+          return (...args: unknown[]) => {
+            if (key === "clearColor") calls.push(args);
+            return key === "getExtension" ? null : {};
+          };
+        },
+      },
+    );
+    vi.stubGlobal("document", {
+      createElement: () =>
+        Object.assign(new EventTarget(), {
+          width: 1,
+          height: 1,
+          style: {},
+          setAttribute() {},
+          remove() {},
+          getContext: (kind: string, options: unknown) => {
+            attributes.push(options);
+            return kind === "webgl2" ? gl : {};
+          },
+        }),
+    });
+    const renderer = new WebGlCellRenderer(translucent);
+    try {
+      renderer.configure(
+        {
+          metrics: {
+            scale: 1,
+            deviceCellWidth: 8,
+            deviceCellHeight: 16,
+            deviceBaseline: 12,
+            cellWidth: 8,
+            cellHeight: 16,
+            baseline: 12,
+            font: {
+              family: "monospace",
+              size: 14,
+              weight: "400",
+              lineHeight: 1.2,
+              letterSpacing: 0,
+            },
+          },
+          theme: {
+            background: [51, 102, 153],
+            foreground: [255, 255, 255],
+            cursor: [255, 255, 255],
+            selection: { color: [50, 50, 50], alpha: 0.5 },
+            palette: [],
+            translucent,
+          },
+          scale: 1,
+        },
+        () => {},
+        () => {},
+      );
+      renderer.resize(2, 1);
+      const model = {
+        cols: 2,
+        rows: 1,
+        cursor: () => ({ x: 0, y: 0, visible: false, blinking: false }),
+        viewportOriginLine: () => 0,
+        renderCells: () => ({
+          length: 2,
+          width: () => 1,
+          flags: () => 0,
+          codepoint: () => 0,
+          backgroundPacked: () => 0x336699,
+          foregroundPacked: () => 0xffffff,
+          underlineColorPacked: () => 0,
+          underlineStyle: () => 0,
+          overline: () => false,
+        }),
+      } as unknown as GhosttyTerminalModelApi;
+      renderer.render({
+        model,
+        damage: { kind: "full" },
+        cursorVisible: false,
+        textBlinkVisible: true,
+        selection: null,
+        searchMatchAt: () => 0,
+      });
+      expect(renderer.translucent).toBe(translucent);
+      expect(attributes[0]).toMatchObject({ alpha: translucent });
+      expect(calls[calls.length - 1]).toEqual(
+        translucent ? [0, 0, 0, 0] : [0.2, 0.4, 0.6, 1],
+      );
+    } finally {
+      renderer.dispose();
+    }
+  }
+});

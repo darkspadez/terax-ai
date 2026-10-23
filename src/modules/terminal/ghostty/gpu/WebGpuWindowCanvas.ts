@@ -59,6 +59,13 @@ export interface WindowCanvasPane {
   drawable(): boolean;
   /** Theme background; the first drawable pane's colour clears the canvas. */
   background(): Rgb;
+  /**
+   * The pane's uniform leaves the default background transparent (translucent
+   * terminals). While any drawable pane's does, the canvas is premultiplied and
+   * cleared transparent, so a pane that has not caught up with a change is
+   * drawn opaque, never on black.
+   */
+  translucent?(): boolean;
   /** Encodes the pane's draw calls; viewport and scissor already cover its rectangle. */
   encode(pass: GPURenderPassEncoder, resources: WebGpuSharedResources): void;
   /** App lab: id in the smoothness probe. */
@@ -164,6 +171,8 @@ export class WebGpuWindowCanvas {
   private appliedTransform = "";
   private generation: number;
   private device: GPUDevice;
+  private format: GPUTextureFormat;
+  private alphaMode: GPUCanvasAlphaMode = "opaque";
   private gestureActive = terminalResizeInteractionActive();
   private gestureStartInner: CssSize = windowInnerSize();
   private layoutStale = true;
@@ -206,6 +215,7 @@ export class WebGpuWindowCanvas {
     this.context = context;
     this.generation = configuration.generation;
     this.device = configuration.device;
+    this.format = configuration.format;
     this.backing = new CanvasBackingStore(canvas);
     this.observer = new ResizeObserver(() => {
       if (!this.area) return;
@@ -312,10 +322,11 @@ export class WebGpuWindowCanvas {
     this.context.configure({
       device: configuration.device,
       format: configuration.format,
-      alphaMode: "opaque",
+      alphaMode: this.alphaMode,
     });
     this.generation = configuration.generation;
     this.device = configuration.device;
+    this.format = configuration.format;
     this.reconfigurations += 1;
     this.dirty = true;
     // Reconfiguring cleared the canvas, and the panes cover it again (`handleDeviceLoss`):
@@ -397,13 +408,17 @@ export class WebGpuWindowCanvas {
     resources: WebGpuSharedResources,
   ): WindowFrameResult {
     let clear: GPUColor | null = null;
+    let translucent = false;
     const drawable: Array<[WindowCanvasPane, PaneState]> = [];
     for (const entry of this.panes) {
       if (!entry[1].rect || !entry[0].drawable()) continue;
       drawable.push(entry);
       clear ??= rgbClear(entry[0].background());
+      translucent ||= entry[0].translucent?.() === true;
     }
     if (!clear) return { drawn: 0, revealed: [] };
+    this.setAlphaMode(translucent ? "premultiplied" : "opaque");
+    if (translucent) clear = TRANSPARENT;
     const pass = encoder.beginRenderPass({
       label: "Terax terminal window pass",
       colorAttachments: [
@@ -499,6 +514,22 @@ export class WebGpuWindowCanvas {
     this.context.unconfigure();
     this.canvas.remove();
     this.area = null;
+  }
+
+  /**
+   * Opaque unless the window shows through its terminals, so the compositor can skip blending
+   * the canvas. Configuring again keeps the element and its size; it happens only when the
+   * translucency setting changes.
+   */
+  private setAlphaMode(alphaMode: GPUCanvasAlphaMode): void {
+    if (alphaMode === this.alphaMode) return;
+    this.alphaMode = alphaMode;
+    this.context.configure({
+      device: this.device,
+      format: this.format,
+      alphaMode,
+    });
+    this.reconfigurations += 1;
   }
 
   private readonly handleWindowResize = (): void => {
@@ -617,6 +648,8 @@ export class WebGpuWindowCanvas {
     }, HIDE_DELAY_MS);
   }
 }
+
+const TRANSPARENT: GPUColor = { r: 0, g: 0, b: 0, a: 0 };
 
 function rgbClear(color: Rgb): GPUColor {
   return {

@@ -1,4 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
+import {
+  setTerminalTranslucent,
+  terminalBackgroundOpacity,
+} from "./terminalTranslucency";
 
 /** Mirrors `Backdrop` in `src-tauri/src/modules/vibrancy.rs`. */
 export type Backdrop = "vibrancy" | "mica" | "none";
@@ -85,18 +89,43 @@ export function parseCssColor(value: string): Rgb | null {
   return null;
 }
 
+/**
+ * The alpha of a computed CSS colour (`rgba()`, or a `/ alpha` in `rgb()`,
+ * `color(srgb)`, `oklab()` or `oklch()`); 1 when it carries none or is not
+ * one of those.
+ */
+export function cssColorAlpha(value: string): number {
+  const match = /^([a-z-]+)\(([^)]*)\)$/i.exec(value.trim());
+  if (!match) return 1;
+  const body = match[2];
+  if (body.includes("/")) {
+    const alpha = numbers(body.split("/")[1]);
+    return alpha?.length === 1 ? clamp01(alpha[0]) : 1;
+  }
+  if (match[1].toLowerCase() === "rgba") {
+    const channels = numbers(body);
+    return channels?.length === 4 ? clamp01(channels[3]) : 1;
+  }
+  return 1;
+}
+
 export function toHex(rgb: Rgb): string {
   return `#${rgb.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
 }
 
+/** A theme colour variable as the webview computes it. */
+function readColorVariable(name: string): string {
+  const probe = document.createElement("div");
+  probe.style.cssText = `position:fixed;width:0;height:0;pointer-events:none;background-color:var(${name})`;
+  document.body.appendChild(probe);
+  const value = getComputedStyle(probe).backgroundColor;
+  probe.remove();
+  return value;
+}
+
 /** The solid colour the chrome paints the whole window with. */
 function readFrameColor(): string | null {
-  const probe = document.createElement("div");
-  probe.style.cssText =
-    "position:fixed;width:0;height:0;pointer-events:none;background-color:var(--frame)";
-  document.body.appendChild(probe);
-  const rgb = parseCssColor(getComputedStyle(probe).backgroundColor);
-  probe.remove();
+  const rgb = parseCssColor(readColorVariable("--frame"));
   return rgb ? toHex(rgb) : null;
 }
 
@@ -125,13 +154,18 @@ export function getBackdropKind(): Promise<Backdrop> {
 let applied: string | null = null;
 let queue: Promise<void> = Promise.resolve();
 
-/** Serialized: two in-flight toggles could otherwise land out of order. */
+/**
+ * Serialized: two in-flight toggles could otherwise land out of order.
+ * `terminalOpacity` is the setting; times the theme's terminal background
+ * alpha, below 1 it makes the window see-through behind the terminals.
+ */
 export function applyVibrancy(
   enabled: boolean,
   dark: boolean,
   themeId = "",
+  terminalOpacity = 1,
 ): Promise<void> {
-  queue = queue.then(() => run(enabled, dark, themeId));
+  queue = queue.then(() => run(enabled, dark, themeId, terminalOpacity));
   return queue;
 }
 
@@ -139,31 +173,46 @@ async function run(
   enabled: boolean,
   dark: boolean,
   themeId: string,
+  terminalOpacity: number,
 ): Promise<void> {
   const kind = await getBackdropKind();
   const on = enabled && kind !== "none";
   const root = document.documentElement;
+  // Theme variables are applied by a parent effect; let them settle.
+  await nextFrame();
+  const translucent =
+    terminalBackgroundOpacity(
+      cssColorAlpha(readColorVariable("--terminal-background")),
+      terminalOpacity,
+    ) < 1;
+  const seeThrough = on || translucent;
 
   const paintOpaque = () => {
     root.removeAttribute("data-vibrancy");
+    root.removeAttribute("data-terminal-translucent");
     root.style.backgroundColor = dark ? PREPAINT_BG.dark : PREPAINT_BG.light;
+    setTerminalTranslucent(false);
   };
 
-  if (on) {
-    root.setAttribute("data-vibrancy", "on");
+  if (seeThrough) {
+    if (on) root.setAttribute("data-vibrancy", "on");
+    else root.removeAttribute("data-vibrancy");
+    if (translucent) {
+      root.style.setProperty("--terminal-opacity", String(terminalOpacity));
+      root.setAttribute("data-terminal-translucent", "");
+    } else {
+      root.removeAttribute("data-terminal-translucent");
+    }
     // The pre-paint colour parked on <html> sits in front of the backdrop.
     root.style.backgroundColor = "";
+    setTerminalTranslucent(translucent);
   } else {
     paintOpaque();
   }
 
   // With no backdrop the native window is opaque and painted with the theme's
   // window colour, so a theme change must reach the native side too.
-  let background: string | undefined;
-  if (!on) {
-    await nextFrame();
-    background = readFrameColor() ?? undefined;
-  }
+  const background = seeThrough ? undefined : (readFrameColor() ?? undefined);
 
   // Mica tints its own backdrop and cannot read the webview theme, so it has
   // to be rebuilt on a mode flip; NSVisualEffectView adapts on its own.
@@ -171,11 +220,18 @@ async function run(
     ? kind === "mica"
       ? `on:${dark}`
       : "on"
-    : `off:${themeId}:${background ?? dark}`;
+    : seeThrough
+      ? "clear"
+      : `off:${themeId}:${background ?? dark}`;
   if (key === applied) return;
 
   try {
-    await invoke("window_set_backdrop", { enabled: on, dark, background });
+    await invoke("window_set_backdrop", {
+      enabled: on,
+      dark,
+      background,
+      seeThrough,
+    });
     applied = key;
   } catch {
     // Never leave the webview transparent over nothing.

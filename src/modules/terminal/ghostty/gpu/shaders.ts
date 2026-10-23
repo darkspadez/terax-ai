@@ -56,6 +56,9 @@ export const SCREEN_FLAG_SELECTION_RECTANGULAR = 8;
  * - `contrast.z` is Ghostty's minimum contrast (1 off): text below that WCAG ratio against its
  *   displayed background is drawn white or black (`minimumContrast.ts`); colour glyphs and
  *   cell-exact shapes keep their colours.
+ * - `theme_background.a` is 0 while the window shows through the terminal (translucent
+ *   terminals): the slack and cells on the default background are then transparent in every
+ *   mode, and the page paints the background behind them. It is 1 otherwise.
  * - `shade` modes (Kitty images, Ghostty's layering): 0 draws the whole pane opaque; 1 draws the
  *   cells over images placed under the backgrounds, leaving out the slack and every cell that shows
  *   the default background (Ghostty draws those transparent); 2 draws only the cursor and the
@@ -229,7 +232,7 @@ fn shade(position: vec4f, mode: u32) -> vec4f {
   let cell = pixel / screen.cell_size;
   if (cell.x >= screen.dims.x || cell.y >= screen.dims.y) {
     if (mode != 0u) { return vec4f(0.0); }
-    return vec4f(screen.theme_background.rgb, 1.0);
+    return vec4f(screen.theme_background.rgb, 1.0) * screen.theme_background.a;
   }
   let index = cell.y * screen.dims.x + cell.x;
   let record = cells[index];
@@ -251,7 +254,8 @@ fn shade(position: vec4f, mode: u32) -> vec4f {
   }
   let decoration = decoration_at(record, local, span_width, link_contains(index));
   if (decoration.a > 0.0) { return decoration; }
-  if (mode == 2u || (mode == 1u && is_default_background(background))) { return vec4f(0.0); }
+  let clear_default = mode == 1u || screen.theme_background.a < 1.0;
+  if (mode == 2u || (clear_default && is_default_background(background))) { return vec4f(0.0); }
   return vec4f(background, 1.0);
 }
 

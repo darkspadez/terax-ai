@@ -1767,7 +1767,10 @@ export default function App() {
               <ResizableHandle className="w-1 rounded-full bg-transparent transition-colors duration-[var(--dur-fast)] after:w-4 hover:bg-border" />
               <ResizablePanel id="workspace" defaultSize="78%" minSize="30%">
                 <div className="h-full min-h-0 pl-0.5 pr-2">
-                  <div className="terax-pane flex h-full min-h-0 flex-col">
+                  <div
+                    className="terax-pane flex h-full min-h-0 flex-col"
+                    data-terminal-surface={isTerminalTab ? "" : undefined}
+                  >
                     <div className="relative min-h-0 flex-1">
                       <WorkspaceSurface
                         tabs={tabs}
