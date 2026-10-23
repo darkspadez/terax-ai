@@ -24,7 +24,7 @@ export type WindowStatus = {
 export type StatusView =
   /** Off in Settings. */
   | { state: "disabled" }
-  /** On, but no window has needed it yet (it starts with the first agent run). */
+  /** On, but no window has needed it yet (an agent run or the composer starts it). */
   | { state: "idle" }
   | { state: "starting"; windows: number }
   | {

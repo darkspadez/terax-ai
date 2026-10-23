@@ -306,7 +306,7 @@ function statusText(status: StatusView, now: number): string {
     case "disabled":
       return "Off";
     case "idle":
-      return "Starts when the agent first needs tools in a window";
+      return "Starts when a window first needs it: an agent run, or the @ or / list";
     case "starting":
       return "Starting";
     case "running": {
