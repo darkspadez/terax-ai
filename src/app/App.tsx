@@ -37,6 +37,7 @@ import {
 } from "@/modules/ai";
 import { AiComposerProvider } from "@/modules/ai/lib/composer";
 import { isAiSurfaceTarget } from "@/modules/ai/lib/aiSurface";
+import { withComposerDrop } from "@/modules/ai/lib/composerDrop";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
 import { useControlBridge } from "@/modules/control";
 import {
@@ -270,6 +271,11 @@ export default function App() {
   const { zoomIn, zoomOut, zoomReset } = useZoom();
   useApplyEditorFontSize();
   const terminalPathDropTarget = useTerminalFileDrop();
+  // Explorer drags reach the AI composer first; OS drops stay the terminals'.
+  const explorerPathDropTarget = useMemo(
+    () => withComposerDrop(terminalPathDropTarget),
+    [terminalPathDropTarget],
+  );
   const explorerRef = useRef<FileExplorerHandle>(null);
 
   // Drives session disposal off the pane tree, not React lifecycles —
@@ -1759,7 +1765,7 @@ export default function App() {
                           onOpenGitHistory={handleOpenGitHistoryForPath}
                           onAttachToAgent={handleAttachFileToAgent}
                           onOpenFolder={openFolder}
-                          pathDropTarget={terminalPathDropTarget}
+                          pathDropTarget={explorerPathDropTarget}
                           visible={!sidebarCollapsed}
                         />
                       ) : (

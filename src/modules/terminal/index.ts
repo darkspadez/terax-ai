@@ -40,9 +40,6 @@ export {
 export { startWindowProgress } from "./lib/windowProgress";
 export { isTerminalSurfaceTarget } from "./lib/terminalSurfaceTarget";
 export { TerminalPromptDialog } from "./TerminalPromptDialog";
-export {
-  type TerminalPathDropTarget,
-  useTerminalFileDrop,
-} from "./lib/useTerminalFileDrop";
+export { useTerminalFileDrop } from "./lib/useTerminalFileDrop";
 export type { TerminalPaneHandle } from "./TerminalPane";
 export { TerminalStack } from "./TerminalStack";

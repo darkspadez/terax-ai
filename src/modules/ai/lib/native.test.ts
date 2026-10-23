@@ -187,9 +187,10 @@ describe("the AI tools' file and shell calls", () => {
 });
 
 describe("file and shell commands in the AI module", () => {
-  // The composer's attach and @ file list serve what the user picked: the
-  // app's own features, under the app's setting.
-  const appFeatures = ["lib/composer.tsx", "hooks/useWorkspaceFiles.ts"];
+  // Attach to Agent, an @ mention and the @ file list serve what the user
+  // picked: the app's own features, under the app's setting. (A file dropped
+  // on the composer is read through native, as the agent's.)
+  const appFeatures = ["lib/pathAttachment.ts", "hooks/useWorkspaceFiles.ts"];
 
   it("go through native, which tags them as the AI tools'", async () => {
     const { readdirSync, readFileSync, statSync } = await import("node:fs");

@@ -159,12 +159,15 @@ describe("finishExplorerDrag", () => {
       null,
       pathDropTarget,
       onMove,
+      isDir,
     );
 
+    // The target learns which paths are folders (the AI composer names them).
     expect(pathDropTarget.dropPath).toHaveBeenCalledWith(
       ["/repo/file.ts"],
       100,
       200,
+      isDir,
     );
     expect(pathDropTarget.clearTarget).toHaveBeenCalledOnce();
     expect(onMove).not.toHaveBeenCalled();

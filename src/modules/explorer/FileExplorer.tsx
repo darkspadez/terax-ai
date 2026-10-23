@@ -56,7 +56,10 @@ import {
 import { useWorkspaceEnvStore } from "@/modules/workspace";
 import { PrivacyRefusalNotice, usePrivacyRefusal } from "@/modules/mac-privacy";
 import { COMPACT_CONTENT, COMPACT_ITEM } from "./lib/menuItemClass";
-import { useExplorerDnd } from "./lib/useExplorerDnd";
+import {
+  type ExplorerPathDropTarget,
+  useExplorerDnd,
+} from "./lib/useExplorerDnd";
 import { useExplorerFileDrop } from "./lib/useExplorerFileDrop";
 import { useFileTree } from "./lib/useFileTree";
 import { useGitStatus } from "./lib/useGitStatus";
@@ -64,7 +67,6 @@ import type { GitStatusCode } from "./lib/gitStatusUtils";
 import { useGlobalShortcuts } from "@/modules/shortcuts";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
-import type { TerminalPathDropTarget } from "@/modules/terminal";
 
 export type FileExplorerHandle = {
   focus: () => void;
@@ -85,7 +87,7 @@ type Props = {
   onAttachToAgent?: (path: string) => void;
   /** Open Folder: the OS folder picker. */
   onOpenFolder?: () => void;
-  pathDropTarget?: TerminalPathDropTarget;
+  pathDropTarget?: ExplorerPathDropTarget;
   gitStatus?: GitStatusSnapshot | null;
   /**
    * The explorer is on screen (default true). It stays mounted when the sidebar

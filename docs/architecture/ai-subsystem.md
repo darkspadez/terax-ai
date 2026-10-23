@@ -73,6 +73,8 @@ Conversations are organized into sessions (`src/modules/ai/lib/sessions.ts`):
 
 `AiComposerProvider` (`src/modules/ai/lib/composer.tsx`) is a React context that holds shared input state (text, attachments, voice) for the docked input bar and any other surface. Attachments can be images, text files, or `selection` chips from the terminal or editor. Selections are wrapped as `<selection source="terminal|editor">…</selection>` blocks at submit time and are not pasted into the textarea.
 
+A file reaches the composer by path through Attach to Agent, an `@` mention or a drop from the explorer (`lib/pathAttachment.ts`), and a text attachment holds up to 200 KB however it is added. A picked file is read as when the user opens it (its folder is authorized). A dropped file is read as the agent's `read_file` reads it, through the secret-path deny-list and the backend's gates with `origin: "ai"`, and nothing is authorized, so a drop never gives the AI a file it could not read itself. A dropped folder is named in the prompt as inline code (`lib/composerDrop.ts`), never listed or read into it; the agent's own tools then reach it, or not, under the same limits.
+
 The composer derives `isBusy` from `agentMeta.status` so it can mount safely before sessions hydrate.
 
 ## Tools and approval
