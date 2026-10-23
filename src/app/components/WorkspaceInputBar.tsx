@@ -82,6 +82,7 @@ export function WorkspaceInputBar({
     if (open && effectiveMode === "ai") setAiLoaded(true);
   }, [open, effectiveMode]);
   const renderAi = hasComposer && aiLoaded;
+  const aiComposerShown = open && renderAi && effectiveMode === "ai";
 
   const switchMode = (next: "shell" | "ai") => {
     setMode(next);
@@ -130,7 +131,10 @@ export function WorkspaceInputBar({
     !hasComposer && !isBlockTab ? (
       <AiInputBarConnect onAdd={onConnect} onClose={onClose} />
     ) : (
-      <div className="shrink-0 border-t border-border/60 bg-foreground/[0.02] px-3 py-2">
+      <div
+        data-ai-composer={aiComposerShown ? "" : undefined}
+        className="shrink-0 border-t border-border/60 bg-foreground/[0.02] px-3 py-2"
+      >
         <div className="flex flex-col gap-2 rounded-lg px-1 py-1">
           <ChipsRow
             leading={terminalChips}

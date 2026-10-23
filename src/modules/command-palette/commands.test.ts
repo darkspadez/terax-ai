@@ -48,6 +48,7 @@ function baseContext(
     toggleSidebar: noop,
     toggleHiddenFiles: noop,
     toggleAi: noop,
+    newAiConversation: noop,
     askAiSelection: noop,
     openSettings: noop,
     openKeyboardShortcuts: noop,
@@ -113,6 +114,19 @@ describe("createCommandItems", () => {
     expect(item?.disabledReason).toBeUndefined();
     item?.run();
     expect(restartTerminal).toHaveBeenCalledOnce();
+  });
+
+  // crynta/terax-ai#444: a new conversation from the palette, under its shortcut.
+  it("starts a new AI conversation through the palette and its own shortcut", () => {
+    const newAiConversation = vi.fn();
+    const item = createCommandItems(baseContext({ newAiConversation })).find(
+      (i) => i.id === "ai.newConversation",
+    );
+    expect(item?.group).toBe("AI");
+    expect(item?.shortcutId).toBe("ai.newConversation");
+    expect(item?.disabledReason).toBeUndefined();
+    item?.run();
+    expect(newAiConversation).toHaveBeenCalledOnce();
   });
 
   it("disables restarting without a terminal tab", () => {

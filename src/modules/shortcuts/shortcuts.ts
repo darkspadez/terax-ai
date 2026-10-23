@@ -61,6 +61,7 @@ export type ShortcutId =
   | "view.zenMode"
   | "ai.toggle"
   | "ai.toggleMini"
+  | "ai.newConversation"
   | "ai.askSelection"
   | "agent.focusAttention"
   | "settings.open"
@@ -431,6 +432,14 @@ export function defaultShortcuts(platform: ShortcutPlatform): Shortcut[] {
       label: "Toggle AI chat window",
       group: "AI",
       defaultBindings: shiftedCommand("i"),
+    },
+    {
+      id: "ai.newConversation",
+      label: "New AI conversation",
+      group: "AI",
+      // Runs only while the AI composer or chat window has focus, so it never
+      // takes a terminal's key; Ctrl+Shift+N is New window off macOS.
+      defaultBindings: [{ [mod]: true, key: "n" }],
     },
     {
       id: "ai.askSelection",

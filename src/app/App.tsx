@@ -36,6 +36,7 @@ import {
   useSelectionAskAi,
 } from "@/modules/ai";
 import { AiComposerProvider } from "@/modules/ai/lib/composer";
+import { isAiSurfaceTarget } from "@/modules/ai/lib/aiSurface";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
 import { useControlBridge } from "@/modules/control";
 import {
@@ -591,6 +592,15 @@ export default function App() {
     }
   }, [hasComposer, panelOpen, openPanel, focusInput]);
 
+  const startNewConversation = useCallback(() => {
+    if (!hasComposer) {
+      void openSettingsWindow("models");
+      return;
+    }
+    useChatStore.getState().newSession();
+    focusInput(null);
+  }, [hasComposer, focusInput]);
+
   const attachSelection = useChatStore((s) => s.attachSelection);
 
   const handleAttachFileToAgent = useCallback(
@@ -1083,6 +1093,7 @@ export default function App() {
         }
         toggleMini();
       },
+      "ai.newConversation": startNewConversation,
       "ai.askSelection": onAskFromSelection,
       "agent.focusAttention": () => {
         const t = nextAttentionTarget();
@@ -1131,6 +1142,7 @@ export default function App() {
       panelOpen,
       togglePanelAndFocus,
       toggleMini,
+      startNewConversation,
       onAskFromSelection,
       toggleSidebar,
       toggleExplorerFocus,
@@ -1166,6 +1178,13 @@ export default function App() {
         id === "editor.codeComplete"
       ) {
         return activeTab?.kind !== "editor";
+      }
+      if (id === "ai.newConversation") {
+        // Only where the AI composer or chat window has focus; anywhere else
+        // (a terminal's Ctrl+N) the key passes through.
+        return !isAiSurfaceTarget(
+          (e.target as HTMLElement | null) ?? document.activeElement,
+        );
       }
       if (id === "ai.askSelection") {
         const target =
@@ -1483,6 +1502,7 @@ export default function App() {
             toggleSidebar,
             toggleHiddenFiles,
             toggleAi: togglePanelAndFocus,
+            newAiConversation: startNewConversation,
             askAiSelection: askFromSelection,
             openSettings: () => void openSettingsWindow(),
             openKeyboardShortcuts: () => void openSettingsWindow("shortcuts"),
@@ -1515,6 +1535,7 @@ export default function App() {
       toggleSidebar,
       toggleHiddenFiles,
       togglePanelAndFocus,
+      startNewConversation,
       askFromSelection,
       activeSpaceId,
       handleNewSpace,
