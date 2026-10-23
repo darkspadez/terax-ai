@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { AGENT_ICONS } from "@/modules/ai/components/AgentSwitcher";
@@ -40,6 +41,7 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   setAiApprovalMode,
   setCustomInstructions,
+  setSelectionAskAi,
 } from "@/modules/settings/store";
 import {
   Add01Icon,
@@ -65,6 +67,7 @@ const ICON_OPTIONS: AgentIconId[] = [
 export function AgentsSection() {
   const customInstructions = usePreferencesStore((s) => s.customInstructions);
   const approvalMode = usePreferencesStore((s) => s.aiApprovalMode);
+  const selectionAskAi = usePreferencesStore((s) => s.selectionAskAi);
   const customAgents = useAgentsStore((s) => s.customAgents);
   const activeAgentId = useAgentsStore((s) => s.activeId);
   const setActiveAgentId = useAgentsStore((s) => s.setActiveId);
@@ -117,6 +120,19 @@ export function AgentsSection() {
               ))}
             </SelectContent>
           </Select>
+        </SettingRow>
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <Label>Selections</Label>
+        <SettingRow
+          title="Ask Terax on selected text"
+          description="Show an Ask Terax button when you select text in a terminal or the editor. The Ask AI about selection shortcut works either way."
+        >
+          <Switch
+            checked={selectionAskAi}
+            onCheckedChange={(v) => void setSelectionAskAi(v)}
+          />
         </SettingRow>
       </section>
 

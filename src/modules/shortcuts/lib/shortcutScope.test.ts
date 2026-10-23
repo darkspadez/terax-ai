@@ -88,7 +88,8 @@ describe("shouldDeferShortcutToTerminal", () => {
   });
 
   // Every app shortcut works from a focused terminal through its first
-  // binding; editor shortcuts only run in editor tabs.
+  // binding; editor shortcuts only run in editor tabs, and a new AI
+  // conversation only in the AI composer and chat window.
   it.each(["windows", "linux"] as const)(
     "reaches every %s shortcut from a focused terminal by its first binding",
     (platform) => {
@@ -106,6 +107,7 @@ describe("shouldDeferShortcutToTerminal", () => {
         );
       for (const shortcut of defaultShortcuts(platform)) {
         if (shortcut.group === "Editor") continue;
+        if (shortcut.id === "ai.newConversation") continue;
         const [first] = shortcut.defaultBindings;
         if (first) expect(deferred(first), shortcut.id).toBe(false);
       }

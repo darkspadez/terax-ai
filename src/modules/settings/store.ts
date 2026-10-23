@@ -150,6 +150,8 @@ export type Preferences = {
   customInstructions: string;
   /** How new AI conversations start: gated tools ask, or run unasked. */
   aiApprovalMode: ApprovalMode;
+  /** Selecting text in a terminal or the editor offers an Ask Terax button. */
+  selectionAskAi: boolean;
   /** The reasoning effort last chosen for each model; absent is its default. */
   reasoningEffortByModel: Record<string, ReasoningEffort>;
   autostart: boolean;
@@ -276,6 +278,7 @@ const KEY_EDITOR_THEME = "editorTheme";
 const KEY_EDITOR_FONT_SIZE = "editorFontSize";
 const KEY_CUSTOM_INSTRUCTIONS = "customInstructions";
 const KEY_AI_APPROVAL_MODE = "aiApprovalMode";
+const KEY_SELECTION_ASK_AI = "selectionAskAi";
 const KEY_REASONING_EFFORT_BY_MODEL = "reasoningEffortByModel";
 const KEY_AUTOSTART = "autostart";
 const KEY_RESTORE_WINDOW = "restoreWindowState";
@@ -401,6 +404,11 @@ export function coerceTerminalLigatures(value: unknown): boolean {
   return value !== false;
 }
 
+/** The Ask Terax button stays on unless it was explicitly turned off. */
+export function coerceSelectionAskAi(value: unknown): boolean {
+  return value !== false;
+}
+
 const TERMINAL_FONT_SIZE_MIN = 8;
 const TERMINAL_FONT_SIZE_MAX = 32;
 
@@ -440,6 +448,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   editorFontSize: EDITOR_FONT_SIZE_DEFAULT,
   customInstructions: "",
   aiApprovalMode: "ask",
+  selectionAskAi: true,
   reasoningEffortByModel: {},
   autostart: false,
   // Off by default: a translucent window keeps the compositor blending the
@@ -576,6 +585,7 @@ export async function loadPreferences(): Promise<Preferences> {
       get<string>(KEY_CUSTOM_INSTRUCTIONS) ??
       DEFAULT_PREFERENCES.customInstructions,
     aiApprovalMode: normalizeApprovalMode(get<unknown>(KEY_AI_APPROVAL_MODE)),
+    selectionAskAi: coerceSelectionAskAi(get<unknown>(KEY_SELECTION_ASK_AI)),
     reasoningEffortByModel: normalizeReasoningEffortByModel(
       get<unknown>(KEY_REASONING_EFFORT_BY_MODEL),
     ),
@@ -838,6 +848,10 @@ export async function setCustomInstructions(value: string): Promise<void> {
 
 export async function setAiApprovalMode(value: ApprovalMode): Promise<void> {
   await writePref(KEY_AI_APPROVAL_MODE, normalizeApprovalMode(value));
+}
+
+export async function setSelectionAskAi(value: boolean): Promise<void> {
+  await writePref(KEY_SELECTION_ASK_AI, coerceSelectionAskAi(value));
 }
 
 export async function setReasoningEffortByModel(
@@ -1251,6 +1265,7 @@ export async function onPreferencesChange(
     [KEY_EDITOR_FONT_SIZE]: "editorFontSize",
     [KEY_CUSTOM_INSTRUCTIONS]: "customInstructions",
     [KEY_AI_APPROVAL_MODE]: "aiApprovalMode",
+    [KEY_SELECTION_ASK_AI]: "selectionAskAi",
     [KEY_REASONING_EFFORT_BY_MODEL]: "reasoningEffortByModel",
     [KEY_AUTOSTART]: "autostart",
     [KEY_RESTORE_WINDOW]: "restoreWindowState",

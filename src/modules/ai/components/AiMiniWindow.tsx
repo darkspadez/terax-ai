@@ -94,8 +94,11 @@ export function AiMiniWindow({ state }: { state: PresenceState }) {
       ref={ref}
       data-state={state}
       data-ai-mini-window
+      // A click in the conversation keeps focus in the AI surface, where its
+      // shortcuts (New AI conversation) run.
+      tabIndex={-1}
       className={cn(
-        "no-scrollbar-deep fixed z-40 flex flex-col overflow-hidden",
+        "no-scrollbar-deep fixed z-40 flex flex-col overflow-hidden outline-none",
         "rounded-2xl border border-border/60 bg-card text-[12px]",
         "shadow-[0_1px_0_0_rgba(255,255,255,0.04)_inset,0_24px_48px_-12px_rgba(0,0,0,0.45),0_8px_16px_-8px_rgba(0,0,0,0.3)]",
         "ring-1 ring-black/5 dark:ring-white/5",

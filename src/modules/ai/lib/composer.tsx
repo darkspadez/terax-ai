@@ -1,17 +1,35 @@
-import { invoke } from "@tauri-apps/api/core";
 import {
   createContext,
   useContext,
   useEffect,
+  useEffectEvent,
   useRef,
   useState,
 } from "react";
+import { toast } from "sonner";
 import { useWhisperRecording } from "../hooks/useWhisperRecording";
 import { expandSnippetTokens, type Snippet } from "../lib/snippets";
+import {
+  COMPOSER_DROP_EVENT,
+  type DroppedPath,
+  folderReference,
+  insertIntoPrompt,
+  planComposerDrop,
+} from "./composerDrop";
+import type { ReadResult } from "./native";
+import { encodeForSending, imageNeedsEncoding } from "./imageAttachment";
+import { readClipboardImageFile } from "./pastedImages";
+import {
+  attachableText,
+  attachmentName,
+  MAX_TEXT_ATTACHMENT_BYTES,
+  readDroppedFile,
+  readPickedFile,
+  textTooLarge,
+} from "./pathAttachment";
 import { tryRunSlashCommand, type SlashCommandMeta } from "./slashCommands";
 import { getChat, useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
-import { authorizeFileFolder, currentWorkspaceEnv } from "@/modules/workspace";
 
 export type FileAttachment = {
   id: string;
@@ -29,7 +47,6 @@ type MessagePart =
   | { type: "text"; text: string }
   | { type: "file"; mediaType: string; url: string; filename?: string };
 
-const MAX_TEXT_INLINE = 200_000;
 export const ACCEPTED_FILES =
   "image/*,.txt,.md,.json,.yaml,.yml,.toml,.sh,.zsh,.bash,.py,.js,.jsx,.ts,.tsx,.rs,.go,.java,.c,.cpp,.h,.hpp,.html,.css,.csv,.log,.env,.config,.conf,.ini,Dockerfile,.dockerfile";
 
@@ -41,6 +58,9 @@ type ComposerCtx = {
   setValue: React.Dispatch<React.SetStateAction<string>>;
   files: FileAttachment[];
   addFiles: (list: FileList | readonly File[] | null) => Promise<void>;
+  /** Attach the clipboard's image as the app reads it (a paste the webview
+   *  handed no image, `pasteNeedsClipboardImage`). */
+  pasteClipboardImage: () => Promise<void>;
   /** Attach a file by absolute path — used by the file explorer's "Attach to Agent". */
   attachFileByPath: (path: string) => Promise<void>;
   removeFile: (id: string) => void;
@@ -162,6 +182,11 @@ export function AiComposerProvider({ children }: ProviderProps) {
     if (next.length) setFiles((prev) => [...prev, ...next]);
   };
 
+  const pasteClipboardImage = async () => {
+    const image = await readClipboardImageFile();
+    if (image) await addFiles([image]);
+  };
+
   const removeFile = (id: string) =>
     setFiles((prev) => prev.filter((f) => f.id !== id));
 
@@ -179,43 +204,80 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const removeCommand = (name: string) =>
     setPickedCommands((prev) => prev.filter((c) => c.name !== name));
 
-  // Picked by the user (Attach to Agent, an @ mention): its folder may be reached.
-  const attachFileByPath = async (path: string) => {
+  // Picked by the user (Attach to Agent, an @ mention) or dropped from the
+  // explorer, which reads only what the agent itself may read.
+  const attachFileByPath = async (
+    path: string,
+    via: "picked" | "dropped" = "picked",
+  ) => {
+    const name = attachmentName(path);
+    let result: ReadResult;
     try {
-      await authorizeFileFolder(path);
-      type ReadResult =
-        | { kind: "text"; content: string; size: number }
-        | { kind: "binary"; size: number }
-        | { kind: "toolarge"; size: number; limit: number };
-      const result = await invoke<ReadResult>("fs_read_file", {
-        path,
-        workspace: currentWorkspaceEnv(),
-      });
-      if (result.kind !== "text") {
-        // Binary/oversize files: skip (could surface a toast in future).
-        console.warn("attachFileByPath: skipped non-text file", path, result);
-        return;
-      }
-      const name = path.split("/").pop() || path;
-      const id = `path-${path}`;
-      setFiles((prev) => {
-        if (prev.some((f) => f.id === id)) return prev;
-        const att: FileAttachment = {
-          id,
-          name,
-          kind: "text",
-          mediaType: "text/plain",
-          text: result.content,
-          size: result.size,
-        };
-        return [...prev, att];
-      });
-      // Open the AI panel & focus the input so the user sees the chip.
-      useChatStore.getState().focusInput();
+      result =
+        via === "dropped"
+          ? await readDroppedFile(path)
+          : await readPickedFile(path);
     } catch (e) {
-      console.error("attachFileByPath failed:", e);
+      toast.error(`Could not attach ${name}`, {
+        description: e instanceof Error ? e.message : String(e),
+      });
+      return;
     }
+    const attachable = attachableText(result);
+    if (!attachable.ok) {
+      toast.error(`Could not attach ${name}`, {
+        description: attachable.reason,
+      });
+      return;
+    }
+    const id = `path-${path}`;
+    setFiles((prev) => {
+      if (prev.some((f) => f.id === id)) return prev;
+      const att: FileAttachment = {
+        id,
+        name,
+        kind: "text",
+        mediaType: "text/plain",
+        text: attachable.text,
+        size: attachable.size,
+      };
+      return [...prev, att];
+    });
+    // Open the AI panel & focus the input so the user sees the chip.
+    useChatStore.getState().focusInput();
   };
+
+  // Explorer items dropped on the composer: folders are named at the caret
+  // (or at the end), files attach one by one.
+  const onDropPaths = useEffectEvent(async (entries: DroppedPath[]) => {
+    const { files, folders } = planComposerDrop(entries);
+    if (folders.length > 0) {
+      const el = textareaRef.current;
+      const selection =
+        el && document.activeElement === el
+          ? { start: el.selectionStart, end: el.selectionEnd }
+          : null;
+      const next = insertIntoPrompt(
+        value,
+        selection,
+        folders.map(folderReference).join(" "),
+      );
+      setValue(next.value);
+      useChatStore.getState().focusInput();
+      requestAnimationFrame(() =>
+        textareaRef.current?.setSelectionRange(next.caret, next.caret),
+      );
+    }
+    for (const path of files) await attachFileByPath(path, "dropped");
+  });
+  useEffect(() => {
+    const onDrop = (e: Event) => {
+      const entries = (e as CustomEvent<DroppedPath[]>).detail;
+      if (Array.isArray(entries)) void onDropPaths(entries);
+    };
+    window.addEventListener(COMPOSER_DROP_EVENT, onDrop);
+    return () => window.removeEventListener(COMPOSER_DROP_EVENT, onDrop);
+  }, []);
 
   const submit = () => {
     if (isBusy) return;
@@ -344,6 +406,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     setValue,
     files,
     addFiles,
+    pasteClipboardImage,
     attachFileByPath,
     removeFile,
     pickedSnippets,
@@ -362,20 +425,38 @@ export function AiComposerProvider({ children }: ProviderProps) {
   return <Ctx.Provider value={ctx}>{children}</Ctx.Provider>;
 }
 
+/** A picked or pasted file as an attachment; null (said in a toast) when it
+ *  cannot be one. */
 async function readAttachment(file: File): Promise<FileAttachment | null> {
   const id = `${file.name}-${file.size}-${file.lastModified}`;
+  const name = file.name || "image";
   if (file.type.startsWith("image/")) {
-    const url = await readAsDataURL(file);
+    const image = imageNeedsEncoding(file.type, file.size)
+      ? await encodeForSending(file)
+      : file;
+    if (!image) {
+      toast.error(`Could not attach ${name}`, {
+        description:
+          "The AI takes PNG, JPEG, GIF and WebP images, and this one could not be converted or made small enough.",
+      });
+      return null;
+    }
+    const url = await readAsDataURL(image);
     return {
       id,
-      name: file.name,
+      name: image.name,
       kind: "image",
-      mediaType: file.type || "image/png",
+      mediaType: image.type,
       url,
-      size: file.size,
+      size: image.size,
     };
   }
-  if (file.size > MAX_TEXT_INLINE) return null;
+  if (file.size > MAX_TEXT_ATTACHMENT_BYTES) {
+    toast.error(`Could not attach ${name}`, {
+      description: textTooLarge(file.size),
+    });
+    return null;
+  }
   const text = await file.text();
   return {
     id,

@@ -6,7 +6,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { useComposer } from "../lib/composer";
 import { composerKeyAction } from "../lib/composerKeys";
-import { pastedImages, pasteKeepsText } from "../lib/pastedImages";
+import {
+  pastedImages,
+  pasteKeepsText,
+  pasteNeedsClipboardImage,
+} from "../lib/pastedImages";
 import { SLASH_COMMANDS } from "../lib/slashCommands";
 import { useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
@@ -200,6 +204,8 @@ export function AiComposerInput() {
     if (it) onPickItem(it);
   };
 
+  const middlePressAt = useRef(Number.NEGATIVE_INFINITY);
+
   const voiceLabel = c.voice.recording
     ? "Listening…"
     : c.voice.transcribing
@@ -221,11 +227,21 @@ export function AiComposerInput() {
               onKeyUp={updateTrigger}
               onClick={updateTrigger}
               onSelect={updateTrigger}
+              onMouseDown={(e) => {
+                if (e.button === 1) middlePressAt.current = e.timeStamp;
+              }}
               onPaste={(e) => {
                 const images = pastedImages(e.clipboardData);
-                if (images.length === 0) return;
-                if (!pasteKeepsText(e.clipboardData)) e.preventDefault();
-                void c.addFiles(images);
+                if (images.length > 0) {
+                  if (!pasteKeepsText(e.clipboardData)) e.preventDefault();
+                  void c.addFiles(images);
+                  return;
+                }
+                // A middle click pastes the primary selection, not the clipboard.
+                const fromPrimary = e.timeStamp - middlePressAt.current < 1000;
+                if (pasteNeedsClipboardImage(e.clipboardData, fromPrimary)) {
+                  void c.pasteClipboardImage();
+                }
               }}
               onKeyDown={(e) => {
                 const items = fileTrigger ? filteredFiles : filteredItems;

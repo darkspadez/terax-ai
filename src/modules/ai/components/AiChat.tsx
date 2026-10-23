@@ -35,6 +35,7 @@ import {
   HashtagIcon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
+import { type MessageImage, messageImages } from "../lib/imageAttachment";
 import { mergeInterleavedReasoning } from "../lib/reasoningDisplay";
 import { SLASH_COMMANDS, TERAX_CMD_RE } from "../lib/slashCommands";
 import { Spinner } from "@/components/ui/spinner";
@@ -122,6 +123,27 @@ function stripUserContextBlocks(text: string): {
   });
   return { text: out.trim(), chips };
 }
+
+const MessageImages = memo(function MessageImages({
+  images,
+}: {
+  images: MessageImage[];
+}) {
+  return (
+    <div className="mb-1 flex flex-wrap gap-1.5">
+      {images.map((image) => (
+        <img
+          key={image.key}
+          src={image.url}
+          alt={image.name}
+          title={image.name}
+          decoding="async"
+          className="h-24 max-w-48 rounded-md border border-border/50 object-cover"
+        />
+      ))}
+    </div>
+  );
+});
 
 const ContextChips = memo(function ContextChips({
   chips,
@@ -381,11 +403,13 @@ const RenderedMessage = memo(function RenderedMessage({
     const commandName = cmdMatch?.[1] ?? null;
     const withoutCmd = cmdMatch ? rawText.slice(cmdMatch[0].length) : rawText;
     const stripped = stripUserContextBlocks(withoutCmd);
+    const images = messageImages(message.parts);
 
     return (
       <Message from="user" {...deferProps}>
         <MessageContent>
           {commandName ? <CommandSnippet name={commandName} /> : null}
+          {images.length > 0 ? <MessageImages images={images} /> : null}
           {stripped.chips.length > 0 ? (
             <ContextChips chips={stripped.chips} />
           ) : null}

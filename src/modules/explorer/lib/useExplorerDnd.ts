@@ -11,7 +11,13 @@ import { dirname } from "./treePaths";
 
 export type ExplorerPathDropTarget = {
   updateTarget: (clientX: number, clientY: number) => boolean;
-  dropPath: (paths: string[], clientX: number, clientY: number) => boolean;
+  /** `isDir` tells which dropped paths are folders (undefined: unknown). */
+  dropPath: (
+    paths: string[],
+    clientX: number,
+    clientY: number,
+    isDir?: (path: string) => boolean | undefined,
+  ) => boolean;
   clearTarget: () => void;
 };
 
@@ -57,9 +63,11 @@ export function finishExplorerDrag(
   moveTarget: string | null,
   pathDropTarget: ExplorerPathDropTarget | undefined,
   onMove: (from: string[], toDir: string) => void,
+  isDir?: (path: string) => boolean | undefined,
 ): void {
   const handledByPathTarget =
-    commit && (pathDropTarget?.dropPath(sources, clientX, clientY) ?? false);
+    commit &&
+    (pathDropTarget?.dropPath(sources, clientX, clientY, isDir) ?? false);
   if (commit && !handledByPathTarget && moveTarget) {
     onMove(sources, moveTarget);
   }
@@ -198,6 +206,7 @@ export function useExplorerDnd({
         dropTargetRef.current,
         optsRef.current.pathDropTarget,
         optsRef.current.onMove,
+        optsRef.current.isDir,
       );
       suppressClickRef.current = true;
       setTimeout(() => {

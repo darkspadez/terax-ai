@@ -64,6 +64,7 @@ export type CommandPaletteActionContext = {
   toggleSidebar: () => void;
   toggleHiddenFiles: () => void;
   toggleAi: () => void;
+  newAiConversation: () => void;
   askAiSelection: () => void;
   openSettings: () => void;
   openKeyboardShortcuts: () => void;
@@ -351,6 +352,15 @@ export function createCommandItems(
       icon: SparklesIcon,
       shortcutId: "ai.toggle",
       run: ctx.toggleAi,
+    },
+    {
+      id: "ai.newConversation",
+      title: "New AI conversation",
+      group: "AI",
+      keywords: ["chat", "session", "thread", "assistant", "agent"],
+      icon: SparklesIcon,
+      shortcutId: "ai.newConversation",
+      run: ctx.newAiConversation,
     },
     {
       id: "ai.askSelection",

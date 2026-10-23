@@ -55,6 +55,20 @@ describe("estimateMessageHeight", () => {
     ).toBe(1200);
   });
 
+  it("gives a sent message's images one row of thumbnails", () => {
+    const image = { type: "file", url: "data:image/png;base64,AAAA" };
+    const text = { type: "text", text: "what is this?" };
+    const one = estimateMessageHeight({ role: "user", parts: [image, text] });
+    const three = estimateMessageHeight({
+      role: "user",
+      parts: [image, image, image, text],
+    });
+    expect(three).toBe(one);
+    expect(one).toBeGreaterThan(
+      estimateMessageHeight({ role: "user", parts: [text] }) + 80,
+    );
+  });
+
   it("ignores non-string text defensively", () => {
     expect(
       estimateMessageHeight({

@@ -4,7 +4,7 @@
 // height, so the estimate only matters the first time a long chat is scrolled
 // through; a close guess keeps the scrollbar and scroll position from jumping.
 
-type PartLike = { type: string; text?: unknown };
+type PartLike = { type: string; text?: unknown; url?: unknown };
 
 export type EstimableMessage = {
   role: string;
@@ -15,6 +15,8 @@ const LINE_PX = 19;
 const CHARS_PER_LINE = 56;
 const PART_GAP_PX = 12;
 const NON_TEXT_PART_PX = 40;
+/** A sent message's images share one row of thumbnails. */
+const IMAGE_ROW_PX = 100;
 const USER_BUBBLE_PADDING_PX = 16;
 const MIN_PX = 40;
 const MAX_PX = 1200;
@@ -33,7 +35,17 @@ function textLines(text: string): number {
 
 export function estimateMessageHeight(message: EstimableMessage): number {
   let height = message.role === "user" ? USER_BUBBLE_PADDING_PX : 0;
+  let images = false;
   for (const part of message.parts) {
+    if (
+      part.type === "file" &&
+      typeof part.url === "string" &&
+      part.url.startsWith("data:image/")
+    ) {
+      if (!images) height += IMAGE_ROW_PX + PART_GAP_PX;
+      images = true;
+      continue;
+    }
     height +=
       part.type === "text" && typeof part.text === "string"
         ? textLines(part.text) * LINE_PX
