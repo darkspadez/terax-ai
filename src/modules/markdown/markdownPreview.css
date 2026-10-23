@@ -279,6 +279,56 @@
   font-size: inherit;
 }
 
+/* Code blocks (PreviewCode.tsx) and raw <pre>: GitHub's box, with a copy
+   button that shows on hover. */
+
+.markdown-body pre:where(:not(.not-prose *)) {
+  padding: 16px;
+  overflow: auto;
+  font-family: var(--md-mono);
+  font-size: 85%;
+  line-height: 1.45;
+  color: var(--foreground);
+  overflow-wrap: normal;
+  background-color: var(--md-bg-muted);
+  border-radius: 6px;
+}
+.markdown-body pre code {
+  display: inline;
+  padding: 0;
+  margin: 0;
+  overflow: visible;
+  font-size: 100%;
+  line-height: inherit;
+  white-space: pre;
+  word-break: normal;
+  background-color: transparent;
+  border: 0;
+  border-radius: 0;
+}
+.markdown-body .markdown-code-block {
+  position: relative;
+  margin-bottom: 16px;
+}
+.markdown-body .markdown-code-block > pre {
+  margin-bottom: 0;
+}
+.markdown-body .markdown-code-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  padding: 3px;
+  background-color: var(--md-bg-muted);
+  border: 1px solid var(--md-border);
+  border-radius: 6px;
+  opacity: 0;
+}
+.markdown-body .markdown-code-block:hover .markdown-code-copy,
+.markdown-body .markdown-code-copy:focus-within {
+  opacity: 1;
+}
+
 .markdown-body kbd {
   display: inline-block;
   padding: 4px;

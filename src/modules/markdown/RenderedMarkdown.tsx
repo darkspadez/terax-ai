@@ -1,10 +1,10 @@
-import { MarkdownCode } from "@/components/ai-elements/markdown-code";
 import { useMemo } from "react";
 import { Streamdown, type StreamdownProps } from "streamdown";
 import { splitFrontmatter } from "./frontmatter";
 import { MarkdownImage } from "./MarkdownImage";
 import "./markdownPreview.css";
 import { useMathPlugins } from "./math";
+import { PreviewCode, PreviewPre } from "./PreviewCode";
 import { PreviewLink } from "./PreviewLink";
 import { previewRehypePlugins } from "./previewPipeline";
 
@@ -14,7 +14,8 @@ import { previewRehypePlugins } from "./previewPipeline";
 // `align="center"` READMEs centre their logos with.
 const components: StreamdownProps["components"] = {
   a: PreviewLink,
-  code: MarkdownCode,
+  code: PreviewCode,
+  pre: PreviewPre,
   img: MarkdownImage,
   p: "p",
   h1: "h1",
