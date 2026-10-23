@@ -39,7 +39,7 @@ Until `1.0.0`, only the latest minor gets security fixes. See the current versio
 - **No Node in the renderer.** The frontend only reaches the host through the allow-listed Tauri commands.
 - **Files stay in your folders.** Terax's file commands read, write and list only inside folders you opened or browsed (and the folders of files you opened), judged on the real path, so a link or `..` cannot lead out. The agent's file tools are refused anywhere else. A terminal's folder joins them as you `cd`, but on Linux and macOS only once the OS confirms the shell is really there, so a program printing a fake folder report cannot add one.
 - **Settings stay in Terax's folder.** The page can open its settings stores only by plain names inside Terax's own data folder, never a path elsewhere on disk.
-- **Programs ask first, natively.** Open in Default App runs a program or script only after you confirm in your OS's own dialog, which nothing in the app's pages can answer.
+- **Programs ask first, natively.** Open in Default App runs a program or script only after you confirm in your OS's own dialog, which nothing in the app's pages can answer. Return and Escape answer Cancel there, so running takes a click on Run.
 - **Signed releases.** Updates are verified before they're applied.
 
 ## What we can't promise

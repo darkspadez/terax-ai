@@ -58,7 +58,7 @@ Every command here that takes a path is refused outside the folders the workspac
 - `fs_stat` - file metadata
 - `fs_canonicalize` - canonical path
 - `fs_host_path` - host path of a workspace file (WSL share or drive), for asset URLs
-- `fs_open_default` - open a file in its default app; a program only after the user agrees in a native dialog the backend shows
+- `fs_open_default` - open a file in its default app; a program only after the user clicks Run in a native dialog the backend shows (Return and Escape answer Cancel)
 
 #### Mutate
 

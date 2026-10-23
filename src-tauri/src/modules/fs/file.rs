@@ -5,13 +5,13 @@ use std::{fs, io::Write};
 
 use serde::Serialize;
 use tauri::{Emitter, Manager};
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tempfile::NamedTempFile;
 
 use super::blocking;
 use super::index::FileIndexState;
 use super::launch;
 use super::mutate::note_changed;
+use super::run_prompt;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv, WorkspaceRegistry};
 
 const MAX_READ_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
@@ -328,26 +328,12 @@ impl Drop for RunPrompt {
     }
 }
 
-/// Asks in the OS's own dialog, attached to the calling window, whether to run `target`. The
-/// dialog runs on the main thread and answers on another; this waits without holding a thread.
-/// Nothing in a page can answer it.
+/// Asks in the OS's own dialog, attached to the calling window, whether to run `target`, with
+/// Cancel the button Return presses (`run_prompt`). This waits without holding a thread, and
+/// nothing in a page can answer it.
 async fn ask_to_run(app: &tauri::AppHandle, window: &tauri::Window, target: &Path) -> bool {
     let (title, message) = run_prompt_text(target);
-    let (answer, answered) = tokio::sync::oneshot::channel();
-    app.dialog()
-        .message(message)
-        .title(title)
-        .kind(MessageDialogKind::Warning)
-        .buttons(MessageDialogButtons::OkCancelCustom(
-            "Run".into(),
-            "Cancel".into(),
-        ))
-        .parent(window)
-        .show(move |run| {
-            let _ = answer.send(run);
-        });
-    // A dialog that never showed (the app is closing) dropped the sender: nothing runs.
-    answered.await.unwrap_or(false)
+    run_prompt::ask(app, window, title, message).await
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]

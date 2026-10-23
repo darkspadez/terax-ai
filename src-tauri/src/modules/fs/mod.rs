@@ -5,6 +5,7 @@ pub mod grep;
 pub mod index;
 pub mod launch;
 pub mod mutate;
+mod run_prompt;
 pub mod search;
 pub mod supersede;
 pub mod tree;
