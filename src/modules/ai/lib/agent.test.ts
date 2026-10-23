@@ -69,9 +69,11 @@ vi.mock("@/modules/workspace", () => ({
   workspaceScopeKey: () => "local",
 }));
 
+import { skill } from "@/modules/skills/fixtures";
 import { compatModelIdForEndpoint, MAX_AGENT_STEPS } from "../config";
 import { TOOL_APPROVAL } from "../tools/tools";
 import {
+  activeToolNames,
   buildConfiguredLanguageModel,
   buildLanguageModel,
   runAgentStream,
@@ -97,6 +99,7 @@ const uiMessages: UIMessage[] = [
 
 type StreamTextOptions = {
   instructions: unknown;
+  activeTools?: string[];
   tools: Record<string, unknown>;
   toolApproval: unknown;
   onStepEnd: (step: unknown) => void;
@@ -249,6 +252,9 @@ describe("runAgentStream with MCP tools", () => {
     });
     expect(options.tools).toHaveProperty("mcp__srv__echo");
     expect(run.tools).toBe(options.tools);
+    // A run without skills hides only the skill tools.
+    expect(options.activeTools).toContain("mcp__srv__echo");
+    expect(options.activeTools).not.toContain("use_skill");
     expect(resolvePolicy(options.toolApproval)).toMatchObject({
       // Auto-approve never covers an untrusted server.
       mcp__srv__echo: "user-approval",
@@ -326,6 +332,48 @@ describe("runAgentStream with MCP tools", () => {
     });
     expect(onStep).toHaveBeenLastCalledWith("Calling Server: echo");
     useMcpCatalog.getState().setTools({});
+  });
+});
+
+describe("skills in a run", () => {
+  const skills = (list: ReturnType<typeof skill>[]) => ({
+    skills: list,
+    project: null,
+    env: { kind: "local" } as const,
+  });
+
+  it("lists the run's skills in the system prompt and offers the skill tools", async () => {
+    const { options } = await startRun({
+      skills: skills([skill({ name: "pdf", description: "Fill PDF forms." })]),
+    });
+    const system = JSON.stringify(options.instructions);
+    expect(system).toContain("## AVAILABLE SKILLS");
+    expect(system).toContain("- pdf: Fill PDF forms.");
+    expect(options.activeTools).toBeUndefined();
+  });
+
+  it("never lists a skill only the user may call", async () => {
+    const { options } = await startRun({
+      skills: skills([skill({ name: "manual", modelInvocable: false })]),
+    });
+    expect(JSON.stringify(options.instructions)).not.toContain(
+      "AVAILABLE SKILLS",
+    );
+    // Its files stay readable for a message that invoked it.
+    expect(options.activeTools).toBeUndefined();
+  });
+
+  it("offers no skill tools to a run without skills", async () => {
+    const { options } = await startRun();
+    expect(JSON.stringify(options.instructions)).not.toContain(
+      "AVAILABLE SKILLS",
+    );
+    expect(options.activeTools).toContain("read_file");
+    expect(options.activeTools).not.toContain("use_skill");
+    expect(options.activeTools).not.toContain("read_skill_file");
+    expect(activeToolNames(["read_file", "use_skill"], skills([]))).toEqual([
+      "read_file",
+    ]);
   });
 });
 

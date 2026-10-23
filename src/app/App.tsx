@@ -90,6 +90,7 @@ import {
   useSpaces,
   useSpacesBoot,
 } from "@/modules/spaces";
+import { SkillsBridge } from "@/modules/skills";
 import { StatusBar } from "@/modules/statusbar";
 import {
   type CloseTabsPlan,
@@ -1899,6 +1900,10 @@ export default function App() {
             onActivate={onActivateAgent}
           />
           <Toaster position="bottom-right" />
+          <SkillsBridge
+            root={explorerRoot ?? launchCwd ?? home}
+            openFileTab={openFileTab}
+          />
 
           {hasComposer ? (
             <>

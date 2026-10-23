@@ -30,11 +30,13 @@ import { cn } from "@/lib/utils";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowRight01Icon,
+  BookOpenTextIcon,
   CodeIcon,
   File01Icon,
   HashtagIcon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
+import { SKILL_BLOCK_RE } from "@/modules/skills/invocation";
 import { type MessageImage, messageImages } from "../lib/imageAttachment";
 import { mergeInterleavedReasoning } from "../lib/reasoningDisplay";
 import { SLASH_COMMANDS, TERAX_CMD_RE } from "../lib/slashCommands";
@@ -86,7 +88,8 @@ type AnyToolPart = ToolUIPart | DynamicToolUIPart;
 type ContextChip =
   | { kind: "selection"; source: "terminal" | "editor"; lines: number }
   | { kind: "file"; name: string; lines: number }
-  | { kind: "snippet"; name: string };
+  | { kind: "snippet"; name: string }
+  | { kind: "skill"; name: string };
 
 const SELECTION_RE =
   /<selection\s+source="(terminal|editor)">\n?([\s\S]*?)\n?<\/selection>/g;
@@ -107,6 +110,10 @@ function stripUserContextBlocks(text: string): {
 } {
   const chips: ContextChip[] = [];
   let out = text;
+  out = out.replace(SKILL_BLOCK_RE, (_m, name: string) => {
+    chips.push({ kind: "skill", name });
+    return "";
+  });
   out = out.replace(SELECTION_RE, (_m, source: string, body: string) => {
     chips.push({
       kind: "selection",
@@ -183,6 +190,11 @@ function chipIcon(c: ContextChip) {
   if (c.kind === "file") {
     return <HugeiconsIcon icon={File01Icon} size={10} strokeWidth={1.75} />;
   }
+  if (c.kind === "skill") {
+    return (
+      <HugeiconsIcon icon={BookOpenTextIcon} size={10} strokeWidth={1.75} />
+    );
+  }
   return <HugeiconsIcon icon={HashtagIcon} size={10} strokeWidth={1.75} />;
 }
 
@@ -191,6 +203,7 @@ function chipLabel(c: ContextChip): string {
     return c.source === "editor" ? "Editor selection" : "Terminal selection";
   }
   if (c.kind === "file") return c.name;
+  if (c.kind === "skill") return `/${c.name}`;
   return `#${c.name}`;
 }
 type AnyPart = UIMessagePart<Record<string, never>, Record<string, never>>;

@@ -1,12 +1,15 @@
 import { PopoverContent } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { HugeiconsIcon } from "@hugeicons/react";
+import type { Skill } from "@/modules/skills/types";
+import { BookOpenTextIcon } from "@hugeicons/core-free-icons";
 import type { SlashCommandMeta } from "../lib/slashCommands";
 import type { Snippet } from "../lib/snippets";
 
 export type PickerItem =
   | { kind: "snippet"; snippet: Snippet }
-  | { kind: "command"; command: SlashCommandMeta };
+  | { kind: "command"; command: SlashCommandMeta }
+  | { kind: "skill"; skill: Skill };
 
 type Props = {
   items: readonly PickerItem[];
@@ -22,6 +25,7 @@ export function SnippetPickerContent({
   onHover,
 }: Props) {
   const commands = items.filter((it) => it.kind === "command");
+  const skills = items.filter((it) => it.kind === "skill");
   const snippets = items.filter((it) => it.kind === "snippet");
   let cursor = -1;
 
@@ -75,6 +79,54 @@ export function SnippetPickerContent({
                               #{c.name}
                             </span>
                             <span className="font-medium">{c.label}</span>
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
+          {skills.length > 0 && (
+            <>
+              <SectionHeader label="Skills" />
+              <ul>
+                {skills.map((it) => {
+                  cursor += 1;
+                  const i = cursor;
+                  if (it.kind !== "skill") return null;
+                  const s = it.skill;
+                  return (
+                    <li key={`skill-${s.key}`}>
+                      <button
+                        type="button"
+                        onMouseEnter={() => onHover(i)}
+                        onClick={() => onPick(it)}
+                        className={cn(
+                          "flex w-full items-start gap-2 px-2 py-1.5 text-left text-[12px]",
+                          i === activeIndex
+                            ? "bg-accent"
+                            : "hover:bg-accent/60",
+                        )}
+                      >
+                        <HugeiconsIcon
+                          icon={BookOpenTextIcon}
+                          size={13}
+                          strokeWidth={1.75}
+                          className="mt-0.5 shrink-0 text-muted-foreground"
+                        />
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <span className="flex items-center gap-1.5">
+                            <span className="font-mono">/{s.name}</span>
+                            {s.argumentHint ? (
+                              <span className="truncate font-mono text-[10.5px] text-muted-foreground">
+                                {s.argumentHint}
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className="line-clamp-1 text-[10.5px] text-muted-foreground">
+                            {s.description}
                           </span>
                         </span>
                       </button>

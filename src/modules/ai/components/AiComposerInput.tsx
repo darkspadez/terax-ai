@@ -11,6 +11,8 @@ import {
   pasteKeepsText,
   pasteNeedsClipboardImage,
 } from "../lib/pastedImages";
+import { useUserSkills } from "@/modules/skills/useUserSkills";
+import { BookOpenTextIcon } from "@hugeicons/core-free-icons";
 import { SLASH_COMMANDS } from "../lib/slashCommands";
 import { useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
@@ -105,6 +107,8 @@ export function AiComposerInput() {
 
   useEffect(updateTrigger, [c.value, c.textareaRef]);
 
+  const skills = useUserSkills(trigger?.char === "/", workspaceRoot);
+
   const filteredItems = useMemo<PickerItem[]>(() => {
     if (!trigger) return [];
     const q = trigger.query;
@@ -113,7 +117,18 @@ export function AiComposerInput() {
         (c) => !q || c.name.includes(q) || c.label.toLowerCase().includes(q),
       )
       .map((command) => ({ kind: "command", command }));
-    if (trigger.char === "/") return cmdItems;
+    if (trigger.char === "/") {
+      const skillItems: PickerItem[] = skills
+        .filter(
+          (skill) =>
+            !SLASH_COMMANDS[skill.name] &&
+            (!q ||
+              skill.name.includes(q) ||
+              skill.description.toLowerCase().includes(q)),
+        )
+        .map((skill) => ({ kind: "skill", skill }));
+      return [...cmdItems, ...skillItems];
+    }
     const snipItems: PickerItem[] = snippets
       .filter(
         (s) =>
@@ -124,7 +139,7 @@ export function AiComposerInput() {
       )
       .map((snippet) => ({ kind: "snippet", snippet }));
     return [...cmdItems, ...snipItems];
-  }, [trigger, snippets]);
+  }, [trigger, snippets, skills]);
 
   const FILE_PICKER_CAP = 30;
   const filteredFiles = useMemo<string[]>(() => {
@@ -158,11 +173,19 @@ export function AiComposerInput() {
       const needsSpace = afterRaw.length === 0 || !/^\s/.test(afterRaw);
       insert = `#${item.snippet.handle}${needsSpace ? " " : ""}`;
       c.addSnippet(item.snippet);
+    } else if (item.kind === "skill") {
+      c.addCommand({
+        name: item.skill.name,
+        invocation: `/${item.skill.name}`,
+        label: item.skill.description,
+        icon: BookOpenTextIcon,
+        skill: true,
+      });
     } else {
       c.addCommand(item.command);
     }
     const after =
-      item.kind === "command" ? afterRaw.replace(/^\s+/, "") : afterRaw;
+      item.kind === "snippet" ? afterRaw : afterRaw.replace(/^\s+/, "");
     c.setValue(`${before}${insert}${after}`);
     setTrigger(null);
     setActiveIndex(0);
@@ -277,7 +300,7 @@ export function AiComposerInput() {
                   c.submit();
                 }
               }}
-              placeholder="Ask Terax anything   -   # for snippets and commands, @ for files"
+              placeholder="Ask Terax anything   -   # for snippets, / for commands and skills, @ for files"
               rows={1}
               className={cn(
                 "max-h-40 flex-1 resize-none bg-transparent text-[13px] leading-relaxed outline-none",

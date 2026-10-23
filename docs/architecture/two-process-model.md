@@ -124,6 +124,14 @@ Three distinct surfaces:
 - `ai_session_load` / `ai_session_save` / `ai_session_delete` - per-session conversation files, written atomically with a `.bak` copy
 - `ai_session_finish_migration` / `ai_session_prune_backup` - migration of conversations stored by older versions
 
+### Skills (`src-tauri/src/modules/skills/`) and project trust (`project_trust.rs`)
+
+- `skills_list` - the skills a conversation in a project may use, or (`all`) every skill with the open projects' trust states, for Settings
+- `skills_load` / `skills_read_file` - a usable skill's `SKILL.md` body and file list, or one of its text files, read only inside its real folder
+- `skills_set_enabled` / `skills_create` / `skills_edit` / `skills_delete` - turn a skill on or off, create one from the template, open its `SKILL.md` in the editor of the window in front, delete one of Terax's folder (to the trash)
+- `skills_install_git` / `skills_install_zip` / `skills_install_commit` / `skills_install_cancel` - stage skills from a Git repository or a zip the user picks, then install the reviewed ones
+- `project_trust_status` / `project_trust_decide` / `project_trust_list` / `project_trust_revoke` - what a project provides and the user's decision on each item, kept with its content hash
+
 ### Language servers (`src-tauri/src/modules/lsp/`)
 
 - `lsp_detect` / `lsp_resolve_root` - find a server binary and the workspace root for a file

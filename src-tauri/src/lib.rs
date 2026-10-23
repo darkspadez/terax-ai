@@ -358,6 +358,7 @@ pub fn run() {
                 if let Some(state) = webview.try_state::<fs::watch::FsWatchState>() {
                     state.release_window(webview.app_handle(), webview.label());
                 }
+                modules::project_trust::release_window(webview.app_handle(), webview.label());
                 windows::on_page_load(webview.app_handle(), webview.label());
             }
         })
@@ -395,6 +396,8 @@ pub fn run() {
         .manage(modules::mcp::McpHttpStreams::default())
         .manage(fs::supersede::Supersede::default())
         .manage(fs::index::FileIndexState::default())
+        .manage(modules::project_trust::ProjectTrustState::default())
+        .manage(modules::skills::SkillsState::default())
         .manage({
             let registry = workspace::WorkspaceRegistry::default();
             workspace::bootstrap_registry(&registry);
@@ -495,6 +498,21 @@ pub fn run() {
             git::commands::git_checkout_branch,
             git::commands::git_worktree_add,
             git::commands::git_worktree_remove,
+            modules::skills::skills_list,
+            modules::skills::skills_load,
+            modules::skills::skills_read_file,
+            modules::skills::skills_set_enabled,
+            modules::skills::skills_create,
+            modules::skills::skills_edit,
+            modules::skills::skills_delete,
+            modules::skills::skills_install_git,
+            modules::skills::skills_install_zip,
+            modules::skills::skills_install_commit,
+            modules::skills::skills_install_cancel,
+            modules::project_trust::project_trust_status,
+            modules::project_trust::project_trust_decide,
+            modules::project_trust::project_trust_list,
+            modules::project_trust::project_trust_revoke,
             shell::shell_run_command,
             shell::shell_session_open,
             shell::shell_session_run,
@@ -590,6 +608,7 @@ pub fn run() {
                     if let Some(state) = app.try_state::<LaunchFiles>() {
                         state.take(&label);
                     }
+                    modules::project_trust::release_window(app, &label);
                     windows::on_destroyed(app, &label);
                 }
                 // Servers exit on stdin EOF, but destructors are not guaranteed

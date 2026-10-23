@@ -76,6 +76,9 @@ tempfile = "3"
 which = "8.0.4"
 fontdb = "0.24"
 image = { version = "0.25", default-features = false, features = ["png"] }
+# Skills: content hashes for project trust, and zip installs (both already in the tree).
+sha2 = "0.10"
+zip = { version = "4.6", default-features = false, features = ["deflate-flate2"] }
 
 [dev-dependencies]
 proptest = "1"
@@ -105,7 +108,7 @@ apple-native-keyring-store = { version = "1", features = ["keychain"] }
 objc2 = { version = "0.6", features = ["exception"] }
 block2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "NSAlert", "NSApplication", "NSButton", "NSColor", "NSControl", "NSEvent", "NSPasteboard", "NSPasteboardItem", "NSResponder", "NSView", "NSWindow", "NSWorkspace"] }
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSDate", "NSRunLoop", "NSURL", "NSString", "NSUserDefaults", "NSValue"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSDate", "NSError", "NSFileManager", "NSRunLoop", "NSURL", "NSString", "NSUserDefaults", "NSValue"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFArray", "CFString"] }
 objc2-core-services = { version = "0.3", default-features = false, features = ["std", "FSEvents", "dispatch2"] }
 dispatch2 = { version = "0.3", default-features = false, features = ["std"] }
