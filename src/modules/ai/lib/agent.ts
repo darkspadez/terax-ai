@@ -22,11 +22,14 @@ import {
   type CustomEndpoint,
   type ProviderId,
 } from "../config";
+import { type AgentSkills, modelSkills } from "@/modules/skills/catalog";
+import { skillsPromptBlock } from "@/modules/skills/prompt";
 import {
   type ApprovalState,
   buildTools,
   buildToolApproval,
   type ToolContext,
+  type ToolName,
 } from "../tools/tools";
 import { compactModelMessagesDetailed } from "./compact";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
@@ -64,6 +67,9 @@ const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
     todo_write: (i) =>
       `Updating plan (${Array.isArray(i.todos) ? i.todos.length : 0} items)`,
     run_subagent: (i) => `Spawning ${String(i.type ?? "subagent")} subagent`,
+    use_skill: (i) => `Loading skill ${ellipsize(String(i.name ?? ""), 40)}`,
+    read_skill_file: (i) =>
+      `Reading ${ellipsize(String(i.name ?? ""), 30)}/${shortPath(i.path)}`,
   };
 
 function shortPath(p: unknown): string {
@@ -268,11 +274,23 @@ export function buildConfiguredLanguageModel(
 const PLAN_MODE_PROMPT = `## PLAN MODE — ACTIVE
 Mutating tools (write_file, edit, multi_edit, create_directory) will queue their changes for the user to review as a single diff. Do NOT execute bash_run or bash_background while plan mode is active — restrict yourself to reads (read_file, grep, glob, list_directory) and the queued mutations. After queueing the full set of edits, stop and return a brief summary; do not continue acting until the user has accepted/rejected.`;
 
+const SKILL_TOOLS: readonly ToolName[] = ["use_skill", "read_skill_file"];
+
+/** Every tool but the skill tools when the run has no skill to use. */
+export function activeToolNames(
+  tools: readonly ToolName[],
+  skills: AgentSkills | undefined,
+): ToolName[] | undefined {
+  if (skills && skills.skills.length > 0) return undefined;
+  return tools.filter((name) => !SKILL_TOOLS.includes(name));
+}
+
 function buildStableSystem(
   modelId: string,
   persona: { name: string; instructions: string } | null,
   customInstructions: string | undefined,
   projectMemory: string | null,
+  skills: AgentSkills | undefined,
 ): string {
   const base = selectSystemPrompt(modelId);
   const personaBlock = persona?.instructions.trim()
@@ -285,7 +303,9 @@ function buildStableSystem(
     projectMemory && projectMemory.trim().length > 0
       ? `\n\n## PROJECT — TERAX.md\n${projectMemory.trim()}`
       : "";
-  return `${base}${memoryBlock}${personaBlock}${customBlock}`;
+  const skillsList = skills ? skillsPromptBlock(modelSkills(skills)) : null;
+  const skillsBlock = skillsList ? `\n\n${skillsList}` : "";
+  return `${base}${memoryBlock}${skillsBlock}${personaBlock}${customBlock}`;
 }
 
 export type AgentUsage = {
@@ -328,6 +348,8 @@ export type RunAgentOptions = {
   /** The effort chosen for this model; absent keeps the model's default. */
   reasoningEffort?: ReasoningEffort;
   projectMemory?: string | null;
+  /** The skills this run may use; none when absent. */
+  skills?: AgentSkills;
   uiMessages: UIMessage[];
   abortSignal?: AbortSignal;
 };
@@ -358,6 +380,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.agentPersona ?? null,
     opts.customInstructions,
     opts.projectMemory ?? null,
+    opts.skills,
   );
 
   const history = await convertToModelMessages(opts.uiMessages);
@@ -384,7 +407,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   );
 
   let stepsSeen = 0;
-  const tools = buildTools(opts.toolContext);
+  const tools = buildTools(opts.toolContext, opts.skills);
   const result = streamText({
     model,
     instructions: prompt.system,
@@ -392,6 +415,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
     allowSystemInMessages: false,
     ...reasoningCallOptions(info, opts.reasoningEffort),
     tools,
+    activeTools: activeToolNames(
+      Object.keys(tools) as ToolName[],
+      opts.skills,
+    ),
     toolApproval: buildToolApproval(opts.approvalState ?? (() => ASK_STATE)),
     stopWhen: isStepCount(MAX_AGENT_STEPS),
     abortSignal: opts.abortSignal,

@@ -46,6 +46,8 @@ export type SlashCommandMeta = {
   invocation: string;
   label: string;
   icon: typeof SparklesIcon;
+  /** A skill called with `/name`, not a built-in command. */
+  skill?: boolean;
 };
 
 export const SLASH_COMMANDS: Record<string, SlashCommandMeta> = {

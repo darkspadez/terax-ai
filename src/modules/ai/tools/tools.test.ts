@@ -136,6 +136,16 @@ describe("approval modes", () => {
     }
   });
 
+  it("loads skills without asking: they only read inside skill folders", () => {
+    for (const state of ALL_STATES) {
+      for (const name of ["use_skill", "read_skill_file"] as const) {
+        expect(toolApprovalStatus(TOOL_GATES[name], state), name).toBe(
+          "not-applicable",
+        );
+      }
+    }
+  });
+
   it("builds a run's policy that reads the mode on every call", () => {
     let state: ApprovalState = { mode: "auto", planMode: false };
     const policy = buildToolApproval(() => state);

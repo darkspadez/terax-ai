@@ -5,7 +5,12 @@ import type { FileAttachment } from "../lib/composer";
 import type { Snippet } from "../lib/snippets";
 import { Chip } from "./Chip";
 
-type CommandChip = { name: string; label: string; icon: typeof HashtagIcon };
+type CommandChip = {
+  name: string;
+  label: string;
+  icon: typeof HashtagIcon;
+  skill?: boolean;
+};
 
 type Props = {
   files: FileAttachment[];
@@ -39,9 +44,10 @@ export function ChipsRow({
           icon={cmd.icon}
           title={cmd.label}
           onRemove={() => onRemoveCommand(cmd.name)}
-          removeLabel="Remove command"
+          removeLabel={cmd.skill ? "Remove skill" : "Remove command"}
         >
-          #{cmd.name}
+          {cmd.skill ? "/" : "#"}
+          {cmd.name}
         </Chip>
       ))}
       {snippets.map((s) => (

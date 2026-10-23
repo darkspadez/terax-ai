@@ -40,18 +40,27 @@ Keys are never persisted outside the OS keychain / Linux secrets file.
 `runAgentStream` (`agent.ts`):
 
 1. Resolves the model via `buildConfiguredLanguageModel`.
-2. Builds a stable system prompt from `selectSystemPrompt(modelId)` plus optional persona, custom instructions, and `TERAX.md` project memory.
+2. Builds a stable system prompt from `selectSystemPrompt(modelId)` plus optional persona, custom instructions, `TERAX.md` project memory and the "Available skills" block (see Skills).
 3. Converts UI messages to model messages, prunes reasoning content if the model does not keep it, and compacts old messages if the context limit is exceeded.
 4. Streams via `streamText` with the tool set from `buildTools(ctx)`, the run's approval policy (`buildToolApproval`, see below), the chosen reasoning effort (`reasoningCallOptions`) and `stopWhen: isStepCount(MAX_AGENT_STEPS)`.
 5. Emits step labels, usage deltas, and finish metadata.
 
-The tool set is assembled in `src/modules/ai/tools/tools.ts` from the `fs`, `edit`, `search`, `shell`, `subagent`, `terminal`, `todo`, and managed-agent (`agent.ts`) builders.
+The tool set is assembled in `src/modules/ai/tools/tools.ts` from the `fs`, `edit`, `search`, `shell`, `subagent`, `terminal`, `todo`, managed-agent (`agent.ts`) and `skills` builders.
 
 `createContextAwareTransport` (`src/modules/ai/lib/transport.ts`) is the chat transport: it adds the environment block to the last user message, reads `TERAX.md` (capped, cached per workspace root), runs `runAgentStream` and returns `toUIMessageStream(...)` for the `Chat`.
 
 ### Reasoning effort
 
 `lib/reasoningEffort.ts` decides which models offer an effort from the catalog metadata: a model tagged `reasoning` on OpenAI, Anthropic, Google or xAI (but Grok 4.20, which the AI SDK refuses an effort for) offers off, low, medium and high; DeepSeek V4 offers off and high (its `thinking` switch, with `reasoning_effort` high when on). Everything else, including endpoints, local servers and OpenRouter, hides the composer's picker. The choice is remembered per model in `reasoningEffortByModel`; until one is made nothing is sent. For the native providers the effort becomes the AI SDK's `reasoning` call option, which each provider maps under its own constraints (Anthropic adaptive thinking with an effort or a budget within the max tokens, temperature dropped; OpenAI `reasoningEffort`; Google `thinkingConfig`; xAI `reasoningEffort`); "off" gives a model that always thinks its lowest setting. `reasoningEffort.test.ts` checks the request body each provider builds.
+
+## Skills
+
+Skills follow the Agent Skills format (as Claude Code and Codex use it): a folder with a `SKILL.md`, YAML frontmatter (`name`, `description`) and Markdown instructions, plus optional reference files and scripts. The backend (`src-tauri/src/modules/skills/`) discovers them in Terax's skills folder (the app config folder's `skills/`), `~/.claude/skills`, and the `.claude/skills` and `.terax/skills` of the project a conversation works in once the user trusts them (`project_trust.rs`, see the security model). A name found in several places is taken from the project (`.terax/skills` over `.claude/skills`), else `~/.claude/skills`, else Terax's folder; a skill turned off takes no part.
+
+- **Validation** (`skills/frontmatter.rs`, a small YAML reader for frontmatter: plain, quoted and block scalars, lists and maps). `name` follows the specification (1 to 64 lowercase letters, digits and hyphens, no hyphen at either end or twice in a row); without one the folder name is used, and a name that differs from its folder is a warning. `description` may have at most 1,024 characters; without one, the first line of the instructions is used, as Claude Code does. `compatibility` may have 500. A field that does not parse fails only when Terax uses it; other tools' fields (`metadata`, `hooks`, `allowed-tools`, ...) are skipped. `disable-model-invocation: true` keeps a skill out of the model's list (only `/name` calls it) and `user-invocable: false` out of the slash list. Invalid skills are listed in Settings with every reason. Folders named `.something` or `synced` (Claude Code's own) are skipped.
+- **The model's view.** Each run lists the skills the conversation may use (`loadAgentSkills`, through `skills_list` for the workspace root). `skillsPromptBlock` (`src/modules/skills/prompt.ts`) adds an "Available skills" section to the system prompt: name and description (with `when_to_use`, 1,536 characters at most each) of every skill the model may load, within 8,000 characters; names always fit first and the longest descriptions are shortened first. `use_skill` returns a skill's instructions (`${CLAUDE_SKILL_DIR}` filled in, 60,000 characters at most), its folder (as a WSL shell reaches it in a WSL conversation) and its file list; `read_skill_file` reads one of its text files by relative path (25 KB windows like `read_file`). Both are `TOOL_GATES` `none`. A run with no skill offers neither tool (`activeTools`). Scripts run through `bash_run`/`bash_background` with their absolute path, under the usual approval. Sub-agents get no skill tools.
+- **`/skill-name`.** The composer's `/` list shows the skills the user may call (`useUserSkills`). Sending `/name text` (typed, or the skill picked as a chip) loads the skill and sends its instructions in a `<skill name="..." dir="...">` block before the text; `$ARGUMENTS`, `$ARGUMENTS[N]` and `$N` take the user's arguments (Claude Code's substitutions; `\$` keeps a dollar sign). A built-in command of the same name wins. The conversation shows the block as a chip.
+- **Settings > Skills** lists the skills by source (Terax, `~/.claude/skills`, each open project with its trust state) with on/off switches, notes and validation errors; creates a skill from a template and opens it in the editor; edits any skill's `SKILL.md`; deletes skills of Terax's folder (to the trash); installs from a Git address (a GitHub `/tree/<branch>/<folder>` address picks a folder) or a zip, reviewing what was found before anything is kept. On/off state is kept by the backend (`skills-state.json`), so a skill turned off can be neither listed nor loaded. A watcher (`skills/watch.rs`: FSEvents on macOS, notify elsewhere; a missing folder through its parent) tells every window when skills or trust change (`skills:changed`), only when the listing really changed.
 
 ## Sub-agents
 
@@ -85,7 +94,7 @@ Tool definitions live under `src/modules/ai/tools/`:
 - Each conversation is in **Ask** (the default) or **Auto-approve** (`SessionMeta.approvalMode`, chosen in the composer; new conversations start in the Settings default `aiApprovalMode`). Auto-approve runs `approvable` tools, and `approvable-outside-plan` ones outside plan mode, without a card; their `execute` still applies the deny-lists. `always` tools ask in every mode. While it is on, the composer shows a chip that turns it off in one click, and the mini window and the running status pill show it too.
 - Read-only tools (`read_file`, `list_directory`, `grep`, `glob`) auto-execute after passing the security deny-list. Like every file tool, they are refused outside the folders the workspace registry authorizes; a path named by the model or a tool result never authorizes anything.
 - In Ask mode, mutating tools (`write_file`, `edit`, `multi_edit`, `create_directory`, `bash_run`, `bash_background`) and the coding-agent tools (`spawn_coding_agent`, `send_to_agent`) are `user-approval`. The AI SDK pauses and the UI renders an approval card.
-- Other tools run without an approval card: `bash_logs`, `bash_list`, `bash_kill` (background processes the agent started), `get_terminal_output` (refused for private terminals), `suggest_command` (renders an Insert card, never writes to a terminal), `open_preview`, `todo_write`, `read_agent_output` and `run_subagent`.
+- Other tools run without an approval card: `bash_logs`, `bash_list`, `bash_kill` (background processes the agent started), `get_terminal_output` (refused for private terminals), `suggest_command` (renders an Insert card, never writes to a terminal), `open_preview`, `todo_write`, `read_agent_output`, `run_subagent`, and `use_skill` and `read_skill_file` (confined to the conversation's usable skills, see Skills).
 - `edit` / `multi_edit` enforce a read-before-edit invariant: the model must have read the file earlier in the session.
 - In plan mode, mutating tools queue edits for batch review instead of applying them immediately. Apply (`planStore.applyAll`) writes the edits queued when it was pressed, re-checks each path against the deny-list (canonicalized) at write time, skips edits rejected meanwhile, and leaves edits queued during the writes for the next review.
 
@@ -109,6 +118,7 @@ AI-proposed file edits open in an `ai-diff` tab. The user accepts or rejects per
 - Keys only via `secrets_*` commands; never disk, settings store, or `localStorage`.
 - New providers must justify their bundle cost and unique value.
 - Mutating tools require approval unless the conversation is in Auto-approve; the coding-agent tools always do, and no mode skips a deny-list. Read-only tools still pass the deny-list.
+- A project's skills reach the model only while the user trusts that content; a skill's text never changes approval.
 
 ## See also
 

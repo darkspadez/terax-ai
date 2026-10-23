@@ -65,6 +65,13 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       usePreferencesStore.getState().reasoningEffortByModel[
         useChatStore.getState().selectedModelId
       ],
+    getSkills: async (root) => {
+      const [{ loadAgentSkills }, { currentWorkspaceEnv }] = await Promise.all([
+        import("@/modules/skills/catalog"),
+        import("@/modules/workspace"),
+      ]);
+      return loadAgentSkills(root, currentWorkspaceEnv());
+    },
     getLmstudioBaseURL: () => usePreferencesStore.getState().lmstudioBaseURL,
     getLmstudioModelId: () => usePreferencesStore.getState().lmstudioModelId,
     getMlxBaseURL: () => usePreferencesStore.getState().mlxBaseURL,

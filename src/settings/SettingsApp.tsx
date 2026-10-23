@@ -6,6 +6,7 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import { WindowActivityBridge } from "@/modules/theme";
 import {
   AiScanIcon,
+  BookOpenTextIcon,
   InformationCircleIcon,
   KeyboardIcon,
   PaintBoardIcon,
@@ -15,7 +16,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { type JSX, useEffect, useState } from "react";
+import { type JSX, lazy, Suspense, useEffect, useState } from "react";
 import { AboutSection } from "./sections/AboutSection";
 import { AgentsSection } from "./sections/AgentsSection";
 import { EditorSection } from "./sections/EditorSection";
@@ -24,6 +25,20 @@ import { GeneralSection } from "./sections/GeneralSection";
 import { ModelsSection } from "./sections/ModelsSection";
 import { ShortcutsSection } from "./sections/ShortcutsSection";
 import { ThemesSection } from "./sections/ThemesSection";
+
+const LazySkillsSection = lazy(() =>
+  import("./sections/SkillsSection").then((m) => ({
+    default: m.SkillsSection,
+  })),
+);
+
+function SkillsTab() {
+  return (
+    <Suspense fallback={null}>
+      <LazySkillsSection />
+    </Suspense>
+  );
+}
 
 const TABS: {
   id: SettingsTab;
@@ -63,6 +78,12 @@ const TABS: {
     component: AgentsSection,
   },
   {
+    id: "skills",
+    label: "Skills",
+    icon: BookOpenTextIcon,
+    component: SkillsTab,
+  },
+  {
     id: "about",
     label: "About",
     icon: InformationCircleIcon,
@@ -77,6 +98,7 @@ const VALID_TABS: SettingsTab[] = [
   "shortcuts",
   "models",
   "agents",
+  "skills",
   "about",
 ];
 

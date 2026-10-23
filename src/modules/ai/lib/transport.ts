@@ -1,5 +1,6 @@
 import type { UIMessage } from "@ai-sdk/react";
 import { toUIMessageStream } from "ai";
+import type { AgentSkills } from "@/modules/skills/catalog";
 import type { CustomEndpoint } from "../config";
 import { runAgentStream, type AgentUsageDelta } from "./agent";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
@@ -71,6 +72,8 @@ type Deps = {
   getApprovalMode?: () => ApprovalMode;
   /** The effort remembered for the run's model, if one was chosen. */
   getReasoningEffort?: () => ReasoningEffort | undefined;
+  /** The skills a run in this workspace may use. */
+  getSkills?: (workspaceRoot: string | null) => Promise<AgentSkills>;
 };
 
 type SendOptions = {
@@ -82,7 +85,10 @@ type SendOptions = {
 export function createContextAwareTransport(deps: Deps) {
   const run = async (options: SendOptions) => {
     const live = deps.getLive();
-    const projectMemory = await readTeraxMd(live.workspaceRoot);
+    const [projectMemory, skills] = await Promise.all([
+      readTeraxMd(live.workspaceRoot),
+      deps.getSkills?.(live.workspaceRoot),
+    ]);
     const envBlock = formatEnvBlock(live);
     const messagesForRun = envBlock
       ? injectEnvIntoLastUser(options.messages, envBlock)
@@ -116,6 +122,7 @@ export function createContextAwareTransport(deps: Deps) {
       }),
       reasoningEffort: deps.getReasoningEffort?.(),
       projectMemory,
+      skills,
       uiMessages: messagesForRun,
       abortSignal: options.abortSignal,
     });

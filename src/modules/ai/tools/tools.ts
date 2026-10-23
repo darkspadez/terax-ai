@@ -1,9 +1,11 @@
+import { type AgentSkills, NO_AGENT_SKILLS } from "@/modules/skills/catalog";
 import type { ApprovalMode } from "../lib/approvalMode";
 import { buildManagedAgentTools } from "./agent";
 import { buildEditTools } from "./edit";
 import { buildFsTools } from "./fs";
 import { buildSearchTools } from "./search";
 import { buildShellTools } from "./shell";
+import { buildSkillTools } from "./skills";
 import { buildSubagentTools } from "./subagent";
 import { buildTerminalTools } from "./terminal";
 import { buildTodoTools } from "./todo";
@@ -25,12 +27,18 @@ export { resolvePath, type ToolContext } from "./context";
  *  - `edit` / `multi_edit` additionally enforce a read-before-edit invariant
  *    (the model must have called read_file on the path earlier in the
  *    session).
+ *  - `use_skill` / `read_skill_file` read only inside the folders of the
+ *    run's usable skills (`skills`), which the backend confines; skill scripts
+ *    run through `bash_run` with its approval.
  *
  * The model sees absolute paths only after they are resolved against the
  * active terminal's cwd (provided via `getCwd`); it should not invent paths
  * outside that.
  */
-export function buildTools(ctx: import("./context").ToolContext) {
+export function buildTools(
+  ctx: import("./context").ToolContext,
+  skills: AgentSkills = NO_AGENT_SKILLS,
+) {
   return {
     ...buildFsTools(ctx),
     ...buildEditTools(ctx),
@@ -40,6 +48,7 @@ export function buildTools(ctx: import("./context").ToolContext) {
     ...buildTerminalTools(ctx),
     ...buildTodoTools(ctx),
     ...buildManagedAgentTools(ctx),
+    ...buildSkillTools(skills),
   } as const;
 }
 
@@ -86,6 +95,8 @@ export const TOOL_GATES: Readonly<Record<ToolName, ToolGate>> = {
   spawn_coding_agent: "always",
   send_to_agent: "always",
   read_agent_output: "none",
+  use_skill: "none",
+  read_skill_file: "none",
 };
 
 type ApprovalStatus = "user-approval" | "not-applicable";

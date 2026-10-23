@@ -27,7 +27,13 @@ import {
   readPickedFile,
   textTooLarge,
 } from "./pathAttachment";
-import { tryRunSlashCommand, type SlashCommandMeta } from "./slashCommands";
+import { parseSkillInvocation } from "@/modules/skills/slash";
+import { currentWorkspaceEnv } from "@/modules/workspace";
+import {
+  SLASH_COMMANDS,
+  tryRunSlashCommand,
+  type SlashCommandMeta,
+} from "./slashCommands";
 import { getChat, useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
 
@@ -279,8 +285,11 @@ export function AiComposerProvider({ children }: ProviderProps) {
     return () => window.removeEventListener(COMPOSER_DROP_EVENT, onDrop);
   }, []);
 
+  // A skill is loaded before its message is sent; nothing else is sent meanwhile.
+  const loadingSkill = useRef(false);
+
   const submit = () => {
-    if (isBusy) return;
+    if (isBusy || loadingSkill.current) return;
     const trimmed = value.trim();
     if (
       !trimmed &&
@@ -289,6 +298,44 @@ export function AiComposerProvider({ children }: ProviderProps) {
       pickedCommands.length === 0
     )
       return;
+
+    // `/skill-name ...` (typed, or picked as a chip) sends the skill's
+    // instructions with the user's text. Built-in commands keep their names.
+    const pickedSkill = pickedCommands.find((c) => c.skill);
+    const typedSkill = pickedSkill ? null : parseSkillInvocation(trimmed);
+    const skillCall = pickedSkill
+      ? { name: pickedSkill.name, args: trimmed }
+      : typedSkill && !SLASH_COMMANDS[typedSkill.name]
+        ? typedSkill
+        : null;
+    if (skillCall) {
+      loadingSkill.current = true;
+      void (async () => {
+        try {
+          const { skillInvocation } = await import("@/modules/skills/composer");
+          const result = await skillInvocation(
+            skillCall.name,
+            skillCall.args,
+            useChatStore.getState().live.getWorkspaceRoot(),
+            currentWorkspaceEnv(),
+          );
+          if (result.kind === "block") {
+            send(skillCall.args, null, [result.block]);
+          } else if (pickedSkill) {
+            toast.error(`The skill ${skillCall.name} is not available`);
+          } else {
+            send(trimmed, null, []);
+          }
+        } catch (e) {
+          toast.error(`Could not load the skill ${skillCall.name}`, {
+            description: e instanceof Error ? e.message : String(e),
+          });
+        } finally {
+          loadingSkill.current = false;
+        }
+      })();
+      return;
+    }
 
     // Slash-command interception. `/plan` toggles plan mode; `/init` rewrites
     // the prompt to the TERAX.md scan template before sending.
@@ -312,7 +359,16 @@ export function AiComposerProvider({ children }: ProviderProps) {
         }
       }
     }
+    send(effectiveText, commandMarker, []);
+  };
 
+  /** Sends the message: the command marker, `leading` blocks (a skill's), snippets,
+   *  selections and files, then the text. */
+  const send = (
+    effectiveText: string,
+    commandMarker: string | null,
+    leading: string[],
+  ) => {
     const parts: MessagePart[] = [];
     const fileBlocks = files
       .filter((f) => f.kind === "text")
@@ -347,6 +403,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     }
     const composed = [
       commandMarker ?? "",
+      ...leading,
       allSnippetBlocks.join("\n\n"),
       selectionBlocks.join("\n\n"),
       fileBlocks.join("\n\n"),
