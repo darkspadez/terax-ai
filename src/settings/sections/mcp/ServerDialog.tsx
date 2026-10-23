@@ -352,7 +352,7 @@ export function ServerDialog({
               <Field
                 label="Command"
                 error={shown.command}
-                hint="The program and its arguments, as you would type them. Found through the PATH of your terminal shell."
+                hint="The program and its arguments, as you would type them. Found through the PATH of your terminal shell; a relative path (./serve.sh) in the working folder."
               >
                 <Input
                   value={draft.commandLine}

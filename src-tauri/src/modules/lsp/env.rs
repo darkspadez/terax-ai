@@ -4,7 +4,7 @@
 //! (interactive and login), once per shell, and reuse it for detect and spawn.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 /// A captured shell environment.
@@ -85,17 +85,48 @@ fn captured_envs() -> &'static EnvCache {
     CACHE.get_or_init(EnvCache::default)
 }
 
-pub fn resolve_binary(command: &str, env: &ServerEnv) -> Option<PathBuf> {
+/// Whether `command` names a program by a path relative to a folder
+/// (`./serve.sh`, `bin/serve`, `..\tools\serve.cmd`) rather than by a name
+/// looked up on PATH: it holds a path separator or starts with `.`.
+pub fn is_relative_path(command: &str) -> bool {
+    let separator = command.contains('/') || (cfg!(windows) && command.contains('\\'));
+    !Path::new(command).is_absolute() && (separator || command.starts_with('.'))
+}
+
+/// The program `command` names for a process that runs in `cwd`: an absolute
+/// path as is, a relative path inside `cwd` (never Terax's own folder), a bare
+/// name through the PATH of `env`, else Terax's own PATH.
+pub fn resolve_binary(command: &str, env: &ServerEnv, cwd: &Path) -> Option<PathBuf> {
     let command = command.trim();
     if command.is_empty() {
         return None;
     }
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
     let path = env
         .get("PATH")
         .cloned()
         .or_else(|| std::env::var("PATH").ok());
+    if is_relative_path(command) {
+        let mut inside = cwd.to_path_buf();
+        inside.extend(
+            Path::new(command)
+                .components()
+                .skip_while(|c| matches!(c, Component::CurDir)),
+        );
+        return which::which_in(inside, path, cwd).ok();
+    }
     which::which_in(command, path, cwd).ok()
+}
+
+/// What `lsp_detect` reports for a server's command: where it resolves, or,
+/// for a relative path, the path itself, which each project's server looks
+/// up in that project's folder when it starts.
+pub fn detect_binary(command: &str, env: &ServerEnv) -> Option<String> {
+    let command = command.trim();
+    if is_relative_path(command) {
+        return Some(command.to_owned());
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+    resolve_binary(command, env, &cwd).map(|p| p.to_string_lossy().into_owned())
 }
 
 #[cfg(unix)]
@@ -189,33 +220,96 @@ fn parse_env_block(bytes: &[u8]) -> Option<HashMap<String, String>> {
 mod tests {
     use super::*;
 
+    fn executable(dir: &Path, name: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
     #[test]
     fn resolve_binary_finds_sh() {
-        let p = resolve_binary("sh", &HashMap::new()).expect("sh must resolve");
+        let p = resolve_binary("sh", &HashMap::new(), Path::new("/")).expect("sh must resolve");
         assert!(p.is_absolute());
     }
 
     #[test]
     fn resolve_binary_rejects_empty_and_missing() {
         let env = HashMap::new();
-        assert!(resolve_binary("", &env).is_none());
-        assert!(resolve_binary("   ", &env).is_none());
-        assert!(resolve_binary("terax-definitely-not-a-real-binary", &env).is_none());
+        let cwd = Path::new("/");
+        assert!(resolve_binary("", &env, cwd).is_none());
+        assert!(resolve_binary("   ", &env, cwd).is_none());
+        assert!(resolve_binary("terax-definitely-not-a-real-binary", &env, cwd).is_none());
     }
 
     #[test]
     fn resolve_binary_searches_the_captured_path() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
-        let server = dir.path().join("terax-test-language-server");
-        std::fs::write(&server, "#!/bin/sh\n").unwrap();
-        std::fs::set_permissions(&server, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let server = executable(dir.path(), "terax-test-language-server");
         let env = HashMap::from([("PATH".to_string(), dir.path().display().to_string())]);
+        let cwd = Path::new("/");
         assert_eq!(
-            resolve_binary("terax-test-language-server", &env),
+            resolve_binary("terax-test-language-server", &env, cwd),
             Some(server)
         );
-        assert!(resolve_binary("terax-test-language-server", &HashMap::new()).is_none());
+        assert!(resolve_binary("terax-test-language-server", &HashMap::new(), cwd).is_none());
+    }
+
+    #[test]
+    fn relative_commands_are_paths_and_bare_names_are_not() {
+        for relative in ["./serve.sh", "../tools/serve", "bin/serve", ".serve", "."] {
+            assert!(is_relative_path(relative), "{relative}");
+        }
+        for not_relative in ["npx", "serve.sh", "/usr/bin/node", "uvx", ""] {
+            assert!(!is_relative_path(not_relative), "{not_relative}");
+        }
+    }
+
+    #[test]
+    fn a_relative_command_is_found_in_the_folder_it_runs_in() {
+        let project = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let script = executable(project.path(), "scripts/serve.sh");
+        let hidden = executable(project.path(), ".serve");
+        let env = HashMap::new();
+        assert_eq!(
+            resolve_binary("./scripts/serve.sh", &env, project.path()),
+            Some(script.clone())
+        );
+        assert_eq!(
+            resolve_binary("scripts/serve.sh", &env, project.path()),
+            Some(script)
+        );
+        assert_eq!(resolve_binary(".serve", &env, project.path()), Some(hidden));
+        assert!(resolve_binary("./scripts/serve.sh", &env, other.path()).is_none());
+        assert!(resolve_binary("./scripts", &env, project.path()).is_none());
+    }
+
+    #[test]
+    fn a_bare_name_never_comes_from_the_folder_it_runs_in() {
+        let project = tempfile::tempdir().unwrap();
+        let bin = tempfile::tempdir().unwrap();
+        executable(project.path(), "terax-test-server");
+        let env = HashMap::from([("PATH".to_string(), bin.path().display().to_string())]);
+        assert!(resolve_binary("terax-test-server", &env, project.path()).is_none());
+        let on_path = executable(bin.path(), "terax-test-server");
+        assert_eq!(
+            resolve_binary("terax-test-server", &env, project.path()),
+            Some(on_path)
+        );
+    }
+
+    #[test]
+    fn detection_leaves_a_relative_command_to_each_project() {
+        let env = HashMap::new();
+        assert_eq!(
+            detect_binary(" ./node_modules/.bin/server ", &env).as_deref(),
+            Some("./node_modules/.bin/server")
+        );
+        assert!(detect_binary("sh", &env).is_some_and(|p| Path::new(&p).is_absolute()));
+        assert!(detect_binary("terax-definitely-not-a-real-binary", &env).is_none());
     }
 
     fn env_with(key: &str) -> Arc<ServerEnv> {

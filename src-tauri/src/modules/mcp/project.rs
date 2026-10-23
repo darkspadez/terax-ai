@@ -532,19 +532,6 @@ pub fn lookup(shell: &Lookup) -> impl Fn(&str) -> Option<String> + '_ {
     }
 }
 
-/// A command as a project server runs it: a relative path (`./server.sh`, `bin/serve`) is the
-/// project's, as it is for Claude Code, which starts servers in the project folder; a bare
-/// name is looked up on PATH.
-pub fn command_in(root: &Path, command: &str) -> String {
-    let path = Path::new(command);
-    let has_separator = command.contains('/') || (cfg!(windows) && command.contains('\\'));
-    if path.is_absolute() || !has_separator {
-        command.to_owned()
-    } else {
-        root.join(path).to_string_lossy().into_owned()
-    }
-}
-
 /// A local server ready to start: every value expanded.
 pub struct StdioLaunch {
     pub command: String,
@@ -698,21 +685,6 @@ mod tests {
         assert!(parse(b"{nope", "/p").is_err());
         assert!(parse(br#"{"mcpServers": 3}"#, "/p").is_err());
         assert!(parse(b"{}", "/p").unwrap().is_empty());
-    }
-
-    #[test]
-    fn relative_commands_are_the_projects() {
-        let root = Path::new("/work/p");
-        assert_eq!(command_in(root, "npx"), "npx");
-        assert_eq!(command_in(root, "/usr/bin/node"), "/usr/bin/node");
-        assert_eq!(
-            Path::new(&command_in(root, "./scripts/serve.sh")),
-            root.join("./scripts/serve.sh")
-        );
-        assert_eq!(
-            Path::new(&command_in(root, "bin/serve")),
-            root.join("bin/serve")
-        );
     }
 
     #[test]

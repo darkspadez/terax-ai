@@ -44,12 +44,32 @@ fn spawn_thread(
         .map_err(|e| e.to_string())
 }
 
+/// The folder a server starts in. A relative command is looked up only in a
+/// folder that was set, never in one the server just defaults to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkingFolder {
+    /// Set in the server's settings, or a project server's project.
+    Set(PathBuf),
+    /// None is set: the home folder.
+    Home(PathBuf),
+}
+
+impl WorkingFolder {
+    pub fn path(&self) -> &Path {
+        match self {
+            Self::Set(path) | Self::Home(path) => path,
+        }
+    }
+}
+
 /// The folder a server starts in: the one configured (absolute, existing),
 /// else the home folder. Servers run outside the workspace authorization
 /// registry: they are programs the user chose, with the user's rights.
-pub fn resolve_cwd(cwd: Option<&str>) -> Result<PathBuf, String> {
+pub fn resolve_cwd(cwd: Option<&str>) -> Result<WorkingFolder, String> {
     match cwd.map(str::trim).filter(|c| !c.is_empty()) {
-        None => dirs::home_dir().ok_or_else(|| "mcp: no home folder".to_string()),
+        None => dirs::home_dir()
+            .map(WorkingFolder::Home)
+            .ok_or_else(|| "mcp: no home folder".to_string()),
         Some(raw) => {
             let path = PathBuf::from(raw);
             if !path.is_absolute() {
@@ -60,7 +80,7 @@ pub fn resolve_cwd(cwd: Option<&str>) -> Result<PathBuf, String> {
             if !path.is_dir() {
                 return Err(format!("mcp: the working folder does not exist: {raw}"));
             }
-            Ok(path)
+            Ok(WorkingFolder::Set(path))
         }
     }
 }
@@ -440,16 +460,35 @@ pub fn shut_down(sessions: Vec<Arc<StdioSession>>) {
     }
 }
 
-/// The program to run: an absolute path as is, a bare name through the PATH
-/// of the user's shell environment (`lsp::env::resolve_binary`).
-pub fn resolve_program(command: &str, env: &HashMap<String, String>) -> Result<PathBuf, String> {
+/// The program to run: an absolute path as is, a relative path (`./serve.sh`,
+/// `bin/serve`) inside the server's working folder, which must be set for
+/// it, a bare name through the PATH of the user's shell environment
+/// (`lsp::env::resolve_binary`).
+pub fn resolve_program(
+    command: &str,
+    env: &HashMap<String, String>,
+    folder: &WorkingFolder,
+) -> Result<PathBuf, String> {
+    use crate::modules::lsp::env::{is_relative_path, resolve_binary};
     let command = command.trim();
     if command.is_empty() {
         return Err("mcp: no command".into());
     }
-    crate::modules::lsp::env::resolve_binary(command, env).ok_or_else(|| {
+    let relative = is_relative_path(command);
+    if relative && matches!(folder, WorkingFolder::Home(_)) {
+        return Err(format!(
+            "mcp: {command} is a relative path, and this server has no working folder \
+             to find it in; set its working folder in Settings, MCP, or give the full path"
+        ));
+    }
+    resolve_binary(command, env, folder.path()).ok_or_else(|| {
         if Path::new(command).is_absolute() {
             format!("mcp: {command} is not an executable file")
+        } else if relative {
+            format!(
+                "mcp: {command} is not an executable file in the working folder {}",
+                folder.path().display()
+            )
         } else {
             format!("mcp: command not found: {command}")
         }
@@ -649,21 +688,56 @@ mod tests {
     #[test]
     fn the_working_folder_is_absolute_and_exists_or_home() {
         let dir = tempfile::tempdir().unwrap();
+        let home = WorkingFolder::Home(dirs::home_dir().unwrap());
         assert_eq!(
             resolve_cwd(Some(dir.path().to_str().unwrap())).unwrap(),
-            dir.path()
+            WorkingFolder::Set(dir.path().to_owned())
         );
-        assert_eq!(resolve_cwd(None).unwrap(), dirs::home_dir().unwrap());
-        assert_eq!(resolve_cwd(Some("  ")).unwrap(), dirs::home_dir().unwrap());
+        assert_eq!(resolve_cwd(None).unwrap(), home);
+        assert_eq!(resolve_cwd(Some("  ")).unwrap(), home);
         assert!(resolve_cwd(Some("relative/dir")).is_err());
         assert!(resolve_cwd(Some(dir.path().join("missing").to_str().unwrap())).is_err());
     }
 
     #[test]
     fn programs_resolve_through_the_given_path() {
-        assert!(resolve_program("sh", &HashMap::new()).is_ok());
-        let missing = resolve_program("terax-no-such-mcp-server", &HashMap::new());
+        let home = WorkingFolder::Home(dirs::home_dir().unwrap());
+        assert!(resolve_program("sh", &HashMap::new(), &home).is_ok());
+        let missing = resolve_program("terax-no-such-mcp-server", &HashMap::new(), &home);
         assert!(missing.unwrap_err().contains("command not found"));
-        assert!(resolve_program(" ", &HashMap::new()).is_err());
+        assert!(resolve_program(" ", &HashMap::new(), &home).is_err());
+    }
+
+    #[test]
+    fn a_relative_command_is_the_working_folders() {
+        use std::os::unix::fs::PermissionsExt;
+        let folder = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        std::fs::create_dir(folder.path().join("bin")).unwrap();
+        let serve = folder.path().join("bin/serve");
+        std::fs::write(&serve, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&serve, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let env = HashMap::new();
+        let set = WorkingFolder::Set(folder.path().to_owned());
+        for command in ["./bin/serve", "bin/serve"] {
+            assert_eq!(resolve_program(command, &env, &set), Ok(serve.clone()));
+        }
+
+        let other = WorkingFolder::Set(elsewhere.path().to_owned());
+        let error = resolve_program("./bin/serve", &env, &other).unwrap_err();
+        assert!(
+            error.contains(&elsewhere.path().display().to_string()),
+            "{error}"
+        );
+
+        // Never the home folder a server without one runs in, nor Terax's own.
+        let unset = WorkingFolder::Home(folder.path().to_owned());
+        let error = resolve_program("./bin/serve", &env, &unset).unwrap_err();
+        assert!(error.contains("no working folder"), "{error}");
+
+        // A bare name comes from PATH, even where a file of that name sits.
+        std::fs::copy(&serve, folder.path().join("terax-no-such-mcp-server")).unwrap();
+        let error = resolve_program("terax-no-such-mcp-server", &env, &set).unwrap_err();
+        assert!(error.contains("command not found"), "{error}");
     }
 }
