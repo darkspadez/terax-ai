@@ -322,7 +322,8 @@ pub fn run() {
         )
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build())
-        .plugin(tauri_plugin_store::Builder::new().build())
+        // Stores open only by plain names in the app data folder.
+        .plugin(modules::store_scope::plugin())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(
@@ -400,6 +401,7 @@ pub fn run() {
             pty::pty_close_all,
             pty::pty_has_foreground_process,
             pty::pty_has_foreground_job,
+            pty::pty_authorize_cwd,
             pty::pty_shell_name,
             pty::pty_list_shells,
             fs::tree::list_subdirs,

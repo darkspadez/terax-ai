@@ -49,7 +49,11 @@ function authorize(
   return request;
 }
 
-/** Makes a folder a workspace root: one the user opened, or a terminal's. */
+/**
+ * Makes a folder a workspace root: one the user opened, or one a restored
+ * window works in. A terminal's own folder is checked against its shell
+ * first, in the backend (`authorizePtyCwd`).
+ */
 export function authorizeRoot(
   path: string,
   env: WorkspaceEnv = currentWorkspaceEnv(),

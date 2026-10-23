@@ -26,6 +26,7 @@ pub mod runtime;
 pub mod second_launch;
 pub mod secrets;
 pub mod shell;
+pub mod store_scope;
 pub mod system_fonts;
 pub mod terminal_scrollback;
 pub mod vibrancy;
