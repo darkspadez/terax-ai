@@ -2,6 +2,7 @@ import { generateText, isStepCount } from "ai";
 import { buildConfiguredLanguageModel } from "../lib/agent";
 import type { ProviderKeys } from "../lib/keyring";
 import type { LocalProviderConfig } from "../lib/modelTarget";
+import { type TokenUsage, tokenUsage } from "../lib/usage";
 import type { ToolContext } from "../tools/context";
 import { buildFsTools } from "../tools/fs";
 import { buildSearchTools } from "../tools/search";
@@ -20,6 +21,9 @@ type Args = {
   config: LocalProviderConfig;
   toolContext: ToolContext;
   onStep?: (label: string) => void;
+  /** Each step's usage on the user's key, with the model id it ran on
+   *  (`modelId`, which prices it). */
+  onUsage?: (modelId: string, usage: TokenUsage) => void;
 };
 
 type RunResult = {
@@ -36,6 +40,7 @@ export async function runSubagent({
   config,
   toolContext,
   onStep,
+  onUsage,
 }: Args): Promise<RunResult> {
   const def = SUBAGENTS[type];
   if (!def) throw new Error(`unknown subagent type: ${type}`);
@@ -63,6 +68,7 @@ export async function runSubagent({
     toolApproval: TOOL_APPROVAL,
     stopWhen: isStepCount(SUBAGENT_MAX_STEPS),
     onStepEnd: (step) => {
+      if (onUsage && step.usage) onUsage(modelId, tokenUsage(step.usage));
       if (!onStep) return;
       const last = step.toolCalls?.[step.toolCalls.length - 1];
       if (last) onStep(`${type}: ${last.toolName}`);

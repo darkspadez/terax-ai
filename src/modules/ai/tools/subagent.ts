@@ -2,7 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { runSubagent } from "../agents/runSubagent";
 import { SUBAGENTS, type SubagentType } from "../agents/registry";
-import { useChatStore } from "../store/chatStore";
+import { countConversationUsage, useChatStore } from "../store/chatStore";
 import { liveModelConfig } from "../store/modelConfig";
 import type { ToolContext } from "./context";
 
@@ -32,6 +32,7 @@ Auto-executes (no approval) — subagents are read-only by design.`,
       execute: async ({ type, prompt, description }) => {
         const { apiKeys, selectedModelId, patchAgentMeta } =
           useChatStore.getState();
+        const sessionId = ctx.getSessionId();
         try {
           const r = await runSubagent({
             type,
@@ -41,6 +42,11 @@ Auto-executes (no approval) — subagents are read-only by design.`,
             config: liveModelConfig(),
             toolContext: ctx,
             onStep: (label) => patchAgentMeta({ step: label }),
+            // Its tokens are the conversation's, counted like the agent's
+            // own steps: in its meter while it is the open one.
+            onUsage: (modelId, usage) => {
+              if (sessionId) countConversationUsage(sessionId, modelId, usage);
+            },
           });
           return {
             type,

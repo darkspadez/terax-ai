@@ -2,9 +2,9 @@ import { estimateCost } from "../config";
 
 /**
  * What a conversation's runs used on the user's keys, for its token and cost
- * meter: the agent's steps and the sampling requests the user approved for
- * an MCP server, each counted with the model that ran it so its cost comes
- * from that model's price. Pure.
+ * meter: the agent's steps, its sub-agents' steps and the sampling requests
+ * the user approved for an MCP server, each counted with the model that ran
+ * it so its cost comes from that model's price. Pure.
  */
 
 export type TokenUsage = {

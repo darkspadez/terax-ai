@@ -64,7 +64,7 @@ Skills follow the Agent Skills format (as Claude Code and Codex use it): a folde
 
 ## Sub-agents
 
-`src/modules/ai/agents/registry.ts` defines read-only sub-agents: `explore`, `code-review`, `security`, and `general`. Each has a whitelist of tools and its own system prompt. `run_subagent` cannot recurse (the subagent tool set excludes `run_subagent` itself).
+`src/modules/ai/agents/registry.ts` defines read-only sub-agents: `explore`, `code-review`, `security`, and `general`. Each has a whitelist of tools and its own system prompt. `run_subagent` cannot recurse (the subagent tool set excludes `run_subagent` itself). A sub-agent runs on the window's selected model; `runSubagent` reports each step's usage with that model's id (`onUsage`), and `run_subagent` counts it in the meter of the conversation that started it (`countConversationUsage`, so only while that conversation is the open one), as the agent's own steps are.
 
 ## Sessions
 
