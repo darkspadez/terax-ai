@@ -1,10 +1,10 @@
 import { detectMonoFontFamily } from "@/lib/fonts";
 import { indentUnit } from "@codemirror/language";
 import { lintGutter } from "@codemirror/lint";
-import { search } from "@codemirror/search";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { chromeTheme } from "./chromeTheme";
+import { countedSearch } from "./searchPanel";
 
 // Compartments allow runtime reconfiguration without rebuilding state.
 export const languageCompartment = new Compartment();
@@ -52,7 +52,7 @@ export function wordWrapExtension(column: number | null): Extension {
 // highlightSelectionMatches and the search keymap.
 // Singleton: per-pane instances would inject duplicate style modules.
 const SHARED_EXTENSIONS: readonly Extension[] = Object.freeze([
-  search({ top: true }),
+  countedSearch({ top: true }),
   lintGutter(),
   chromeTheme(),
   EditorView.theme({

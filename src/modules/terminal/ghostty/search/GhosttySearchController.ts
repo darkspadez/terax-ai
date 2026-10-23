@@ -1,3 +1,4 @@
+import { type MatchCount, sameMatchCount } from "@/lib/matchCount";
 import type {
   TerminalSearchController,
   TerminalSearchOptions,
@@ -6,7 +7,7 @@ import type {
   GhosttySearchStatus,
   GhosttyTerminalModelApi,
 } from "../GhosttyTerminalModel";
-import { RegexTerminalSearch } from "./RegexTerminalSearch";
+import { MAX_REGEX_MATCHES, RegexTerminalSearch } from "./RegexTerminalSearch";
 
 const SEARCH_STEP_BUDGET = 256;
 /** Buffer lines a regex search scans per frame. */
@@ -38,6 +39,8 @@ export class GhosttySearchController implements TerminalSearchController {
   private scheduledStep: number | null = null;
   private disposed = false;
   private suspended = false;
+  private count: MatchCount | null = null;
+  private readonly countListeners = new Set<() => void>();
 
   constructor(
     private readonly model: GhosttyTerminalModelApi,
@@ -93,7 +96,19 @@ export class GhosttySearchController implements TerminalSearchController {
     this.regex = false;
     this.status = emptyStatus();
     this.commitMask(new Uint8Array(0), 0);
+    this.publishCount();
     this.onChange();
+  }
+
+  matchCount(): MatchCount | null {
+    return this.count;
+  }
+
+  subscribeMatchCount(listener: () => void): () => void {
+    this.countListeners.add(listener);
+    return () => {
+      this.countListeners.delete(listener);
+    };
   }
 
   refreshOverlay(): void {
@@ -147,6 +162,7 @@ export class GhosttySearchController implements TerminalSearchController {
     if (this.disposed) return;
     this.disposed = true;
     this.cancelStep();
+    this.countListeners.clear();
     this.viewportMask = new Uint8Array(0);
     this.scratchMask = new Uint8Array(0);
     this.maskCells = 0;
@@ -185,9 +201,18 @@ export class GhosttySearchController implements TerminalSearchController {
         : this.model.selectSearchMatch(direction);
     }
     this.rebuildViewportMask();
+    this.publishCount();
     this.onChange();
     if (!this.status.complete) this.scheduleStep();
     else this.cancelStep();
+  }
+
+  /** Steps run often while output streams: listeners hear only real changes. */
+  private publishCount(): void {
+    const next = this.query ? searchMatchCount(this.status, this.regex) : null;
+    if (sameMatchCount(this.count, next)) return;
+    this.count = next;
+    for (const listener of [...this.countListeners]) listener();
   }
 
   private rebuildViewportMask(): void {
@@ -257,6 +282,23 @@ export class GhosttySearchController implements TerminalSearchController {
     }
     this.scheduledStep = null;
   }
+}
+
+/**
+ * The count a search status stands for. The selected index counts in the
+ * engine's own order, as Ghostty's search shows it; the regex engine stops
+ * counting at its cap.
+ */
+export function searchMatchCount(
+  status: GhosttySearchStatus,
+  regex: boolean,
+): MatchCount {
+  return {
+    current: status.selectedIndex >= 0 ? status.selectedIndex + 1 : 0,
+    total: status.totalMatches,
+    capped: regex && status.totalMatches >= MAX_REGEX_MATCHES,
+    pending: !status.complete,
+  };
 }
 
 function emptyStatus(): GhosttySearchStatus {
