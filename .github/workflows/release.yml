@@ -13,35 +13,39 @@ jobs:
       contents: write
       id-token: write
     # `platform` names the leg (the steps below branch on it); `runner` is the
-    # Namespace profile it builds on (see ci.yml). The Linux profile is Ubuntu
-    # 22.04 so the packages keep that glibc baseline.
+    # Namespace profile it builds on (see ci.yml). The Linux profiles are Ubuntu
+    # 22.04 so the packages keep that glibc baseline. There is no Windows
+    # profile yet: the Windows leg is left out until one exists, and its
+    # SignPath steps below stay for when it returns.
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: macos-latest
-            runner: namespace-profile-terax-macos
+            runner: namespace-profile-oarlock-macos-arm64
             args: --target aarch64-apple-darwin
             rust-target: aarch64-apple-darwin
           - platform: macos-latest
-            runner: namespace-profile-terax-macos
+            runner: namespace-profile-oarlock-macos-arm64
             args: --target x86_64-apple-darwin
             rust-target: x86_64-apple-darwin
           - platform: ubuntu-22.04
-            runner: namespace-profile-terax-linux
+            runner: namespace-profile-oarlock-linux-amd64
             args: ""
             rust-target: ""
-          - platform: windows-latest
-            runner: namespace-profile-terax-windows
+            appimage-arch: x86_64
+          - platform: ubuntu-22.04-arm
+            runner: namespace-profile-oarlock-linux-arm64
             args: ""
             rust-target: ""
+            appimage-arch: aarch64
 
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
 
       - name: Install Linux build dependencies
-        if: matrix.platform == 'ubuntu-22.04'
+        if: startsWith(matrix.platform, 'ubuntu')
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -98,7 +102,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Terax ${{ github.ref_name }}"
-          releaseBody: "See the assets to download and install. Auto-update is built in."
+          releaseBody: "See the assets to download and install."
           releaseDraft: true
           prerelease: false
           tauriScript: bun run tauri
@@ -116,7 +120,7 @@ jobs:
       # patch-appimage-updater job after all matrix legs finish, so a parallel
       # macOS/Windows upload cannot clobber the combined latest.json.
       - name: Fix AppImage wayland libs and re-sign
-        if: matrix.platform == 'ubuntu-22.04' && startsWith(github.ref, 'refs/tags/')
+        if: startsWith(matrix.platform, 'ubuntu') && startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -141,10 +145,11 @@ jobs:
           find squashfs-root \( -type f -o -type l \) \
             -name 'libwayland-*.so*' -print -delete
 
+          ARCH="${{ matrix.appimage-arch }}"
           curl -fsSL -o appimagetool.AppImage \
-            https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+            "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-${ARCH}.AppImage"
           chmod +x appimagetool.AppImage
-          ARCH=x86_64 ./appimagetool.AppImage --appimage-extract-and-run squashfs-root "$BASENAME"
+          ARCH="$ARCH" ./appimagetool.AppImage --appimage-extract-and-run squashfs-root "$BASENAME"
 
           # Sanity-check the repacked image before it replaces the original.
           rm -rf squashfs-root
@@ -160,12 +165,18 @@ jobs:
 
           cp "$WORK/$BASENAME" "$APPIMAGE"
 
-          rm -f "$APPIMAGE.sig"
-          bun run tauri signer sign "$APPIMAGE"
-
           TAG="${GITHUB_REF_NAME}"
-          gh release upload "$TAG" "$APPIMAGE" "$APPIMAGE.sig" \
-            --clobber --repo "$GITHUB_REPOSITORY"
+          rm -f "$APPIMAGE.sig"
+          # The updater signature exists only while updates are on (a signing
+          # key is configured); without one the repacked AppImage goes up alone.
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            bun run tauri signer sign "$APPIMAGE"
+            gh release upload "$TAG" "$APPIMAGE" "$APPIMAGE.sig" \
+              --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release upload "$TAG" "$APPIMAGE" \
+              --clobber --repo "$GITHUB_REPOSITORY"
+          fi
 
       # SignPath Authenticode-signs the Windows installers. Their bytes change,
       # so the minisign updater signatures tauri-action produced over the
@@ -246,16 +257,16 @@ jobs:
             $env:MSI_REAL_PATH "$($env:MSI_REAL_PATH).sig" `
             --clobber --repo $env:GITHUB_REPOSITORY
 
-  # Patch the re-signed AppImage and SignPath-signed Windows signatures into the
-  # combined updater manifest. Runs once, after every matrix leg has finished
-  # merging its platform into latest.json, so it operates on the full manifest
-  # and cannot be clobbered by a parallel upload. Both linux keys point at the
-  # AppImage; the three windows keys are patched from the minisign signatures
-  # regenerated over the Authenticode-signed installers.
+  # Patch the re-signed AppImages and SignPath-signed Windows signatures into
+  # the combined updater manifest. Runs once, after every matrix leg has
+  # finished merging its platform into latest.json, so it operates on the full
+  # manifest and cannot be clobbered by a parallel upload. Each platform key is
+  # patched only when its leg ran and signed (no Windows leg for now), and the
+  # job does nothing while updates are off and there is no latest.json.
   patch-updater-manifest:
     needs: publish-tauri
     if: startsWith(github.ref, 'refs/tags/')
-    runs-on: namespace-profile-terax-linux
+    runs-on: namespace-profile-oarlock-linux-amd64
     permissions:
       contents: write
     steps:
@@ -265,55 +276,53 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
+          DL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
 
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --pattern "latest.json" \
-            --pattern "*_amd64.AppImage.sig" \
-            --pattern "*_x64-setup.exe.sig" \
-            --pattern "*_x64_en-US.msi.sig" --clobber
-
-          APP_SIG=$(cat ./*_amd64.AppImage.sig)
-          EXE_SIG=$(cat ./*_x64-setup.exe.sig)
-          MSI_SIG=$(cat ./*_x64_en-US.msi.sig)
+          # latest.json exists only while updates are on (tauri-action writes
+          # it when updater artifacts are built); nothing to patch otherwise.
+          if ! gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --pattern "latest.json" --clobber; then
+            echo "No latest.json in $TAG: updates are off, nothing to patch."
+            exit 0
+          fi
 
           # Re-signing an artifact re-uploads it with --clobber, which deletes
           # and recreates the asset under a new id. tauri-action baked the old
-          # asset-id API urls into latest.json, so we also rewrite the urls of
-          # the re-signed artifacts to the tag+filename download url, which is
-          # stable across clobbers. Filenames come from the .sig names.
-          APP_FILE=$(basename "$(ls ./*_amd64.AppImage.sig)" .sig)
-          EXE_FILE=$(basename "$(ls ./*_x64-setup.exe.sig)" .sig)
-          MSI_FILE=$(basename "$(ls ./*_x64_en-US.msi.sig)" .sig)
-          DL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
+          # asset-id API urls into latest.json, so the urls of re-signed
+          # artifacts are rewritten to the stable tag+filename download url.
+          # Each platform is patched only when its signature is in the release.
+          patch() { # key file-glob
+            local key="$1" glob="$2" sig file
+            sig=$(ls $glob 2>/dev/null | head -n1) || true
+            [ -n "$sig" ] || return 0
+            file=$(basename "$sig" .sig)
+            jq --arg key "$key" --arg s "$(cat "$sig")" --arg u "$DL/$file" '
+              if .platforms[$key] then .platforms[$key] += {signature: $s, url: $u}
+              else . end' latest.json > latest.json.tmp
+            mv latest.json.tmp latest.json
+          }
 
-          jq -e 'has("platforms") and (.platforms | has("linux-x86_64")
-            and has("windows-x86_64") and has("windows-x86_64-msi")
-            and has("windows-x86_64-nsis"))' latest.json >/dev/null \
-            || { echo "latest.json missing an expected platform key"; exit 1; }
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+            --pattern "*.AppImage.sig" --pattern "*_x64-setup.exe.sig" \
+            --pattern "*_x64_en-US.msi.sig" || true
+
+          patch linux-x86_64 "./*_amd64.AppImage.sig"
+          patch linux-x86_64-appimage "./*_amd64.AppImage.sig"
+          patch linux-aarch64 "./*_aarch64.AppImage.sig"
+          patch linux-aarch64-appimage "./*_aarch64.AppImage.sig"
+          patch windows-x86_64-msi "./*_x64_en-US.msi.sig"
+          patch windows-x86_64-nsis "./*_x64-setup.exe.sig"
 
           # The generic windows-x86_64 key mirrors whichever installer Tauri
-          # picked as primary; decode its current signature to see which file it
-          # references so the correct regenerated signature and url are used.
-          GEN_FILE=$(jq -r '.platforms["windows-x86_64"].signature' latest.json \
-            | base64 -d | grep -oE 'file:[^[:space:]]+' | head -n1)
-          GEN_FILE=${GEN_FILE#file:}
-          case "$GEN_FILE" in
-            *.msi) WIN_GEN="$MSI_SIG" ;;
-            *)     WIN_GEN="$EXE_SIG" ;;
-          esac
-
-          jq --arg app "$APP_SIG" --arg gen "$WIN_GEN" \
-             --arg msi "$MSI_SIG" --arg nsis "$EXE_SIG" \
-             --arg appurl "$DL/$APP_FILE" --arg genurl "$DL/$GEN_FILE" \
-             --arg msiurl "$DL/$MSI_FILE" --arg exeurl "$DL/$EXE_FILE" '
-            .platforms["linux-x86_64"] += {signature: $app, url: $appurl}
-            | (if .platforms["linux-x86_64-appimage"]
-               then .platforms["linux-x86_64-appimage"] += {signature: $app, url: $appurl}
-               else . end)
-            | .platforms["windows-x86_64"] += {signature: $gen, url: $genurl}
-            | .platforms["windows-x86_64-msi"] += {signature: $msi, url: $msiurl}
-            | .platforms["windows-x86_64-nsis"] += {signature: $nsis, url: $exeurl}
-          ' latest.json > latest.json.tmp
-          mv latest.json.tmp latest.json
+          # picked as primary; its current signature names that file.
+          if jq -e '.platforms["windows-x86_64"]' latest.json >/dev/null; then
+            GEN_FILE=$(jq -r '.platforms["windows-x86_64"].signature' latest.json \
+              | base64 -d | grep -oE 'file:[^[:space:]]+' | head -n1)
+            GEN_FILE=${GEN_FILE#file:}
+            case "$GEN_FILE" in
+              *.msi) patch windows-x86_64 "./*_x64_en-US.msi.sig" ;;
+              *)     patch windows-x86_64 "./*_x64-setup.exe.sig" ;;
+            esac
+          fi
 
           gh release upload "$TAG" latest.json --clobber --repo "$GITHUB_REPOSITORY"

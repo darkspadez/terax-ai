@@ -24,7 +24,7 @@ If you do not have `cargo-nextest` installed, `cargo test --locked` is the local
 
 ## CI runners
 
-CI, release and the Nix-sources job run on [Namespace](https://namespace.so) runner profiles, each with a cache volume attached: `terax-linux` (Linux amd64, Ubuntu 22.04, the release glibc baseline), `terax-macos` (macOS arm64) and `terax-windows` (Windows amd64). A repository needs the Namespace GitHub app and those three profiles before its workflows can start. `keychain_compat` runs only in the macOS and Windows jobs (`--run-ignored only`), against a throwaway keychain on macOS.
+CI, release and the Nix-sources job run on [Namespace](https://namespace.so) runner profiles, each with a cache volume attached: `oarlock-linux-amd64` (Linux amd64, Ubuntu 22.04, the release glibc baseline), `oarlock-linux-arm64` (Linux arm64, Ubuntu 22.04; release builds only) and `oarlock-macos-arm64` (macOS arm64). A repository needs the Namespace GitHub app and those profiles before its workflows can start. There is no Windows profile yet, so CI and release have no Windows legs until one exists (the SignPath steps stay in `release.yml` for then). `keychain_compat` runs only in the macOS job (`--run-ignored only`), against a throwaway keychain.
 
 ## What must have a test
 

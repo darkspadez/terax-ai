@@ -13,15 +13,16 @@ concurrency:
 
 # Jobs run on Namespace runner profiles (cloud.namespace.so, Actions profiles),
 # each with a cache volume attached:
-#   terax-linux    Linux amd64, Ubuntu 22.04 (the release glibc baseline)
-#   terax-macos    macOS arm64
-#   terax-windows  Windows amd64
-# nscloud-cache-action keeps the Bun, Cargo, apt and target caches on that
-# volume. Cargo's target dir is src-tauri/target, so it is listed explicitly.
+#   oarlock-linux-amd64  Linux amd64, Ubuntu 22.04 (the release glibc baseline)
+#   oarlock-macos-arm64  macOS arm64
+# There is no Windows profile yet, so the Windows legs are left out until one
+# exists. nscloud-cache-action keeps the Bun, Cargo, apt and target caches on
+# that volume. Cargo's target dir is src-tauri/target, so it is listed
+# explicitly.
 
 jobs:
   frontend:
-    runs-on: namespace-profile-terax-linux
+    runs-on: namespace-profile-oarlock-linux-amd64
     steps:
       - uses: actions/checkout@v7
         with:
@@ -70,10 +71,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows
-            runner: namespace-profile-terax-windows
           - os: macos
-            runner: namespace-profile-terax-macos
+            runner: namespace-profile-oarlock-macos-arm64
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
@@ -90,7 +89,7 @@ jobs:
         run: bun run vitest run src/modules/terminal
 
   rust:
-    runs-on: namespace-profile-terax-linux
+    runs-on: namespace-profile-oarlock-linux-amd64
     steps:
       - uses: actions/checkout@v7
         with:
@@ -150,10 +149,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows
-            runner: namespace-profile-terax-windows
           - os: macos
-            runner: namespace-profile-terax-macos
+            runner: namespace-profile-oarlock-macos-arm64
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
@@ -198,7 +195,7 @@ jobs:
         run: cargo nextest run --locked --run-ignored only -E 'test(keychain_compat)'
 
   coverage:
-    runs-on: namespace-profile-terax-linux
+    runs-on: namespace-profile-oarlock-linux-amd64
     needs: rust
     steps:
       - uses: actions/checkout@v7
