@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const invoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({
-  convertFileSrc: (path: string) =>
-    `http://asset.localhost/${encodeURIComponent(path)}`,
+  convertFileSrc: (path: string, protocol = "asset") =>
+    `http://${protocol}.localhost/${encodeURIComponent(path)}`,
   invoke: (...args: unknown[]) => invoke(...args),
 }));
 vi.mock("@/modules/settings/store", () => ({ setLastWslDistro: vi.fn() }));
@@ -30,5 +30,18 @@ describe("workspaceAssetUrl", () => {
       path: "/home/me/a.png",
       workspace,
     });
+  });
+
+  it("loads through the backend's own scheme while the app may access all folders", async () => {
+    expect(
+      await workspaceAssetUrl("D:\\photos\\a.png", { kind: "local" }, true),
+    ).toBe(
+      `http://terax-asset.localhost/${encodeURIComponent("D:\\photos\\a.png")}`,
+    );
+    invoke.mockResolvedValue("\\\\wsl.localhost\\Ubuntu\\srv\\a.png");
+    const workspace = { kind: "wsl", distro: "Ubuntu" } as const;
+    expect(await workspaceAssetUrl("/srv/a.png", workspace, true)).toBe(
+      `http://terax-asset.localhost/${encodeURIComponent("\\\\wsl.localhost\\Ubuntu\\srv\\a.png")}`,
+    );
   });
 });

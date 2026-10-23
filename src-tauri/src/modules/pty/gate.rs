@@ -59,7 +59,7 @@ fn ct_eq(a: u64, b: u64) -> bool {
 /// other origin (a preview iframe, a page the user browsed to) is refused, and
 /// a response only ever names one of these in `Access-Control-Allow-Origin`.
 #[derive(Debug, PartialEq, Eq)]
-pub(super) struct AllowedOrigins {
+pub(crate) struct AllowedOrigins {
     origins: Vec<Arc<str>>,
 }
 

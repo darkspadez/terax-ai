@@ -60,6 +60,7 @@ import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { useEffect, useRef, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
+import { FolderAccessSettings } from "./FolderAccessSettings";
 import { TerminalBehaviorSettings } from "./TerminalBehaviorSettings";
 
 const APPEARANCE: {
@@ -293,6 +294,8 @@ export function GeneralSection() {
           />
         </SettingRow>
       </div>
+
+      <FolderAccessSettings />
 
       <div className="flex flex-col gap-2">
         <Label>Web preview</Label>

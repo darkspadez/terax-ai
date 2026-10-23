@@ -12,7 +12,7 @@ use tauri::{AppHandle, State};
 
 use super::supersede::Supersede;
 use super::{authorized_root, blocking, display_path, to_canon};
-use crate::modules::workspace::{resolve_path, WorkspaceEnv};
+use crate::modules::workspace::{resolve_path, Origin, WorkspaceEnv};
 
 const FILE_SIZE_CAP: u64 = 5 * 1024 * 1024;
 const DEFAULT_MAX_RESULTS: usize = 200;
@@ -174,6 +174,7 @@ fn search_tree(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn fs_grep(
     app: AppHandle,
     pattern: String,
@@ -182,9 +183,10 @@ pub async fn fs_grep(
     case_insensitive: Option<bool>,
     max_results: Option<usize>,
     workspace: Option<WorkspaceEnv>,
+    origin: Option<Origin>,
 ) -> Result<GrepResponse, String> {
     blocking(move || {
-        authorized_root(&app, &root, workspace.as_ref())?;
+        authorized_root(&app, &root, workspace.as_ref(), origin.unwrap_or_default())?;
         run_grep(
             pattern,
             root,
@@ -251,7 +253,7 @@ pub async fn fs_grep_interactive(
 ) -> Result<GrepResponse, String> {
     let ticket = supersede.begin(INTERACTIVE_KEY);
     blocking(move || {
-        authorized_root(&app, &root, workspace.as_ref())?;
+        authorized_root(&app, &root, workspace.as_ref(), Origin::App)?;
         run_grep_interactive(pattern, root, max_results, workspace, &|| {
             ticket.is_superseded()
         })
@@ -308,9 +310,10 @@ pub async fn fs_glob(
     root: String,
     max_results: Option<usize>,
     workspace: Option<WorkspaceEnv>,
+    origin: Option<Origin>,
 ) -> Result<GlobResponse, String> {
     blocking(move || {
-        authorized_root(&app, &root, workspace.as_ref())?;
+        authorized_root(&app, &root, workspace.as_ref(), origin.unwrap_or_default())?;
         run_glob(pattern, root, max_results, workspace)
     })
     .await

@@ -12,7 +12,7 @@ use super::index::FileIndexState;
 use super::launch;
 use super::mutate::note_changed;
 use super::run_prompt;
-use crate::modules::workspace::{resolve_path, WorkspaceEnv, WorkspaceRegistry};
+use crate::modules::workspace::{resolve_path, Gates, Origin, WorkspaceEnv, WorkspaceRegistry};
 
 const MAX_READ_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
 /// Ceiling for explicit "open anyway"; mirrored as FORCE_READ_LIMIT in useDocument.ts.
@@ -66,11 +66,13 @@ pub async fn fs_read_file(
     path: String,
     workspace: Option<WorkspaceEnv>,
     force: Option<bool>,
+    origin: Option<Origin>,
 ) -> Result<ReadResult, String> {
     blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
         let real = app
             .state::<WorkspaceRegistry>()
+            .gates(origin.unwrap_or_default())
             .authorized_existing(&resolve_path(&path, &workspace))?;
         read_file_sync(&real, force.unwrap_or(false))
     })
@@ -175,6 +177,7 @@ pub async fn fs_write_file(
     content: String,
     workspace: Option<WorkspaceEnv>,
     source: Option<String>,
+    origin: Option<Origin>,
     app: tauri::AppHandle,
     index: tauri::State<'_, FileIndexState>,
 ) -> Result<u64, String> {
@@ -184,6 +187,7 @@ pub async fn fs_write_file(
         let workspace = WorkspaceEnv::from_option(workspace);
         let target = watcher
             .state::<WorkspaceRegistry>()
+            .gates(origin.unwrap_or_default())
             .authorized_write_target(&resolve_path(&path, &workspace))?;
         let (real, existed) = write_file_sync(&target, content.as_bytes()).map_err(|e| {
             log::warn!("fs_write_file({}) failed: {e}", target.display());
@@ -208,11 +212,13 @@ pub async fn fs_canonicalize(
     app: tauri::AppHandle,
     path: String,
     workspace: Option<WorkspaceEnv>,
+    origin: Option<Origin>,
 ) -> Result<String, String> {
     blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
         let real = app
             .state::<WorkspaceRegistry>()
+            .gates(origin.unwrap_or_default())
             .authorized_existing(&resolve_path(&path, &workspace))?;
         Ok(super::to_canon(&real))
     })
@@ -237,6 +243,7 @@ pub async fn fs_host_path(
     blocking(move || {
         let host = host_path(&path, &workspace);
         app.state::<WorkspaceRegistry>()
+            .gates(Origin::App)
             .authorized_existing(Path::new(&host))?;
         Ok(host)
     })
@@ -248,10 +255,10 @@ fn host_path(path: &str, workspace: &WorkspaceEnv) -> String {
 }
 
 /// What "Open in Default App" may hand to the OS: an existing file whose real location is
-/// inside an authorized workspace (a link pointing out of it is refused). A folder goes to the
-/// file manager through Reveal instead.
-fn default_app_target(registry: &WorkspaceRegistry, path: &Path) -> Result<PathBuf, String> {
-    let canonical = registry.authorized_existing(path)?;
+/// within the app's reach (an authorized workspace unless the app may access all folders; a
+/// link pointing out of it is refused). A folder goes to the file manager through Reveal instead.
+fn default_app_target(gates: Gates<'_>, path: &Path) -> Result<PathBuf, String> {
+    let canonical = gates.authorized_existing(path)?;
     if !canonical.is_file() {
         return Err("only files open in their default app".into());
     }
@@ -272,11 +279,11 @@ enum OpenStep {
 
 /// Decides on the real path, so a link or an innocent-looking name cannot skip the question.
 fn open_step(
-    registry: &WorkspaceRegistry,
+    gates: Gates<'_>,
     path: &Path,
     runs_as_program: impl Fn(&Path) -> bool,
 ) -> Result<OpenStep, String> {
-    let target = default_app_target(registry, path)?;
+    let target = default_app_target(gates, path)?;
     if runs_as_program(&target) {
         return Ok(OpenStep::AskFirst(target));
     }
@@ -358,7 +365,7 @@ pub async fn fs_open_default(
     let step = blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
         open_step(
-            &gate.state::<WorkspaceRegistry>(),
+            gate.state::<WorkspaceRegistry>().gates(Origin::App),
             &resolve_path(&path, &workspace),
             launch::file_runs_as_program,
         )
@@ -380,8 +387,9 @@ pub async fn fs_open_default(
         return Ok(OpenOutcome::Cancelled);
     };
     blocking(move || {
-        // Still an authorized file now that the user has answered.
-        let target = default_app_target(&app.state::<WorkspaceRegistry>(), &target)?;
+        // Still a file within reach now that the user has answered.
+        let target =
+            default_app_target(app.state::<WorkspaceRegistry>().gates(Origin::App), &target)?;
         tauri_plugin_opener::open_path(&target, None::<&str>).map_err(|e| {
             log::warn!("fs_open_default({}) failed: {e}", target.display());
             e.to_string()
@@ -400,7 +408,10 @@ pub async fn fs_stat(
     blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
         let p = resolve_path(&path, &workspace);
-        let real = app.state::<WorkspaceRegistry>().authorized_existing(&p)?;
+        let real = app
+            .state::<WorkspaceRegistry>()
+            .gates(Origin::App)
+            .authorized_existing(&p)?;
         stat_path(&p, &real)
     })
     .await
@@ -459,13 +470,19 @@ mod tests {
         std::fs::write(&file, b"png").unwrap();
         let registry = WorkspaceRegistry::default();
         assert!(
-            default_app_target(&registry, &file).is_err(),
+            default_app_target(registry.gates(Origin::App), &file).is_err(),
             "nothing is authorized yet"
         );
         registry.authorize(&root).unwrap();
-        assert_eq!(default_app_target(&registry, &file).unwrap(), file);
-        assert!(default_app_target(&registry, &root).is_err(), "a folder");
-        assert!(default_app_target(&registry, &root.join("missing")).is_err());
+        assert_eq!(
+            default_app_target(registry.gates(Origin::App), &file).unwrap(),
+            file
+        );
+        assert!(
+            default_app_target(registry.gates(Origin::App), &root).is_err(),
+            "a folder"
+        );
+        assert!(default_app_target(registry.gates(Origin::App), &root.join("missing")).is_err());
     }
 
     #[test]
@@ -478,7 +495,13 @@ mod tests {
         std::fs::write(&script, b"@echo off").unwrap();
         let registry = WorkspaceRegistry::default();
         registry.authorize(&root).unwrap();
-        let step = |path: &Path| open_step(&registry, path, launch::file_runs_as_program);
+        let step = |path: &Path| {
+            open_step(
+                registry.gates(Origin::App),
+                path,
+                launch::file_runs_as_program,
+            )
+        };
 
         assert_eq!(step(&doc), Ok(OpenStep::Open(doc.clone())));
         assert_eq!(step(&script), Ok(OpenStep::AskFirst(script.clone())));
@@ -533,8 +556,42 @@ mod tests {
         let script = std::fs::canonicalize(dir.path()).unwrap().join("setup.bat");
         std::fs::write(&script, b"@echo off").unwrap();
         let registry = WorkspaceRegistry::default();
-        assert!(open_step(&registry, &script, |_| true).is_err());
-        assert!(open_step(&registry, &script, |_| false).is_err());
+        assert!(open_step(registry.gates(Origin::App), &script, |_| true).is_err());
+        assert!(open_step(registry.gates(Origin::App), &script, |_| false).is_err());
+    }
+
+    #[test]
+    fn with_access_to_all_folders_a_file_anywhere_opens_and_a_program_still_asks() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let doc = root.join("report.pdf");
+        std::fs::write(&doc, b"%PDF").unwrap();
+        let script = root.join("setup.bat");
+        std::fs::write(&script, b"@echo off").unwrap();
+        let registry = WorkspaceRegistry::default();
+        registry.set_all_folders(Origin::Ai, true);
+        assert!(
+            default_app_target(registry.gates(Origin::App), &doc).is_err(),
+            "the AI tools' setting does not open the app"
+        );
+
+        registry.set_all_folders(Origin::App, true);
+        let step = |path: &Path| {
+            open_step(
+                registry.gates(Origin::App),
+                path,
+                launch::file_runs_as_program,
+            )
+        };
+        assert_eq!(step(&doc), Ok(OpenStep::Open(doc.clone())));
+        assert_eq!(step(&script), Ok(OpenStep::AskFirst(script.clone())));
+        assert!(
+            default_app_target(registry.gates(Origin::App), &root).is_err(),
+            "a folder"
+        );
+
+        registry.set_all_folders(Origin::App, false);
+        assert!(step(&doc).is_err());
     }
 
     #[cfg(unix)]
@@ -549,7 +606,11 @@ mod tests {
         let registry = WorkspaceRegistry::default();
         registry.authorize(&root).unwrap();
         assert_eq!(
-            open_step(&registry, &link, launch::file_runs_as_program),
+            open_step(
+                registry.gates(Origin::App),
+                &link,
+                launch::file_runs_as_program
+            ),
             Ok(OpenStep::AskFirst(script))
         );
     }
@@ -578,7 +639,7 @@ mod tests {
         std::os::unix::fs::symlink(&secret, &link).unwrap();
         let registry = WorkspaceRegistry::default();
         registry.authorize(&root).unwrap();
-        assert!(default_app_target(&registry, &link).is_err());
+        assert!(default_app_target(registry.gates(Origin::App), &link).is_err());
     }
 
     #[test]

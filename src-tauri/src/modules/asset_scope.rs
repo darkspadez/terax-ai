@@ -11,6 +11,10 @@
 //! The configured scope sets `requireLiteralLeadingDot`, so on every platform `**` never enters
 //! a name starting with a dot and a granted home folder does not expose `~/.ssh`. Tauri's
 //! default skips dot names only on Unix, which on Windows would serve `C:\Users\me\.ssh`.
+//!
+//! A grant here can never be taken back, so "Allow the app to access all folders" grants
+//! nothing: previews outside these roots load through `asset_all_folders`' own scheme, which
+//! asks the setting on every request.
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Mutex, PoisonError};

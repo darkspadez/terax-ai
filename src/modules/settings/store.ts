@@ -182,6 +182,17 @@ export type Preferences = {
   editorDefaultIndent: EditorDefaultIndent;
   showHidden: boolean;
   explorerGitDecorations: boolean;
+  /**
+   * The app's own file features (explorer, editor, previews, search,
+   * watching, path completion, Open in Default App) reach every folder, not
+   * only the authorized ones. At the user's own risk; off by default.
+   */
+  appAllFolders: boolean;
+  /**
+   * The AI tools reach every folder, not only the authorized ones. The
+   * secret-path deny-list and tool approval still apply. Off by default.
+   */
+  aiAllFolders: boolean;
   /** Clicked localhost links in terminals open in the preview tab. */
   terminalLinksInPreview: boolean;
   terminalRenderer: "auto" | "webgl";
@@ -298,6 +309,8 @@ const KEY_EDITOR_DEFAULT_INDENT = "editorDefaultIndent";
 const KEY_SHOW_HIDDEN = "showHidden";
 const LEGACY_KEY_SHOW_HIDDEN_DIRS = "showHiddenDirectories";
 const KEY_EXPLORER_GIT_DECORATIONS = "explorerGitDecorations";
+const KEY_APP_ALL_FOLDERS = "appAllFolders";
+const KEY_AI_ALL_FOLDERS = "aiAllFolders";
 const KEY_TERMINAL_LINKS_IN_PREVIEW = "terminalLinksInPreview";
 const KEY_TERMINAL_RENDERER = "terminalRenderer";
 const KEY_TERMINAL_SCREEN_READER = "terminalScreenReader";
@@ -460,6 +473,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   editorDefaultIndent: "spaces2",
   showHidden: false,
   explorerGitDecorations: true,
+  appAllFolders: false,
+  aiAllFolders: false,
   terminalLinksInPreview: false,
   terminalRenderer: "auto",
   terminalScreenReader: false,
@@ -635,6 +650,9 @@ export async function loadPreferences(): Promise<Preferences> {
     explorerGitDecorations:
       get<boolean>(KEY_EXPLORER_GIT_DECORATIONS) ??
       DEFAULT_PREFERENCES.explorerGitDecorations,
+    // Only a stored `true` widens access; anything else is the default, off.
+    appAllFolders: get<unknown>(KEY_APP_ALL_FOLDERS) === true,
+    aiAllFolders: get<unknown>(KEY_AI_ALL_FOLDERS) === true,
     terminalLinksInPreview:
       get<boolean>(KEY_TERMINAL_LINKS_IN_PREVIEW) ??
       DEFAULT_PREFERENCES.terminalLinksInPreview,
@@ -990,6 +1008,14 @@ export async function setExplorerGitDecorations(value: boolean): Promise<void> {
   await writePref(KEY_EXPLORER_GIT_DECORATIONS, value);
 }
 
+export async function setAppAllFolders(value: boolean): Promise<void> {
+  await writePref(KEY_APP_ALL_FOLDERS, value === true);
+}
+
+export async function setAiAllFolders(value: boolean): Promise<void> {
+  await writePref(KEY_AI_ALL_FOLDERS, value === true);
+}
+
 export async function setTerminalRenderer(
   value: "auto" | "webgl",
 ): Promise<void> {
@@ -1239,6 +1265,8 @@ export async function onPreferencesChange(
     [KEY_EDITOR_DEFAULT_INDENT]: "editorDefaultIndent",
     [KEY_SHOW_HIDDEN]: "showHidden",
     [KEY_EXPLORER_GIT_DECORATIONS]: "explorerGitDecorations",
+    [KEY_APP_ALL_FOLDERS]: "appAllFolders",
+    [KEY_AI_ALL_FOLDERS]: "aiAllFolders",
     [KEY_TERMINAL_LINKS_IN_PREVIEW]: "terminalLinksInPreview",
     [KEY_TERMINAL_RENDERER]: "terminalRenderer",
     [KEY_TERMINAL_SCREEN_READER]: "terminalScreenReader",

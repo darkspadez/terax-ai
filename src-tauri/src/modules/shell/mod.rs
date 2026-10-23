@@ -15,7 +15,7 @@ use tauri::Manager;
 use crate::modules::proc::capture::{self, Limits, OnTimeout};
 #[cfg(windows)]
 use crate::modules::workspace::validate_wsl_distro_name;
-use crate::modules::workspace::{authorize_spawn_cwd, WorkspaceEnv, WorkspaceRegistry};
+use crate::modules::workspace::{Origin, WorkspaceEnv, WorkspaceRegistry};
 
 use background::{BackgroundLogResponse, BackgroundProc, BackgroundProcInfo};
 use session::{SessionRunOutput, ShellSession};
@@ -45,6 +45,7 @@ pub async fn shell_run_command(
     cwd: Option<String>,
     timeout_secs: Option<u64>,
     workspace: Option<WorkspaceEnv>,
+    origin: Option<Origin>,
 ) -> Result<CommandOutput, String> {
     let trimmed = command.trim().to_string();
     if trimmed.is_empty() {
@@ -56,11 +57,9 @@ pub async fn shell_run_command(
     // Authorization canonicalizes the cwd and the run blocks until exit, so
     // both belong on the blocking pool, never on an async worker.
     tauri::async_runtime::spawn_blocking(move || {
-        authorize_spawn_cwd(
-            &app.state::<WorkspaceRegistry>(),
-            cwd.as_deref(),
-            &workspace,
-        )?;
+        app.state::<WorkspaceRegistry>()
+            .gates(origin.unwrap_or_default())
+            .spawn_cwd(cwd.as_deref(), &workspace)?;
         let cwd_path = cwd
             .as_deref()
             .map(str::trim)
@@ -167,16 +166,16 @@ pub async fn shell_session_open(
     app: tauri::AppHandle,
     cwd: Option<String>,
     workspace: Option<WorkspaceEnv>,
+    origin: Option<Origin>,
 ) -> Result<u32, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     // wsl_home spawns wsl.exe on Windows and authorization hits the disk.
     let registry_app = app.clone();
     let (initial, workspace) = tauri::async_runtime::spawn_blocking(move || {
-        authorize_spawn_cwd(
-            &registry_app.state::<WorkspaceRegistry>(),
-            cwd.as_deref(),
-            &workspace,
-        )?;
+        registry_app
+            .state::<WorkspaceRegistry>()
+            .gates(origin.unwrap_or_default())
+            .spawn_cwd(cwd.as_deref(), &workspace)?;
         let initial = match cwd.as_deref().filter(|s| !s.is_empty()) {
             Some(c) => c.to_string(),
             None => {
@@ -212,6 +211,7 @@ pub async fn shell_session_run(
     cwd: Option<String>,
     timeout_secs: Option<u64>,
     workspace: Option<WorkspaceEnv>,
+    origin: Option<Origin>,
 ) -> Result<SessionRunOutput, String> {
     let session = app
         .state::<ShellState>()
@@ -226,11 +226,9 @@ pub async fn shell_session_run(
         let effective_workspace = workspace
             .clone()
             .unwrap_or_else(|| session.workspace.clone());
-        authorize_spawn_cwd(
-            &app.state::<WorkspaceRegistry>(),
-            cwd.as_deref(),
-            &effective_workspace,
-        )?;
+        app.state::<WorkspaceRegistry>()
+            .gates(origin.unwrap_or_default())
+            .spawn_cwd(cwd.as_deref(), &effective_workspace)?;
         session.run(command, cwd, workspace, dur)
     })
     .await
@@ -249,14 +247,13 @@ pub async fn shell_bg_spawn(
     command: String,
     cwd: Option<String>,
     workspace: Option<WorkspaceEnv>,
+    origin: Option<Origin>,
 ) -> Result<u32, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     tauri::async_runtime::spawn_blocking(move || {
-        authorize_spawn_cwd(
-            &app.state::<WorkspaceRegistry>(),
-            cwd.as_deref(),
-            &workspace,
-        )?;
+        app.state::<WorkspaceRegistry>()
+            .gates(origin.unwrap_or_default())
+            .spawn_cwd(cwd.as_deref(), &workspace)?;
         let proc = background::spawn(command, cwd, workspace)?;
         let state = app.state::<ShellState>();
         let id = state.next_bg_id.fetch_add(1, Ordering::Relaxed);

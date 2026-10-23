@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
-#[cfg(target_os = "linux")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -20,14 +19,71 @@ struct CanonicalEntry {
 
 type RootListener = Box<dyn Fn(&Path) + Send + Sync>;
 
+/// Whose request a file command serves. The app's own file features and the AI tools each have
+/// a setting that lets them reach every folder, so a command that both use takes the caller's
+/// origin. The page leaves it out for the app; the AI tools always send `ai`, so they never get
+/// the app's access, and the app never gets theirs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Origin {
+    #[default]
+    App,
+    Ai,
+}
+
+/// The two "access all folders" settings, off until the page sends them.
+#[derive(Default)]
+struct AllFolders {
+    app: AtomicBool,
+    ai: AtomicBool,
+}
+
+impl AllFolders {
+    fn of(&self, origin: Origin) -> &AtomicBool {
+        match origin {
+            Origin::App => &self.app,
+            Origin::Ai => &self.ai,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct WorkspaceRegistry {
     roots: Mutex<HashSet<PathBuf>>,
     canonical_cache: Mutex<HashMap<PathBuf, CanonicalEntry>>,
     root_listener: OnceLock<RootListener>,
+    all_folders: AllFolders,
 }
 
 impl WorkspaceRegistry {
+    /// Lets `origin`'s requests reach every folder, or only the authorized ones again, from the
+    /// next command on. It authorizes no root, so the other origin, git, language servers and
+    /// the asset protocol's grants stay as they were. Returns the previous setting.
+    pub fn set_all_folders(&self, origin: Origin, all: bool) -> bool {
+        self.all_folders.of(origin).swap(all, Ordering::SeqCst)
+    }
+
+    pub fn all_folders(&self, origin: Origin) -> bool {
+        self.all_folders.of(origin).load(Ordering::SeqCst)
+    }
+
+    /// The gates of the file commands as `origin` meets them, decided once for the command.
+    pub fn gates(&self, origin: Origin) -> Gates<'_> {
+        Gates {
+            registry: self,
+            everywhere: self.all_folders(origin),
+        }
+    }
+
+    /// The gates of the authorized folders alone, whatever the settings say: for what neither
+    /// setting covers (language servers, launch arguments).
+    pub fn authorized_gates(&self) -> Gates<'_> {
+        Gates {
+            registry: self,
+            everywhere: false,
+        }
+    }
+
     pub fn authorize<P: AsRef<Path>>(&self, path: P) -> std::io::Result<PathBuf> {
         let canonical = std::fs::canonicalize(path.as_ref())?;
         let added = self
@@ -97,74 +153,24 @@ impl WorkspaceRegistry {
         self.authorize(folder)
     }
 
-    /// The real path of an existing `path` (links followed), for a command that reads, lists,
-    /// stats, searches or watches it. Refused outside every authorized folder, and a missing path
-    /// out there reads as outside too, so the answer never tells whether it exists.
+    /// `Gates::authorized_existing` of the authorized folders alone.
     pub fn authorized_existing(&self, path: &Path) -> Result<PathBuf, String> {
-        require_absolute(path)?;
-        match std::fs::canonicalize(path) {
-            Ok(real) if self.is_authorized(&real) => Ok(real),
-            Ok(_) => Err(outside(path)),
-            Err(error) => Err(self.missing(path, error)),
-        }
+        self.authorized_gates().authorized_existing(path)
     }
 
-    /// A directory entry itself, not what a link points to: its name in its real folder, which
-    /// must be authorized. For renaming, moving, deleting and copying entries.
+    /// `Gates::authorized_entry` of the authorized folders alone.
     pub fn authorized_entry(&self, path: &Path) -> Result<PathBuf, String> {
-        require_absolute(path)?;
-        let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
-            return Err(format!("not a file or folder: {}", path.display()));
-        };
-        if !is_plain_name(name) {
-            return Err(format!("not a file or folder: {}", path.display()));
-        }
-        Ok(self.authorized_existing(parent)?.join(name))
+        self.authorized_gates().authorized_entry(path)
     }
 
-    /// A path that may not exist yet (a file or folder to create): its nearest existing ancestor,
-    /// as it really is, must be authorized and every name below it a plain name, so neither a
-    /// link nor `..` leads out.
+    /// `Gates::authorized_new` of the authorized folders alone.
     pub fn authorized_new(&self, path: &Path) -> Result<PathBuf, String> {
-        require_absolute(path)?;
-        let (real, rest) = nearest_real_ancestor(path).ok_or_else(|| outside(path))?;
-        if !self.is_authorized(&real) {
-            return Err(outside(path));
-        }
-        if !is_plain_relative(rest) {
-            return Err(format!(
-                "not a plain path below its folder: {}",
-                path.display()
-            ));
-        }
-        Ok(real.join(rest))
+        self.authorized_gates().authorized_new(path)
     }
 
-    /// The file a write lands in: an existing file (a link followed to its file) or a new one.
-    /// A dangling link is an error, never a new file at a place the user did not name.
+    /// `Gates::authorized_write_target` of the authorized folders alone.
     pub fn authorized_write_target(&self, path: &Path) -> Result<PathBuf, String> {
-        require_absolute(path)?;
-        match std::fs::symlink_metadata(path) {
-            Ok(meta) if meta.file_type().is_symlink() => match std::fs::canonicalize(path) {
-                Ok(_) => self.authorized_existing(path),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    self.authorized_entry(path)?;
-                    Err("symlink target does not exist".into())
-                }
-                Err(error) => Err(self.missing(path, error)),
-            },
-            Ok(_) => self.authorized_existing(path),
-            Err(_) => self.authorized_new(path),
-        }
-    }
-
-    /// The error for a path that could not be resolved: the real one inside an authorized
-    /// folder, "outside" anywhere else.
-    fn missing(&self, path: &Path, error: std::io::Error) -> String {
-        match nearest_real_ancestor(path) {
-            Some((real, _)) if self.is_authorized(&real) => error.to_string(),
-            _ => outside(path),
-        }
+        self.authorized_gates().authorized_write_target(path)
     }
 
     pub fn canonicalize_cached<P: AsRef<Path>>(&self, path: P) -> std::io::Result<PathBuf> {
@@ -199,6 +205,117 @@ impl WorkspaceRegistry {
             },
         );
         Ok(canonical)
+    }
+}
+
+/// The gates every file command passes a path the page sends through, as one caller meets them:
+/// the authorized folders, or every folder while that caller's "access all folders" setting is on.
+/// Either way the path must be absolute and is judged on its real path.
+#[derive(Clone, Copy)]
+pub struct Gates<'a> {
+    registry: &'a WorkspaceRegistry,
+    everywhere: bool,
+}
+
+impl Gates<'_> {
+    /// Whether a real (canonical) path is within reach.
+    pub fn reaches(&self, target: &Path) -> bool {
+        self.everywhere || self.registry.is_authorized(target)
+    }
+
+    /// The real path of an existing `path` (links followed), for a command that reads, lists,
+    /// stats, searches or watches it. Refused outside every folder these gates reach, and a
+    /// missing path out there reads as outside too, so the answer never tells whether it exists.
+    pub fn authorized_existing(&self, path: &Path) -> Result<PathBuf, String> {
+        require_absolute(path)?;
+        match std::fs::canonicalize(path) {
+            Ok(real) if self.reaches(&real) => Ok(real),
+            Ok(_) => Err(outside(path)),
+            Err(error) => Err(self.missing(path, error)),
+        }
+    }
+
+    /// A directory entry itself, not what a link points to: its name in its real folder, which
+    /// must be reached. For renaming, moving, deleting and copying entries.
+    pub fn authorized_entry(&self, path: &Path) -> Result<PathBuf, String> {
+        require_absolute(path)?;
+        let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+            return Err(format!("not a file or folder: {}", path.display()));
+        };
+        if !is_plain_name(name) {
+            return Err(format!("not a file or folder: {}", path.display()));
+        }
+        Ok(self.authorized_existing(parent)?.join(name))
+    }
+
+    /// A path that may not exist yet (a file or folder to create): its nearest existing ancestor,
+    /// as it really is, must be reached and every name below it a plain name, so neither a
+    /// link nor `..` leads out.
+    pub fn authorized_new(&self, path: &Path) -> Result<PathBuf, String> {
+        require_absolute(path)?;
+        let (real, rest) = nearest_real_ancestor(path).ok_or_else(|| outside(path))?;
+        if !self.reaches(&real) {
+            return Err(outside(path));
+        }
+        if !is_plain_relative(rest) {
+            return Err(format!(
+                "not a plain path below its folder: {}",
+                path.display()
+            ));
+        }
+        Ok(real.join(rest))
+    }
+
+    /// The file a write lands in: an existing file (a link followed to its file) or a new one.
+    /// A dangling link is an error, never a new file at a place the user did not name.
+    pub fn authorized_write_target(&self, path: &Path) -> Result<PathBuf, String> {
+        require_absolute(path)?;
+        match std::fs::symlink_metadata(path) {
+            Ok(meta) if meta.file_type().is_symlink() => match std::fs::canonicalize(path) {
+                Ok(_) => self.authorized_existing(path),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    self.authorized_entry(path)?;
+                    Err("symlink target does not exist".into())
+                }
+                Err(error) => Err(self.missing(path, error)),
+            },
+            Ok(_) => self.authorized_existing(path),
+            Err(_) => self.authorized_new(path),
+        }
+    }
+
+    /// The error for a path that could not be resolved: the real one inside a folder these gates
+    /// reach, "outside" anywhere else.
+    fn missing(&self, path: &Path, error: std::io::Error) -> String {
+        match nearest_real_ancestor(path) {
+            Some((real, _)) if self.reaches(&real) => error.to_string(),
+            _ => outside(path),
+        }
+    }
+
+    /// A spawn cwd: `None` means "use the bootstrapped default"; `Some` is canonicalized to
+    /// defeat link and `..` traversal and must be a folder within reach.
+    pub fn spawn_cwd(
+        &self,
+        cwd: Option<&str>,
+        workspace: &WorkspaceEnv,
+    ) -> Result<Option<PathBuf>, String> {
+        let Some(cwd) = cwd.map(str::trim).filter(|s| !s.is_empty()) else {
+            return Ok(None);
+        };
+        let resolved = resolve_path(cwd, workspace);
+        let canonical =
+            std::fs::canonicalize(&resolved).map_err(|e| format!("cwd not accessible: {e}"))?;
+        if !canonical.is_dir() {
+            return Err(format!("cwd is not a directory: {}", canonical.display()));
+        }
+        if !self.reaches(&canonical) {
+            return Err(format!(
+                "cwd is outside the authorized workspace: {}",
+                canonical.display()
+            ));
+        }
+        Ok(Some(canonical))
     }
 }
 
@@ -238,29 +355,13 @@ pub(crate) fn is_plain_name(name: &std::ffi::OsStr) -> bool {
     )
 }
 
-// `None` means "use bootstrapped default". `Some` is canonicalized to defeat
-// symlink/`..` traversal and must sit under an authorized root.
+/// `Gates::spawn_cwd` of the authorized folders alone.
 pub fn authorize_spawn_cwd(
     registry: &WorkspaceRegistry,
     cwd: Option<&str>,
     workspace: &WorkspaceEnv,
 ) -> Result<Option<PathBuf>, String> {
-    let Some(cwd) = cwd.map(str::trim).filter(|s| !s.is_empty()) else {
-        return Ok(None);
-    };
-    let resolved = resolve_path(cwd, workspace);
-    let canonical =
-        std::fs::canonicalize(&resolved).map_err(|e| format!("cwd not accessible: {e}"))?;
-    if !canonical.is_dir() {
-        return Err(format!("cwd is not a directory: {}", canonical.display()));
-    }
-    if !registry.is_authorized(&canonical) {
-        return Err(format!(
-            "cwd is outside the authorized workspace: {}",
-            canonical.display()
-        ));
-    }
-    Ok(Some(canonical))
+    registry.authorized_gates().spawn_cwd(cwd, workspace)
 }
 
 // User-initiated terminal spawn: canonicalize, require a real dir, and register
@@ -341,6 +442,17 @@ pub async fn workspace_authorize(
         Ok(crate::modules::fs::to_canon(&canonical))
     })
     .await
+}
+
+/// Turns one origin's "access all folders" setting on or off (Settings, both off by default).
+/// Every window sends the stored settings when it starts and each change, so the gates follow
+/// the setting from the next command on.
+#[tauri::command]
+pub fn workspace_set_all_folders(app: tauri::AppHandle, origin: Origin, all: bool) {
+    let registry = tauri::Manager::state::<WorkspaceRegistry>(&app);
+    if registry.set_all_folders(origin, all) != all {
+        log::info!("access to all folders for {origin:?} requests: {all}");
+    }
 }
 
 #[tauri::command]
@@ -1472,6 +1584,222 @@ mod auth_tests {
         assert!(is_outside(
             reg.authorized_new(&resolve_path("/home/me/new.txt", &ubuntu))
         ));
+    }
+
+    /// An authorized folder and a folder outside it, each with a file and a subfolder.
+    fn inside_and_outside(label: &str) -> (WorkspaceRegistry, PathBuf, PathBuf) {
+        let root = tempdir(&format!("{label}-root"));
+        let outside = tempdir(&format!("{label}-outside"));
+        for dir in [&root, &outside] {
+            fs::write(dir.join("a.txt"), b"a").unwrap();
+            fs::create_dir(dir.join("sub")).unwrap();
+        }
+        let reg = WorkspaceRegistry::default();
+        reg.authorize(&root).unwrap();
+        (reg, root, outside)
+    }
+
+    /// Whether every gate lets `gates` reach into `dir`.
+    fn every_gate_reaches(gates: Gates<'_>, dir: &Path) -> bool {
+        let spawn = gates.spawn_cwd(
+            Some(&dir.join("sub").to_string_lossy()),
+            &WorkspaceEnv::Local,
+        );
+        let results = [
+            gates.reaches(dir),
+            gates.authorized_existing(&dir.join("a.txt")).is_ok(),
+            gates.authorized_entry(&dir.join("a.txt")).is_ok(),
+            gates.authorized_new(&dir.join("new").join("b.txt")).is_ok(),
+            gates.authorized_write_target(&dir.join("a.txt")).is_ok(),
+            gates.authorized_write_target(&dir.join("b.txt")).is_ok(),
+            spawn.is_ok(),
+        ];
+        assert!(
+            results.iter().all(|r| *r) || results.iter().all(|r| !*r),
+            "the gates disagree on {}: {results:?}",
+            dir.display()
+        );
+        results[0]
+    }
+
+    #[test]
+    fn each_setting_opens_exactly_its_own_callers() {
+        let (reg, root, outside) = inside_and_outside("policy");
+        for (app, ai) in [(false, false), (true, false), (false, true), (true, true)] {
+            reg.set_all_folders(Origin::App, app);
+            reg.set_all_folders(Origin::Ai, ai);
+            let case = format!("app {app}, ai {ai}");
+            assert_eq!(
+                every_gate_reaches(reg.gates(Origin::App), &outside),
+                app,
+                "{case}"
+            );
+            assert_eq!(
+                every_gate_reaches(reg.gates(Origin::Ai), &outside),
+                ai,
+                "{case}"
+            );
+            // Language servers, launch arguments, git, `terax open` and terminal folders.
+            assert!(
+                !every_gate_reaches(reg.authorized_gates(), &outside),
+                "{case}"
+            );
+            assert!(is_outside(reg.authorized_existing(&outside.join("a.txt"))));
+            assert!(is_outside(reg.authorized_new(&outside.join("b.txt"))));
+            assert!(authorize_spawn_cwd(
+                &reg,
+                Some(&outside.to_string_lossy()),
+                &WorkspaceEnv::Local
+            )
+            .is_err());
+            assert!(!reg.is_authorized(&outside), "{case}");
+            for gates in [
+                reg.gates(Origin::App),
+                reg.gates(Origin::Ai),
+                reg.authorized_gates(),
+            ] {
+                assert!(every_gate_reaches(gates, &root), "{case}: authorized");
+            }
+        }
+    }
+
+    #[test]
+    fn turning_a_setting_off_restores_the_gates_at_once() {
+        let (reg, _root, outside) = inside_and_outside("off");
+        for origin in [Origin::App, Origin::Ai] {
+            assert!(!reg.set_all_folders(origin, true), "off by default");
+            let on = reg.gates(origin);
+            assert!(every_gate_reaches(on, &outside));
+            assert!(reg.set_all_folders(origin, false));
+            assert!(
+                every_gate_reaches(on, &outside),
+                "a command keeps the gates it started with"
+            );
+            let off = reg.gates(origin);
+            assert!(!every_gate_reaches(off, &outside));
+            assert!(is_outside(off.authorized_existing(&outside.join("a.txt"))));
+            assert!(is_outside(
+                off.authorized_existing(&outside.join("gone.txt"))
+            ));
+        }
+    }
+
+    #[test]
+    fn a_setting_authorizes_no_folder() {
+        let (reg, root, outside) = inside_and_outside("no-root");
+        let added = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let sink = added.clone();
+        reg.watch_roots(move |r| sink.lock().unwrap().push(r.to_path_buf()));
+        assert_eq!(*added.lock().unwrap(), vec![root.clone()]);
+        reg.set_all_folders(Origin::App, true);
+        reg.set_all_folders(Origin::Ai, true);
+        reg.gates(Origin::App)
+            .authorized_existing(&outside.join("a.txt"))
+            .unwrap();
+        assert_eq!(*added.lock().unwrap(), vec![root], "no new asset grant");
+        assert!(!reg.is_authorized(&outside));
+    }
+
+    #[test]
+    fn every_folder_still_means_real_absolute_paths_and_plain_names() {
+        let (reg, _root, outside) = inside_and_outside("plain");
+        reg.set_all_folders(Origin::App, true);
+        let gates = reg.gates(Origin::App);
+        let err = gates.authorized_existing(Path::new("a.txt")).unwrap_err();
+        assert!(err.contains("not an absolute path"), "got: {err}");
+        assert!(gates
+            .authorized_entry(&outside.join("sub").join(".."))
+            .is_err());
+        assert!(gates
+            .authorized_new(&outside.join("new").join("..").join("x"))
+            .is_err());
+        let missing = gates
+            .authorized_existing(&outside.join("gone.txt"))
+            .unwrap_err();
+        assert!(!missing.contains("outside"), "a real error: {missing}");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(outside.join("gone"), outside.join("dangling")).unwrap();
+            assert_eq!(
+                gates.authorized_write_target(&outside.join("dangling")),
+                Err("symlink target does not exist".into())
+            );
+        }
+    }
+
+    #[test]
+    fn a_command_without_an_origin_is_the_apps() {
+        let parse = |json: &str| {
+            serde_json::from_str::<Option<Origin>>(json).map(Option::unwrap_or_default)
+        };
+        assert_eq!(parse("null").unwrap(), Origin::App);
+        assert_eq!(parse(r#""app""#).unwrap(), Origin::App);
+        assert_eq!(parse(r#""ai""#).unwrap(), Origin::Ai);
+        assert!(parse(r#""AI""#).is_err());
+        assert!(parse(r#""all""#).is_err());
+    }
+
+    /// The commands whose callers say whose request they serve. The AI tools call each with
+    /// `origin: "ai"` (`src/modules/ai/lib/native.ts`); the app leaves it out.
+    const ORIGIN_COMMANDS: &[&str] = &[
+        "fs_canonicalize",
+        "fs_create_dir",
+        "fs_glob",
+        "fs_grep",
+        "fs_read_dir",
+        "fs_read_file",
+        "fs_write_file",
+        "shell_bg_spawn",
+        "shell_run_command",
+        "shell_session_open",
+        "shell_session_run",
+    ];
+
+    #[test]
+    fn every_command_the_ai_tools_tag_takes_their_origin() {
+        // A command without the parameter would drop the tag and serve the AI tools under the
+        // app's setting.
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let native = fs::read_to_string(manifest.join("../src/modules/ai/lib/native.ts")).unwrap();
+        let mut tagged: Vec<&str> = native
+            .split("invoke")
+            .skip(1)
+            .filter(|call| call.contains("...AI_ORIGIN"))
+            .filter_map(|call| call.split('"').nth(1))
+            .collect();
+        tagged.sort_unstable();
+        assert_eq!(tagged, ORIGIN_COMMANDS);
+
+        let mut taking = Vec::new();
+        let mut dirs = vec![manifest.join("src")];
+        while let Some(dir) = dirs.pop() {
+            for entry in fs::read_dir(&dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs.push(path);
+                    continue;
+                }
+                if path.extension().is_none_or(|ext| ext != "rs") {
+                    continue;
+                }
+                let source = fs::read_to_string(&path).unwrap();
+                for command in source.split("#[tauri::command]").skip(1) {
+                    let signature = command.split(" {").next().unwrap_or_default();
+                    let name = signature
+                        .split("fn ")
+                        .nth(1)
+                        .and_then(|rest| rest.split(['(', '<']).next())
+                        .unwrap_or_default()
+                        .trim()
+                        .to_owned();
+                    if signature.contains("origin: Option<Origin>") {
+                        taking.push(name);
+                    }
+                }
+            }
+        }
+        taking.sort_unstable();
+        assert_eq!(taking, ORIGIN_COMMANDS);
     }
 
     #[test]

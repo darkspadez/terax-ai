@@ -1,3 +1,4 @@
+import { syncAllFolders } from "@/modules/workspace/allFolders";
 import { create } from "zustand";
 import {
   DEFAULT_PREFERENCES,
@@ -54,6 +55,7 @@ export const usePreferencesStore = create<State>((set) => ({
       try {
         const prefs = await loadPreferences();
         set({ ...prefs, hydrated: true });
+        syncAllFolders(usePreferencesStore);
         mirrorBgFastPath(prefs.backgroundKind, prefs.backgroundImageId);
         void onPreferencesChange((key, value) => {
           set({ [key]: value } as Partial<State>);

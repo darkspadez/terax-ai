@@ -28,6 +28,7 @@ use crate::modules::control::ControlState;
 use crate::modules::workspace::{
     resolve_path, user_spawn_cwd_or_home, WorkspaceEnv, WorkspaceRegistry,
 };
+pub(crate) use gate::AllowedOrigins;
 use hub::{Command, Hub};
 pub use presentation::PresentationClass;
 pub use protocol::stream_protocol;

@@ -16,7 +16,7 @@ The main trust boundaries are:
 
 ## Secret-path deny-list
 
-`src/modules/ai/lib/security.ts` refuses reads and writes of obvious secret paths. This applies **on both read and write** and must never be bypassed.
+`src/modules/ai/lib/security.ts` refuses reads and writes of obvious secret paths. This applies **on both read and write**, also while "Allow AI tools to access all folders" is on (it consults no setting), and must never be bypassed.
 
 Blocked categories include:
 
@@ -41,7 +41,7 @@ The comparison surface normalizes paths: backslashes to forward slashes, strips 
 
 ### File commands
 
-Every Tauri command that reads, writes, lists, stats, searches or watches a path the page sends is refused outside the authorized folders. The check is on the real path, through one of four gates:
+Every Tauri command that reads, writes, lists, stats, searches or watches a path the page sends is refused outside the authorized folders, unless its caller's "access all folders" switch is on (below). The check is on the real path, through one of four gates:
 
 - `authorized_existing`: the path, links followed and `..` resolved, lies in an authorized folder (`fs_read_file`, `fs_read_dir`, `list_subdirs`, `fs_stat`, `fs_canonicalize`, `fs_host_path` for WSL, the roots of `fs_search`, `fs_list_files`, `fs_grep`, `fs_grep_interactive` and `fs_glob`, `fs_open_default`, `lsp_resolve_root`).
 - `authorized_write_target`: `fs_write_file` writes through a link only to an authorized file, a dangling link is an error, a new file needs an authorized folder.
@@ -54,7 +54,18 @@ The page authorizes only what the user chose (`src/modules/workspace/authorize.t
 
 A terminal's folder is authorized as a root, which keeps the explorer and Source Control following `cd` anywhere. The folder comes from OSC 7, which is terminal output: `cat` of a crafted file can print one naming any folder, even `/`. So the page hands each report to `pty_authorize_cwd` with the terminal's id (only the window that opened the terminal may ask), and on Linux and macOS the backend authorizes it only when its real path is exactly the folder the OS reports for the shell (`/proc/<pid>/cwd`; `proc_pidinfo` with `PROC_PIDVNODEPATHINFO`) or for the leader of the terminal's foreground process group (a nested local shell, such as `bash` started from zsh, reports its own folder), both canonical and checked to still be the folder the process is in (a deleted folder never matches). The report follows the `cd`, so the shell is already there; one that a fast second `cd` overtook authorizes nothing, and the next report is checked. A report that does not match changes nothing in the page either (`TerminalCwdReports`): not the tab's folder, the explorer or Source Control, the folder a restart or a new tab starts in, or the terminal folders a restored window authorizes, since each of those would authorize it later. One check runs at a time per terminal and a burst keeps its latest report. A remote shell's report (over `ssh`) names no local process's folder, so the tab keeps the local folder `ssh` runs in. Windows cannot read another process's folder cheaply, so there (a WSL pane included) the report is authorized and taken as before.
 
-One limit remains: `workspace_authorize` is itself a command the page can call, so the registry contains what the app's own flows do, not a fully compromised page.
+One limit remains: `workspace_authorize` is itself a command the page can call, so the registry contains what the app's own flows do, not a fully compromised page. The same holds for the two settings below: they are plain switches in Settings, so the page can turn them on (`workspace_set_all_folders`).
+
+### Access to all folders
+
+Settings, General, Folder access has two switches, both off by default and labelled "At your own risk": **Allow the app to access all folders** and **Allow AI tools to access all folders**. They are independent: each widens one side and never the other.
+
+- The backend holds them (`WorkspaceRegistry::set_all_folders`, both off until told). Every window sends the stored values when its preferences load and each change it sees, whichever window made it (`src/modules/workspace/allFolders.ts`, from `usePreferencesStore.init`), so the gates follow a switch from the next command on.
+- A command that both sides use takes an `origin` (`Origin`, `app` or `ai`): `fs_read_file`, `fs_write_file`, `fs_canonicalize`, `fs_create_dir`, `fs_read_dir`, `fs_grep`, `fs_glob`, `shell_run_command` (its cwd), `shell_session_open`, `shell_session_run` and `shell_bg_spawn`. A call that leaves it out is the app's. The AI tools' wrappers (`src/modules/ai/lib/native.ts`) send `ai` on every file and shell call, so the agent never gets the app's access, and a test checks that each command they tag takes the parameter (otherwise the tag would be dropped silently). Every other file command is the app's alone.
+- The command takes its gates once (`registry.gates(origin)`): the authorized folders, or every folder while that origin's switch is on. The gates still require an absolute path judged on its real path, plain names for new entries and below an explorer root, and still read a missing path as outside while closed. Turning a switch off refuses the next command.
+- A switch authorizes nothing: no root is added, so the other side, the asset protocol's grants, git, language servers (`lsp_resolve_root`, spawn cwd), terminal folders (`pty_authorize_cwd`) and `terax open` keep the authorized folders (`registry.authorized_gates()`, `is_authorized`). The page still authorizes what the user opens, as with the switches off, so turning one off leaves what the user chose reachable.
+- The app's switch covers the explorer (listing, create, rename, move, delete, copy), editor open and save (and the external formatter's cwd), previews, the file finder and content search, file watching, path completion in block terminals and Open in Default App, whose question before running a program stays. Watches set up while it was on keep reporting changes until released.
+- The AI tools' switch covers `read_file`, `list_directory`, `grep`, `glob`, `write_file`, `edit`, `multi_edit`, `create_directory`, plan mode's Apply and the agent shell's cwd. The deny-list and tool approval (Ask, Auto-approve) are unchanged, and the composer shows an "All folders" chip while it is on. Settings shows a persistent indicator in its header while either is on.
 
 This is the allow side of the file-system boundary. Any new command that takes a path must pass it through one of these gates.
 
@@ -70,6 +81,8 @@ Asset URLs (`asset://localhost/...`, `http(s)://asset.localhost/...` on Windows)
 - each installed font face `system_font_faces` returns, as a single file, for the terminal's font features.
 
 Tauri canonicalizes every requested path before matching, so a link pointing out of a granted root is refused. The configured scope sets `requireLiteralLeadingDot`, so on every platform the wildcards never enter names starting with a dot and a granted home folder does not serve `~/.ssh` (Tauri's default does this only on Unix, which on Windows would serve `C:\Users\<me>\.ssh`). Never widen the configured scope (no `**`); grant what a feature needs where it needs it.
+
+A runtime grant can never be taken back, so "Allow the app to access all folders" grants nothing here. While it is on, previews load through the backend's own `terax-asset` scheme instead (`src-tauri/src/modules/asset_all_folders.rs`; `workspaceAssetUrl` picks the scheme from the setting this window last sent). It asks the setting on every request: it serves what the asset protocol would, and while the switch is on any file whose real path has no name starting with a dot (the rule `requireLiteralLeadingDot` applies below a granted root, here from the filesystem root), so `~/.ssh`, `.env` and `.git` stay out. Links are judged by their target, a missing file outside reads as refused, only GET and HEAD with single byte ranges (at most 1000 KiB a response) are answered, responses are `no-store` and name only the app's origin, and a request carrying any other `Origin` is refused. Like the asset protocol, any frame can load from it (a page in the preview pane can show, but not read, such a file while the switch is on). The moment the switch is off it serves no more than the asset protocol, and previews switch back to `asset:` URLs.
 
 ## Opening files in their default app
 
@@ -132,7 +145,8 @@ The agent detector (`src-tauri/src/modules/pty/agent_detect.rs`) is armed by `OS
 - The deny-list in `security.ts` applies on both read and write. Never bypass it.
 - New file-system-touching commands must pass every path the page sends through a registry gate (`authorized_existing`, `authorized_write_target`, `authorized_new`, `authorized_entry`).
 - The page authorizes a path only for what the user chose, never for a path a terminal program or an AI reply named. A terminal's reported folder is authorized only by `pty_authorize_cwd`, which on Linux and macOS requires the OS to confirm the shell or its foreground job is there.
-- The asset protocol's configured scope stays empty; files are granted at runtime (`asset_scope.rs`), never with `**`.
+- The asset protocol's configured scope stays empty; files are granted at runtime (`asset_scope.rs`), never with `**`. Files outside the grants are served only by `terax-asset`, only while the app may access all folders, and never under a dot name.
+- The "access all folders" switches widen only their own side: a command both use takes `origin`, the AI tools send `ai` on every file and shell call, a call without it is the app's, and neither switch authorizes a root.
 - The page opens stores by plain names in the app data folder only (`store_scope.rs`); a new store gets a plain name.
 - New network-facing commands must go through the `net.rs` proxy or reimplement the same classification and DNS pinning.
 - New plugin APIs must be added to `src-tauri/capabilities/default.json`.

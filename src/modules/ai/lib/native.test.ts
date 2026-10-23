@@ -126,3 +126,90 @@ describe("git commands on a path the page names", () => {
     expect(commandsRun()).toEqual(["git_panel_snapshot"]);
   });
 });
+
+describe("the AI tools' file and shell calls", () => {
+  const dir = "/home/me/project";
+  const cases: [string, () => Promise<unknown>][] = [
+    ["fs_read_file", () => native.readFile(`${dir}/a.txt`)],
+    ["fs_write_file", () => native.writeFile(`${dir}/a.txt`, "x")],
+    ["fs_canonicalize", () => native.canonicalize(`${dir}/a.txt`)],
+    ["fs_create_dir", () => native.createDir(`${dir}/new`)],
+    ["fs_read_dir", () => native.readDir(dir)],
+    ["fs_grep", () => native.grep({ pattern: "x", root: dir })],
+    ["fs_glob", () => native.glob({ pattern: "**/*.ts", root: dir })],
+    ["shell_run_command", () => native.runCommand("ls", dir)],
+    ["shell_session_open", () => native.shellSessionOpen(dir)],
+    ["shell_session_run", () => native.shellSessionRun(1, "ls", dir)],
+    ["shell_bg_spawn", () => native.shellBgSpawn("bun run dev", dir)],
+  ];
+
+  // Without it the backend applies the app's setting, which must never
+  // widen what the agent reaches.
+  it.each(cases)("%s says it comes from the AI tools", async (command, run) => {
+    invoke.mockResolvedValue(null);
+    await run();
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith(
+      command,
+      expect.objectContaining({ origin: "ai" }),
+    );
+  });
+
+  it("leaves no file or folder command untagged", async () => {
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync(
+      `${process.cwd()}/src/modules/ai/lib/native.ts`,
+      "utf8",
+    );
+    const named = [
+      ...source.matchAll(/invoke<?[^(]*>?\(\s*"((?:fs|shell)_[a-z_]+)"/g),
+    ].map((m) => m[1]);
+    // These take no path or folder: a handle or session id only.
+    const pathless = [
+      "shell_session_close",
+      "shell_bg_logs",
+      "shell_bg_kill",
+      "shell_bg_list",
+    ];
+    expect(named.filter((c) => !pathless.includes(c)).sort()).toEqual(
+      cases.map(([command]) => command).sort(),
+    );
+  });
+
+  it("leaves git, which the app's Source Control shares, to the authorized folders", async () => {
+    invoke.mockResolvedValue(null);
+    await native.gitStatus("/home/me/project");
+    expect(invoke).toHaveBeenCalledWith("git_status", {
+      repoRoot: "/home/me/project",
+      workspace: ubuntu,
+    });
+  });
+});
+
+describe("file and shell commands in the AI module", () => {
+  // The composer's attach and @ file list serve what the user picked: the
+  // app's own features, under the app's setting.
+  const appFeatures = ["lib/composer.tsx", "hooks/useWorkspaceFiles.ts"];
+
+  it("go through native, which tags them as the AI tools'", async () => {
+    const { readdirSync, readFileSync, statSync } = await import("node:fs");
+    const root = `${process.cwd()}/src/modules/ai`;
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const path = `${dir}/${name}`;
+        if (statSync(path).isDirectory()) walk(path);
+        else if (/\.tsx?$/.test(name) && !name.includes(".test.")) {
+          files.push(path.slice(root.length + 1));
+        }
+      }
+    };
+    walk(root);
+    const direct = files.filter((file) =>
+      /invoke<?[^(]*>?\(\s*"(?:fs|shell)_/.test(
+        readFileSync(`${root}/${file}`, "utf8"),
+      ),
+    );
+    expect(direct.sort()).toEqual(["lib/native.ts", ...appFeatures].sort());
+  });
+});

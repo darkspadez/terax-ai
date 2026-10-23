@@ -336,6 +336,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         // One async scheme multiplexes every terminal's output; see pty/hub.rs.
         .register_asynchronous_uri_scheme_protocol("terax-pty", pty::stream_protocol)
+        // Previews outside the authorized folders while the app may access all of them.
+        .register_asynchronous_uri_scheme_protocol(
+            modules::asset_all_folders::SCHEME,
+            modules::asset_all_folders::protocol,
+        )
         .on_page_load(|webview, payload| {
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
                 if let Some(state) = webview.try_state::<net::AiStreamState>() {
@@ -478,6 +483,7 @@ pub fn run() {
             workspace::wsl_default_distro,
             workspace::ipc::wsl_home,
             workspace::workspace_authorize,
+            workspace::workspace_set_all_folders,
             workspace::workspace_current_dir,
             control::control_frontend_ready,
             control::control_respond,

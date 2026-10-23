@@ -1,6 +1,8 @@
 use super::blocking;
 use super::index::FileIndexState;
-use crate::modules::workspace::{is_plain_name, resolve_path, WorkspaceEnv, WorkspaceRegistry};
+use crate::modules::workspace::{
+    is_plain_name, resolve_path, Origin, WorkspaceEnv, WorkspaceRegistry,
+};
 use serde::Serialize;
 use std::io;
 use std::path::Path;
@@ -50,6 +52,8 @@ fn is_conflict(error: &io::Error) -> bool {
     )
 }
 
+/// The explorer's root a move or batch delete stays under: authorized, or anywhere while the app
+/// may access all folders.
 fn resolve_authorized_root(
     root: &str,
     workspace: &WorkspaceEnv,
@@ -59,7 +63,7 @@ fn resolve_authorized_root(
     let canonical = registry
         .canonicalize_cached(resolved)
         .map_err(|error| format!("workspace root is not accessible: {error}"))?;
-    if registry.is_authorized(&canonical) {
+    if registry.gates(Origin::App).reaches(&canonical) {
         Ok(canonical)
     } else {
         Err(format!(
@@ -248,6 +252,7 @@ pub async fn fs_create_file(
         let workspace = WorkspaceEnv::from_option(workspace);
         let p = app
             .state::<WorkspaceRegistry>()
+            .gates(Origin::App)
             .authorized_new(&resolve_path(&path, &workspace))?;
         create_file(&p)?;
         note_changed(&index, &p);
@@ -275,12 +280,14 @@ pub async fn fs_create_dir(
     index: State<'_, FileIndexState>,
     path: String,
     workspace: Option<WorkspaceEnv>,
+    origin: Option<Origin>,
 ) -> Result<(), String> {
     let index = index.inner().clone();
     blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
         let p = app
             .state::<WorkspaceRegistry>()
+            .gates(origin.unwrap_or_default())
             .authorized_new(&resolve_path(&path, &workspace))?;
         create_dir(&p)?;
         note_changed(&index, &p);
@@ -312,8 +319,9 @@ pub async fn fs_rename(
     blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
         let registry = app.state::<WorkspaceRegistry>();
-        let from_p = registry.authorized_entry(&resolve_path(&from, &workspace))?;
-        let to_p = registry.authorized_entry(&resolve_path(&to, &workspace))?;
+        let gates = registry.gates(Origin::App);
+        let from_p = gates.authorized_entry(&resolve_path(&from, &workspace))?;
+        let to_p = gates.authorized_entry(&resolve_path(&to, &workspace))?;
         rename(&from_p, &to_p)?;
         note_changed(&index, &from_p);
         note_changed(&index, &to_p);
@@ -433,6 +441,7 @@ pub async fn fs_delete(
         let workspace = WorkspaceEnv::from_option(workspace);
         let p = app
             .state::<WorkspaceRegistry>()
+            .gates(Origin::App)
             .authorized_entry(&resolve_path(&path, &workspace))?;
         delete_path(&p)?;
         note_changed(&index, &p);

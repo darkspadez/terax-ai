@@ -3,7 +3,7 @@ use super::{
     mutate::{note_dir_changed, rename_no_replace},
     to_canon,
 };
-use crate::modules::workspace::{resolve_path, WorkspaceEnv, WorkspaceRegistry};
+use crate::modules::workspace::{resolve_path, Origin, WorkspaceEnv, WorkspaceRegistry};
 use serde::Serialize;
 use std::ffi::{OsStr, OsString};
 use std::io;
@@ -63,7 +63,7 @@ fn copy_destination(
     }
     let root = std::fs::canonicalize(root).map_err(|error| error.to_string())?;
     let dest = std::fs::canonicalize(dest).map_err(|error| error.to_string())?;
-    if !registry.is_authorized(&root) || !dest.starts_with(&root) {
+    if !registry.gates(Origin::App).reaches(&root) || !dest.starts_with(&root) {
         return Err("copy destination is outside the authorized workspace".into());
     }
     if !dest.is_dir() {
@@ -85,14 +85,13 @@ fn copy_batch(
         return Err(format!("copy at most {MAX_COPY_SOURCES} items at a time"));
     }
     let dest = copy_destination(dest_dir, root, workspace, registry)?;
+    let gates = registry.gates(Origin::App);
     let mut result = CopyResult::default();
     for source in sources {
-        // Sources are host paths (dropped or on the clipboard), read only from authorized folders.
-        let copied = registry
-            .authorized_entry(Path::new(&source))
-            .and_then(|src| {
-                copy_item(&src, &dest, rename_on_conflict).map_err(|error| error.to_string())
-            });
+        // Sources are host paths (dropped or on the clipboard), read only from folders in reach.
+        let copied = gates.authorized_entry(Path::new(&source)).and_then(|src| {
+            copy_item(&src, &dest, rename_on_conflict).map_err(|error| error.to_string())
+        });
         match copied {
             Ok(name) => result
                 .created

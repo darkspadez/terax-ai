@@ -1,8 +1,9 @@
 pub mod agent;
 pub mod ai_sessions;
-pub mod asset_scope;
 #[cfg(target_os = "macos")]
 pub mod app_menu;
+pub mod asset_all_folders;
+pub mod asset_scope;
 #[cfg(feature = "bench")]
 pub mod bench;
 pub mod clipboard_image;

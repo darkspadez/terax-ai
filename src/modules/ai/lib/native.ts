@@ -193,28 +193,40 @@ function gitOnPath<T>(
   );
 }
 
+/**
+ * Marks a file or shell call as the AI tools': the backend then applies their
+ * own "access all folders" setting, never the app's. Every file and shell
+ * call below carries it, and only the AI tools use them.
+ */
+const AI_ORIGIN = { origin: "ai" } as const;
+
 export const native = {
   workspaceCurrentDir: () => invoke<string>("workspace_current_dir"),
   readFile: (path: string) =>
     invoke<ReadResult>("fs_read_file", {
       path,
       workspace: currentWorkspaceEnv(),
+      ...AI_ORIGIN,
     }),
   writeFile: (path: string, content: string) =>
     invoke<void>("fs_write_file", {
       path,
       content,
       workspace: currentWorkspaceEnv(),
+      ...AI_ORIGIN,
     }),
   canonicalize: (path: string) =>
     invoke<string>("fs_canonicalize", {
       path,
       workspace: currentWorkspaceEnv(),
+      ...AI_ORIGIN,
     }),
-  createFile: (path: string) =>
-    invoke<void>("fs_create_file", { path, workspace: currentWorkspaceEnv() }),
   createDir: (path: string) =>
-    invoke<void>("fs_create_dir", { path, workspace: currentWorkspaceEnv() }),
+    invoke<void>("fs_create_dir", {
+      path,
+      workspace: currentWorkspaceEnv(),
+      ...AI_ORIGIN,
+    }),
   // AI tooling never sees dot-prefixed entries regardless of the user's
   // explorer preference — keeps .git / .env / .ssh out of agent context.
   readDir: (path: string) =>
@@ -222,6 +234,7 @@ export const native = {
       path,
       showHidden: false,
       workspace: currentWorkspaceEnv(),
+      ...AI_ORIGIN,
     }),
   grep: (params: {
     pattern: string;
@@ -237,6 +250,7 @@ export const native = {
       caseInsensitive: params.caseInsensitive ?? null,
       maxResults: params.maxResults ?? null,
       workspace: currentWorkspaceEnv(),
+      ...AI_ORIGIN,
     }),
   glob: (params: { pattern: string; root: string; maxResults?: number }) =>
     invoke<GlobResponse>("fs_glob", {
@@ -244,6 +258,7 @@ export const native = {
       root: params.root,
       maxResults: params.maxResults ?? null,
       workspace: currentWorkspaceEnv(),
+      ...AI_ORIGIN,
     }),
   runCommand: (
     command: string,
@@ -255,12 +270,14 @@ export const native = {
       cwd: cwd ?? null,
       timeoutSecs: timeoutSecs ?? null,
       workspace: currentWorkspaceEnv(),
+      ...AI_ORIGIN,
     }),
 
   shellSessionOpen: (cwd?: string | null) =>
     invoke<number>("shell_session_open", {
       cwd: cwd ?? null,
       workspace: currentWorkspaceEnv(),
+      ...AI_ORIGIN,
     }),
   shellSessionRun: (
     id: number,
@@ -281,6 +298,7 @@ export const native = {
       cwd: cwd ?? null,
       timeoutSecs: timeoutSecs ?? null,
       workspace: currentWorkspaceEnv(),
+      ...AI_ORIGIN,
     }),
   shellSessionClose: (id: number) =>
     invoke<void>("shell_session_close", { id }),
@@ -289,6 +307,7 @@ export const native = {
       command,
       cwd: cwd ?? null,
       workspace: currentWorkspaceEnv(),
+      ...AI_ORIGIN,
     }),
   shellBgLogs: (handle: number, sinceOffset?: number) =>
     invoke<{

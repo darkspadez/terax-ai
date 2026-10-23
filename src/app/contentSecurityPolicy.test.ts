@@ -52,6 +52,22 @@ describe("content security policy", () => {
     },
   );
 
+  // While "Allow the app to access all folders" is on, previews load through
+  // the backend's own scheme (asset_all_folders.rs), which asks the setting on
+  // every request.
+  it.each(["img-src", "media-src", "frame-src"])(
+    "%s allows previews from every folder on every platform",
+    (directive) => {
+      for (const url of [
+        `terax-asset://localhost/${encodeURIComponent("/srv/pic.png")}`,
+        `http://terax-asset.localhost/${encodeURIComponent("D:\\pic.png")}`,
+        `https://terax-asset.localhost/${encodeURIComponent("D:\\pic.png")}`,
+      ]) {
+        expect(allows(directive, url), url).toBe(true);
+      }
+    },
+  );
+
   // Markdown from the AI chat renders in this webview: a remote image URL
   // would leak data from a prompt-injected answer without a click.
   it("loads no remote images or media", () => {

@@ -19,6 +19,7 @@ import { type JSX, useEffect, useState } from "react";
 import { AboutSection } from "./sections/AboutSection";
 import { AgentsSection } from "./sections/AgentsSection";
 import { EditorSection } from "./sections/EditorSection";
+import { FolderAccessIndicator } from "./sections/FolderAccessSettings";
 import { GeneralSection } from "./sections/GeneralSection";
 import { ModelsSection } from "./sections/ModelsSection";
 import { ShortcutsSection } from "./sections/ShortcutsSection";
@@ -145,6 +146,7 @@ export function SettingsApp() {
             ))}
           </TabsList>
         </Tabs>
+        <FolderAccessIndicator onShowGeneral={() => setActive("general")} />
         {USE_CUSTOM_WINDOW_CONTROLS && <WindowControls closeOnly />}
       </header>
       <WindowActivityBridge />

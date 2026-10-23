@@ -25,7 +25,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use super::blocking;
 use super::index::FileIndexState;
 use super::to_canon;
-use crate::modules::workspace::{resolve_path, WorkspaceEnv, WorkspaceRegistry};
+use crate::modules::workspace::{resolve_path, Gates, Origin, WorkspaceEnv, WorkspaceRegistry};
 use plan::{Batch, DirSet, FileStamp, Pending, WatchSet};
 
 // Quiet-gap before a batch flushes; MAX_WINDOW caps latency under a long stream.
@@ -378,7 +378,7 @@ fn resolve_changes(pending: Pending, shared: &Shared) -> Changes {
 /// Each requested directory with its canonical path. Canonical keys keep add/remove symmetric
 /// whatever the spelling, and the spelling is what changes are reported under.
 fn prepare_dirs(
-    registry: &WorkspaceRegistry,
+    gates: Gates<'_>,
     workspace: &WorkspaceEnv,
     paths: Vec<String>,
 ) -> Vec<(String, PathBuf)> {
@@ -387,10 +387,7 @@ fn prepare_dirs(
         .filter_map(|raw| {
             let resolved = resolve_path(&raw, workspace);
             let canonical = std::fs::canonicalize(&resolved).ok()?;
-            if !canonical.is_dir()
-                || plan::is_skipped(&canonical)
-                || !registry.is_authorized(&canonical)
-            {
+            if !canonical.is_dir() || plan::is_skipped(&canonical) || !gates.reaches(&canonical) {
                 return None;
             }
             Some((raw, canonical))
@@ -517,15 +514,15 @@ pub async fn fs_watch_add(
     let owner = webview.label().to_owned();
     blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
-        let registry = app.state::<WorkspaceRegistry>();
-        let dirs = prepare_dirs(&registry, &workspace, paths);
+        let gates = app.state::<WorkspaceRegistry>().inner().gates(Origin::App);
+        let dirs = prepare_dirs(gates, &workspace, paths);
         let files: Vec<_> = files
             .unwrap_or_default()
             .into_iter()
             .filter_map(|raw| {
                 let (dir, key, path) = canonical_file(&workspace, &raw)?;
                 // Its folder, as the watch sees it: the file's own changes are reported from there.
-                if !registry.is_authorized(path.parent()?) {
+                if !gates.reaches(path.parent()?) {
                     return None;
                 }
                 Some((dir, key, raw, FileStamp::of(&path)))
@@ -1051,7 +1048,11 @@ mod tests {
         let link_src = spelled(&link.join("src"));
         let link_file = spelled(&link.join("src/open.ts"));
 
-        let dirs = prepare_dirs(&registry, &WorkspaceEnv::Local, vec![link_src.clone()]);
+        let dirs = prepare_dirs(
+            registry.gates(Origin::App),
+            &WorkspaceEnv::Local,
+            vec![link_src.clone()],
+        );
         assert_eq!(dirs, vec![(link_src.clone(), real.join("src"))]);
         let (dir_key, file_key, file_path) =
             canonical_file(&WorkspaceEnv::Local, &link_file).unwrap();

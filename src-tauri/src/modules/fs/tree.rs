@@ -7,7 +7,7 @@ use ignore::WalkBuilder;
 use serde::Serialize;
 
 use super::{authorized_root, blocking};
-use crate::modules::workspace::{resolve_path, WorkspaceEnv};
+use crate::modules::workspace::{resolve_path, Origin, WorkspaceEnv};
 
 #[derive(Serialize, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -151,9 +151,10 @@ pub async fn fs_read_dir(
     show_hidden: bool,
     git_decorations: Option<bool>,
     workspace: Option<WorkspaceEnv>,
+    origin: Option<Origin>,
 ) -> Result<Vec<DirEntry>, String> {
     blocking(move || {
-        authorized_root(&app, &path, workspace.as_ref())?;
+        authorized_root(&app, &path, workspace.as_ref(), origin.unwrap_or_default())?;
         read_dir_entries(path, show_hidden, git_decorations, workspace)
     })
     .await
@@ -256,7 +257,7 @@ pub async fn list_subdirs(
     workspace: Option<WorkspaceEnv>,
 ) -> Result<Vec<String>, String> {
     blocking(move || {
-        authorized_root(&app, &path, workspace.as_ref())?;
+        authorized_root(&app, &path, workspace.as_ref(), Origin::App)?;
         subdirs(path, show_hidden, workspace)
     })
     .await

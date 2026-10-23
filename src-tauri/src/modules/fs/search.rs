@@ -8,7 +8,7 @@ use tauri::{AppHandle, State};
 use super::index::{FileIndexState, IndexKey, Packed};
 use super::supersede::Supersede;
 use super::{authorized_root, blocking, display_path};
-use crate::modules::workspace::{resolve_path, WorkspaceEnv};
+use crate::modules::workspace::{resolve_path, Origin, WorkspaceEnv};
 
 #[derive(Serialize, Clone)]
 pub struct SearchHit {
@@ -70,7 +70,7 @@ pub async fn fs_search(
     let ticket = request_key.as_deref().map(|key| supersede.begin(key));
     let index = index.inner().clone();
     blocking(move || {
-        authorized_root(&app, &root, workspace.as_ref())?;
+        authorized_root(&app, &root, workspace.as_ref(), Origin::App)?;
         let cancelled = || ticket.as_ref().is_some_and(|t| t.is_superseded());
         run_search(
             &index,
@@ -188,7 +188,7 @@ pub async fn fs_list_files(
 ) -> Result<ListFilesResult, String> {
     let index = index.inner().clone();
     blocking(move || {
-        authorized_root(&app, &root, workspace.as_ref())?;
+        authorized_root(&app, &root, workspace.as_ref(), Origin::App)?;
         run_list_files(&index, root, limit, max_depth, workspace, show_hidden)
     })
     .await
