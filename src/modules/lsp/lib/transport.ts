@@ -1,6 +1,7 @@
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type { Transport } from "codemirror-languageserver";
+import { lspShell } from "./detect";
 
 export type LspSpawnConfig = {
   command: string;
@@ -64,6 +65,7 @@ export class TauriLspTransport implements Transport {
       root: config.root,
       maxRssMb: config.maxMemoryMb ?? null,
       workspace: currentWorkspaceEnv(),
+      shell: lspShell(),
       onMessage,
       onExit,
     });

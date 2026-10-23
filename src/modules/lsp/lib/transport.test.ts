@@ -68,6 +68,7 @@ describe("TauriLspTransport", () => {
       root: "/repo",
       maxRssMb: 2048,
       workspace: "local",
+      shell: null,
     });
   });
 

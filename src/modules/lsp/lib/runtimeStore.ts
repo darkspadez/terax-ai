@@ -25,6 +25,11 @@ type State = {
   clearFailed: (presetId: string) => void;
   setDetected: (command: string, path: string | null) => void;
   clearDetected: (command: string) => void;
+  /**
+   * Forgets every binary lookup and bumps the generation of `enabledPresets`
+   * that have no session, so their open files try to start them again.
+   */
+  resetDetections: (enabledPresets: readonly string[]) => void;
 };
 
 export const useLspRuntimeStore = create<State>((set) => ({
@@ -75,5 +80,18 @@ export const useLspRuntimeStore = create<State>((set) => ({
       const detected = { ...state.detected };
       delete detected[command];
       return { detected };
+    }),
+  resetDetections: (enabledPresets) =>
+    set((state) => {
+      const running = new Set(
+        Object.values(state.sessions).map((s) => s.presetId),
+      );
+      const generations = { ...state.generations };
+      for (const presetId of enabledPresets) {
+        if (!running.has(presetId)) {
+          generations[presetId] = (generations[presetId] ?? 0) + 1;
+        }
+      }
+      return { detected: {}, generations };
     }),
 }));
