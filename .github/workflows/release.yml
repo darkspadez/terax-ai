@@ -13,47 +13,83 @@ jobs:
       contents: write
       id-token: write
     # `platform` names the leg (the steps below branch on it); `runner` is the
-    # Namespace profile it builds on (see ci.yml). The Linux profiles are Ubuntu
-    # 22.04 so the packages keep that glibc baseline. There is no Windows
-    # profile yet: the Windows leg is left out until one exists, and its
-    # SignPath steps below stay for when it returns.
+    # Namespace profile it builds on (see ci.yml). The Linux profiles run
+    # Ubuntu 26.04, so the Linux legs build inside an ubuntu:22.04 container:
+    # a binary needs at least the glibc it was built against, and 22.04 keeps
+    # the packages starting on Ubuntu 22.04+, Debian 12, Fedora 36+ and the
+    # like. An empty `container` runs the leg on the runner itself. There is
+    # no Windows profile yet: the Windows leg is left out until one exists,
+    # and its SignPath steps below stay for when it returns.
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: macos-latest
             runner: namespace-profile-oarlock-macos-arm64
+            container: ""
             args: --target aarch64-apple-darwin
             rust-target: aarch64-apple-darwin
           - platform: macos-latest
             runner: namespace-profile-oarlock-macos-arm64
+            container: ""
             args: --target x86_64-apple-darwin
             rust-target: x86_64-apple-darwin
           - platform: ubuntu-22.04
             runner: namespace-profile-oarlock-linux-amd64
+            container: ubuntu:22.04
             args: ""
             rust-target: ""
             appimage-arch: x86_64
           - platform: ubuntu-22.04-arm
             runner: namespace-profile-oarlock-linux-arm64
+            container: ubuntu:22.04
             args: ""
             rust-target: ""
             appimage-arch: aarch64
 
     runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container }}
+    env:
+      # No FUSE inside the container: AppImage tools unpack themselves instead.
+      APPIMAGE_EXTRACT_AND_RUN: "1"
     steps:
-      - uses: actions/checkout@v7
-
+      # The container starts bare (and as root, without sudo), so its build
+      # dependencies, git (for a real checkout) and the GitHub CLI (used by the
+      # AppImage repack) come first.
       - name: Install Linux build dependencies
         if: startsWith(matrix.platform, 'ubuntu')
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            curl \
+            file \
+            git \
+            libayatana-appindicator3-dev \
             libgtk-3-dev \
             librsvg2-dev \
             libssl-dev \
-            patchelf
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            patchelf \
+            pkg-config \
+            unzip \
+            wget \
+            xz-utils
+          mkdir -p -m 755 /etc/apt/keyrings
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+            -o /etc/apt/keyrings/githubcli-archive-keyring.gpg
+          chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+            > /etc/apt/sources.list.d/github-cli.list
+          apt-get update
+          apt-get install -y --no-install-recommends gh
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - uses: actions/checkout@v7
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -64,7 +100,10 @@ jobs:
         with:
           targets: ${{ matrix.rust-target }}
 
+      # A container leg may not see the runner's cache volume; a release then
+      # builds without the cache rather than failing.
       - uses: namespacelabs/nscloud-cache-action@v1
+        continue-on-error: ${{ matrix.container != '' }}
         with:
           cache: |
             bun

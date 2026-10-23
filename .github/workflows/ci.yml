@@ -13,7 +13,8 @@ concurrency:
 
 # Jobs run on Namespace runner profiles (cloud.namespace.so, Actions profiles),
 # each with a cache volume attached:
-#   oarlock-linux-amd64  Linux amd64, Ubuntu 22.04 (the release glibc baseline)
+#   oarlock-linux-amd64  Linux amd64, Ubuntu 26.04 (release builds use a
+#                        22.04 container for the glibc baseline, release.yml)
 #   oarlock-macos-arm64  macOS arm64
 # There is no Windows profile yet, so the Windows legs are left out until one
 # exists. nscloud-cache-action keeps the Bun, Cargo, apt and target caches on
