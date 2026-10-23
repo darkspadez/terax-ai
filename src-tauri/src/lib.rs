@@ -346,6 +346,12 @@ pub fn run() {
                 if let Some(state) = webview.try_state::<net::AiStreamState>() {
                     state.cancel_window(webview.window().label());
                 }
+                if let Some(state) = webview.try_state::<modules::mcp::McpHttpStreams>() {
+                    state.cancel_window(webview.label());
+                }
+                if let Some(state) = webview.try_state::<modules::mcp::McpState>() {
+                    state.release_window(webview.app_handle(), webview.label());
+                }
                 if let Some(state) = webview.try_state::<pty::PtyState>() {
                     state.reset_webview(webview.label());
                 }
@@ -385,6 +391,8 @@ pub fn run() {
         .manage(fs::watch::FsWatchState::default())
         .manage(history::HistoryState::default())
         .manage(lsp::LspState::default())
+        .manage(modules::mcp::McpState::default())
+        .manage(modules::mcp::McpHttpStreams::default())
         .manage(fs::supersede::Supersede::default())
         .manage(fs::index::FileIndexState::default())
         .manage({
@@ -441,6 +449,22 @@ pub fn run() {
             lsp::lsp_spawn,
             lsp::lsp_send,
             lsp::lsp_kill,
+            modules::mcp::mcp_spawn,
+            modules::mcp::mcp_send,
+            modules::mcp::mcp_kill,
+            modules::mcp::mcp_logs,
+            modules::mcp::mcp_logs_clear,
+            modules::mcp::mcp_log_note,
+            modules::mcp::mcp_status_report,
+            modules::mcp::mcp_status_list,
+            modules::mcp::mcp_secret_set,
+            modules::mcp::mcp_secret_delete,
+            modules::mcp::mcp_secret_status,
+            modules::mcp::mcp_http_open,
+            modules::mcp::mcp_http_close,
+            modules::mcp::mcp_http_stream,
+            modules::mcp::mcp_http_cancel,
+            modules::mcp::mcp_http_ack,
             fs::search::fs_search,
             fs::search::fs_list_files,
             fs::grep::fs_grep,
@@ -551,6 +575,12 @@ pub fn run() {
                     if let Some(state) = app.try_state::<net::AiStreamState>() {
                         state.cancel_window(&label);
                     }
+                    if let Some(state) = app.try_state::<modules::mcp::McpHttpStreams>() {
+                        state.cancel_window(&label);
+                    }
+                    if let Some(state) = app.try_state::<modules::mcp::McpState>() {
+                        state.release_window(app, &label);
+                    }
                     if let Some(state) = app.try_state::<pty::PtyState>() {
                         state.destroy_webview(&label);
                     }
@@ -569,6 +599,9 @@ pub fn run() {
                     modules::window_presentation::macos::uninstall();
                     if let Some(state) = app.try_state::<lsp::LspState>() {
                         state.kill_all();
+                    }
+                    if let Some(state) = app.try_state::<modules::mcp::McpState>() {
+                        state.shut_down();
                     }
                     if let Some(state) = app.try_state::<shell::ShellState>() {
                         state.kill_all();

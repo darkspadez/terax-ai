@@ -17,6 +17,7 @@ pub mod ipc_body;
 pub mod lsp;
 #[cfg(any(target_os = "macos", test))]
 pub mod mac_privacy;
+pub mod mcp;
 #[cfg(any(target_os = "macos", test))]
 pub mod menu_shortcuts;
 pub mod net;

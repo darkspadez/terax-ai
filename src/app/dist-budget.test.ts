@@ -271,6 +271,7 @@ describe("built startup graph", () => {
       "iconEngine",
       "mathPlugin",
       "MermaidDiagram",
+      "mcp-sdk",
     ]) {
       const file = chunks.find((f) => chunkName(f) === stem);
       expect(file, `${stem} chunk should be emitted`).toBeDefined();
@@ -323,6 +324,19 @@ describe("built startup graph", () => {
           .map((pkg) => `${file}: ${pkg}`),
       ),
     ).toEqual([]);
+  });
+
+  it("bundles the MCP client without AJV, which the CSP could not run", () => {
+    const assets = join(outDir, "assets");
+    const bundled = new Set<string>();
+    for (const file of readdirSync(assets).filter((f) =>
+      f.endsWith(".js.map"),
+    )) {
+      const map = readFileSync(join(assets, file), "utf8");
+      for (const pkg of packagesFromMap(map) ?? []) bundled.add(pkg);
+    }
+    expect(bundled.has("@modelcontextprotocol/sdk")).toBe(true);
+    expect([...bundled].filter((pkg) => /^ajv/.test(pkg))).toEqual([]);
   });
 
   it("ships KaTeX's fonts as woff2 only", () => {

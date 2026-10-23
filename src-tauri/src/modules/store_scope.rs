@@ -160,6 +160,7 @@ mod tests {
         "terax-ai-todos.json",
         "terax-ai-agents.json",
         "terax-custom-themes.json",
+        "terax-mcp.json",
         "terax-spaces.json",
     ];
 

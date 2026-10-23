@@ -1,3 +1,6 @@
+import type { McpRunTools } from "@/modules/mcp";
+import { isMcpToolName } from "@/modules/mcp/lib/toolNames";
+import type { Tool } from "ai";
 import type { ApprovalMode } from "../lib/approvalMode";
 import { buildManagedAgentTools } from "./agent";
 import { buildEditTools } from "./edit";
@@ -25,6 +28,9 @@ export { resolvePath, type ToolContext } from "./context";
  *  - `edit` / `multi_edit` additionally enforce a read-before-edit invariant
  *    (the model must have called read_file on the path earlier in the
  *    session).
+ *  - Tools of MCP servers (`mcp__<server>__<tool>`, added per run by
+ *    `runAgentStream`) ask in every mode unless the server is Trusted; see
+ *    `mcpToolGate`. Sub-agents never get them.
  *
  * The model sees absolute paths only after they are resolved against the
  * active terminal's cwd (provided via `getCwd`); it should not invent paths
@@ -57,12 +63,21 @@ export type ToolName = keyof ReturnType<typeof buildTools>;
  *    still refuses the command deny-list.
  *  - `always`: launches or messages a coding agent, which no deny-list
  *    covers, so the user's approval is the only gate: asks in every mode.
+ *  - `mcp`: a tool of an MCP server the user has not marked Trusted. The
+ *    server is an outside program or service, so it asks in every mode.
+ *  - `mcp-trusted`: a tool of a Trusted server. Follows the conversation's
+ *    mode as a shell command does: plan mode, which must not act, asks.
+ * MCP tools are gated by `mcpToolGate`, from what the user chose for the
+ * server and the tool; the server's own annotations (`readOnlyHint` and the
+ * like) are never an input, so a server cannot talk its way past a gate.
  */
 export type ToolGate =
   | "none"
   | "approvable"
   | "approvable-outside-plan"
-  | "always";
+  | "always"
+  | "mcp"
+  | "mcp-trusted";
 
 export const TOOL_GATES: Readonly<Record<ToolName, ToolGate>> = {
   read_file: "none",
@@ -101,31 +116,69 @@ export function toolApprovalStatus(
     case "none":
       return "not-applicable";
     case "always":
+    case "mcp":
       return "user-approval";
     case "approvable":
       return mode === "auto" ? "not-applicable" : "user-approval";
     case "approvable-outside-plan":
+    case "mcp-trusted":
       return mode === "auto" && !planMode ? "not-applicable" : "user-approval";
   }
+}
+
+/**
+ * The gate of an MCP tool. "Always allow" runs it unasked in every mode;
+ * otherwise a Trusted server's tools follow the conversation's mode and any
+ * other server's ask every time. Tools the user never allows are not offered
+ * to the model at all, so they have no gate.
+ */
+export function mcpToolGate(access: {
+  trusted: boolean;
+  alwaysAllow: boolean;
+}): ToolGate {
+  if (access.alwaysAllow) return "none";
+  return access.trusted ? "mcp-trusted" : "mcp";
+}
+
+/**
+ * The MCP tools one run offers, each with its gate. A tool comes through only
+ * with an MCP name and an access entry, so none is ever offered ungated.
+ */
+export function mcpToolsWithGates(mcp: McpRunTools | null | undefined): {
+  tools: Record<string, Tool>;
+  gates: Record<string, ToolGate>;
+} {
+  const tools: Record<string, Tool> = {};
+  const gates: Record<string, ToolGate> = {};
+  if (!mcp) return { tools, gates };
+  for (const [name, tool] of Object.entries(mcp.tools)) {
+    if (!isMcpToolName(name) || name in TOOL_GATES) continue;
+    // An MCP name never meets a prototype property, so a lookup is enough.
+    const access = mcp.access[name];
+    if (!access) continue;
+    tools[name] = tool;
+    gates[name] = mcpToolGate(access);
+  }
+  return { tools, gates };
 }
 
 /**
  * The `toolApproval` policy of one run. Gated tools read the conversation's
  * state on every call, so turning Auto-approve off stops the very next call
  * from running unasked, even mid-run. Auto-approved calls run as read-only
- * tools do, with no approval part, so nothing waits on the user.
+ * tools do, with no approval part, so nothing waits on the user. `extra`
+ * gates the run's MCP tools; it can never regate a built-in tool.
  */
 export function buildToolApproval(
   state: () => ApprovalState,
-): Readonly<Record<ToolName, ApprovalStatus | (() => ApprovalStatus)>> {
-  const policy = {} as Record<
-    ToolName,
-    ApprovalStatus | (() => ApprovalStatus)
-  >;
-  for (const [name, gate] of Object.entries(TOOL_GATES) as [
-    ToolName,
-    ToolGate,
-  ][]) {
+  extra: Readonly<Record<string, ToolGate>> = {},
+): Readonly<Record<string, ApprovalStatus | (() => ApprovalStatus)>> {
+  const policy: Record<string, ApprovalStatus | (() => ApprovalStatus)> = {};
+  const gates: [string, ToolGate][] = [
+    ...Object.entries(extra).filter(([name]) => !(name in TOOL_GATES)),
+    ...(Object.entries(TOOL_GATES) as [ToolName, ToolGate][]),
+  ];
+  for (const [name, gate] of gates) {
     policy[name] =
       gate === "none"
         ? "not-applicable"

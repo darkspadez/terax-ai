@@ -45,7 +45,7 @@ Keys are never persisted outside the OS keychain / Linux secrets file.
 4. Streams via `streamText` with the tool set from `buildTools(ctx)`, the run's approval policy (`buildToolApproval`, see below), the chosen reasoning effort (`reasoningCallOptions`) and `stopWhen: isStepCount(MAX_AGENT_STEPS)`.
 5. Emits step labels, usage deltas, and finish metadata.
 
-The tool set is assembled in `src/modules/ai/tools/tools.ts` from the `fs`, `edit`, `search`, `shell`, `subagent`, `terminal`, `todo`, and managed-agent (`agent.ts`) builders.
+The tool set is assembled in `src/modules/ai/tools/tools.ts` from the `fs`, `edit`, `search`, `shell`, `subagent`, `terminal`, `todo`, and managed-agent (`agent.ts`) builders, plus the window's MCP tools (below).
 
 `createContextAwareTransport` (`src/modules/ai/lib/transport.ts`) is the chat transport: it adds the environment block to the last user message, reads `TERAX.md` (capped, cached per workspace root), runs `runAgentStream` and returns `toUIMessageStream(...)` for the `Chat`.
 
@@ -91,6 +91,16 @@ Tool definitions live under `src/modules/ai/tools/`:
 
 Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalResponses`.
 
+### MCP tools
+
+Tools of MCP servers come from the window's MCP client (`src/modules/mcp/`). On every run `transport.ts` calls `mcpToolsForRun`: with no server enabled it only reads the configuration; otherwise it loads the client chunk, brings the window's servers in line with Settings (starting them on the first run, which waits up to 15 s for servers still starting) and returns their tools. `runAgentStream` adds them beside the built-in tools:
+
+- Names are `mcp__<server>__<tool>` (sanitized, at most 64 characters), each a `dynamicTool` with the server's input schema, a capped description and `metadata.mcp` (server and tool), which UI parts carry as `toolMetadata`.
+- Gates (`mcpToolGate`, `mcpToolsWithGates` in `tools.ts`): an untrusted server's tools ask in every mode; a Trusted server's follow the conversation's mode (plan mode asks); Always allow runs a tool unasked; Never allow keeps it from the model. Annotations are shown, never used. Sub-agents get no MCP tools.
+- Execution goes to the server through the window's client (`runtime/manager.ts`): two minutes without progress, fifteen at most, cancelled with the run. Results are capped and kept as text and images (`lib/results.ts`); `toModelOutput` hands them to the model as text and files, and history is converted with a converter for MCP calls whose tool is gone (`lib/mcpHistory.ts`).
+- The system prompt gains an MCP block saying results are untrusted data, with each server's instructions.
+- The chat renders MCP calls with `components/McpTool.tsx`: the approval card names the server and shows the arguments and the server's annotations; the transcript row marks the result as external.
+
 A tool call needs a result before any later request: one without it fails every following prompt with `MissingToolResultsError`. So only the newest message's approvals can be answered (`pendingApprovalIds` in `lib/toolApprovals.ts`): older cards render as denied rows, their diff tabs close, and the diff-tab responder ignores them. Every user message (composer, Continue, managed-agent review) goes through `sendUserMessage` in `store/chatRuntime.ts`, which first replaces the messages holding unanswered approvals (waiting, or approved but never run) with copies where those calls are denied, so the model is told they did not run and the settled state is what gets persisted.
 
 In plan mode, an edit that Apply could not write (a write error, or a path the deny-list refuses at write time) stays in the review list with its error until it is applied or rejected; written edits leave the list.
@@ -109,6 +119,7 @@ AI-proposed file edits open in an `ai-diff` tab. The user accepts or rejects per
 - Keys only via `secrets_*` commands; never disk, settings store, or `localStorage`.
 - New providers must justify their bundle cost and unique value.
 - Mutating tools require approval unless the conversation is in Auto-approve; the coding-agent tools always do, and no mode skips a deny-list. Read-only tools still pass the deny-list.
+- MCP tools of an untrusted server ask in every mode; an MCP tool is never offered without its gate, and server annotations never relax one.
 
 ## See also
 

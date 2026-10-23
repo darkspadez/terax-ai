@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const providers = vi.hoisted(() => ({
   created: [] as { name: string; baseURL: string; apiKey?: string }[],
   models: [] as string[],
+  tools: [] as string[],
 }));
 vi.mock("@ai-sdk/openai-compatible", async () => {
   const { MockLanguageModelV4: Mock } = await import("ai/test");
@@ -13,20 +14,23 @@ vi.mock("@ai-sdk/openai-compatible", async () => {
         providers.created.push(config);
         providers.models.push(modelId);
         return new Mock({
-          doGenerate: async () => ({
-            content: [{ type: "text", text: "found it" }],
-            finishReason: { unified: "stop", raw: "stop" },
-            usage: {
-              inputTokens: {
-                total: 1,
-                noCache: 1,
-                cacheRead: 0,
-                cacheWrite: 0,
+          doGenerate: async (options: { tools?: { name: string }[] }) => {
+            providers.tools.push(...(options.tools ?? []).map((t) => t.name));
+            return {
+              content: [{ type: "text", text: "found it" }],
+              finishReason: { unified: "stop", raw: "stop" },
+              usage: {
+                inputTokens: {
+                  total: 1,
+                  noCache: 1,
+                  cacheRead: 0,
+                  cacheWrite: 0,
+                },
+                outputTokens: { total: 1, text: 1, reasoning: 0 },
               },
-              outputTokens: { total: 1, text: 1, reasoning: 0 },
-            },
-            warnings: [],
-          }),
+              warnings: [],
+            };
+          },
         });
       },
   };
@@ -57,6 +61,7 @@ const toolContext = {
 beforeEach(() => {
   providers.created.length = 0;
   providers.models.length = 0;
+  providers.tools.length = 0;
 });
 
 describe("runSubagent", () => {
@@ -89,6 +94,37 @@ describe("runSubagent", () => {
       }),
     ]);
     expect(providers.models).toEqual(["qwen3-coder"]);
+  });
+
+  it("gets only its read-only built-in tools, never the window's MCP tools", async () => {
+    const { useMcpCatalog } = await import("@/modules/mcp/lib/catalog");
+    useMcpCatalog.getState().setTools({
+      mcp__srv__write: {
+        name: "mcp__srv__write",
+        serverId: "s",
+        serverName: "srv",
+        tool: "write",
+        trusted: true,
+      },
+    });
+    await runSubagent({
+      type: "general",
+      prompt: "look around",
+      keys: EMPTY_PROVIDER_KEYS,
+      modelId: "ollama-local",
+      config: { ollamaModelId: "qwen3:8b" },
+      toolContext,
+    });
+    useMcpCatalog.getState().setTools({});
+    expect(providers.tools.length).toBeGreaterThan(0);
+    expect(providers.tools.filter((name) => name.startsWith("mcp__"))).toEqual(
+      [],
+    );
+    expect(
+      providers.tools.every((name) =>
+        ["read_file", "list_directory", "grep", "glob"].includes(name),
+      ),
+    ).toBe(true);
   });
 
   it("sends a local server its configured model, not the placeholder id", async () => {

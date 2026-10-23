@@ -1,3 +1,4 @@
+import { mcpToolsForRun } from "@/modules/mcp";
 import type { UIMessage } from "@ai-sdk/react";
 import { toUIMessageStream } from "ai";
 import type { CustomEndpoint } from "../config";
@@ -82,7 +83,13 @@ type SendOptions = {
 export function createContextAwareTransport(deps: Deps) {
   const run = async (options: SendOptions) => {
     const live = deps.getLive();
-    const projectMemory = await readTeraxMd(live.workspaceRoot);
+    const [projectMemory, mcp] = await Promise.all([
+      readTeraxMd(live.workspaceRoot),
+      mcpToolsForRun({
+        signal: options.abortSignal,
+        onWaiting: () => deps.onStep?.("Starting MCP servers"),
+      }),
+    ]);
     const envBlock = formatEnvBlock(live);
     const messagesForRun = envBlock
       ? injectEnvIntoLastUser(options.messages, envBlock)
@@ -116,6 +123,7 @@ export function createContextAwareTransport(deps: Deps) {
       }),
       reasoningEffort: deps.getReasoningEffort?.(),
       projectMemory,
+      mcp,
       uiMessages: messagesForRun,
       abortSignal: options.abortSignal,
     });

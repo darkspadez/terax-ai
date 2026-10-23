@@ -356,7 +356,10 @@ function estimateTokens(messages: UIMessage[]): number {
         chars += (p as { text?: string }).text?.length ?? 0;
       } else if (p.type === "reasoning") {
         chars += (p as { text?: string }).text?.length ?? 0;
-      } else if (typeof p.type === "string" && p.type.startsWith("tool-")) {
+      } else if (
+        typeof p.type === "string" &&
+        (p.type.startsWith("tool-") || p.type === "dynamic-tool")
+      ) {
         const tp = p as unknown as { input?: unknown; output?: unknown };
         if (tp.input) chars += JSON.stringify(tp.input).length;
         if (tp.output) chars += JSON.stringify(tp.output).length;

@@ -28,6 +28,7 @@ export const FORBIDDEN_CHUNK_PATTERNS = [
   /^streamdown$/,
   /^codemirror$/,
   /^cm-(?:lang|legacy)-/,
+  /^mcp-/,
 ];
 
 /**
@@ -63,6 +64,8 @@ export const FORBIDDEN_PACKAGES = [
   /^@iconify-json\//,
   /^(?:motion|framer-motion|motion-dom|motion-utils)$/,
   /^(?:@xterm\/|xterm)/,
+  /^@modelcontextprotocol\//,
+  /^ajv/,
 ];
 
 // `import {a as b} from "./x.js"`, `import "./x.js"`, `export * from "./x.js"`,
