@@ -50,6 +50,12 @@ import {
   setCustomEndpointKey,
   setKey,
 } from "@/modules/ai/lib/keyring";
+import {
+  ENDPOINT_PRESETS,
+  type EndpointPreset,
+  endpointPresetFor,
+  newCustomEndpoint,
+} from "@/modules/ai/lib/endpointPresets";
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
@@ -202,14 +208,8 @@ export function ModelsSection() {
     await emitKeysChanged();
   };
 
-  const addCustomEndpoint = async () => {
-    const ep: CustomEndpoint = {
-      id: crypto.randomUUID().slice(0, 8),
-      name: "",
-      baseURL: "",
-      modelId: "",
-      contextLimit: 128_000,
-    };
+  const addCustomEndpoint = async (preset?: EndpointPreset) => {
+    const ep = newCustomEndpoint(crypto.randomUUID().slice(0, 8), preset);
     await setCustomEndpoints([...customEndpoints, ep]);
   };
 
@@ -382,7 +382,7 @@ export function ModelsSection() {
           <AddProviderMenu
             providers={addableProviders}
             onAdd={addProvider}
-            onAddCompat={addCustomEndpoint}
+            onAddCompat={(preset) => void addCustomEndpoint(preset)}
           />
         </div>
 
@@ -467,7 +467,7 @@ function AddProviderMenu({
 }: {
   providers: readonly ProviderInfo[];
   onAdd: (id: ProviderId) => void;
-  onAddCompat: () => void;
+  onAddCompat: (preset?: EndpointPreset) => void;
 }) {
   const cloud = providers.filter((p) => !isLocalProvider(p.id));
   const local = providers.filter(
@@ -510,6 +510,16 @@ function AddProviderMenu({
           <ProviderIcon provider="openai-compatible" size={13} />
           <span>OpenAI Compatible</span>
         </DropdownMenuItem>
+        {ENDPOINT_PRESETS.map((preset) => (
+          <DropdownMenuItem
+            key={preset.id}
+            onSelect={() => onAddCompat(preset)}
+            className="flex items-center gap-2 text-[12px]"
+          >
+            <ProviderIcon provider="openai-compatible" size={13} />
+            <span>{preset.label}</span>
+          </DropdownMenuItem>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -1078,7 +1088,7 @@ function CustomEndpointCard({
   onUpdate: (patch: Partial<CustomEndpoint>) => Promise<void>;
   onRemove: () => void;
 }) {
-  const [expanded, setExpanded] = useState(!endpoint.baseURL.trim());
+  const [expanded, setExpanded] = useState(!isCompleteEndpoint(endpoint));
   const [nameDraft, setNameDraft] = useState(endpoint.name);
   const [urlDraft, setUrlDraft] = useState(endpoint.baseURL);
   const [modelDraft, setModelDraft] = useState(endpoint.modelId);
@@ -1097,6 +1107,7 @@ function CustomEndpointCard({
   );
 
   const configured = !!endpoint.baseURL.trim() && !!endpoint.modelId.trim();
+  const preset = endpointPresetFor(endpoint.baseURL);
 
   const test = async () => {
     setTestStatus({ status: "testing" });
@@ -1157,6 +1168,23 @@ function CustomEndpointCard({
 
       {expanded && (
         <div className="flex flex-col gap-2.5 border-t border-border/40 px-3 py-2.5">
+          {preset ? (
+            <div className="flex items-start gap-2 text-[10.5px] leading-relaxed text-muted-foreground">
+              <span className="min-w-0 flex-1">{preset.hint}</span>
+              <button
+                type="button"
+                onClick={() => void openUrl(preset.keyUrl)}
+                className="inline-flex shrink-0 items-center gap-0.5 transition-colors hover:text-foreground"
+              >
+                Get key
+                <HugeiconsIcon
+                  icon={ArrowUpRight01Icon}
+                  size={11}
+                  strokeWidth={1.75}
+                />
+              </button>
+            </div>
+          ) : null}
           <FieldRow label="Name">
             <Input
               value={nameDraft}
@@ -1267,7 +1295,11 @@ function CustomEndpointCard({
                   type="password"
                   value={keyDraft}
                   onChange={(e) => setKeyDraft(e.target.value)}
-                  placeholder="Optional — leave empty for unauthenticated endpoints"
+                  placeholder={
+                    preset
+                      ? `Your ${preset.label} API key`
+                      : "Optional — leave empty for unauthenticated endpoints"
+                  }
                   spellCheck={false}
                   className="h-8 flex-1 font-mono text-[11.5px]"
                 />
