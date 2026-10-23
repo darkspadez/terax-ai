@@ -730,8 +730,8 @@ export class GhosttyInputController {
     }
 
     const modes = this.options.model.modes();
-    // Alternate scroll (mode 1007, on by default): a full-screen program that
-    // does not track the mouse gets cursor keys, so pagers and editors scroll.
+    // Alternate scroll (mode 1007; Settings decides its default): a full-screen
+    // program that does not track the mouse gets cursor keys, so pagers scroll.
     if (modes.alternateScreen && this.options.model.mode(1007)) {
       consume(event);
       for (let step = 0; step < Math.abs(rows); step += 1) {

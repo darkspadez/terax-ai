@@ -57,6 +57,36 @@ describe.each(["ghostty-vt", "ghostty-vt-scalar"])(
       }
     });
 
+    // crynta/terax-ai#781: the setting is mode 1007's default; programs win.
+    it("makes alternate scroll a default that programs still override", () => {
+      const { model, replies, write } = create();
+      const alternateScroll = () => model.mode(1007);
+      try {
+        expect(alternateScroll()).toBe(true);
+        model.setAlternateScroll(false);
+        expect(alternateScroll()).toBe(false);
+        write("\x1b[?1007$p");
+        expect(replies[replies.length - 1]).toBe("\x1b[?1007;2$y");
+
+        write("\x1b[?1007h");
+        model.setAlternateScroll(false);
+        expect(alternateScroll()).toBe(true);
+        model.setAlternateScroll(true);
+        write("\x1b[?1007l");
+        model.setAlternateScroll(false);
+        expect(alternateScroll()).toBe(false);
+
+        write("\x1bc");
+        expect(alternateScroll()).toBe(false);
+        model.setAlternateScroll(true);
+        expect(alternateScroll()).toBe(true);
+        write("\x1b[?1007l\x1bc");
+        expect(alternateScroll()).toBe(true);
+      } finally {
+        model.dispose();
+      }
+    });
+
     it("delivers colour scheme and visibility changes to the PTY", () => {
       const { model, replies, write } = create();
       try {

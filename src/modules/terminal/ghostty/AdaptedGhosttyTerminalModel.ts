@@ -70,6 +70,8 @@ const NO_PLACEMENTS: readonly GhosttyImagePlacement[] = Object.freeze([]);
 const MAX_LINK_ROWS = 8;
 /** DEC private mode a program sets for Kitty clipboard paste events. */
 const KITTY_PASTE_EVENTS_MODE = 5522;
+/** xterm's alternate scroll: the wheel sends cursor keys in the alternate screen. */
+const ALTERNATE_SCROLL_MODE = 1007;
 
 /** Inclusive viewport cell range [start, end] as per-row spans. */
 function viewportSpans(
@@ -480,6 +482,11 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
 
   ligatures(): boolean {
     return this.ligaturesValue;
+  }
+
+  setAlternateScroll(enabled: boolean): void {
+    this.assertLive();
+    this.terminal.setModeDefault(ALTERNATE_SCROLL_MODE, enabled);
   }
 
   setClipboardPolicy(policy: GhosttyClipboardPolicy): void {

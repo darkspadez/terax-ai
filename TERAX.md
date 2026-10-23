@@ -322,7 +322,12 @@ Bare shells keep direct terminal input. Bash before 4.4 reports
 `OSC 133;B;terax_blocks=0` and keeps its native prompt because it lacks PS0.
 
 Settings offer Automatic or WebGL for new terminals, plus opt-in screen reader
-output. Accessible text is limited to 256 rows / 64 KiB and refreshes at most four
+output. The wheel in a full-screen program that does not track the mouse sends
+cursor keys (alternate scroll, mode 1007) unless "Scroll wheel sends arrow keys"
+is off (`terminalBehavior.alternateScroll`). The setting is the mode's reset
+value in the core (`restty_set_mode_default`, Ghostty's `mode_default`), so a
+program that sets the mode itself still decides, and a change reaches every
+terminal whose program left the mode alone. Accessible text is limited to 256 rows / 64 KiB and refreshes at most four
 times per second while visible. Ordinary URL detection runs on pointer demand;
 OSC 8 links take precedence. A clicked link opens in the browser (URLs), the
 editor (files, at their line) or the system file manager (local folders); a

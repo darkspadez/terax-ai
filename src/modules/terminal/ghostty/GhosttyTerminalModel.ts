@@ -286,6 +286,12 @@ export interface GhosttyTerminalModelApi extends TerminalModel {
   setLigatures?(enabled: boolean): void;
   ligatures?(): boolean;
   /**
+   * Whether the wheel sends cursor keys to a full-screen program that does
+   * not track the mouse (alternate scroll, mode 1007) unless the program
+   * sets the mode itself: the mode's reset value. On by default.
+   */
+  setAlternateScroll?(enabled: boolean): void;
+  /**
    * Kitty clipboard (OSC 5522) access, refused by default. Reads the host
    * takes are held and reported (`kitty-clipboard-read`) for
    * `answerClipboardRead`; allowed writes are reported

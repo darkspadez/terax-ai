@@ -556,6 +556,21 @@ describe.each(["ghostty-vt.wasm", "ghostty-vt-scalar.wasm"])(
       dispose();
     });
 
+    // crynta/terax-ai#781: alternate scroll can be off by default.
+    it("leaves full-screen programs alone with alternate scroll off, unless they ask", () => {
+      const { model, pointerTarget, sent, write, dispose } = setup();
+      model.setAlternateScroll(false);
+      write("\x1b[?1049h");
+      const wheel = wheelEvent({ deltaMode: 1, deltaY: -1 });
+      pointerTarget.dispatchEvent(wheel);
+      expect(sent).toEqual([]);
+      expect(wheel.defaultPrevented).toBe(false);
+      write("\x1b[?1007h");
+      pointerTarget.dispatchEvent(wheelEvent({ deltaMode: 1, deltaY: -1 }));
+      expect(sent).toEqual(Array(3).fill("\x1b[A"));
+      dispose();
+    });
+
     it("scrolls history with the wheel when nothing tracks it", () => {
       const { model, pointerTarget, sent, write, dispose } = setup();
       write("line\r\n".repeat(60));

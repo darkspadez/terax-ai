@@ -88,6 +88,12 @@ const GhosttyTerminalPane = memo(
     useEffect(() => {
       getGhosttyCoreRuntime().setLigatures(ligatures);
     }, [ligatures]);
+    const alternateScroll = usePreferencesStore(
+      (state) => state.terminalBehavior.alternateScroll,
+    );
+    useEffect(() => {
+      getGhosttyCoreRuntime().setAlternateScroll(alternateScroll);
+    }, [alternateScroll]);
     const clipboardRead = usePreferencesStore(
       (state) => state.terminalBehavior.clipboardRead,
     );
