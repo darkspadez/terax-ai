@@ -1,7 +1,10 @@
+import type { ThemeMode } from "@/modules/theme/types";
 import { defaultRehypePlugins, type StreamdownProps } from "streamdown";
+import { rehypeDocumentLinks } from "./documentLinks";
 import { rehypeGithubAlerts } from "./githubAlerts";
 import { rehypeHeadingAnchors } from "./headingAnchors";
 import { rehypeLocalImages } from "./localImages";
+import { rehypePictures } from "./pictures";
 
 type RehypePlugins = NonNullable<StreamdownProps["rehypePlugins"]>;
 type SanitizeSchema = {
@@ -43,11 +46,16 @@ const previewSchema = {
 
 /**
  * Streamdown's chain for the rendered preview, in a load-bearing order:
- * GitHub alerts and heading ids are added before the sanitizer vets them,
- * relative images resolve after it (so an asset: URL written in the file is
- * still stripped) and before harden, which vets every URL last.
+ * GitHub alerts and heading ids are added before the sanitizer vets them;
+ * a `<picture>` takes its source for the app's colour scheme, links to
+ * files and anchors without a link are settled, and relative images resolve
+ * after it (so an asset: URL written in the file is still stripped) and
+ * before harden, which vets every URL last.
  */
-export function previewRehypePlugins(baseDir: string): RehypePlugins {
+export function previewRehypePlugins(
+  baseDir: string,
+  colorScheme: ThemeMode,
+): RehypePlugins {
   const plugins: RehypePlugins = [];
   for (const [name, plugin] of Object.entries(defaultRehypePlugins)) {
     if (name === "sanitize") {
@@ -56,7 +64,12 @@ export function previewRehypePlugins(baseDir: string): RehypePlugins {
         previewSchema,
       ] as RehypePlugins[number]);
     } else if (name === "harden") {
-      plugins.push([rehypeLocalImages, baseDir], plugin);
+      plugins.push(
+        [rehypePictures, colorScheme],
+        rehypeDocumentLinks,
+        [rehypeLocalImages, baseDir],
+        plugin,
+      );
     } else {
       plugins.push(plugin);
     }

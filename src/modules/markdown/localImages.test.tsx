@@ -20,7 +20,7 @@ function render(markdown: string, file = "/repo/docs/README.md") {
   return renderToStaticMarkup(
     <Streamdown
       components={{ img: MarkdownImage }}
-      rehypePlugins={previewRehypePlugins(dirOf(file))}
+      rehypePlugins={previewRehypePlugins(dirOf(file), "light")}
       mode="static"
       parseIncompleteMarkdown={false}
     >

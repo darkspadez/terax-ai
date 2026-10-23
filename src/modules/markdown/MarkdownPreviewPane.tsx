@@ -2,6 +2,7 @@ import { pathKey } from "@/lib/pathKey";
 import { cn } from "@/lib/utils";
 import { listenFsChanged } from "@/modules/explorer/lib/watch";
 import { PrivacyRefusalNotice, usePrivacyRefusal } from "@/modules/mac-privacy";
+import { useTheme, variantMode } from "@/modules/theme";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { authorizationSettled } from "@/modules/workspace/authorize";
 import { invoke } from "@tauri-apps/api/core";
@@ -57,6 +58,7 @@ export function MarkdownPreviewPane({ path, visible, onSetView }: Props) {
   const [status, setStatus] = useState<PreviewStatus>({ kind: "loading" });
   const [shownPath, setShownPath] = useState(path);
   const revision = useFileRevision(path);
+  const { activeTheme, resolvedMode } = useTheme();
 
   if (shownPath !== path) {
     setShownPath(path);
@@ -110,6 +112,7 @@ export function MarkdownPreviewPane({ path, visible, onSetView }: Props) {
               <RenderedMarkdown
                 content={status.content}
                 baseDir={dirOf(path)}
+                colorScheme={variantMode(activeTheme, resolvedMode)}
               />
             </RenderBoundary>
           </article>

@@ -1,3 +1,4 @@
+import type { ThemeMode } from "@/modules/theme/types";
 import { useMemo } from "react";
 import { Streamdown, type StreamdownProps } from "streamdown";
 import { splitFrontmatter } from "./frontmatter";
@@ -49,15 +50,22 @@ const components: StreamdownProps["components"] = {
 export function RenderedMarkdown({
   content,
   baseDir,
+  colorScheme,
 }: {
   content: string;
   /** The file's folder, which relative images resolve against. */
   baseDir: string;
+  /** The variant the app paints, which picks a `<picture>`'s image. */
+  colorScheme: ThemeMode;
 }) {
   const { entries, body } = splitFrontmatter(content);
   const plugins = useMathPlugins(body);
-  // Stable per folder so Streamdown's processor cache keeps hitting.
-  const rehypePlugins = useMemo(() => previewRehypePlugins(baseDir), [baseDir]);
+  // Stable per folder and scheme so Streamdown's processor cache keeps
+  // hitting.
+  const rehypePlugins = useMemo(
+    () => previewRehypePlugins(baseDir, colorScheme),
+    [baseDir, colorScheme],
+  );
   return (
     <>
       {entries.length > 0 && (

@@ -7,7 +7,7 @@ import { previewRehypePlugins } from "./previewPipeline";
 
 // The preview's own chain, so slugs and the sanitizer's user-content-
 // clobber cannot drift from what the pane emits.
-const rehypePlugins = previewRehypePlugins("/repo");
+const rehypePlugins = previewRehypePlugins("/repo", "light");
 const render = (md: string) =>
   renderToStaticMarkup(
     <Streamdown

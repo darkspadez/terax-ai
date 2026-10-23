@@ -7,7 +7,7 @@ export const LOCAL_IMAGE_PATH = "data-local-path";
 // A path relative to the document: no scheme (http:, data:, C: are vetted by
 // the sanitizer and harden), not protocol-relative, not root-absolute (that
 // would need the repository root, as GitHub resolves it).
-function isDocumentRelative(src: string): boolean {
+export function isDocumentRelative(src: string): boolean {
   if (src === "" || src.startsWith("/") || src.startsWith("#")) return false;
   return !/^[a-z][a-z0-9+.-]*:/i.test(src);
 }

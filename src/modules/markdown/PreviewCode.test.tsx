@@ -13,7 +13,9 @@ const { RenderedMarkdown } = await import("./RenderedMarkdown");
 
 // The Markdown preview of a file, exactly as the pane renders it.
 const preview = (md: string) =>
-  renderToStaticMarkup(<RenderedMarkdown content={md} baseDir="/repo" />);
+  renderToStaticMarkup(
+    <RenderedMarkdown content={md} baseDir="/repo" colorScheme="light" />,
+  );
 
 // An AI chat reply, finished streaming.
 const chat = (md: string) =>

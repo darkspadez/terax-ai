@@ -6,7 +6,7 @@ import { previewRehypePlugins } from "./previewPipeline";
 
 // The preview's own chain, so plugin order and the sanitizer schema cannot
 // drift from what the pane runs.
-const rehypePlugins = previewRehypePlugins("/repo");
+const rehypePlugins = previewRehypePlugins("/repo", "light");
 const render = (md: string) =>
   renderToStaticMarkup(
     <Streamdown

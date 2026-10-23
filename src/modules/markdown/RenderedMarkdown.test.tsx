@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ThemeMode } from "@/modules/theme/types";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
@@ -14,8 +15,10 @@ const { RenderedMarkdown } = await import("./RenderedMarkdown");
 const { imageHeightStyle } = await import("./MarkdownImage");
 
 // Exactly what the pane renders inside its .markdown-body.
-const render = (md: string) =>
-  renderToStaticMarkup(<RenderedMarkdown content={md} baseDir="/repo" />);
+const render = (md: string, colorScheme: ThemeMode = "light") =>
+  renderToStaticMarkup(
+    <RenderedMarkdown content={md} baseDir="/repo" colorScheme={colorScheme} />,
+  );
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const source = (file: string) => readFileSync(path.join(here, file), "utf8");
@@ -109,6 +112,71 @@ describe("GitHub markup", () => {
     expect(html).toMatch(/^<div class="[^"]*\bspace-y-0\b/);
     expect(html).not.toContain("space-y-4");
     expect(html).not.toContain("node=");
+  });
+});
+
+// What READMEs write in HTML, shown as GitHub shows it.
+describe("README markup", () => {
+  const logo = (sources: string) =>
+    `<picture>\n${sources}\n<img src="logo.png" alt="Logo">\n</picture>`;
+  const THEMED = logo(
+    '<source media="(prefers-color-scheme: dark)" srcset="logo-dark.png">\n<source media="(prefers-color-scheme: light)" srcset="logo-light.png 1x, logo-light@2x.png 2x">',
+  );
+  const local = (file: string) => `data-local-path="/repo/${file}"`;
+
+  it("picks a picture's image for the theme the app paints", () => {
+    const light = render(THEMED, "light");
+    expect(light).toContain(local("logo-light.png"));
+    const dark = render(THEMED, "dark");
+    expect(dark).toContain(local("logo-dark.png"));
+    for (const html of [light, dark]) {
+      expect(html).not.toContain("<source");
+      expect(html).not.toMatch(/srcset/i);
+    }
+  });
+
+  it("keeps the img's own image when no source applies", () => {
+    expect(
+      render(logo('<source media="(min-width: 600px)" srcset="wide.png">')),
+    ).toContain(local("logo.png"));
+    expect(render(logo('<source srcset="any.png">'))).toContain(
+      local("any.png"),
+    );
+  });
+
+  it("never loads a source an image could not name", () => {
+    for (const url of [
+      `asset://localhost/${encodeURIComponent("/etc/secret.png")}`,
+      "javascript:alert(1)",
+      "data:image/png;base64,AAAA",
+      "//evil.test/x.png",
+    ]) {
+      const html = render(logo(`<source srcset="${url}">`));
+      expect(html, url).toContain(local("logo.png"));
+      expect(html, url).not.toContain("secret");
+      expect(html, url).not.toContain("evil");
+      expect(html, url).not.toContain("javascript");
+    }
+  });
+
+  it("keeps links to files next to the document as links", () => {
+    const html = render(
+      "[License](LICENSE), [setup](docs/setup.md#install), [up](../README.md) and [dot](./CONTRIBUTING.md)",
+    );
+    expect(html).not.toContain("[blocked]");
+    expect(html).toMatch(/<a [^>]*href="\/LICENSE">License<\/a>/);
+    expect(html).toMatch(/<a [^>]*href="\/docs\/setup.md#install">setup<\/a>/);
+    expect(html).toMatch(/<a [^>]*href="[^"]*README.md">up<\/a>/);
+    expect(html).toMatch(/<a [^>]*href="[^"]*CONTRIBUTING.md">dot<\/a>/);
+  });
+
+  it("shows anchors without a link as their content, keeping their name", () => {
+    expect(render('<a name="install"></a>\n\n## Setup')).toContain(
+      '<span id="user-content-install"></span>',
+    );
+    const js = render("[run](javascript:alert(1)) it");
+    expect(js).toContain("<span>run</span> it");
+    expect(js).not.toContain("[blocked]");
   });
 });
 

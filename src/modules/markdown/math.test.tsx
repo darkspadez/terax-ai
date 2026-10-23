@@ -13,7 +13,7 @@ const preview = (md: string) =>
     <Streamdown
       mode="static"
       parseIncompleteMarkdown={false}
-      rehypePlugins={previewRehypePlugins("/repo")}
+      rehypePlugins={previewRehypePlugins("/repo", "light")}
       plugins={plugins}
     >
       {md}
