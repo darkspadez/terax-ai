@@ -58,7 +58,7 @@ function McpToolApprovalImpl({
   return (
     <div className="rounded-lg border border-border bg-card shadow-sm">
       <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
-        <span className="size-1.5 shrink-0 rounded-full bg-amber-500 terax-attention-pulse" />
+        <span className="size-1.5 shrink-0 rounded-full bg-amber-500 oarlock-attention-pulse" />
         <HugeiconsIcon
           icon={McpServerIcon}
           size={13}
@@ -170,7 +170,7 @@ function McpOutput({ output }: { output: unknown }) {
 
 /**
  * An MCP call in the transcript, marked as coming from an outside server:
- * its result is the server's, untrusted, not Terax's.
+ * its result is the server's, untrusted, not Oarlock's.
  */
 function McpToolCallImpl({
   part,
@@ -213,7 +213,7 @@ function McpToolCallImpl({
         </span>
         <span
           className="shrink-0 rounded border border-border/70 px-1 text-[9.5px] text-muted-foreground"
-          title="Returned by an MCP server: outside content, not Terax's"
+          title="Returned by an MCP server: outside content, not Oarlock's"
         >
           external
         </span>
@@ -223,7 +223,7 @@ function McpToolCallImpl({
           </span>
         )}
       </CollapsibleTrigger>
-      <CollapsibleContent className="terax-collapsible-content">
+      <CollapsibleContent className="oarlock-collapsible-content">
         <div className="mt-1 ml-3 space-y-2 border-l border-border/60 pb-1 pl-3">
           <div className="space-y-1">
             <div className="text-[10px] font-medium text-muted-foreground">

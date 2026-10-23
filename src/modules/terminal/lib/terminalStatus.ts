@@ -1,4 +1,4 @@
-import type { GhosttyProgressState } from "@terax/ghostty-core/protocol";
+import type { GhosttyProgressState } from "@oarlock/ghostty-core/protocol";
 import { create } from "zustand";
 
 /** An OSC 9;4 progress report; `value` is a percentage when the program sent one. */

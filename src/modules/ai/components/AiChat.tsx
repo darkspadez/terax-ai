@@ -40,7 +40,7 @@ import {
 import { type MessageImage, messageImages } from "../lib/imageAttachment";
 import { type ContextChip, messageChips } from "../lib/messageChips";
 import { mergeInterleavedReasoning } from "../lib/reasoningDisplay";
-import { TERAX_CMD_RE } from "../lib/commandMessage";
+import { OARLOCK_CMD_RE } from "../lib/commandMessage";
 import { SLASH_COMMANDS } from "../lib/slashCommands";
 import { Spinner } from "@/components/ui/spinner";
 import { useChatStore } from "../store/chatStore";
@@ -120,7 +120,7 @@ const ContextChips = memo(function ContextChips({
           key={i}
           title={
             c.kind === "mcp-resource" || c.kind === "mcp-prompt"
-              ? `From the MCP server ${c.server} (outside content, not Terax's)`
+              ? `From the MCP server ${c.server} (outside content, not Oarlock's)`
               : undefined
           }
           className="inline-flex max-w-full items-center gap-1 rounded-md border border-border/50 bg-card/60 px-1.5 py-0.5 text-[10.5px] text-muted-foreground"
@@ -223,7 +223,7 @@ export function AiChatView({
       <Conversation>
         <ConversationContent>
           <ConversationEmptyState
-            title="Ask Terax anything"
+            title="Ask Oarlock anything"
             description="Explain command output, fix errors, generate snippets, or run a task."
           />
         </ConversationContent>
@@ -354,7 +354,7 @@ const RenderedMessage = memo(function RenderedMessage({
 }) {
   const deferProps = deferOffscreen
     ? {
-        className: "terax-chat-item",
+        className: "oarlock-chat-item",
         style: {
           containIntrinsicSize: `auto ${estimateMessageHeight(message)}px`,
         },
@@ -383,7 +383,7 @@ const RenderedMessage = memo(function RenderedMessage({
       .map((p) => p.text)
       .join("\n");
 
-    const cmdMatch = rawText.match(TERAX_CMD_RE);
+    const cmdMatch = rawText.match(OARLOCK_CMD_RE);
     const commandName = cmdMatch?.[1] ?? null;
     const withoutCmd = cmdMatch ? rawText.slice(cmdMatch[0].length) : rawText;
     const stripped = messageChips(withoutCmd);
@@ -561,7 +561,7 @@ const ReadGroup = memo(function ReadGroup({ parts }: { parts: AnyPart[] }) {
           </span>
         ) : null}
       </CollapsibleTrigger>
-      <CollapsibleContent className="terax-collapsible-content border-t border-border/30">
+      <CollapsibleContent className="oarlock-collapsible-content border-t border-border/30">
         <ul className="flex flex-col gap-0.5 px-2 py-1.5">
           {paths.map((path) => (
             <li

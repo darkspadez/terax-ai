@@ -19,7 +19,7 @@ const FIELDS = new Map<string, ColorField>([
   ["selection-foreground", "selectionForeground"],
 ]);
 
-// Ghostty 1.2 lets these follow the cell under them; Terax has no equivalent,
+// Ghostty 1.2 lets these follow the cell under them; Oarlock has no equivalent,
 // so they fall back like an unset key.
 const CELL_REFERENCES = new Set(["cell-foreground", "cell-background"]);
 

@@ -1,22 +1,22 @@
-//! The terminal identity of a Terax shell.
+//! The terminal identity of an Oarlock shell.
 //!
-//! A shell inherits Terax's environment, and a Terax started from another
-//! terminal (a dev build run in Ghostty, a launcher inside tmux, Terax itself)
+//! A shell inherits Oarlock's environment, and an Oarlock started from another
+//! terminal (a dev build run in Ghostty, a launcher inside tmux, Oarlock itself)
 //! carries that terminal's identity. Tools read it to pick escape sequences,
 //! wrap output for a multiplexer that is not there, or reach the other terminal
-//! over its socket, so it is dropped and Terax's own identity takes its place.
+//! over its socket, so it is dropped and Oarlock's own identity takes its place.
 //! User configuration (PATH, locale, XDG dirs, a tool's config location) is
 //! never touched.
 
 use std::collections::HashMap;
 use std::path::Path;
 
-/// What every Terax terminal session advertises. The terminal core answers
+/// What every Oarlock terminal session advertises. The terminal core answers
 /// XTVERSION with the same name and version.
 pub const IDENTITY: [(&str, &str); 4] = [
     ("TERM", "xterm-256color"),
     ("COLORTERM", "truecolor"),
-    ("TERM_PROGRAM", "terax"),
+    ("TERM_PROGRAM", "oarlock"),
     ("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION")),
 ];
 
@@ -120,14 +120,14 @@ const LAUNCHER_VARS: &[&str] = &[
     "ZELLIJ",
     "ZELLIJ_SESSION_NAME",
     "ZELLIJ_PANE_ID",
-    // A parent Terax session. Each is set again when it applies to this one;
-    // TERAX_USER_ZDOTDIR is kept because it names the user's own zsh config.
-    "TERAX_TERMINAL",
-    "TERAX_BLOCKS",
-    "TERAX_CONTROL_ADDR",
-    "TERAX_CONTROL_TOKEN",
-    "TERAX_PANE_ID",
-    "TERAX_CLI",
+    // A parent Oarlock session. Each is set again when it applies to this one;
+    // OARLOCK_USER_ZDOTDIR is kept because it names the user's own zsh config.
+    "OARLOCK_TERMINAL",
+    "OARLOCK_BLOCKS",
+    "OARLOCK_CONTROL_ADDR",
+    "OARLOCK_CONTROL_TOKEN",
+    "OARLOCK_PANE_ID",
+    "OARLOCK_CLI",
 ];
 
 /// Namespaces VS Code reserves for what its terminal injects: the git
@@ -236,11 +236,11 @@ mod tests {
     }
 
     #[test]
-    fn identity_is_terax_at_the_app_version() {
+    fn identity_is_oarlock_at_the_app_version() {
         let identity: HashMap<_, _> = IDENTITY.into_iter().collect();
         assert_eq!(identity["TERM"], "xterm-256color");
         assert_eq!(identity["COLORTERM"], "truecolor");
-        assert_eq!(identity["TERM_PROGRAM"], "terax");
+        assert_eq!(identity["TERM_PROGRAM"], "oarlock");
         // The frontend answers XTVERSION with Tauri's app version; both must agree.
         let config: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tauri.conf.json"))
@@ -343,12 +343,12 @@ mod tests {
                 ("ZELLIJ_PANE_ID", "1"),
             ],
             &[
-                ("TERAX_TERMINAL", "1"),
-                ("TERAX_BLOCKS", "1"),
-                ("TERAX_CONTROL_ADDR", "127.0.0.1:1"),
-                ("TERAX_CONTROL_TOKEN", "secret"),
-                ("TERAX_PANE_ID", "3"),
-                ("TERAX_CLI", "/app/terax-cli"),
+                ("OARLOCK_TERMINAL", "1"),
+                ("OARLOCK_BLOCKS", "1"),
+                ("OARLOCK_CONTROL_ADDR", "127.0.0.1:1"),
+                ("OARLOCK_CONTROL_TOKEN", "secret"),
+                ("OARLOCK_PANE_ID", "3"),
+                ("OARLOCK_CLI", "/app/oarlock-cli"),
             ],
         ];
         for launcher in launchers {
@@ -379,7 +379,7 @@ mod tests {
             ("WEZTERM_CONFIG_FILE", "/home/u/.wezterm.lua"),
             ("ALACRITTY_EXTRA_LOG_TARGETS", "winit"),
             ("VSCODE_PORTABLE", "/opt/code-data"),
-            ("TERAX_USER_ZDOTDIR", "/home/u/.config/zsh"),
+            ("OARLOCK_USER_ZDOTDIR", "/home/u/.config/zsh"),
             ("FLATPAK_TTY_PROGRESS", "1"),
             // Generic names only belong to a launcher whose marker is present.
             ("WINDOW", "0"),

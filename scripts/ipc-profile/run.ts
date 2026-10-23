@@ -59,7 +59,7 @@ async function main(): Promise<void> {
   const root = import.meta.dirname;
   const repo = join(root, "../..");
   const output = realResolve(
-    args.output ?? mkdtempSync(join(tmpdir(), "terax-ipc-profile-")),
+    args.output ?? mkdtempSync(join(tmpdir(), "oarlock-ipc-profile-")),
   );
   mkdirSync(output, { recursive: true });
   const state = { slowDisconnected: false };
@@ -108,19 +108,19 @@ async function main(): Promise<void> {
       response.end();
     }
   });
-  const identifier = `app.crynta.terax.ipc-lab-${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+  const identifier = `sh.oarlock.app.ipc-lab-${randomUUID().replaceAll("-", "").slice(0, 12)}`;
   const config = join(output, "tauri.conf.json");
   writeFileSync(
     config,
     JSON.stringify({
-      productName: "Terax IPC Lab",
+      productName: "Oarlock IPC Lab",
       identifier,
       build: { beforeBuildCommand: "", frontendDist: join(output, "dist") },
       app: {
         windows: [
           {
             label: "main",
-            title: "Terax IPC Lab",
+            title: "Oarlock IPC Lab",
             width: 800,
             height: 500,
             visible: true,
@@ -142,9 +142,9 @@ async function main(): Promise<void> {
   }
   const env = {
     ...process.env,
-    TERAX_IPC_BASE_URL: server.url,
-    TERAX_IPC_DIST: join(output, "dist"),
-    TERAX_IPC_TREE: realResolve(tree),
+    OARLOCK_IPC_BASE_URL: server.url,
+    OARLOCK_IPC_DIST: join(output, "dist"),
+    OARLOCK_IPC_TREE: realResolve(tree),
   };
   let app: ChildProcess | undefined;
   try {
@@ -193,7 +193,7 @@ async function main(): Promise<void> {
       throw new CalledProcessError(metadata.status, cargoMetadata);
     const executable = join(
       JSON.parse(metadata.stdout).target_directory as string,
-      "debug/terax",
+      "debug/oarlock",
     );
     const appLog = openSync(join(output, "app.log"), "w");
     try {

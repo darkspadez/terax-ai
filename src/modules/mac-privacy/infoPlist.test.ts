@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-// macOS shows these sentences in its privacy prompts for Terax, which also
+// macOS shows these sentences in its privacy prompts for Oarlock, which also
 // stands for every program its terminals start.
 const plist = readFileSync(
   fileURLToPath(new URL("../../../src-tauri/Info.plist", import.meta.url)),

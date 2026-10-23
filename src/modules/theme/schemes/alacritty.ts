@@ -13,7 +13,7 @@ import {
 type Node = string | null | { [key: string]: Node };
 type Table = { [key: string]: Node };
 
-// Alacritty's cursor and selection may follow the cell under them; Terax has no
+// Alacritty's cursor and selection may follow the cell under them; Oarlock has no
 // equivalent, so those fall back like an unset key.
 const CELL_REFERENCES = new Set(["cellforeground", "cellbackground"]);
 

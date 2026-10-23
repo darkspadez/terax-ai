@@ -1,29 +1,29 @@
 ; Explorer integration for the current user (HKCU, the installer's currentUser
-; scope): "Open in Terax" on folders, folder backgrounds and drives, and Terax
-; under "Open with" for text and code files. Terax is only listed for those
-; types (OpenWithProgids, Applications\terax.exe SupportedTypes), never made
+; scope): "Open in Oarlock" on folders, folder backgrounds and drives, and Oarlock
+; under "Open with" for text and code files. Oarlock is only listed for those
+; types (OpenWithProgids, Applications\oarlock.exe SupportedTypes), never made
 ; their default app, and uninstalling removes every key written here.
 ; %V = clicked path. NoWorkingDirectory keeps Explorer from overriding %V
 ; (System32 on Drive). Needs NSIS 3.06+ (DeleteRegKey /ifempty checks values).
 
-!define TERAX_EXE "terax.exe"
-!define TERAX_PROGID "Terax Document"
-!define TERAX_APP_KEY "Software\Classes\Applications\${TERAX_EXE}"
+!define OARLOCK_EXE "oarlock.exe"
+!define OARLOCK_PROGID "Oarlock Document"
+!define OARLOCK_APP_KEY "Software\Classes\Applications\${OARLOCK_EXE}"
 
-!macro TERAX_ADD_FOLDER_VERB CLASS
-  WriteRegStr HKCU "Software\Classes\${CLASS}\shell\OpenInTerax" "" "Open in Terax"
-  WriteRegStr HKCU "Software\Classes\${CLASS}\shell\OpenInTerax" "Icon" '"$INSTDIR\${TERAX_EXE}",0'
-  WriteRegStr HKCU "Software\Classes\${CLASS}\shell\OpenInTerax" "NoWorkingDirectory" ""
-  WriteRegStr HKCU "Software\Classes\${CLASS}\shell\OpenInTerax\command" "" '"$INSTDIR\${TERAX_EXE}" "%V"'
+!macro OARLOCK_ADD_FOLDER_VERB CLASS
+  WriteRegStr HKCU "Software\Classes\${CLASS}\shell\OpenInOarlock" "" "Open in Oarlock"
+  WriteRegStr HKCU "Software\Classes\${CLASS}\shell\OpenInOarlock" "Icon" '"$INSTDIR\${OARLOCK_EXE}",0'
+  WriteRegStr HKCU "Software\Classes\${CLASS}\shell\OpenInOarlock" "NoWorkingDirectory" ""
+  WriteRegStr HKCU "Software\Classes\${CLASS}\shell\OpenInOarlock\command" "" '"$INSTDIR\${OARLOCK_EXE}" "%V"'
 !macroend
 
-!macro TERAX_REMOVE_FOLDER_VERB CLASS
-  DeleteRegKey HKCU "Software\Classes\${CLASS}\shell\OpenInTerax"
+!macro OARLOCK_REMOVE_FOLDER_VERB CLASS
+  DeleteRegKey HKCU "Software\Classes\${CLASS}\shell\OpenInOarlock"
 !macroend
 
-; The text and code types Terax is offered for. Keep in step with the
+; The text and code types Oarlock is offered for. Keep in step with the
 ; extensions in Info.plist (src/app/os-integration.test.ts checks).
-!macro TERAX_TEXT_TYPES MACRO
+!macro OARLOCK_TEXT_TYPES MACRO
   !insertmacro ${MACRO} json
   !insertmacro ${MACRO} jsonc
   !insertmacro ${MACRO} txt
@@ -84,76 +84,45 @@
   !insertmacro ${MACRO} proto
 !macroend
 
-!macro TERAX_LIST_TYPE EXT
-  WriteRegNone HKCU "Software\Classes\.${EXT}\OpenWithProgids" "${TERAX_PROGID}"
-  WriteRegStr HKCU "${TERAX_APP_KEY}\SupportedTypes" ".${EXT}" ""
+!macro OARLOCK_LIST_TYPE EXT
+  WriteRegNone HKCU "Software\Classes\.${EXT}\OpenWithProgids" "${OARLOCK_PROGID}"
+  WriteRegStr HKCU "${OARLOCK_APP_KEY}\SupportedTypes" ".${EXT}" ""
 !macroend
 
-!macro TERAX_UNLIST_TYPE EXT
-  DeleteRegValue HKCU "Software\Classes\.${EXT}\OpenWithProgids" "${TERAX_PROGID}"
+!macro OARLOCK_UNLIST_TYPE EXT
+  DeleteRegValue HKCU "Software\Classes\.${EXT}\OpenWithProgids" "${OARLOCK_PROGID}"
   DeleteRegKey /ifempty HKCU "Software\Classes\.${EXT}\OpenWithProgids"
   DeleteRegKey /ifempty HKCU "Software\Classes\.${EXT}"
 !macroend
 
-; Earlier installers (Tauri's bundle.fileAssociations) made Terax the default
-; app for these types; give each back the default it had before, else none.
-!macro TERAX_RELEASE_LEGACY_DEFAULT EXT
-  ReadRegStr $R0 HKCU "Software\Classes\.${EXT}" ""
-  ${If} $R0 == "${TERAX_PROGID}"
-    ReadRegStr $R1 HKCU "Software\Classes\.${EXT}" "${TERAX_PROGID}_backup"
-    ${If} $R1 == ""
-    ${OrIf} $R1 == "${TERAX_PROGID}"
-      DeleteRegValue HKCU "Software\Classes\.${EXT}" ""
-    ${Else}
-      WriteRegStr HKCU "Software\Classes\.${EXT}" "" $R1
-    ${EndIf}
-  ${EndIf}
-  DeleteRegValue HKCU "Software\Classes\.${EXT}" "${TERAX_PROGID}_backup"
-!macroend
-
 !macro NSIS_HOOK_POSTINSTALL
-  Push $R0
-  Push $R1
-
-  !insertmacro TERAX_ADD_FOLDER_VERB "Directory"
-  !insertmacro TERAX_ADD_FOLDER_VERB "Directory\Background"
-  !insertmacro TERAX_ADD_FOLDER_VERB "Drive"
-
-  !insertmacro TERAX_TEXT_TYPES TERAX_RELEASE_LEGACY_DEFAULT
+  !insertmacro OARLOCK_ADD_FOLDER_VERB "Directory"
+  !insertmacro OARLOCK_ADD_FOLDER_VERB "Directory\Background"
+  !insertmacro OARLOCK_ADD_FOLDER_VERB "Drive"
 
   ; Rewritten whole, so nothing an earlier version wrote lingers.
-  DeleteRegKey HKCU "Software\Classes\${TERAX_PROGID}"
-  WriteRegStr HKCU "Software\Classes\${TERAX_PROGID}" "" "Terax Document"
-  WriteRegStr HKCU "Software\Classes\${TERAX_PROGID}\DefaultIcon" "" '"$INSTDIR\${TERAX_EXE}",0'
-  WriteRegStr HKCU "Software\Classes\${TERAX_PROGID}\shell\open\command" "" '"$INSTDIR\${TERAX_EXE}" "%1"'
+  DeleteRegKey HKCU "Software\Classes\${OARLOCK_PROGID}"
+  WriteRegStr HKCU "Software\Classes\${OARLOCK_PROGID}" "" "Oarlock Document"
+  WriteRegStr HKCU "Software\Classes\${OARLOCK_PROGID}\DefaultIcon" "" '"$INSTDIR\${OARLOCK_EXE}",0'
+  WriteRegStr HKCU "Software\Classes\${OARLOCK_PROGID}\shell\open\command" "" '"$INSTDIR\${OARLOCK_EXE}" "%1"'
 
-  ; SupportedTypes keeps Terax out of "Choose another app" for other types.
-  DeleteRegKey HKCU "${TERAX_APP_KEY}"
-  WriteRegStr HKCU "${TERAX_APP_KEY}" "FriendlyAppName" "Terax"
-  WriteRegStr HKCU "${TERAX_APP_KEY}\DefaultIcon" "" '"$INSTDIR\${TERAX_EXE}",0'
-  WriteRegStr HKCU "${TERAX_APP_KEY}\shell\open\command" "" '"$INSTDIR\${TERAX_EXE}" "%1"'
+  ; SupportedTypes keeps Oarlock out of "Choose another app" for other types.
+  DeleteRegKey HKCU "${OARLOCK_APP_KEY}"
+  WriteRegStr HKCU "${OARLOCK_APP_KEY}" "FriendlyAppName" "Oarlock"
+  WriteRegStr HKCU "${OARLOCK_APP_KEY}\DefaultIcon" "" '"$INSTDIR\${OARLOCK_EXE}",0'
+  WriteRegStr HKCU "${OARLOCK_APP_KEY}\shell\open\command" "" '"$INSTDIR\${OARLOCK_EXE}" "%1"'
 
-  !insertmacro TERAX_TEXT_TYPES TERAX_LIST_TYPE
+  !insertmacro OARLOCK_TEXT_TYPES OARLOCK_LIST_TYPE
   !insertmacro UPDATEFILEASSOC
-
-  Pop $R1
-  Pop $R0
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
-  Push $R0
-  Push $R1
+  !insertmacro OARLOCK_REMOVE_FOLDER_VERB "Directory"
+  !insertmacro OARLOCK_REMOVE_FOLDER_VERB "Directory\Background"
+  !insertmacro OARLOCK_REMOVE_FOLDER_VERB "Drive"
 
-  !insertmacro TERAX_REMOVE_FOLDER_VERB "Directory"
-  !insertmacro TERAX_REMOVE_FOLDER_VERB "Directory\Background"
-  !insertmacro TERAX_REMOVE_FOLDER_VERB "Drive"
-
-  !insertmacro TERAX_TEXT_TYPES TERAX_RELEASE_LEGACY_DEFAULT
-  !insertmacro TERAX_TEXT_TYPES TERAX_UNLIST_TYPE
-  DeleteRegKey HKCU "Software\Classes\${TERAX_PROGID}"
-  DeleteRegKey HKCU "${TERAX_APP_KEY}"
+  !insertmacro OARLOCK_TEXT_TYPES OARLOCK_UNLIST_TYPE
+  DeleteRegKey HKCU "Software\Classes\${OARLOCK_PROGID}"
+  DeleteRegKey HKCU "${OARLOCK_APP_KEY}"
   !insertmacro UPDATEFILEASSOC
-
-  Pop $R1
-  Pop $R0
 !macroend

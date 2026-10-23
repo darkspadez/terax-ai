@@ -108,7 +108,7 @@ describe("promptMessage", () => {
 
   it("refuses a prompt with nothing to send", () => {
     expect(promptMessage({ messages: [] }, "S", "empty")).toEqual({
-      error: "The prompt empty returned no messages Terax can send.",
+      error: "The prompt empty returned no messages Oarlock can send.",
     });
   });
 });

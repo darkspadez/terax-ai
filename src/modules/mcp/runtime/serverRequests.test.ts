@@ -1,4 +1,4 @@
-// Sampling and elicitation for real: the SDK's server asks, Terax's client
+// Sampling and elicitation for real: the SDK's server asks, Oarlock's client
 // handlers answer only with what the user gives (the window's requests).
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -28,7 +28,7 @@ async function connect(): Promise<{ server: McpServer; client: Client }> {
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   await server.connect(serverSide);
   const client = new Client(
-    { name: "Terax", version: "1" },
+    { name: "Oarlock", version: "1" },
     { capabilities: CLIENT_CAPABILITIES },
   );
   handleServerRequests(client, SERVER);
@@ -79,7 +79,7 @@ const form = {
 };
 
 describe("sampling requests", () => {
-  it("declare what Terax offers: sampling and form elicitation, no roots", async () => {
+  it("declare what Oarlock offers: sampling and form elicitation, no roots", async () => {
     const { server } = await connect();
     expect(server.server.getClientCapabilities()).toEqual({
       sampling: {},
@@ -148,7 +148,7 @@ describe("sampling requests", () => {
     const { server } = await connect();
     await expect(server.server.createMessage(ask)).rejects.toMatchObject({
       code: ErrorCode.InvalidRequest,
-      message: expect.stringContaining("No Terax window can show this request"),
+      message: expect.stringContaining("No Oarlock window can show this request"),
     });
     host();
     const first = server.server.createMessage(ask);
@@ -161,7 +161,7 @@ describe("sampling requests", () => {
     useMcpRequests.getState().sampling[0].answer({ kind: "denied" });
     await expect(first).rejects.toMatchObject({ code: -1 });
     expect(notes).toContain(
-      "Refused a sampling request: No Terax window can show this request right now.",
+      "Refused a sampling request: No Oarlock window can show this request right now.",
     );
   });
 
@@ -181,7 +181,7 @@ describe("sampling requests", () => {
       ),
     ).rejects.toMatchObject({
       code: ErrorCode.InvalidParams,
-      message: expect.stringContaining("Terax does not offer tools"),
+      message: expect.stringContaining("Oarlock does not offer tools"),
     });
     await expect(
       server.server.createMessage({
@@ -267,7 +267,7 @@ describe("requests for information", () => {
     await expect(cancelled).resolves.toEqual({ action: "cancel" });
   });
 
-  it("decline URL mode and schemas Terax cannot show, with the reason", async () => {
+  it("decline URL mode and schemas Oarlock cannot show, with the reason", async () => {
     host();
     const { server } = await connect();
     await expect(
@@ -298,7 +298,7 @@ describe("requests for information", () => {
         },
         ElicitResultSchema,
       ),
-      // The SDK's own schema check refuses it before it reaches Terax.
+      // The SDK's own schema check refuses it before it reaches Oarlock.
     ).rejects.toThrow(/street/);
     expect(useMcpRequests.getState().elicitations).toEqual([]);
   });

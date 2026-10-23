@@ -18,7 +18,7 @@ import { useState } from "react";
 
 type Props = {
   open: boolean;
-  /** Names already in Terax's folder. */
+  /** Names already in Oarlock's folder. */
   taken: ReadonlySet<string>;
   onClose: () => void;
   onCreate: (name: string, description: string) => Promise<void>;
@@ -78,7 +78,7 @@ export function NewSkillDialog({ open, taken, onClose, onCreate }: Props) {
         <DialogHeader>
           <DialogTitle>New skill</DialogTitle>
           <DialogDescription>
-            Creates a folder with a SKILL.md in Terax's skills folder and opens
+            Creates a folder with a SKILL.md in Oarlock's skills folder and opens
             it in the editor to write the instructions.
           </DialogDescription>
         </DialogHeader>

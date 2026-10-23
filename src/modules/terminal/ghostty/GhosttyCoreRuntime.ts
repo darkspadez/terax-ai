@@ -1,5 +1,5 @@
-import { TeraxGhostty } from "@terax/ghostty-core/adapted";
-import type { GhosttyTerminalConfig } from "@terax/ghostty-core/protocol";
+import { OarlockGhostty } from "@oarlock/ghostty-core/adapted";
+import type { GhosttyTerminalConfig } from "@oarlock/ghostty-core/protocol";
 import { AdaptedGhosttyTerminalModel } from "./AdaptedGhosttyTerminalModel";
 import {
   allocateScrollbackBytes,
@@ -50,16 +50,16 @@ export type GhosttyCoreRuntimeOptions = {
   readonly scrollbackBudgetBytes?: number;
 };
 
-type GhosttyLoader = () => Promise<TeraxGhostty>;
+type GhosttyLoader = () => Promise<OarlockGhostty>;
 
-const deviceAttributeProbes = new WeakMap<TeraxGhostty, boolean>();
+const deviceAttributeProbes = new WeakMap<OarlockGhostty, boolean>();
 
 export class GhosttyCoreRuntime {
   private readonly loader: GhosttyLoader;
   private readonly models = new Map<number, AdaptedGhosttyTerminalModel>();
   private readonly pendingModels = new Set<number>();
-  private loadPromise: Promise<TeraxGhostty> | null = null;
-  private ghostty: TeraxGhostty | null = null;
+  private loadPromise: Promise<OarlockGhostty> | null = null;
+  private ghostty: OarlockGhostty | null = null;
   private status: GhosttyRuntimeDiagnostics["status"] = "cold";
   private lastError: string | null = null;
   private idleReleaseTimer: ReturnType<typeof setTimeout> | null = null;
@@ -74,7 +74,7 @@ export class GhosttyCoreRuntime {
   private disposed = false;
 
   constructor(
-    loader: GhosttyLoader = () => TeraxGhostty.load(),
+    loader: GhosttyLoader = () => OarlockGhostty.load(),
     options: GhosttyCoreRuntimeOptions = {},
   ) {
     this.loader = loader;
@@ -222,7 +222,7 @@ export class GhosttyCoreRuntime {
     };
   }
 
-  private load(): Promise<TeraxGhostty> {
+  private load(): Promise<OarlockGhostty> {
     if (this.disposed)
       return Promise.reject(new Error("Ghostty runtime is disposed"));
     if (this.ghostty) return Promise.resolve(this.ghostty);
@@ -321,7 +321,7 @@ export class GhosttyCoreRuntime {
  * property of the compiled module, so it is probed once on a throwaway
  * instance that is dropped immediately, and only when diagnostics ask.
  */
-function nativeDeviceAttributes(ghostty: TeraxGhostty): boolean {
+function nativeDeviceAttributes(ghostty: OarlockGhostty): boolean {
   const cached = deviceAttributeProbes.get(ghostty);
   if (cached !== undefined) return cached;
   const terminal = ghostty.createTerminal(2, 1);

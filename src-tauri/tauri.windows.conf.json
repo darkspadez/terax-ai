@@ -3,7 +3,7 @@
   "bundle": {
     "windows": {
       "wix": {
-        "version": "0.9.0"
+        "version": "0.1.0"
       }
     }
   },
@@ -11,7 +11,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Terax",
+        "title": "Oarlock",
         "decorations": false,
         "transparent": true,
         "visible": false,

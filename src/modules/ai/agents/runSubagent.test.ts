@@ -168,7 +168,7 @@ describe("runSubagent", () => {
       onUsage,
     });
     expect(result.stepCount).toBe(2);
-    // Priced by Terax's id for the model, not the server's name for it.
+    // Priced by Oarlock's id for the model, not the server's name for it.
     expect(onUsage.mock.calls).toEqual([
       [
         "ollama-local",

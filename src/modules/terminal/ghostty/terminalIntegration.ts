@@ -4,11 +4,11 @@ import type {
   TerminalBehavior,
   TerminalNotifyOnFinish,
 } from "@/modules/settings/terminalBehavior";
-import type { GhosttyPointerShape } from "@terax/ghostty-core/protocol";
+import type { GhosttyPointerShape } from "@oarlock/ghostty-core/protocol";
 import type {
-  TeraxGhosttyKittyClipboardAnswer,
-  TeraxGhosttyMimeData,
-} from "@terax/ghostty-core/adapted";
+  OarlockGhosttyKittyClipboardAnswer,
+  OarlockGhosttyMimeData,
+} from "@oarlock/ghostty-core/adapted";
 import {
   readClipboardImage,
   readPrimarySelection,
@@ -72,14 +72,14 @@ export function kittyClipboardAnswer(
   mimes: readonly string[],
   text: string | null,
   image: Uint8Array | null = null,
-): TeraxGhosttyKittyClipboardAnswer {
+): OarlockGhosttyKittyClipboardAnswer {
   if (text === null) return { status: "unsupported" };
   const data = encoder.encode(text);
   const png = image && image.byteLength > 0 ? image : null;
   const available: string[] = [];
   if (data.byteLength > 0) available.push("text/plain");
   if (png) available.push(IMAGE_MIME);
-  const contents: TeraxGhosttyMimeData[] = [];
+  const contents: OarlockGhosttyMimeData[] = [];
   let size = 0;
   for (const mime of mimes) {
     if (contents.length === 4) break;
@@ -141,12 +141,12 @@ export function colorSchemeFor(background: Rgb): "dark" | "light" {
 
 let versionPromise: Promise<string> | null = null;
 
-/** The XTVERSION reply: "terax <app version>" (just "terax" outside the app). */
+/** The XTVERSION reply: "oarlock <app version>" (just "oarlock" outside the app). */
 export function terminalVersion(): Promise<string> {
   versionPromise ??= import("@tauri-apps/api/app")
     .then(({ getVersion }) => getVersion())
-    .then((version) => `terax ${version}`)
-    .catch(() => "terax");
+    .then((version) => `oarlock ${version}`)
+    .catch(() => "oarlock");
   return versionPromise;
 }
 
@@ -167,7 +167,7 @@ export type TerminalIntegrationContext = {
   /** Answers a held Kitty clipboard read of this pane's terminal. */
   readonly answerKittyClipboardRead: (
     id: number,
-    answer: TeraxGhosttyKittyClipboardAnswer,
+    answer: OarlockGhosttyKittyClipboardAnswer,
   ) => void;
   /** Where the program-set pointer shape applies. */
   readonly pointerTarget: () => HTMLElement | null;

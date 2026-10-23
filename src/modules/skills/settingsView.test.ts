@@ -11,7 +11,7 @@ import type { SkillsSnapshot } from "./types";
 
 function snapshot(): SkillsSnapshot {
   return {
-    teraxDir: "/cfg/skills",
+    oarlockDir: "/cfg/skills",
     userDir: "/home/me/.claude/skills",
     skills: [
       skill({ name: "zeta" }),
@@ -26,8 +26,8 @@ function snapshot(): SkillsSnapshot {
     ],
     invalid: [
       {
-        id: "terax/Broken",
-        source: "terax",
+        id: "oarlock/Broken",
+        source: "oarlock",
         project: null,
         dirName: "Broken",
         dir: "/cfg/skills/Broken",
@@ -39,10 +39,10 @@ function snapshot(): SkillsSnapshot {
 }
 
 describe("skillGroups", () => {
-  it("groups Terax's folder, the user's folder and each open project", () => {
+  it("groups Oarlock's folder, the user's folder and each open project", () => {
     const groups = skillGroups(snapshot());
     expect(groups.map((g) => [g.id, g.title, g.path])).toEqual([
-      ["terax", "Terax", "/cfg/skills"],
+      ["oarlock", "Oarlock", "/cfg/skills"],
       ["user", "Claude Code (~/.claude/skills)", "/home/me/.claude/skills"],
       [`project:${PROJECT.key}`, "proj", "/work/proj"],
     ]);
@@ -56,12 +56,12 @@ describe("skillGroups", () => {
 
   it("names what overrides a skill and what a project skill overrides", () => {
     const snap = snapshot();
-    const [teraxPdf, userPdf, projectPdf] = [
+    const [oarlockPdf, userPdf, projectPdf] = [
       snap.skills[1],
       snap.skills[2],
       snap.skills[3],
     ];
-    expect(overridingSkill(teraxPdf, snap)?.source).toBe("user");
+    expect(overridingSkill(oarlockPdf, snap)?.source).toBe("user");
     expect(overridingSkill(userPdf, snap)).toBeNull();
     expect(overriddenGlobal(projectPdf, snap)?.source).toBe("user");
     expect(
@@ -74,7 +74,7 @@ describe("skillGroups", () => {
 describe("project groups", () => {
   it("decide the project's TERAX.md and its skills apart: its .mcp.json belongs to Settings > MCP", () => {
     const groups = skillGroups({
-      teraxDir: "/t",
+      oarlockDir: "/t",
       userDir: null,
       skills: [],
       invalid: [],

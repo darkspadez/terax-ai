@@ -23,10 +23,10 @@ const privateUse = (codepoint: number) =>
 const SEGMENT_BYTES = 220 * 1024;
 const TOTAL_BYTES = 1_100 * 1024;
 
-describe("Terax Symbols font faces", () => {
+describe("Oarlock Symbols font faces", () => {
   it("declares every icon set under the one internal family", () => {
     expect(faces.length).toBeGreaterThanOrEqual(10);
-    for (const face of faces) expect(face.family).toBe("Terax Symbols");
+    for (const face of faces) expect(face.family).toBe("Oarlock Symbols");
   });
 
   // Anything outside the Private Use Area would replace the system fallback

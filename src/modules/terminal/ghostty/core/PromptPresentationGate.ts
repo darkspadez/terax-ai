@@ -1,4 +1,4 @@
-import type { GhosttyTerminalEvent } from "@terax/ghostty-core/protocol";
+import type { GhosttyTerminalEvent } from "@oarlock/ghostty-core/protocol";
 
 export const PROMPT_PRESENTATION_WATCHDOG_MS = 1_000;
 

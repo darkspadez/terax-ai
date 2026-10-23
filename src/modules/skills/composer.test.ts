@@ -7,7 +7,7 @@ import { skillInvocation } from "./composer";
 import { PROJECT, skill } from "./fixtures";
 
 function listed(...skills: ReturnType<typeof skill>[]) {
-  return { teraxDir: "", userDir: null, skills, invalid: [], projects: [] };
+  return { oarlockDir: "", userDir: null, skills, invalid: [], projects: [] };
 }
 
 beforeEach(() => {

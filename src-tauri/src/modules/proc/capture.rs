@@ -150,13 +150,13 @@ pub fn run_with(
         .take_stderr()
         .ok_or_else(|| fail(io::Error::other("no stderr pipe")))?;
     let stdout_reader = spawn_reader(
-        "terax-cap-out",
+        "oarlock-cap-out",
         stdout,
         limits.stdout,
         limits.stop_on_stdout_cap.then(|| child.clone()),
     )
     .map_err(fail)?;
-    let stderr_reader = spawn_reader("terax-cap-err", stderr, limits.stderr, None).map_err(fail)?;
+    let stderr_reader = spawn_reader("oarlock-cap-err", stderr, limits.stderr, None).map_err(fail)?;
 
     let (exit_code, timed_out) = match child.wait_timeout(timeout)? {
         Some(status) => (status.code(), false),

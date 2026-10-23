@@ -117,7 +117,7 @@ describe("bootSpaces", () => {
   });
 
   it("opens a folder given at launch over the restored tabs", async () => {
-    // crynta/terax-ai#1382, #1048, #844: Open in Terax after a first session.
+    // crynta/terax-ai#1382, #1048, #844: Open in Oarlock after a first session.
     const { deps, events, params, activeTab, activeCwd } = setup();
     params.explicitLaunchDir = "C:/work/repo";
 

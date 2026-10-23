@@ -5,7 +5,7 @@
  */
 
 /** Sent by the backend when a server's sign-in state changes: `{ serverId }`. */
-export const MCP_AUTH_EVENT = "terax://mcp-auth";
+export const MCP_AUTH_EVENT = "oarlock://mcp-auth";
 
 type AuthReason = "unauthorized" | "metadata" | "scope" | "expired";
 
@@ -98,7 +98,7 @@ export class SignInRequiredError extends Error {
  * (`oauth::SIGN_IN_HEADER`): a token it could not refresh, or the server's
  * Bearer challenge. Any other 401 (a wrong API key) is an ordinary failure.
  */
-const SIGN_IN_HEADER = "x-terax-sign-in";
+const SIGN_IN_HEADER = "x-oarlock-sign-in";
 
 /** A fetch that notes when the server's answer means the user has to sign in. */
 export function watchUnauthorized(

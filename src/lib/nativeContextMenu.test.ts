@@ -94,7 +94,7 @@ describe("allowsNativeContextMenu", () => {
   });
 
   it("keeps the menu the terminal prepares for its selection", () => {
-    const surface = element("div", { "data-terax-terminal-surface": "" }, body);
+    const surface = element("div", { "data-oarlock-terminal-surface": "" }, body);
     expect(
       allowsNativeContextMenu(target(element("canvas", {}, surface)), null),
     ).toBe(true);

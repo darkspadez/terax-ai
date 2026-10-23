@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveFontFamily } from "./fonts";
 
 const FALLBACK =
-  '"JetBrains Mono", "Terax Symbols", SFMono-Regular, Menlo, monospace';
+  '"JetBrains Mono", "Oarlock Symbols", SFMono-Regular, Menlo, monospace';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -99,7 +99,7 @@ describe("resolveFontFamily", () => {
   it("names the bundled symbol font after the chosen fonts in every stack", () => {
     for (const input of ["", "Fira Code", "Foo, Bar", "Hack Nerd Font"]) {
       const families = resolveFontFamily(input).split(", ");
-      const symbols = families.indexOf('"Terax Symbols"');
+      const symbols = families.indexOf('"Oarlock Symbols"');
       expect(symbols, input).toBe(families.indexOf('"JetBrains Mono"') + 1);
       expect(families.indexOf("SFMono-Regular"), input).toBe(symbols + 1);
     }

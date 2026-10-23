@@ -23,9 +23,9 @@ export async function suggestFullDiskAccess(
       console.error("[mac-privacy] could not keep the answer:", error),
     );
   };
-  toast("Allow commands in Terax to reach protected folders?", {
+  toast("Allow commands in Oarlock to reach protected folders?", {
     description:
-      "macOS treats commands run in Terax as Terax: it asks before they open Desktop, Documents, Downloads, iCloud Drive or external drives, and keeps them out of data such as Mail and Safari. Full Disk Access allows all of it. It is also in Settings, General, Privacy.",
+      "macOS treats commands run in Oarlock as Oarlock: it asks before they open Desktop, Documents, Downloads, iCloud Drive or external drives, and keeps them out of data such as Mail and Safari. Full Disk Access allows all of it. It is also in Settings, General, Privacy.",
     duration: Number.POSITIVE_INFINITY,
     action: {
       label: "Open System Settings",

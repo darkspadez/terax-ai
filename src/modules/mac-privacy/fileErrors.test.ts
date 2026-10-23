@@ -44,7 +44,7 @@ describe("explainFileError", () => {
     expect(await explainFileError(DESKTOP_FILE, EPERM)).toEqual({
       area: "desktop",
       message:
-        "macOS privacy settings do not allow Terax to use your Desktop folder.",
+        "macOS privacy settings do not allow Oarlock to use your Desktop folder.",
       pane: "filesAndFolders",
     });
     expect(await explainFileError("/Volumes/USB/a", EPERM)).toMatchObject({
@@ -56,7 +56,7 @@ describe("explainFileError", () => {
     ).toMatchObject({ area: "fullDiskAccess", pane: "fullDiskAccess" });
   });
 
-  it("explains nothing when Terax has Full Disk Access", async () => {
+  it("explains nothing when Oarlock has Full Disk Access", async () => {
     env.fullDiskAccess.mockResolvedValue("allowed");
     const { explainFileError } = await load();
     expect(await explainFileError(DESKTOP_FILE, EPERM)).toBeNull();
@@ -134,7 +134,7 @@ describe("showFileError", () => {
     expect(options).toMatchObject({
       id: "save-error:notes",
       description:
-        "macOS privacy settings do not allow Terax to use your Desktop folder.",
+        "macOS privacy settings do not allow Oarlock to use your Desktop folder.",
       action: { label: "Open System Settings" },
     });
     options.action.onClick();

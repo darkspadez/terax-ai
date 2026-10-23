@@ -1,7 +1,7 @@
 import type { WorkspaceEnv } from "@/modules/workspace";
 
 /** Where a skill comes from (`skills::discover::SourceKind`). */
-export type SkillSource = "terax" | "user" | "claude-project" | "terax-project";
+export type SkillSource = "oarlock" | "user" | "claude-project" | "terax-project";
 
 /** A project a window has open (`project_trust::OpenProject`). */
 export type OpenProject = {
@@ -77,7 +77,7 @@ export type ProjectTrustStatus = {
 };
 
 export type SkillsSnapshot = {
-  teraxDir: string;
+  oarlockDir: string;
   userDir: string | null;
   skills: Skill[];
   invalid: InvalidSkill[];

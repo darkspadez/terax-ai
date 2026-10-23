@@ -144,11 +144,11 @@ export class GcPressureMirror {
 }
 
 /**
- * `localStorage["terax:terminal-gc-mirror"]`: `off`, or
+ * `localStorage["oarlock:terminal-gc-mirror"]`: `off`, or
  * `<bytesPerFrame>[:<batchBytes>]`, for experiments;
  * unset means the defaults above.
  */
-const GC_MIRROR_STORAGE_KEY = "terax:terminal-gc-mirror";
+const GC_MIRROR_STORAGE_KEY = "oarlock:terminal-gc-mirror";
 export function gcPressureOptionsFromStorage(): GcPressureOptions {
   try {
     const value =

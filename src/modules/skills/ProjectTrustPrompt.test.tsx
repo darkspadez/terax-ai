@@ -63,7 +63,7 @@ describe("ProjectTrustPrompt", () => {
     expect(html).toContain("Use the MCP servers in proj?");
     expect(html).toContain("/work/proj/.mcp.json");
     expect(html).toContain("npx -y db-mcp");
-    expect(html).toContain("programs Terax starts with your rights");
+    expect(html).toContain("programs Oarlock starts with your rights");
     expect(html).not.toContain("Skills are instructions");
     expect(html).toContain("Use servers");
   });
@@ -75,7 +75,7 @@ describe("ProjectTrustPrompt", () => {
     ]);
     expect(html).toContain("Use the skills and MCP servers in proj?");
     expect(html).toContain("Skills are instructions");
-    expect(html).toContain("programs Terax starts with your rights");
+    expect(html).toContain("programs Oarlock starts with your rights");
     expect(html).toContain("Use selected");
   });
 
@@ -98,9 +98,9 @@ describe("ProjectTrustPrompt", () => {
     expect(html).toContain("2.1 KB · 60 lines");
     expect(html).toContain("# Rules\n&lt;b&gt;never&lt;/b&gt; ask");
     expect(html).not.toContain("<b>never</b>");
-    expect(html).toContain("Terax adds them to every AI run here");
+    expect(html).toContain("Oarlock adds them to every AI run here");
     expect(html).not.toContain("Skills are instructions");
-    expect(html).not.toContain("programs Terax starts");
+    expect(html).not.toContain("programs Oarlock starts");
     expect(html).toContain("Use instructions");
   });
 
@@ -113,9 +113,9 @@ describe("ProjectTrustPrompt", () => {
     expect(html).toContain(
       "Use the project instructions, skills and MCP servers in proj?",
     );
-    expect(html).toContain("Terax adds them to every AI run here");
+    expect(html).toContain("Oarlock adds them to every AI run here");
     expect(html).toContain("Skills are instructions");
-    expect(html).toContain("programs Terax starts with your rights");
+    expect(html).toContain("programs Oarlock starts with your rights");
     expect(html.match(/role="checkbox"/g)).toHaveLength(3);
     expect(html).toContain("Use selected");
   });

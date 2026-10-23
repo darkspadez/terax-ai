@@ -2,14 +2,14 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-// "Open in Terax" on folders and Terax under Open With for text and code
-// files, on every OS, without Terax ever making itself the default app.
+// "Open in Oarlock" on folders and Oarlock under Open With for text and code
+// files, on every OS, without Oarlock ever making itself the default app.
 const TAURI = fileURLToPath(new URL("../../src-tauri/", import.meta.url));
 const read = (path: string) => readFileSync(`${TAURI}${path}`, "utf8");
 
 const hooks = read("installer-hooks.nsh");
 const plist = read("Info.plist");
-const desktop = read("linux/terax.desktop");
+const desktop = read("linux/oarlock.desktop");
 
 function nsisMacro(name: string): string {
   const match = hooks.match(
@@ -26,7 +26,7 @@ function insertedArgs(body: string, macro: string): string[] {
 }
 
 const windowsTypes = [
-  ...nsisMacro("TERAX_TEXT_TYPES").matchAll(/!insertmacro \$\{MACRO\} (\S+)/g),
+  ...nsisMacro("OARLOCK_TEXT_TYPES").matchAll(/!insertmacro \$\{MACRO\} (\S+)/g),
 ].map((m) => m[1]);
 
 const documentTypes = plist
@@ -46,7 +46,7 @@ function plistStrings(type: string, key: string): string[] {
 describe("bundle config", () => {
   it("declares no Tauri file associations", () => {
     // Tauri's NSIS template writes each associated extension's default
-    // value, making Terax the default app for all of them.
+    // value, making Oarlock the default app for all of them.
     for (const file of [
       "tauri.conf.json",
       "tauri.windows.conf.json",
@@ -56,15 +56,15 @@ describe("bundle config", () => {
     }
   });
 
-  it("builds the deb and rpm desktop entries from the Terax template", () => {
+  it("builds the deb and rpm desktop entries from the Oarlock template", () => {
     const { linux } = JSON.parse(read("tauri.conf.json")).bundle;
-    expect(linux.deb.desktopTemplate).toBe("./linux/terax.desktop");
-    expect(linux.rpm.desktopTemplate).toBe("./linux/terax.desktop");
+    expect(linux.deb.desktopTemplate).toBe("./linux/oarlock.desktop");
+    expect(linux.rpm.desktopTemplate).toBe("./linux/oarlock.desktop");
   });
 });
 
 describe("Windows installer hooks", () => {
-  it("offers Terax for the same text and code types as macOS", () => {
+  it("offers Oarlock for the same text and code types as macOS", () => {
     const macTypes = documentTypes.flatMap((t) =>
       plistStrings(t, "CFBundleTypeExtensions"),
     );
@@ -73,52 +73,43 @@ describe("Windows installer hooks", () => {
     expect([...windowsTypes].sort()).toEqual([...macTypes].sort());
   });
 
-  it("only lists Terax for a type and never takes its default", () => {
+  it("only lists Oarlock for a type and never takes its default", () => {
     expect(hooks).not.toMatch(/Classes\\\*/);
-    const list = nsisMacro("TERAX_LIST_TYPE");
+    const list = nsisMacro("OARLOCK_LIST_TYPE");
     const writes = list.split("\n").filter((line) => /WriteReg/.test(line));
     expect(writes).toHaveLength(2);
     expect(writes[0]).toMatch(
-      /^\s*WriteRegNone HKCU "Software\\Classes\\\.\$\{EXT\}\\OpenWithProgids" "\$\{TERAX_PROGID\}"$/,
+      /^\s*WriteRegNone HKCU "Software\\Classes\\\.\$\{EXT\}\\OpenWithProgids" "\$\{OARLOCK_PROGID\}"$/,
     );
     expect(writes[1]).toMatch(
-      /"\$\{TERAX_APP_KEY\}\\SupportedTypes" "\.\$\{EXT\}" ""$/,
+      /"\$\{OARLOCK_APP_KEY\}\\SupportedTypes" "\.\$\{EXT\}" ""$/,
     );
-    // The one write of an extension's default restores another app's.
-    const defaults = hooks
-      .split("\n")
-      .filter((line) =>
-        /WriteReg\w+ HKCU "Software\\Classes\\\.\$\{EXT\}" ""/.test(line),
-      );
-    expect(defaults).toHaveLength(1);
-    expect(defaults[0]).toMatch(/" "" \$R1$/);
+    // Nothing writes an extension's default value or keeps a backup of one.
+    expect(hooks).not.toMatch(
+      /WriteReg\w+ HKCU "Software\\Classes\\\.\$\{EXT\}" "(?:[^"]*_backup)?"/,
+    );
   });
 
   it("removes on uninstall everything the install writes", () => {
     const install = nsisMacro("NSIS_HOOK_POSTINSTALL");
     const uninstall = nsisMacro("NSIS_HOOK_POSTUNINSTALL");
-    expect(insertedArgs(install, "TERAX_ADD_FOLDER_VERB")).toEqual([
+    expect(insertedArgs(install, "OARLOCK_ADD_FOLDER_VERB")).toEqual([
       "Directory",
       "Directory\\Background",
       "Drive",
     ]);
-    expect(insertedArgs(uninstall, "TERAX_REMOVE_FOLDER_VERB")).toEqual(
-      insertedArgs(install, "TERAX_ADD_FOLDER_VERB"),
+    expect(insertedArgs(uninstall, "OARLOCK_REMOVE_FOLDER_VERB")).toEqual(
+      insertedArgs(install, "OARLOCK_ADD_FOLDER_VERB"),
     );
-    expect(install).toContain("TERAX_TEXT_TYPES TERAX_LIST_TYPE");
-    expect(uninstall).toContain("TERAX_TEXT_TYPES TERAX_UNLIST_TYPE");
+    expect(install).toContain("OARLOCK_TEXT_TYPES OARLOCK_LIST_TYPE");
+    expect(uninstall).toContain("OARLOCK_TEXT_TYPES OARLOCK_UNLIST_TYPE");
     for (const key of [
-      /DeleteRegKey HKCU "Software\\Classes\\\$\{TERAX_PROGID\}"\n/,
-      /DeleteRegKey HKCU "\$\{TERAX_APP_KEY\}"\n/,
+      /DeleteRegKey HKCU "Software\\Classes\\\$\{OARLOCK_PROGID\}"\n/,
+      /DeleteRegKey HKCU "\$\{OARLOCK_APP_KEY\}"\n/,
     ]) {
       expect(install).toMatch(key);
       expect(uninstall).toMatch(key);
     }
-    // Defaults earlier installers took are handed back either way.
-    expect(install).toContain("TERAX_TEXT_TYPES TERAX_RELEASE_LEGACY_DEFAULT");
-    expect(uninstall).toContain(
-      "TERAX_TEXT_TYPES TERAX_RELEASE_LEGACY_DEFAULT",
-    );
   });
 });
 
@@ -147,7 +138,7 @@ describe("macOS document types", () => {
 });
 
 describe("Linux desktop entry", () => {
-  it("passes the opened files and offers Terax for folders and text", () => {
+  it("passes the opened files and offers Oarlock for folders and text", () => {
     expect(desktop).toMatch(/^Exec=\{\{exec\}\} %F$/m);
     // GIO makes an app that names a type itself its default ahead of the
     // desktop's text/plain default, so code types come through text/plain.

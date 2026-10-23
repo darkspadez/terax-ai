@@ -15,7 +15,7 @@ describe("JetBrains Mono segments", () => {
     expect(assigned.get("other")).toEqual([0x1d538]);
   });
 
-  it("leaves icons to Terax Symbols and emoji selectors to the system", () => {
+  it("leaves icons to Oarlock Symbols and emoji selectors to the system", () => {
     for (const codepoint of [0xe0a0, 0xf8ff, 0xf0001, 0xfe0e, 0xfe0f])
       expect(excluded(codepoint), codepoint.toString(16)).toBe(true);
     for (const codepoint of [0x20, 0x2192, 0xfeff, 0xfffd])

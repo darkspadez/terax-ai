@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { TeraxGhostty } from "@terax/ghostty-core/adapted";
+import { OarlockGhostty } from "@oarlock/ghostty-core/adapted";
 import { beforeAll, describe, expect, it } from "vitest";
 import { AdaptedGhosttyTerminalModel } from "../AdaptedGhosttyTerminalModel";
 import {
@@ -32,7 +32,7 @@ describe("regex terminal search patterns", () => {
 });
 
 describe("regex terminal search over a buffer", () => {
-  let core: TeraxGhostty;
+  let core: OarlockGhostty;
   beforeAll(async () => {
     const file = await readFile(
       new URL(
@@ -40,7 +40,7 @@ describe("regex terminal search over a buffer", () => {
         import.meta.url,
       ),
     );
-    core = await TeraxGhostty.loadBytes(Uint8Array.from(file).buffer);
+    core = await OarlockGhostty.loadBytes(Uint8Array.from(file).buffer);
   });
 
   it("scans history in steps, selects matches and scrolls to them", () => {

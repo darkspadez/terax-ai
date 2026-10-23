@@ -19,7 +19,7 @@ export type BenchAppApi = {
   readBuffer: (leafId: number, maxLines?: number) => string | null;
 };
 
-/** One scenario, as written by scripts/app-lab/run.ts into TERAX_BENCH_SCENARIO. */
+/** One scenario, as written by scripts/app-lab/run.ts into OARLOCK_BENCH_SCENARIO. */
 export type BenchScenario = {
   name:
     | "tabs"

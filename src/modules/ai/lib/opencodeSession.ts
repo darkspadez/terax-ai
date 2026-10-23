@@ -3,7 +3,7 @@
  * rejects every chat request lacking an `x-opencode-session` header
  * ("Request is missing \"x-opencode-session\""). The value is an opaque
  * routing key that lets the gateway keep one conversation on the same
- * backend; any stable string works. Terax reaches these endpoints through
+ * backend; any stable string works. Oarlock reaches these endpoints through
  * the generic OpenAI-compatible provider, so the header is attached by host.
  */
 

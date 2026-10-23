@@ -1,4 +1,4 @@
-export type TeraxGhosttyCursor = {
+export type OarlockGhosttyCursor = {
   readonly row: number;
   readonly column: number;
   readonly visible: boolean;
@@ -9,14 +9,14 @@ export type TeraxGhosttyCursor = {
 };
 
 /** Per-cell representation written by `updateRenderState` / `updateGpuRenderState`. */
-export type TeraxGhosttyRenderFormat = "soa" | "gpu";
+export type OarlockGhosttyRenderFormat = "soa" | "gpu";
 
 /**
  * State shared by both render formats. All typed arrays are borrowed views
  * into WASM memory: they are valid only until the next call on the terminal
  * that can allocate (update, resize, release, compaction, write).
  */
-export type TeraxGhosttyRenderBase = {
+export type OarlockGhosttyRenderBase = {
   readonly rows: number;
   readonly cols: number;
   readonly cellCount: number;
@@ -35,11 +35,11 @@ export type TeraxGhosttyRenderBase = {
    */
   readonly dirtyRows: Uint8Array;
   readonly fullDamage: boolean;
-  readonly cursor: TeraxGhosttyCursor;
+  readonly cursor: OarlockGhosttyCursor;
 };
 
 /** Structure-of-arrays format (`"soa"`): the WebGL fallback and legacy readers. */
-export type TeraxGhosttyRenderState = TeraxGhosttyRenderBase & {
+export type OarlockGhosttyRenderState = OarlockGhosttyRenderBase & {
   readonly codepoints: Uint32Array;
   readonly contentTags: Uint8Array;
   readonly widths: Uint8Array;
@@ -57,7 +57,7 @@ export type TeraxGhosttyRenderState = TeraxGhosttyRenderBase & {
 };
 
 /** One interned glyph: a codepoint or grapheme cluster in a bold/italic face. */
-export type TeraxGhosttyGpuGlyph = {
+export type OarlockGhosttyGpuGlyph = {
   /** Dense id starting at 1; 0 never names a glyph. */
   readonly id: number;
   /** Bit 0: bold. Bit 1: italic. These are the only style bits glyphs key on. */
@@ -71,7 +71,7 @@ export type TeraxGhosttyGpuGlyph = {
  * ids interned in WASM. See `GPU_CELL_*` constants for the exact layout. The
  * structure-of-arrays cell arrays do not exist in this format.
  */
-export type TeraxGhosttyGpuRenderState = TeraxGhosttyRenderBase & {
+export type OarlockGhosttyGpuRenderState = OarlockGhosttyRenderBase & {
   /**
    * Glyph-id epoch. When it differs from the epoch you last saw, every glyph
    * id you hold is invalid: drop your id map and rebuild it from `newGlyphs`
@@ -96,26 +96,26 @@ export type TeraxGhosttyGpuRenderState = TeraxGhosttyRenderBase & {
    * Glyphs interned since the last `acknowledgeGpuGlyphs()`. Borrowed; decode
    * (iterate) before the next call, then acknowledge.
    */
-  readonly newGlyphs: TeraxGhosttyGpuGlyphBatch;
+  readonly newGlyphs: OarlockGhosttyGpuGlyphBatch;
 };
 
 /** Borrowed `[id][style][count][codepoints...]` records. */
-export interface TeraxGhosttyGpuGlyphBatch extends Iterable<TeraxGhosttyGpuGlyph> {
+export interface OarlockGhosttyGpuGlyphBatch extends Iterable<OarlockGhosttyGpuGlyph> {
   /** Raw little-endian words of the records. */
   readonly words: Uint32Array;
   readonly isEmpty: boolean;
-  toArray(): TeraxGhosttyGpuGlyph[];
+  toArray(): OarlockGhosttyGpuGlyph[];
 }
 
-/** One decoded buffer line (see `TeraxGhosttyTerminal.readLines`). */
-export type TeraxGhosttyLine = {
+/** One decoded buffer line (see `OarlockGhosttyTerminal.readLines`). */
+export type OarlockGhosttyLine = {
   /** Column strings: `""` for wide-character spacers, `" "` for blanks. */
   readonly cells: string[];
   /** True when the row continues a soft-wrapped line. */
   readonly wrapped: boolean;
 };
 
-export type TeraxGhosttyKeyEvent = {
+export type OarlockGhosttyKeyEvent = {
   readonly action: number;
   readonly key: number;
   readonly mods: number;
@@ -125,22 +125,22 @@ export type TeraxGhosttyKeyEvent = {
   readonly unshiftedCodepoint?: number;
 };
 
-export type TeraxGhosttyTerminalOptions = {
+export type OarlockGhosttyTerminalOptions = {
   readonly maxScrollbackBytes?: number;
   readonly maxScrollbackLines?: number;
 };
 
-export type TeraxGhosttyTerminalResourceStats = {
+export type OarlockGhosttyTerminalResourceStats = {
   readonly cellCapacity: number;
   readonly rowCapacity: number;
   readonly renderStateResets: number;
-  readonly renderFormat: TeraxGhosttyRenderFormat;
+  readonly renderFormat: OarlockGhosttyRenderFormat;
   /** Glyphs interned for the GPU format (0 in other formats or when released). */
   readonly glyphCount: number;
   readonly glyphEpoch: number;
 };
 
-export type TeraxGhosttySearchStatus = {
+export type OarlockGhosttySearchStatus = {
   readonly active: boolean;
   readonly pending: boolean;
   readonly complete: boolean;
@@ -149,32 +149,32 @@ export type TeraxGhosttySearchStatus = {
   readonly selectedIndex: number;
 };
 
-export type TeraxGhosttySearchViewportSpan = {
+export type OarlockGhosttySearchViewportSpan = {
   readonly row: number;
   readonly startColumn: number;
   readonly endColumn: number;
   readonly selected: boolean;
 };
 
-export type TeraxGhosttySelection = {
+export type OarlockGhosttySelection = {
   readonly anchor: { readonly line: number; readonly column: number };
   readonly focus: { readonly line: number; readonly column: number };
   readonly rectangular: boolean;
 };
 
-export type TeraxGhosttyInstantiate = (
+export type OarlockGhosttyInstantiate = (
   module: WebAssembly.Module,
   imports: WebAssembly.Imports,
 ) => WebAssembly.Instance;
 
-export type TeraxGhosttyLoadOptions = {
+export type OarlockGhosttyLoadOptions = {
   readonly log?: (message: string) => void;
   /**
    * Creates one instance of the compiled module. The default is a synchronous
    * `new WebAssembly.Instance`, which takes about a millisecond or less once
    * the module is compiled. Overridable so tests can observe instantiation.
    */
-  readonly instantiate?: TeraxGhosttyInstantiate;
+  readonly instantiate?: OarlockGhosttyInstantiate;
   /**
    * Called once per burst of disposed instances with the linear-memory bytes
    * they released. A dropped memory is only freed when the engine collects it,
@@ -188,7 +188,7 @@ export type TeraxGhosttyLoadOptions = {
 };
 
 /** Linear-memory accounting across every live instance of one compiled module. */
-export type TeraxGhosttyMemoryStats = {
+export type OarlockGhosttyMemoryStats = {
   readonly instanceCount: number;
   /** Sum of `memory.buffer.byteLength` over live instances. */
   readonly totalBytes: number;
@@ -197,7 +197,7 @@ export type TeraxGhosttyMemoryStats = {
   readonly instancesCreated: number;
 };
 
-export type TeraxGhosttyWasmExports = WebAssembly.Exports & {
+export type OarlockGhosttyWasmExports = WebAssembly.Exports & {
   readonly memory: WebAssembly.Memory;
   readonly restty_create_with_limits: (
     cols: number,
@@ -448,7 +448,7 @@ export type TeraxGhosttyWasmExports = WebAssembly.Exports & {
 };
 
 /** Ghostty mouse action (`restty_encode_mouse`). */
-export type TeraxGhosttyMouseAction = "press" | "release" | "motion";
+export type OarlockGhosttyMouseAction = "press" | "release" | "motion";
 
 /**
  * A mouse event to encode for the program's tracking mode and format.
@@ -457,8 +457,8 @@ export type TeraxGhosttyMouseAction = "press" | "release" | "motion";
  * terminal pixels from the grid's top-left corner, in the units of
  * `setPixelSize`. `mods` is Ghostty's key modifier bit set.
  */
-export type TeraxGhosttyMouseEvent = {
-  readonly action: TeraxGhosttyMouseAction;
+export type OarlockGhosttyMouseEvent = {
+  readonly action: OarlockGhosttyMouseAction;
   readonly button: number;
   readonly mods: number;
   readonly x: number;
@@ -467,7 +467,7 @@ export type TeraxGhosttyMouseEvent = {
 };
 
 /** One MIME representation, of a clipboard answer or a drop. */
-export type TeraxGhosttyMimeData = {
+export type OarlockGhosttyMimeData = {
   readonly mime: string;
   readonly data: Uint8Array;
 };
@@ -477,11 +477,11 @@ export type TeraxGhosttyMimeData = {
  * lists the clipboard's MIME types (served when the read asked for the
  * list) and `contents` the requested representations it has.
  */
-export type TeraxGhosttyKittyClipboardAnswer =
+export type OarlockGhosttyKittyClipboardAnswer =
   | {
       readonly status: "success";
       readonly available: readonly string[];
-      readonly contents: readonly TeraxGhosttyMimeData[];
+      readonly contents: readonly OarlockGhosttyMimeData[];
     }
   | { readonly status: "denied" | "unsupported" | "busy" | "io-error" };
 
@@ -490,7 +490,7 @@ export type TeraxGhosttyKittyClipboardAnswer =
  * (Kitty OSC 72): the cell and the pixel within the terminal it is over, and
  * the operations the source allows.
  */
-export type TeraxGhosttyDragPosition = {
+export type OarlockGhosttyDragPosition = {
   readonly cellX: number;
   readonly cellY: number;
   readonly pixelX: number;
@@ -500,14 +500,14 @@ export type TeraxGhosttyDragPosition = {
 };
 
 /** Output formats of `formatTextRange`. */
-export type TeraxGhosttyTextFormat = "plain" | "vt" | "html";
+export type OarlockGhosttyTextFormat = "plain" | "vt" | "html";
 
 /**
  * One Kitty graphics placement in the viewport, sorted by z. `pixels` is a
  * view into WebAssembly memory, valid until the terminal is next written,
  * resized or rendered; copy (or upload) it before then.
  */
-export type TeraxGhosttyKittyPlacement = {
+export type OarlockGhosttyKittyPlacement = {
   readonly imageId: number;
   /** Bytes per pixel of `pixels`: 1 gray, 2 gray + alpha, 3 RGB, 4 RGBA. */
   readonly channels: 1 | 2 | 3 | 4;

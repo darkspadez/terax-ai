@@ -18,7 +18,7 @@ function folderName(root: string): string {
 
 const STATE_TEXT: Record<ProjectServers["state"], string> = {
   allowed:
-    "In use in this project's windows. Edit .mcp.json to change them: edits made in Terax keep your answer, a change from anywhere else asks again.",
+    "In use in this project's windows. Edit .mcp.json to change them: edits made in Oarlock keep your answer, a change from anywhere else asks again.",
   denied: "Not used: you chose not to use them.",
   pending:
     "Not in use yet. Answer the prompt in the project's window, or decide here.",

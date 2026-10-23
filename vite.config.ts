@@ -9,20 +9,20 @@ import Inspect from "vite-plugin-inspect";
 const host = process.env.TAURI_DEV_HOST;
 const rootDir = import.meta.dirname;
 
-// The app-lab driver (`TERAX_BENCH=1`) may only be built for the lab's own identifier
-// (scripts/app-lab/run.ts sets TERAX_BENCH_IDENTIFIER): a stray `TERAX_BENCH=1 bun run build` or
+// The app-lab driver (`OARLOCK_BENCH=1`) may only be built for the lab's own identifier
+// (scripts/app-lab/run.ts sets OARLOCK_BENCH_IDENTIFIER): a stray `OARLOCK_BENCH=1 bun run build` or
 // `tauri build` would otherwise ship the driver under the product identifier. The Rust side
 // refuses to start a bench binary under it too (modules/bench.rs); this fails the build early.
-if (process.env.TERAX_BENCH === "1") {
+if (process.env.OARLOCK_BENCH === "1") {
   const product = (
     JSON.parse(
       readFileSync(path.join(rootDir, "src-tauri/tauri.conf.json"), "utf8"),
     ) as { identifier: string }
   ).identifier;
-  const identifier = process.env.TERAX_BENCH_IDENTIFIER;
+  const identifier = process.env.OARLOCK_BENCH_IDENTIFIER;
   if (!identifier || identifier === product) {
     throw new Error(
-      `TERAX_BENCH=1 builds the app-lab driver and needs its own TERAX_BENCH_IDENTIFIER ` +
+      `OARLOCK_BENCH=1 builds the app-lab driver and needs its own OARLOCK_BENCH_IDENTIFIER ` +
         `(not the product identifier ${product}); run scripts/app-lab/run.ts instead`,
     );
   }
@@ -32,7 +32,7 @@ if (process.env.TERAX_BENCH === "1") {
  * `virtual:katex.css`, the stylesheet of the KaTeX that @streamdown/math
  * renders with. KaTeX is not a direct dependency (the isolated install has no
  * top-level `katex`), so it resolves through that package. The stylesheet
- * offers every font as woff2, woff and ttf; every webview Terax runs in reads
+ * offers every font as woff2, woff and ttf; every webview Oarlock runs in reads
  * woff2, so the fallbacks (0.9 MB that would never load) are dropped and only
  * the woff2 files are emitted.
  */
@@ -44,7 +44,7 @@ function katexStylesheet(): PluginOption {
     "katex/dist/katex.min.css",
   );
   return {
-    name: "terax:katex-stylesheet",
+    name: "oarlock:katex-stylesheet",
     enforce: "pre",
     resolveId: (source) =>
       source === "virtual:katex.css" ? stylesheet : null,
@@ -71,7 +71,7 @@ function katexStylesheet(): PluginOption {
 function mcpWithoutAjv(): PluginOption {
   const shim = path.resolve(rootDir, "src/modules/mcp/runtime/ajvProvider.ts");
   return {
-    name: "terax:mcp-without-ajv",
+    name: "oarlock:mcp-without-ajv",
     enforce: "pre",
     resolveId: (source, importer) =>
       importer?.includes("/@modelcontextprotocol/sdk/") &&
@@ -274,11 +274,11 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => ({
       },
     },
   },
-  // Real-application benchmark driver (src/bench, scripts/app-lab). `TERAX_BENCH=1` compiles
-  // it in; otherwise this is the literal `false` and every `if (__TERAX_BENCH__)` branch,
+  // Real-application benchmark driver (src/bench, scripts/app-lab). `OARLOCK_BENCH=1` compiles
+  // it in; otherwise this is the literal `false` and every `if (__OARLOCK_BENCH__)` branch,
   // including its dynamic imports, is removed, so no bench code or chunk is emitted.
   define: {
-    __TERAX_BENCH__: JSON.stringify(process.env.TERAX_BENCH === "1"),
+    __OARLOCK_BENCH__: JSON.stringify(process.env.OARLOCK_BENCH === "1"),
   },
   clearScreen: false,
   server: {

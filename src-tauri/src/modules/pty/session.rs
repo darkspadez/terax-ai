@@ -16,7 +16,7 @@ use super::queue::{OutputQueue, QueueDiagnostics};
 use super::shell_init;
 use crate::modules::workspace::WorkspaceEnv;
 
-const AGENT_EVENT: &str = "terax:agent-signal";
+const AGENT_EVENT: &str = "oarlock:agent-signal";
 
 const READ_BUF: usize = 16 * 1024;
 const EXIT_ACK_TIMEOUT: Duration = Duration::from_secs(30);
@@ -330,7 +330,7 @@ pub(super) fn spawn_with(
     let spawn_error =
         |what: &str, e: std::io::Error| format!("could not start PTY {what} thread: {e}");
     thread::Builder::new()
-        .name("terax-pty-writer".into())
+        .name("oarlock-pty-writer".into())
         .stack_size(WRITER_STACK)
         .spawn(move || {
             while let Some(message) = input_rx.blocking_recv() {
@@ -348,7 +348,7 @@ pub(super) fn spawn_with(
     let spawn_at = Instant::now();
     let output_r = output.clone();
     let reader_thread = thread::Builder::new()
-        .name("terax-pty-reader".into())
+        .name("oarlock-pty-reader".into())
         .stack_size(READER_STACK)
         .spawn(move || {
             let _failed_on_panic = FailOnPanic(&output_r);
@@ -428,7 +428,7 @@ pub(super) fn spawn_with(
     #[cfg(windows)]
     let master_e = session.master.clone();
     thread::Builder::new()
-        .name("terax-pty-waiter".into())
+        .name("oarlock-pty-waiter".into())
         .stack_size(WAITER_STACK)
         .spawn(move || {
             let code = match child.wait() {

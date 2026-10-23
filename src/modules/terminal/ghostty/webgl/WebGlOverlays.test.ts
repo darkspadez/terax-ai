@@ -8,7 +8,7 @@ import {
   WebGlGlyphAtlas,
   type WebGlGlyphEntry,
 } from "@/modules/terminal/ghostty/webgl/WebGlGlyphAtlas";
-import { CellFlags } from "@terax/ghostty-core/protocol";
+import { CellFlags } from "@oarlock/ghostty-core/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => vi.unstubAllGlobals());

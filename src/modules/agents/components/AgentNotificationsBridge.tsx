@@ -107,7 +107,7 @@ export function AgentNotificationsBridge({
   const ctxRef = useRef<Ctx>({ tabs, activeId, focused, onActivate });
   ctxRef.current = { tabs, activeId, focused, onActivate };
 
-  // Shares the terminal module's single `terax:agent-signal` listener.
+  // Shares the terminal module's single `oarlock:agent-signal` listener.
   useEffect(
     () =>
       subscribeAgentSignals((signal) =>

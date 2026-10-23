@@ -82,18 +82,18 @@ function comparable(path: string): string {
 
 const REFUSALS: Record<RefusedArea, string> = {
   fullDiskAccess:
-    "Only apps with Full Disk Access may open this, and Terax does not have it.",
+    "Only apps with Full Disk Access may open this, and Oarlock does not have it.",
   desktop:
-    "macOS privacy settings do not allow Terax to use your Desktop folder.",
+    "macOS privacy settings do not allow Oarlock to use your Desktop folder.",
   documents:
-    "macOS privacy settings do not allow Terax to use your Documents folder.",
+    "macOS privacy settings do not allow Oarlock to use your Documents folder.",
   downloads:
-    "macOS privacy settings do not allow Terax to use your Downloads folder.",
-  iCloudDrive: "macOS privacy settings do not allow Terax to use iCloud Drive.",
+    "macOS privacy settings do not allow Oarlock to use your Downloads folder.",
+  iCloudDrive: "macOS privacy settings do not allow Oarlock to use iCloud Drive.",
   cloudStorage:
-    "macOS privacy settings do not allow Terax to use files in cloud storage such as Dropbox, OneDrive or Google Drive.",
+    "macOS privacy settings do not allow Oarlock to use files in cloud storage such as Dropbox, OneDrive or Google Drive.",
   volumes:
-    "macOS privacy settings do not allow Terax to use removable or network volumes.",
+    "macOS privacy settings do not allow Oarlock to use removable or network volumes.",
 };
 
 /** One sentence naming the grant a refusal needs. */

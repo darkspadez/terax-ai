@@ -1,10 +1,10 @@
-//! Terax's app windows: `main` (created from `tauri.conf.json`) and the extra
+//! Oarlock's app windows: `main` (created from `tauri.conf.json`) and the extra
 //! windows the user opens (`w-<id>`). Each window keeps its own spaces (a
 //! store file), saved scrollback and active chat, so windows never overwrite
 //! each other's state; preferences, chats, history and the workspace
 //! authorizations stay shared.
 //!
-//! - The windows open at quit are listed in `<app data>/terax-windows.json`
+//! - The windows open at quit are listed in `<app data>/oarlock-windows.json`
 //!   and reopen at launch. `main` always opens; when it had been closed, it
 //!   takes over the first listed window's state, so the same set of windows
 //!   comes back.
@@ -29,13 +29,13 @@ use super::terminal_scrollback;
 
 pub const MAIN: &str = "main";
 const EXTRA_PREFIX: &str = "w-";
-const REGISTRY_FILE: &str = "terax-windows.json";
+const REGISTRY_FILE: &str = "oarlock-windows.json";
 /// An extra window's state lives in `windows/<label>/` under the app data.
 const WINDOWS_DIRECTORY: &str = "windows";
-const MAIN_SPACES_STORE: &str = "terax-spaces.json";
-const SPACES_STORE: &str = "terax-spaces.json";
+const MAIN_SPACES_STORE: &str = "oarlock-spaces.json";
+const SPACES_STORE: &str = "oarlock-spaces.json";
 /// The chat store holds each window's active chat under its own key.
-const CHAT_STORE: &str = "terax-ai-sessions.json";
+const CHAT_STORE: &str = "oarlock-ai-sessions.json";
 const MAIN_ACTIVE_CHAT_KEY: &str = "activeId";
 /// Far above any real use; a runaway loop cannot open windows without bound.
 const MAX_WINDOWS: usize = 32;
@@ -44,10 +44,10 @@ const MAX_WINDOWS: usize = 32;
 /// header: what `trafficLightPosition` gives `main` in `tauri.conf.json`.
 pub const TRAFFIC_LIGHTS: (f64, f64) = (14.0, 22.0);
 
-const QUIT_REQUESTED_EVENT: &str = "terax:quit-requested";
-const NEW_WINDOW_EVENT: &str = "terax:new-window-requested";
+const QUIT_REQUESTED_EVENT: &str = "oarlock:quit-requested";
+const NEW_WINDOW_EVENT: &str = "oarlock:new-window-requested";
 #[cfg(target_os = "macos")]
-const CLOSE_TAB_EVENT: &str = "terax:close-tab-requested";
+const CLOSE_TAB_EVENT: &str = "oarlock:close-tab-requested";
 
 /// `main`, or `w-` and 1 to 32 ASCII letters and digits.
 pub fn is_app_window(label: &str) -> bool {
@@ -308,7 +308,7 @@ fn percent_encode(text: &str) -> String {
 pub enum WindowStart<'a> {
     /// The directory of the window it was opened from (New Window).
     Cwd(&'a str),
-    /// A folder a later launch of Terax asked it to open: it wins over the
+    /// A folder a later launch of Oarlock asked it to open: it wins over the
     /// window's restored spaces, like a folder given to the first launch.
     Folder(&'a str),
 }
@@ -332,7 +332,7 @@ fn build(
 ) -> tauri::Result<WebviewWindow> {
     let url = window_url(start);
     let builder = WebviewWindowBuilder::new(app, label, WebviewUrl::App(url.into()))
-        .title("Terax")
+        .title("Oarlock")
         .inner_size(800.0, 600.0)
         .min_inner_size(420.0, 280.0)
         .visible(false);
@@ -612,7 +612,7 @@ fn discard_state(app: &AppHandle, label: &str) {
     });
 }
 
-/// Starts quitting: each window confirms in turn (`terax:quit-requested`,
+/// Starts quitting: each window confirms in turn (`oarlock:quit-requested`,
 /// answered by `app_quit_ready`). A second request while one runs brings the
 /// window being asked forward.
 pub fn request_quit(app: &AppHandle) {
@@ -756,7 +756,7 @@ pub fn app_window_ready(app: AppHandle, window: tauri::Window) {
     }
 }
 
-/// Quits Terax once every window has confirmed.
+/// Quits Oarlock once every window has confirmed.
 #[tauri::command]
 pub fn app_quit(app: AppHandle) {
     request_quit(&app);
@@ -826,10 +826,10 @@ mod tests {
         let root = Path::new("/data");
         assert_eq!(data_root(root, "main"), PathBuf::from("/data"));
         assert_eq!(data_root(root, "w-1"), PathBuf::from("/data/windows/w-1"));
-        assert_eq!(spaces_store("main"), PathBuf::from("terax-spaces.json"));
+        assert_eq!(spaces_store("main"), PathBuf::from("oarlock-spaces.json"));
         assert_eq!(
             spaces_store("w-1"),
-            PathBuf::from("windows/w-1/terax-spaces.json")
+            PathBuf::from("windows/w-1/oarlock-spaces.json")
         );
         assert_eq!(active_chat_key("main"), "activeId");
         assert_eq!(active_chat_key("w-1"), "activeId:w-1");
@@ -895,16 +895,16 @@ mod tests {
     fn main_adopts_a_window_by_taking_its_spaces_and_scrollback() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        touch(&root.join("terax-spaces.json"), "stale main");
+        touch(&root.join("oarlock-spaces.json"), "stale main");
         touch(&root.join("terminal-scrollback/old.vt"), "stale");
-        touch(&root.join("windows/w-a/terax-spaces.json"), "spaces of a");
+        touch(&root.join("windows/w-a/oarlock-spaces.json"), "spaces of a");
         touch(
             &root.join("windows/w-a/terminal-scrollback/sb-1.vt"),
             "history",
         );
         adopt_files(root, "w-a");
         assert_eq!(
-            fs::read_to_string(root.join("terax-spaces.json")).unwrap(),
+            fs::read_to_string(root.join("oarlock-spaces.json")).unwrap(),
             "spaces of a"
         );
         assert_eq!(
@@ -919,18 +919,18 @@ mod tests {
     fn forgetting_a_window_deletes_only_its_state() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        touch(&root.join("terax-spaces.json"), "main");
+        touch(&root.join("oarlock-spaces.json"), "main");
         touch(&root.join("terminal-scrollback/sb-m.vt"), "main");
-        touch(&root.join("windows/w-a/terax-spaces.json"), "a");
-        touch(&root.join("windows/w-b/terax-spaces.json"), "b");
+        touch(&root.join("windows/w-a/oarlock-spaces.json"), "a");
+        touch(&root.join("windows/w-b/oarlock-spaces.json"), "b");
         forget_files(root, "w-a");
         assert!(!root.join("windows/w-a").exists());
-        assert!(root.join("windows/w-b/terax-spaces.json").exists());
-        assert!(root.join("terax-spaces.json").exists());
+        assert!(root.join("windows/w-b/oarlock-spaces.json").exists());
+        assert!(root.join("oarlock-spaces.json").exists());
         forget_files(root, "main");
-        assert!(!root.join("terax-spaces.json").exists());
+        assert!(!root.join("oarlock-spaces.json").exists());
         assert!(!root.join("terminal-scrollback").exists());
-        assert!(root.join("windows/w-b/terax-spaces.json").exists());
+        assert!(root.join("windows/w-b/oarlock-spaces.json").exists());
     }
 
     #[test]

@@ -7,9 +7,9 @@ import {
 
 describe("terminal link targets", () => {
   it("sends URLs with a scheme to the browser", () => {
-    expect(resolveTerminalLink("https://terax.app", null, null)).toEqual({
+    expect(resolveTerminalLink("https://oarlock.app", null, null)).toEqual({
       kind: "external",
-      url: "https://terax.app",
+      url: "https://oarlock.app",
     });
   });
 

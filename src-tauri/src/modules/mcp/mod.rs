@@ -49,7 +49,7 @@ use status::{StatusRegistry, StatusReport, WindowStatus};
 use stdio::{StdioExit, StdioSession};
 
 const SETTINGS_WINDOW: &str = "settings";
-const STATUS_EVENT: &str = "terax://mcp-status";
+const STATUS_EVENT: &str = "oarlock://mcp-status";
 const MAX_SESSIONS_PER_WINDOW: usize = 64;
 const MAX_ARGS: usize = 256;
 const MAX_ARG_BYTES: usize = 32 * 1024;
@@ -350,7 +350,7 @@ async fn start_stdio(
         let binary = match stdio::resolve_program(&command, &shell_env, &cwd) {
             Ok(binary) => binary,
             Err(e) => {
-                logs.push(&spawn_id, logs::Stream::Terax, e.clone());
+                logs.push(&spawn_id, logs::Stream::Oarlock, e.clone());
                 return Err(e);
             }
         };
@@ -384,7 +384,7 @@ async fn start_stdio(
                 let _ = on_exit.send(exit);
             }),
         )
-        .inspect_err(|e| logs.push(&spawn_id, logs::Stream::Terax, e.clone()))
+        .inspect_err(|e| logs.push(&spawn_id, logs::Stream::Oarlock, e.clone()))
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -492,7 +492,7 @@ pub fn mcp_log_note(
     require_server_id(&server_id)?;
     state.logs.push(
         &server_id,
-        logs::Stream::Terax,
+        logs::Stream::Oarlock,
         logs::clean_line(text.as_bytes()),
     );
     Ok(())
@@ -717,7 +717,7 @@ pub async fn mcp_project_spawn(
     if !launch.missing.is_empty() {
         state.logs.push(
             &server_id,
-            logs::Stream::Terax,
+            logs::Stream::Oarlock,
             format!("Not set in the environment: {}", launch.missing.join(", ")),
         );
     }
@@ -786,7 +786,7 @@ pub async fn mcp_project_http_open(
     if !launch.missing.is_empty() {
         state.logs.push(
             &server_id,
-            logs::Stream::Terax,
+            logs::Stream::Oarlock,
             format!("Not set in the environment: {}", launch.missing.join(", ")),
         );
     }
@@ -838,7 +838,7 @@ pub async fn mcp_http_stream(
     require_app_window(&window)?;
     let metadata = request
         .headers()
-        .get("x-terax-mcp-request")
+        .get("x-oarlock-mcp-request")
         .and_then(|value| value.to_str().ok())
         .filter(|value| value.len() <= 64 * 1024)
         .ok_or("missing or oversized MCP request metadata")?;

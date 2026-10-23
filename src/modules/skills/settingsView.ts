@@ -24,13 +24,13 @@ const TRUST_BARS: Omit<TrustBar, "status">[] = [
     id: "instructions",
     kinds: ["terax-md"],
     accept: "Use instructions",
-    note: "The AI reads a project's TERAX.md only after you allow it. Edits made in Terax keep your answer; a change from anywhere else asks again.",
+    note: "The AI reads a project's TERAX.md only after you allow it. Edits made in Oarlock keep your answer; a change from anywhere else asks again.",
   },
   {
     id: "skills",
     kinds: ["claude-skills", "terax-skills"],
     accept: "Use skills",
-    note: "The AI sees a project's skills only after you allow them. Edits made in Terax keep your answer; a change from anywhere else asks again.",
+    note: "The AI sees a project's skills only after you allow them. Edits made in Oarlock keep your answer; a change from anywhere else asks again.",
   },
 ];
 
@@ -56,7 +56,7 @@ export type SkillGroup = {
 };
 
 const SOURCE_LABEL: Record<SkillSource, string> = {
-  terax: "Terax",
+  oarlock: "Oarlock",
   user: "Claude Code (~/.claude/skills)",
   "claude-project": ".claude/skills",
   "terax-project": ".terax/skills",
@@ -77,7 +77,7 @@ const byName = (a: { name: string }, b: { name: string }) =>
 const byDir = (a: InvalidSkill, b: InvalidSkill) =>
   a.dirName < b.dirName ? -1 : a.dirName > b.dirName ? 1 : 0;
 
-/** Settings' groups: Terax's folder, the user's `~/.claude/skills`, then each open project. */
+/** Settings' groups: Oarlock's folder, the user's `~/.claude/skills`, then each open project. */
 export function skillGroups(snapshot: SkillsSnapshot): SkillGroup[] {
   const global = (source: SkillSource, path: string | null): SkillGroup => ({
     id: source,
@@ -91,7 +91,7 @@ export function skillGroups(snapshot: SkillsSnapshot): SkillGroup[] {
   const inProject = (project: OpenProject | null, key: string) =>
     project?.key === key;
   const groups = [
-    global("terax", snapshot.teraxDir),
+    global("oarlock", snapshot.oarlockDir),
     global("user", snapshot.userDir),
   ];
   for (const status of snapshot.projects) {

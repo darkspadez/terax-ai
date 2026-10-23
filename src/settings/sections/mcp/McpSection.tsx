@@ -254,14 +254,14 @@ export function McpSection() {
     <div className="flex flex-col gap-5">
       <SectionHeader
         title="MCP servers"
-        description="Give the agent tools from Model Context Protocol servers: programs Terax starts on this computer, or remote services."
+        description="Give the agent tools from Model Context Protocol servers: programs Oarlock starts on this computer, or remote services."
       />
       <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5 text-[11px] leading-relaxed text-muted-foreground">
         <span className="font-medium text-foreground">
           Servers run with your rights.
         </span>{" "}
         A local server is a program running as you, outside the folder limits
-        Terax applies to its own file features and the agent's file tools. A
+        Oarlock applies to its own file features and the agent's file tools. A
         remote server receives whatever the agent sends it. Add only servers you
         trust. Their tools ask before every call, even in Auto-approve, unless
         you mark the server Trusted, and what they return is treated as

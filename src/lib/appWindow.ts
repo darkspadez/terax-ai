@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 /**
- * Terax's app windows (`src-tauri/src/modules/windows.rs`): `main` and the
+ * Oarlock's app windows (`src-tauri/src/modules/windows.rs`): `main` and the
  * extra windows the user opens, `w-<id>`. Each keeps its own spaces, saved
  * scrollback and active chat; preferences, chat history and the rest are
  * shared.
@@ -32,8 +32,8 @@ export function isMainWindow(label = appWindowLabel()): boolean {
 /** The window's spaces store, as `windows.rs` places it. */
 export function spacesStorePath(label = appWindowLabel()): string {
   return isMainWindow(label)
-    ? "terax-spaces.json"
-    : `windows/${label}/terax-spaces.json`;
+    ? "oarlock-spaces.json"
+    : `windows/${label}/oarlock-spaces.json`;
 }
 
 /** The key of the window's active chat in the chat store. */
@@ -48,7 +48,7 @@ export function launchCwdFromUrl(search: string): string | null {
 }
 
 /**
- * The folder a later launch of Terax opened this window on (`?folder=`,
+ * The folder a later launch of Oarlock opened this window on (`?folder=`,
  * `windows.rs`): like a folder given to the first launch, it wins over the
  * window's restored spaces.
  */
@@ -71,7 +71,7 @@ export function openNewWindow(cwd?: string | null): Promise<string> {
   return invoke<string>("app_window_open", { cwd: cwd ?? null });
 }
 
-/** Quits Terax once every window has confirmed. */
+/** Quits Oarlock once every window has confirmed. */
 export function quitApp(): Promise<void> {
   return invoke("app_quit");
 }

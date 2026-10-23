@@ -250,7 +250,7 @@ describe("auto-title", () => {
   it("retitles a conversation an earlier version named after a command's marker, keeping its place", async () => {
     const mod = await import("@/modules/ai/lib/sessions");
     vi.spyOn(mod, "saveSessionsList").mockResolvedValue(undefined);
-    const marker = '<terax-command name="claude-code" />';
+    const marker = '<oarlock-command name="claude-code" />';
     useChatStore.setState({
       sessions: [{ id: "s-1", title: marker, createdAt: 1, updatedAt: 2 }],
     });

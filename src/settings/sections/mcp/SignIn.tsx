@@ -179,7 +179,7 @@ export function SignInRow({
           </span>
         ) : null}
         <span className="text-[10px] leading-relaxed text-muted-foreground/80">
-          Sign-in opens your browser. Terax keeps the tokens in your system
+          Sign-in opens your browser. Oarlock keeps the tokens in your system
           keychain and adds them to this server's requests itself; the agent and
           the app's pages never see them.
         </span>

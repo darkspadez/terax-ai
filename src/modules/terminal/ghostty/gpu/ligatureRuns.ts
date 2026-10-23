@@ -6,11 +6,11 @@
  * alternates and ligatures (`->`, `!=`, `===`) join across cells while each
  * cell keeps its own. Like Ghostty's renderer, runs break at the visible
  * cursor, so the text under it reads as typed. The core applies the same
- * rule when it interns WebGPU glyphs (`ligatureChunkLength` in `terax.zig`);
+ * rule when it interns WebGPU glyphs (`ligatureChunkLength` in `oarlock.zig`);
  * the WebGL renderer applies this one.
  */
 
-import { CellFlags } from "@terax/ghostty-core/protocol";
+import { CellFlags } from "@oarlock/ghostty-core/protocol";
 import type { TerminalCellReader } from "../core/packedCells";
 
 export const LIGATURE_MAX_CELLS = 16;

@@ -5,13 +5,13 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
-const source = process.env.TERAX_VISUAL_SOURCE_ROOT ?? path.resolve(root, "../..");
-const outDir = process.env.TERAX_VISUAL_OUT;
+const source = process.env.OARLOCK_VISUAL_SOURCE_ROOT ?? path.resolve(root, "../..");
+const outDir = process.env.OARLOCK_VISUAL_OUT;
 
 // Receives raw RGBA readbacks from the page so they can be compared offline.
 function saveEndpoint(): Plugin {
   return {
-    name: "terax-visual-save",
+    name: "oarlock-visual-save",
     configureServer(server) {
       server.middlewares.use("/__save", (request, response) => {
         if (!outDir || request.method !== "POST") {
@@ -36,11 +36,11 @@ export default defineConfig({
   root,
   cacheDir: path.join(
     os.tmpdir(),
-    `terax-visual-vite-${process.env.TERAX_VISUAL_PORT ?? 5199}`,
+    `oarlock-visual-vite-${process.env.OARLOCK_VISUAL_PORT ?? 5199}`,
   ),
   plugins: [saveEndpoint()],
   server: {
-    port: Number(process.env.TERAX_VISUAL_PORT ?? 5199),
+    port: Number(process.env.OARLOCK_VISUAL_PORT ?? 5199),
     strictPort: true,
     fs: { allow: [root, source, path.resolve(root, "../..")] },
   },
@@ -48,16 +48,16 @@ export default defineConfig({
     alias: [
       { find: "@", replacement: path.join(source, "src") },
       {
-        find: "@terax/ghostty-core/adapted",
+        find: "@oarlock/ghostty-core/adapted",
         replacement: path.join(source, "packages/ghostty-core/lib/adapted/index.ts"),
       },
       {
-        find: "@terax/ghostty-core/protocol",
+        find: "@oarlock/ghostty-core/protocol",
         replacement: path.join(source, "packages/ghostty-core/lib/protocol.ts"),
       },
     ],
   },
   // Product code gates app-lab hooks on this build-time constant (see the app's vite.config.ts).
-  define: { __TERAX_BENCH__: "false" },
+  define: { __OARLOCK_BENCH__: "false" },
   build: { target: "es2022" },
 });

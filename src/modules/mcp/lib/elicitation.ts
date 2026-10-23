@@ -128,7 +128,7 @@ function fieldOf(
     description: bodyText(raw.description, 600).trim() || undefined,
     required,
   };
-  const unsupported = `The field "${base.label}" asks for a kind of value Terax's forms do not support.`;
+  const unsupported = `The field "${base.label}" asks for a kind of value Oarlock's forms do not support.`;
   switch (raw.type) {
     case "string": {
       if (raw.enum !== undefined || raw.oneOf !== undefined) {
@@ -202,7 +202,7 @@ function fieldOf(
   }
 }
 
-/** The form a requested schema describes, or why Terax cannot show it. */
+/** The form a requested schema describes, or why Oarlock cannot show it. */
 export function elicitationFields(
   schema: unknown,
 ): { fields: ElicitField[] } | { unsupported: string } {

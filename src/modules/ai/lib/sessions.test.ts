@@ -26,7 +26,7 @@ describe("deriveTitle", () => {
   });
 
   it("takes the first user text part", () => {
-    expect(deriveTitle([message("what is terax")])).toBe("what is terax");
+    expect(deriveTitle([message("what is oarlock")])).toBe("what is oarlock");
   });
 
   it("uses the first line only", () => {
@@ -117,7 +117,7 @@ function commandMessage(input: string, ...blocks: string[]): UIMessage {
   }
   return message(
     [
-      `<terax-command name="${outcome.commandName}" />`,
+      `<oarlock-command name="${outcome.commandName}" />`,
       ...blocks,
       outcome.prompt,
     ].join("\n\n"),
@@ -157,7 +157,7 @@ describe("deriveTitle for commands, skills and MCP prompts", () => {
 
   it("names a command it no longer knows by its invocation", () => {
     expect(
-      deriveTitle([message('<terax-command name="review" />\n\nCheck it.')]),
+      deriveTitle([message('<oarlock-command name="review" />\n\nCheck it.')]),
     ).toBe("/review");
   });
 

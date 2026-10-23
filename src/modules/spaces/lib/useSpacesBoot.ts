@@ -26,7 +26,7 @@ import { useSpaces } from "./useSpaces";
 
 type BootParams = {
   launchCwd: string | null;
-  /** A folder Terax was asked to open; it wins over the restored spaces. */
+  /** A folder Oarlock was asked to open; it wins over the restored spaces. */
   explicitLaunchDir: string | null;
   home: string | null;
   allocId: () => number;
@@ -44,7 +44,7 @@ export type BootDependencies = {
   loadAll: typeof loadAll;
   saveSpacesList: typeof saveSpacesList;
   saveActiveId: typeof saveActiveId;
-  /** The folder Terax was asked to open, in the local environment. */
+  /** The folder Oarlock was asked to open, in the local environment. */
   authorizeLaunchDir: (path: string) => Promise<unknown>;
   grant: (grant: RestoredGrant) => Promise<unknown>;
   deferGrants: (later: Map<string, RestoredGrant[]>) => void;
@@ -217,7 +217,7 @@ export function useSpacesBoot({
       setActiveSpaceForNewTabs,
       adoptWorkspaceEnv,
     })
-      .catch((e) => console.error("[terax] spaces boot failed:", e))
+      .catch((e) => console.error("[oarlock] spaces boot failed:", e))
       .finally(markBooted);
   }, [
     ready,

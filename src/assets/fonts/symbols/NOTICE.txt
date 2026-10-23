@@ -1,4 +1,4 @@
-Terax Symbols is Symbols Nerd Font 3.5.1 (https://github.com/ryanoasis/nerd-fonts),
+Oarlock Symbols is Symbols Nerd Font 3.5.1 (https://github.com/ryanoasis/nerd-fonts),
 split into one WOFF2 file per icon set and stripped of hinting by
 scripts/symbols-font/build.ts. Glyph outlines are unchanged.
 

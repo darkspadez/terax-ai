@@ -1,13 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { deflateSync } from "node:zlib";
-import { Mods } from "@terax/ghostty-core";
+import { Mods } from "@oarlock/ghostty-core";
 import {
-  type TeraxGhosttyTerminal,
-  TeraxGhostty,
-} from "@terax/ghostty-core/adapted";
+  type OarlockGhosttyTerminal,
+  OarlockGhostty,
+} from "@oarlock/ghostty-core/adapted";
 import { beforeAll, describe, expect, it } from "vitest";
 
-// Protocols the Terax core answers or reports beyond plain VT parsing: Kitty
+// Protocols the Oarlock core answers or reports beyond plain VT parsing: Kitty
 // graphics, in-band size reports, colour scheme and visibility reports,
 // mouse encoding, progress / pointer / clipboard-read events, Kitty
 // clipboard and drag and drop, and VT export.
@@ -90,7 +90,7 @@ describe.each([
   ["SIMD", "ghostty-vt.wasm"],
   ["scalar", "ghostty-vt-scalar.wasm"],
 ])("%s Ghostty core protocols", (_kind, artifact) => {
-  let ghostty: TeraxGhostty;
+  let ghostty: OarlockGhostty;
 
   beforeAll(async () => {
     const file = await readFile(
@@ -99,14 +99,14 @@ describe.each([
         import.meta.url,
       ),
     );
-    ghostty = await TeraxGhostty.loadBytes(Uint8Array.from(file).buffer);
+    ghostty = await OarlockGhostty.loadBytes(Uint8Array.from(file).buffer);
   });
 
   function withTerminal(
     cols: number,
     rows: number,
     run: (
-      terminal: TeraxGhosttyTerminal,
+      terminal: OarlockGhosttyTerminal,
       write: (text: string) => string,
     ) => void,
   ): void {
@@ -278,11 +278,11 @@ describe.each([
       });
     });
 
-    it("identifies as Terax and accepts the host's version", () => {
+    it("identifies as Oarlock and accepts the host's version", () => {
       withTerminal(80, 24, (terminal, write) => {
-        expect(write("\x1b[>q")).toBe("\x1bP>|terax\x1b\\");
-        terminal.setXtversion("terax 1.2.3");
-        expect(write("\x1b[>q")).toBe("\x1bP>|terax 1.2.3\x1b\\");
+        expect(write("\x1b[>q")).toBe("\x1bP>|oarlock\x1b\\");
+        terminal.setXtversion("oarlock 1.2.3");
+        expect(write("\x1b[>q")).toBe("\x1bP>|oarlock 1.2.3\x1b\\");
         expect(() => terminal.setXtversion("bad\x1bversion")).toThrow(
           RangeError,
         );
@@ -472,7 +472,7 @@ describe.each([
         expect(write(kittyWrite(null))).toBe(
           "\x1b]5522;type=write:status=DONE\x1b\\",
         );
-        expect(write(kittyWrite("application/x-terax", "?"))).toBe(
+        expect(write(kittyWrite("application/x-oarlock", "?"))).toBe(
           "\x1b]5522;type=write:status=ENOSYS\x1b\\",
         );
         expect(terminal.drainEvents()).toEqual([
@@ -792,7 +792,7 @@ describe.each([
     it("exports styled, unwrapped history that replays at another width", () => {
       withTerminal(10, 4, (terminal, write) => {
         write(
-          "\x1b[31mred\x1b[0m plain \x1b]8;;https://terax.app\x1b\\link\x1b]8;;\x1b\\ wrapped-line",
+          "\x1b[31mred\x1b[0m plain \x1b]8;;https://oarlock.app\x1b\\link\x1b]8;;\x1b\\ wrapped-line",
         );
         // Styles survive; hyperlink targets are not part of the export.
         const vt = terminal.formatTextRange(0, 3, "vt");

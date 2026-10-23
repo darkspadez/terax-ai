@@ -1,6 +1,6 @@
 /**
  * The macOS privacy grants (System Settings, Privacy & Security) that decide
- * which files Terax, and every program its terminals start, may read.
+ * which files Oarlock, and every program its terminals start, may read.
  */
 export type PrivacyArea =
   | "fullDiskAccess"
@@ -43,7 +43,7 @@ export function settingsPaneFor(area: PrivacyArea | RefusedArea): SettingsPane {
 }
 
 /**
- * What Terax can say about an area without making macOS ask. `askedOnFirstUse`:
+ * What Oarlock can say about an area without making macOS ask. `askedOnFirstUse`:
  * only opening it would tell, and that could put up the prompt.
  */
 export type AreaStatus =
@@ -55,7 +55,7 @@ export type AreaStatus =
 
 /**
  * Full Disk Access is probed silently and covers every folder and volume.
- * Without it, a folder's own switch stays with macOS until Terax opens the
+ * Without it, a folder's own switch stays with macOS until Oarlock opens the
  * folder.
  */
 export function areaStatus(

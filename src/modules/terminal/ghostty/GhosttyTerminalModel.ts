@@ -6,20 +6,20 @@ import type {
 } from "@/modules/terminal/backend/contracts";
 import type { TerminalCellReader } from "@/modules/terminal/ghostty/core/packedCells";
 import type {
-  TeraxGhosttyDragPosition,
-  TeraxGhosttyGpuGlyph,
-  TeraxGhosttyKittyClipboardAnswer,
-  TeraxGhosttyKittyPlacement,
-  TeraxGhosttyMimeData,
-  TeraxGhosttyMouseEvent,
-  TeraxGhosttyTextFormat,
-} from "@terax/ghostty-core/adapted";
+  OarlockGhosttyDragPosition,
+  OarlockGhosttyGpuGlyph,
+  OarlockGhosttyKittyClipboardAnswer,
+  OarlockGhosttyKittyPlacement,
+  OarlockGhosttyMimeData,
+  OarlockGhosttyMouseEvent,
+  OarlockGhosttyTextFormat,
+} from "@oarlock/ghostty-core/adapted";
 import type {
   GhosttyDragOperation,
   GhosttyTerminalConfig,
   GhosttyTerminalEvent,
   KeyEvent,
-} from "@terax/ghostty-core/protocol";
+} from "@oarlock/ghostty-core/protocol";
 
 export type GhosttyTerminalModelOptions = {
   readonly backend: Extract<TerminalBackendKind, `ghostty-${string}`>;
@@ -40,7 +40,7 @@ export type GhosttyClipboardPolicy = {
 };
 
 /** Where a drag is, in cells and in the terminal pixels mouse reports use. */
-export type GhosttyDragPosition = TeraxGhosttyDragPosition;
+export type GhosttyDragPosition = OarlockGhosttyDragPosition;
 
 export type TerminalBufferPoint = {
   readonly line: number;
@@ -72,15 +72,15 @@ export type GhosttySearchViewportSpan = {
 /** Per-cell representation the model is currently producing. */
 export type GhosttyRenderFormat = "soa" | "gpu";
 
-export type GhosttyGpuGlyph = TeraxGhosttyGpuGlyph;
+export type GhosttyGpuGlyph = OarlockGhosttyGpuGlyph;
 
-/** A Kitty graphics placement; see `TeraxGhosttyKittyPlacement`. */
-export type GhosttyImagePlacement = TeraxGhosttyKittyPlacement;
+/** A Kitty graphics placement; see `OarlockGhosttyKittyPlacement`. */
+export type GhosttyImagePlacement = OarlockGhosttyKittyPlacement;
 
-/** A mouse event for `encodeMouse`; see `TeraxGhosttyMouseEvent`. */
-export type GhosttyMouseEvent = TeraxGhosttyMouseEvent;
+/** A mouse event for `encodeMouse`; see `OarlockGhosttyMouseEvent`. */
+export type GhosttyMouseEvent = OarlockGhosttyMouseEvent;
 
-export type GhosttyTextFormat = TeraxGhosttyTextFormat;
+export type GhosttyTextFormat = OarlockGhosttyTextFormat;
 
 /**
  * A link under a viewport cell (an OSC 8 hyperlink or a detected URL or
@@ -107,7 +107,7 @@ export type GhosttyGpuFrameOptions = {
 /**
  * Everything a GPU renderer needs for one frame, produced by
  * `GhosttyTerminalModelApi.consumeGpuFrame()`. Cell records are 16 bytes per
- * cell; see `@terax/ghostty-core/adapted` (`GPU_CELL_*`, `decodeGpuCell`) for
+ * cell; see `@oarlock/ghostty-core/adapted` (`GPU_CELL_*`, `decodeGpuCell`) for
  * the exact word layout. `cells` and `memory.buffer` are borrowed: use them
  * synchronously (for example `queue.writeBuffer`) before the next call into
  * the model, because any WASM allocation can replace `memory.buffer`.
@@ -274,7 +274,7 @@ export interface GhosttyTerminalModelApi extends TerminalModel {
   setColorScheme?(scheme: "dark" | "light"): void;
   /** Whether the terminal can be seen (DSR 998, mode 2033). */
   setVisible?(visible: boolean): void;
-  /** The XTVERSION reply, e.g. "terax 0.6.3". */
+  /** The XTVERSION reply, e.g. "oarlock 0.6.3". */
   setTerminalVersion?(version: string): void;
   /** Kitty image bytes per screen; 0 disables the protocol. */
   setImageStorageLimit?(bytes: number): void;
@@ -312,7 +312,7 @@ export interface GhosttyTerminalModelApi extends TerminalModel {
   /** Answers a held Kitty clipboard read; false when none is held by `id`. */
   answerClipboardRead?(
     id: number,
-    answer: TeraxGhosttyKittyClipboardAnswer,
+    answer: OarlockGhosttyKittyClipboardAnswer,
   ): boolean;
   /** The program registered for drops (Kitty OSC 72). */
   dropTargetActive?(): boolean;
@@ -323,7 +323,7 @@ export interface GhosttyTerminalModelApi extends TerminalModel {
   /** A native drop with its data (at most 16 representations). */
   drop?(
     position: GhosttyDragPosition,
-    items: readonly TeraxGhosttyMimeData[],
+    items: readonly OarlockGhosttyMimeData[],
   ): void;
   /** The native drag left without dropping. */
   dragLeave?(): void;

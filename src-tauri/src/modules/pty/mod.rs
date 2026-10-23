@@ -52,7 +52,7 @@ pub struct PtyState {
     // sometimes treats as "unset". Increments monotonically; never reused.
     next_id: AtomicU32,
     hub: Hub,
-    /// Resolved from the app's config on the first `terax-pty` request.
+    /// Resolved from the app's config on the first `oarlock-pty` request.
     origins: OnceLock<gate::AllowedOrigins>,
 }
 
@@ -161,7 +161,7 @@ fn reap(id: u32, session: Arc<Session>, reason: &str) {
         log::debug!("pty {reason}: kill id={id} returned {e}");
     }
     thread::Builder::new()
-        .name(format!("terax-pty-drop-{id}"))
+        .name(format!("oarlock-pty-drop-{id}"))
         .spawn(move || {
             let t0 = std::time::Instant::now();
             session::drop_session(session);
@@ -245,7 +245,7 @@ pub async fn pty_open(
     if finished {
         if let Some(s) = state.take(id) {
             thread::Builder::new()
-                .name(format!("terax-pty-drop-{id}"))
+                .name(format!("oarlock-pty-drop-{id}"))
                 .spawn(move || session::drop_session(s))
                 .expect("spawn pty drop thread");
         }
@@ -431,7 +431,7 @@ pub fn pty_close_all(
 }
 
 /// Opens (or reopens) this webview's output stream and returns the secret
-/// that authorizes its `terax-pty` requests. Only the page's own frame can
+/// that authorizes its `oarlock-pty` requests. Only the page's own frame can
 /// invoke commands, so other frames and origins cannot read terminal output
 /// even though the custom protocol is reachable from any frame. Reopening
 /// supersedes the previous stream and detaches its terminals.

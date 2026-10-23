@@ -135,7 +135,7 @@ describe("runSampling", () => {
     expect(out.model).toBe("qwen3");
   });
 
-  it("counts what it used for the conversation, under the model's id in Terax", async () => {
+  it("counts what it used for the conversation, under the model's id in Oarlock", async () => {
     await runSampling({
       modelId: "ollama-local",
       draft,

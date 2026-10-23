@@ -67,7 +67,7 @@ async function serverAsks(): Promise<{ result: Promise<unknown> }> {
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   await server.connect(serverSide);
   const client = new Client(
-    { name: "Terax", version: "1" },
+    { name: "Oarlock", version: "1" },
     { capabilities: CLIENT_CAPABILITIES },
   );
   handleServerRequests(client, SERVER);

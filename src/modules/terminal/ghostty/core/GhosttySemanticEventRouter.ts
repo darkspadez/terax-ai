@@ -1,7 +1,7 @@
 import type {
   GhosttyPointerShape,
   GhosttyTerminalEvent,
-} from "@terax/ghostty-core/protocol";
+} from "@oarlock/ghostty-core/protocol";
 import type { TerminalClipboardContent } from "../../lib/terminalClipboard";
 import type { TerminalProgress } from "../../lib/terminalStatus";
 import { parseOsc7, parseOsc52Clipboard } from "../../lib/osc-handlers";
@@ -44,7 +44,7 @@ export type GhosttySemanticEventCallbacks = {
 };
 
 /**
- * Routes parser-owned semantic events into Terax product callbacks.
+ * Routes parser-owned semantic events into Oarlock product callbacks.
  *
  * OSC 7 is accepted only between commands. Output produced by a command is
  * untrusted and must not be allowed to change the workspace directory.

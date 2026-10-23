@@ -5,7 +5,7 @@
 //! unchanged (its stores, resource ids, cross-window change events and file names) and refuses,
 //! before the plugin sees them, the two commands that name a file (`load`, `get_store`) unless
 //! the name is a plain file name in the data folder, or the calling window's own spaces store
-//! (`windows/<label>/terax-spaces.json`, `windows.rs`). Every other store command takes the
+//! (`windows/<label>/oarlock-spaces.json`, `windows.rs`). Every other store command takes the
 //! resource id of a store opened that way. The backend's own stores (`StoreExt`) are not
 //! affected.
 
@@ -154,14 +154,14 @@ mod tests {
 
     /// Every store file the page opens (`STORE_PATH` in `src/`, and `spacesStorePath`).
     const APP_STORES: &[&str] = &[
-        "terax-settings.json",
-        "terax-ai-sessions.json",
-        "terax-ai-snippets.json",
-        "terax-ai-todos.json",
-        "terax-ai-agents.json",
-        "terax-custom-themes.json",
-        "terax-mcp.json",
-        "terax-spaces.json",
+        "oarlock-settings.json",
+        "oarlock-ai-sessions.json",
+        "oarlock-ai-snippets.json",
+        "oarlock-ai-todos.json",
+        "oarlock-ai-agents.json",
+        "oarlock-custom-themes.json",
+        "oarlock-mcp.json",
+        "oarlock-spaces.json",
     ];
 
     #[test]
@@ -181,7 +181,7 @@ mod tests {
         }
         // An extra window's spaces, as `appWindow.ts` names them.
         for window in ["w-1", "w-7", "w-abc"] {
-            let own = format!("windows/{window}/terax-spaces.json");
+            let own = format!("windows/{window}/oarlock-spaces.json");
             assert_eq!(load(json!(own), window), None, "{own}");
         }
     }
@@ -218,7 +218,7 @@ mod tests {
         found.sort();
         let mut expected: Vec<String> = APP_STORES
             .iter()
-            .filter(|name| **name != "terax-spaces.json")
+            .filter(|name| **name != "oarlock-spaces.json")
             .map(|name| format!("\"{name}\""))
             .chain(["spacesStorePath()".to_owned()])
             .collect();
@@ -231,7 +231,7 @@ mod tests {
         for path in [
             "/etc/passwd",
             "/home/me/.config/app/settings.json",
-            "../terax-settings.json",
+            "../oarlock-settings.json",
             "../../.ssh/config.json",
             "..",
             ".",
@@ -241,11 +241,11 @@ mod tests {
             "\\\\server\\share\\x.json",
             "\\\\?\\C:\\x.json",
             "~/x.json",
-            "sub/terax-settings.json",
-            "sub\\terax-settings.json",
+            "sub/oarlock-settings.json",
+            "sub\\oarlock-settings.json",
             "conversations/session-1.json",
-            "terax-settings.json/..",
-            "a/../terax-settings.json",
+            "oarlock-settings.json/..",
+            "a/../oarlock-settings.json",
             ".window-state.json",
             "settings.json.",
             "settings .json",
@@ -268,18 +268,18 @@ mod tests {
 
     #[test]
     fn a_window_reaches_only_its_own_spaces_store() {
-        assert_eq!(load(json!("windows/w-1/terax-spaces.json"), "w-1"), None);
+        assert_eq!(load(json!("windows/w-1/oarlock-spaces.json"), "w-1"), None);
         for (path, window) in [
             // Another window's, or main's folder that is not a folder of its own.
-            ("windows/w-2/terax-spaces.json", "w-1"),
-            ("windows/w-1/terax-spaces.json", "main"),
-            ("windows/main/terax-spaces.json", "main"),
-            ("windows/settings/terax-spaces.json", "settings"),
+            ("windows/w-2/oarlock-spaces.json", "w-1"),
+            ("windows/w-1/oarlock-spaces.json", "main"),
+            ("windows/main/oarlock-spaces.json", "main"),
+            ("windows/settings/oarlock-spaces.json", "settings"),
             // Another file in its own folder, or a way out of it.
-            ("windows/w-1/terax-settings.json", "w-1"),
-            ("windows/w-1/../w-2/terax-spaces.json", "w-1"),
+            ("windows/w-1/oarlock-settings.json", "w-1"),
+            ("windows/w-1/../w-2/oarlock-spaces.json", "w-1"),
             ("windows/w-1/terminal-scrollback/sb-1.vt", "w-1"),
-            ("/windows/w-1/terax-spaces.json", "w-1"),
+            ("/windows/w-1/oarlock-spaces.json", "w-1"),
             ("windows/w-1", "w-1"),
         ] {
             assert!(load(json!(path), window).is_some(), "{path} in {window}");
@@ -290,11 +290,11 @@ mod tests {
     fn a_request_without_a_file_name_is_refused() {
         assert!(load(json!(null), "main").is_some());
         assert!(load(json!(42), "main").is_some());
-        assert!(load(json!(["terax-settings.json"]), "main").is_some());
+        assert!(load(json!(["oarlock-settings.json"]), "main").is_some());
         assert!(refusal("load", &InvokeBody::Json(json!({})), "main").is_some());
         assert!(refusal(
             "load",
-            &InvokeBody::Raw(b"terax-settings.json".to_vec()),
+            &InvokeBody::Raw(b"oarlock-settings.json".to_vec()),
             "main"
         )
         .is_some());

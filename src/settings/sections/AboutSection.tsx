@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { UPDATES_ENABLED, useUpdater } from "@/modules/updater";
-import { GithubIcon, Globe02Icon } from "@hugeicons/core-free-icons";
+import { GithubIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getName, getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -8,8 +8,6 @@ import { arch, platform } from "@tauri-apps/plugin-os";
 import { type ReactNode, useEffect, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 import { ISSUES_URL, REPO_SLUG, REPO_URL } from "./aboutLinks";
-
-const WEBSITE = "https://terax.app";
 
 const PLATFORM_LABEL: Record<string, string> = {
   macos: "macOS",
@@ -22,7 +20,7 @@ const PLATFORM_LABEL: Record<string, string> = {
 
 export function AboutSection() {
   const [version, setVersion] = useState("");
-  const [name, setName] = useState("Terax");
+  const [name, setName] = useState("Oarlock");
   const [build, setBuild] = useState("");
 
   useEffect(() => {
@@ -64,7 +62,7 @@ export function AboutSection() {
         </dd>
 
         <dt className="text-muted-foreground">Bundle ID</dt>
-        <dd className="font-mono text-[11.5px]">app.crynta.terax</dd>
+        <dd className="font-mono text-[11.5px]">sh.oarlock.app</dd>
 
         <dt className="text-muted-foreground">License</dt>
         <dd>Apache 2.0</dd>
@@ -80,17 +78,6 @@ export function AboutSection() {
             {REPO_SLUG}
           </button>
         </dd>
-        <dt className="text-muted-foreground">Website</dt>
-        <dd>
-          <button
-            type="button"
-            onClick={() => void openUrl(WEBSITE)}
-            className="inline-flex items-center gap-1.5 rounded-md text-[12px] underline-offset-2 hover:text-foreground hover:underline"
-          >
-            <HugeiconsIcon icon={Globe02Icon} size={12} strokeWidth={1.75} />
-            terax.app
-          </button>
-        </dd>
       </dl>
 
       {UPDATES_ENABLED ? (
@@ -99,7 +86,7 @@ export function AboutSection() {
         <div className="flex flex-col gap-1.5">
           <LinkButtons />
           <p className="text-[11px] text-muted-foreground">
-            Automatic updates are off in this build.
+            Updates are not set up for this build.
           </p>
         </div>
       )}

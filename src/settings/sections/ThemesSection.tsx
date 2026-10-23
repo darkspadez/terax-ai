@@ -109,7 +109,7 @@ export function ThemesSection() {
         await saveCustomThemes(imported);
         setThemeId(imported[0].id);
       } catch (e) {
-        console.error("[terax] saving imported themes failed:", e);
+        console.error("[oarlock] saving imported themes failed:", e);
         problems.push("Could not save the imported theme.");
       }
     }
@@ -129,7 +129,7 @@ export function ThemesSection() {
       );
       await commitImported(imported, errors);
     } catch (e) {
-      console.error("[terax] theme import failed:", e);
+      console.error("[oarlock] theme import failed:", e);
       setImportError("Could not import the theme.");
     }
   };
@@ -147,7 +147,7 @@ export function ThemesSection() {
       }
       return await commitImported(result.themes, []);
     } catch (e) {
-      console.error("[terax] theme import failed:", e);
+      console.error("[oarlock] theme import failed:", e);
       setImportError("Could not import the theme.");
       return false;
     }
@@ -265,7 +265,7 @@ export function ThemesSection() {
               variant="outline"
               size="sm"
               className="h-7 px-2 text-[11px]"
-              title="Import a .terax-theme, or a Ghostty, iTerm2, Alacritty or Windows Terminal colour scheme"
+              title="Import a .oarlock-theme, or a Ghostty, iTerm2, Alacritty or Windows Terminal colour scheme"
               onClick={onPickThemeFile}
             >
               Import…
@@ -295,7 +295,7 @@ export function ThemesSection() {
           />
         </div>
         <p className="text-[11px] text-muted-foreground">
-          Import, paste or drop a .terax-theme, or a Ghostty, iTerm2, Alacritty
+          Import, paste or drop a .oarlock-theme, or a Ghostty, iTerm2, Alacritty
           or Windows Terminal colour scheme.
         </p>
         {pasteOpen ? (

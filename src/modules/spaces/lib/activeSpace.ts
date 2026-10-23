@@ -78,7 +78,7 @@ export type FolderPlan = {
 };
 
 /**
- * Where a folder Terax is asked to open goes (command line, Open in Terax,
+ * Where a folder Oarlock is asked to open goes (command line, Open in Oarlock,
  * Open Folder): the local space rooted at it, else a new one named after it,
  * on a terminal whose active pane is there, else a new terminal there.
  */
@@ -108,7 +108,7 @@ export function planOpenFolder(
 type ExplicitLaunchDir = {
   spaces: SpaceMeta[];
   tabs: Tab[];
-  /** A folder Terax was asked to open (CLI argument, Open in Terax). */
+  /** A folder Oarlock was asked to open (CLI argument, Open in Oarlock). */
   launchDir: string;
   allocId: () => number;
   now?: () => number;

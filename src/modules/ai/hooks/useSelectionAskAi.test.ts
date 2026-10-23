@@ -12,7 +12,7 @@ const inside = (...selectors: string[]) =>
 describe("endsContentSelection", () => {
   it("offers the popup after a primary-button selection in a terminal or editor", () => {
     for (const target of [
-      inside("[data-terax-terminal-surface]"),
+      inside("[data-oarlock-terminal-surface]"),
       inside(".cm-editor"),
     ]) {
       expect(endsContentSelection({ button: 0, ctrlKey: false, target }, false)).toBe(true);

@@ -46,7 +46,7 @@ export function setSkillEnabled(key: string, enabled: boolean): Promise<void> {
   return invoke("skills_set_enabled", { key, enabled });
 }
 
-/** Creates a skill in Terax's folder; returns its id. */
+/** Creates a skill in Oarlock's folder; returns its id. */
 export function createSkill(
   name: string,
   description: string,

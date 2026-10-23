@@ -10,7 +10,7 @@ import {
   ScrollbackRestoreGate,
   TerminalScrollbackRegistry,
 } from "@/modules/terminal/lib/terminalScrollbackRestore";
-import { TeraxGhostty } from "@terax/ghostty-core/adapted";
+import { OarlockGhostty } from "@oarlock/ghostty-core/adapted";
 import {
   afterEach,
   beforeAll,
@@ -25,7 +25,7 @@ const encoder = new TextEncoder();
 const savedAt = Date.UTC(2026, 9, 22, 14, 3);
 const marker = "─── Restored saved ───";
 
-let core: TeraxGhostty;
+let core: OarlockGhostty;
 const models: AdaptedGhosttyTerminalModel[] = [];
 
 beforeAll(async () => {
@@ -35,7 +35,7 @@ beforeAll(async () => {
       import.meta.url,
     ),
   );
-  core = await TeraxGhostty.loadBytes(Uint8Array.from(file).buffer);
+  core = await OarlockGhostty.loadBytes(Uint8Array.from(file).buffer);
 });
 
 afterEach(() => {

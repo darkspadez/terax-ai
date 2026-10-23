@@ -389,7 +389,7 @@ export function AiComposerInput() {
                   c.submit();
                 }
               }}
-              placeholder="Ask Terax anything   -   # for snippets, / for commands and skills, @ for files"
+              placeholder="Ask Oarlock anything   -   # for snippets, / for commands and skills, @ for files"
               aria-busy={mcpForm !== null}
               rows={1}
               className={cn(
@@ -431,10 +431,10 @@ export function AiComposerInput() {
       </Popover>
 
       {voiceRow.mounted && (
-        <div data-state={voiceRow.state} className="terax-reveal">
+        <div data-state={voiceRow.state} className="oarlock-reveal">
           <div className="flex items-center gap-1.5 px-1 text-[11px] text-muted-foreground">
             {c.voice.recording ? (
-              <span className="size-1.5 terax-blink rounded-full bg-destructive" />
+              <span className="size-1.5 oarlock-blink rounded-full bg-destructive" />
             ) : (
               <Spinner className="size-3" />
             )}

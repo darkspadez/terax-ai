@@ -416,8 +416,8 @@ mod tests {
             assert!(out.status.success(), "git {args:?} failed");
         };
         git(&["init", "-q"]);
-        git(&["config", "user.email", "test@terax.local"]);
-        git(&["config", "user.name", "Terax Test"]);
+        git(&["config", "user.email", "test@oarlock.local"]);
+        git(&["config", "user.name", "Oarlock Test"]);
         git(&["config", "commit.gpgsign", "false"]);
         git(&["config", "core.hooksPath", ".git/hooks"]);
         std::fs::write(repo.join("a.txt"), "a\n").unwrap();

@@ -58,7 +58,7 @@ export const useMcpRequests = create<RequestsState>(() => ({
   elicitations: [],
 }));
 
-/** Terax will not take the request now; the reason goes back to the server. */
+/** Oarlock will not take the request now; the reason goes back to the server. */
 export class RequestRefused extends Error {}
 
 /** A request that ended without an answer (cancelled by the server, or it stopped). */
@@ -98,7 +98,7 @@ function ask<A, P extends Pending<A>>(
   const state = useMcpRequests.getState();
   if (state.hosts === 0) {
     return Promise.reject(
-      new RequestRefused("No Terax window can show this request right now."),
+      new RequestRefused("No Oarlock window can show this request right now."),
     );
   }
   const list = state[key] as unknown as Pending<unknown>[];

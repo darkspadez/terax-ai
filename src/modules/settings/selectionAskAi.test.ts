@@ -48,8 +48,8 @@ beforeEach(() => {
   vi.resetModules();
 });
 
-// crynta/terax-ai#852: the Ask Terax button on a selection can be turned off.
-describe("the Ask Terax on selection setting", () => {
+// crynta/terax-ai#852: the Ask Oarlock button on a selection can be turned off.
+describe("the Ask Oarlock on selection setting", () => {
   it("is on unless it was explicitly turned off", async () => {
     const { coerceSelectionAskAi, DEFAULT_PREFERENCES, loadPreferences } =
       await import("./store");

@@ -1,5 +1,5 @@
-//! Putting skills into Terax's folder: a new one from a template, or the skills in a Git
-//! repository or a zip file. An install is staged in a dot folder inside Terax's folder (which
+//! Putting skills into Oarlock's folder: a new one from a template, or the skills in a Git
+//! repository or a zip file. An install is staged in a dot folder inside Oarlock's folder (which
 //! discovery skips), every skill found there is validated, and only the ones the user then
 //! picks are moved into place, by a rename on the same volume.
 
@@ -332,7 +332,7 @@ pub struct Candidate {
     pub location: String,
     pub errors: Vec<String>,
     pub warnings: Vec<String>,
-    /// A skill of this name is already in Terax's folder.
+    /// A skill of this name is already in Oarlock's folder.
     pub exists: bool,
     #[serde(skip)]
     pub dir: PathBuf,
@@ -432,7 +432,7 @@ fn check_dir(root: &Path, dir: &Path, files: &mut usize, bytes: &mut u64) -> Res
     Ok(())
 }
 
-/// Moves a reviewed skill into Terax's folder under its name, without its `.git` folder. An
+/// Moves a reviewed skill into Oarlock's folder under its name, without its `.git` folder. An
 /// installed skill of that name is replaced only with `replace`, after `discard` took it away.
 pub fn place(
     candidate: &Candidate,

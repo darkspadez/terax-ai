@@ -134,7 +134,7 @@ const signalHandlers = new Set<AgentSignalHandler>();
 
 /**
  * Subscribes to every raw detector signal through the single shared native
- * `terax:agent-signal` listener (the activity store has already applied the
+ * `oarlock:agent-signal` listener (the activity store has already applied the
  * signal when handlers run). One listener serves the tab icons and the
  * notification bridge instead of one IPC subscription each.
  */
@@ -175,14 +175,14 @@ function applySignal(payload: AgentSignal): void {
 // reports per-pty lifecycle: started, working, attention, finished, exited.
 export function ensureAgentActivityListener(): Promise<void> {
   if (listenerReady) return listenerReady;
-  listenerReady = listen<AgentSignal>("terax:agent-signal", (e) => {
+  listenerReady = listen<AgentSignal>("oarlock:agent-signal", (e) => {
     const signal = { ...e.payload, agent: sanitizeAgentName(e.payload.agent) };
     applySignal(signal);
     for (const handler of signalHandlers) {
       try {
         handler(signal);
       } catch (error) {
-        console.error("[terax] agent signal handler failed:", error);
+        console.error("[oarlock] agent signal handler failed:", error);
       }
     }
   }).then(

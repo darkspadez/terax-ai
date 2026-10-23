@@ -11,7 +11,7 @@ import {
 
 describe("app windows", () => {
   it("keeps the main window's state where it always was", () => {
-    expect(spacesStorePath("main")).toBe("terax-spaces.json");
+    expect(spacesStorePath("main")).toBe("oarlock-spaces.json");
     expect(activeChatKey("main")).toBe("activeId");
     // Outside Tauri the page is the main window.
     expect(isMainWindow()).toBe(true);
@@ -19,7 +19,7 @@ describe("app windows", () => {
 
   // Mirrors `spaces_store` and `active_chat_key` in `windows.rs`.
   it("gives every other window its own spaces and active chat", () => {
-    expect(spacesStorePath("w-1a2b")).toBe("windows/w-1a2b/terax-spaces.json");
+    expect(spacesStorePath("w-1a2b")).toBe("windows/w-1a2b/oarlock-spaces.json");
     expect(activeChatKey("w-1a2b")).toBe("activeId:w-1a2b");
     expect(isMainWindow("w-1a2b")).toBe(false);
   });

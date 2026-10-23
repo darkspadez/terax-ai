@@ -20,7 +20,7 @@ import { type TokenUsage, tokenUsage } from "@/modules/ai/lib/usage";
 /**
  * Runs a sampling request the user approved: the chosen model, the
  * request's system prompt and messages only (no conversation, no tools, no
- * Terax instructions), at most the approved number of tokens and never more
+ * Oarlock instructions), at most the approved number of tokens and never more
  * than `SAMPLING_MAX_TOKENS`. The effort remembered for the model applies as
  * in the chat; a temperature only when the model takes one and no effort is
  * set. What it used is counted in the meter of the conversation the user
@@ -74,7 +74,7 @@ export async function runSampling(opts: {
   });
   const usage = tokenUsage(result.usage);
   // Spent once the model answered, sent back or not. Priced by the id in
-  // Terax (`target.modelId` is the provider's name, told to the server). With
+  // Oarlock (`target.modelId` is the provider's name, told to the server). With
   // no conversation open in the window there is no meter to count it in.
   const counted =
     opts.conversationId !== null &&

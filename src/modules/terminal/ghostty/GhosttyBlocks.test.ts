@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { TeraxGhostty } from "@terax/ghostty-core/adapted";
+import { OarlockGhostty } from "@oarlock/ghostty-core/adapted";
 import { AdaptedGhosttyTerminalModel } from "@/modules/terminal/ghostty/AdaptedGhosttyTerminalModel";
 import {
   GhosttyBlocks,
@@ -10,7 +10,7 @@ import {
 describe.each(["ghostty-vt", "ghostty-vt-scalar"])(
   "Ghostty command blocks (%s)",
   (artifact) => {
-    let core: TeraxGhostty;
+    let core: OarlockGhostty;
     beforeAll(async () => {
       const bytes = await readFile(
         new URL(
@@ -18,7 +18,7 @@ describe.each(["ghostty-vt", "ghostty-vt-scalar"])(
           import.meta.url,
         ),
       );
-      core = await TeraxGhostty.loadBytes(Uint8Array.from(bytes).buffer);
+      core = await OarlockGhostty.loadBytes(Uint8Array.from(bytes).buffer);
     });
 
     function create() {
@@ -109,7 +109,7 @@ describe.each(["ghostty-vt", "ghostty-vt-scalar"])(
         expect(blocks.mode).toBe("plain");
         write("bare shell> \x1b]133;A\x07");
         expect(blocks.mode).toBe("plain");
-        write("\x1b]133;B;terax_blocks=0\x07");
+        write("\x1b]133;B;oarlock_blocks=0\x07");
         expect(blocks.mode).toBe("plain");
         write("\x1b]133;C;command\x07\x1b]133;D;0\x07");
         expect(blocks.mode).toBe("plain");

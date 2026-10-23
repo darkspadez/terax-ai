@@ -202,8 +202,8 @@ export async function buildLanguageModel(
         baseURL: "https://openrouter.ai/api/v1",
         apiKey: key,
         headers: {
-          "HTTP-Referer": "https://terax.ai",
-          "X-Title": "Terax",
+          "HTTP-Referer": "https://github.com/qopsc/oarlock",
+          "X-Title": "Oarlock",
         },
       })(resolvedModelId);
       break;
@@ -298,7 +298,7 @@ Mutating tools (write_file, edit, multi_edit, create_directory) will queue their
  * Said once MCP tools are offered. Each server's instructions follow in a
  * block of their own, its name an attribute and its text unable to end the
  * block (`messageBlocks.ts`), so neither can add a section that reads as
- * Terax's.
+ * Oarlock's.
  */
 function mcpPrompt(
   instructions: readonly { server: string; text: string }[],

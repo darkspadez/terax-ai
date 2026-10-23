@@ -18,7 +18,7 @@ import {
 } from "./keyring";
 
 const secretsArgs = (account: string) => ({
-  service: "terax-ai",
+  service: "oarlock-ai",
   account,
 });
 
@@ -57,7 +57,7 @@ describe("provider keyring", () => {
     await setKey("groq", "  gsk-key  ");
 
     expect(core.invoke).toHaveBeenCalledWith("secrets_set", {
-      service: "terax-ai",
+      service: "oarlock-ai",
       account: "groq-api-key",
       password: "gsk-key",
     });
@@ -98,7 +98,7 @@ describe("provider keyring", () => {
   it("stores custom endpoint keys under compat accounts", async () => {
     await setCustomEndpointKey("e1", " k ");
     expect(core.invoke).toHaveBeenCalledWith("secrets_set", {
-      service: "terax-ai",
+      service: "oarlock-ai",
       account: "compat-e1-api-key",
       password: "k",
     });

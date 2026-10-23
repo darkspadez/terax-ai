@@ -152,7 +152,7 @@ export function completePalette(palette: SchemePalette): CompletePalette {
 }
 
 /**
- * Terax paints a selection over the cells and keeps each cell's own text
+ * Oarlock paints a selection over the cells and keeps each cell's own text
  * colour; it has no selection foreground. A scheme that relies on one (GitHub
  * Dark selects with its foreground colour and inverts the text) would hide the
  * selected text. A selection that default text stays readable on is kept;
@@ -295,7 +295,7 @@ function paletteToVariant(palette: CompletePalette): ThemeVariant {
 }
 
 /**
- * Turns a parsed scheme into a Terax theme. Each palette becomes the variant
+ * Turns a parsed scheme into an Oarlock theme. Each palette becomes the variant
  * its declared mode names, or the one its background reads as; when two
  * palettes land on the same mode the first wins.
  */

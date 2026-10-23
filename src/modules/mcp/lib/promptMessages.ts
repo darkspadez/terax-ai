@@ -104,7 +104,7 @@ export function promptMessage(
   }
   if (sections.length === 0 && images.length === 0) {
     return {
-      error: `The prompt ${prompt} returned no messages Terax can send.`,
+      error: `The prompt ${prompt} returned no messages Oarlock can send.`,
     };
   }
   const labelled =

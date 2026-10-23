@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { isAiComposerTarget } from "./aiSurface";
 
 /** Explorer items dropped on the composer (`DroppedPath[]` as the detail). */
-export const COMPOSER_DROP_EVENT = "terax:ai-drop-paths";
+export const COMPOSER_DROP_EVENT = "oarlock:ai-drop-paths";
 
 export type DroppedPath = { path: string; isDir: boolean };
 

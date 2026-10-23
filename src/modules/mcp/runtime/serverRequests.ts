@@ -16,7 +16,7 @@ import { askElicitation, askSampling, RequestRefused } from "../lib/requests";
 import { samplingRequestView, samplingResult } from "../lib/sampling";
 
 /**
- * What Terax offers servers: sampling (no tools, no context) and form-mode
+ * What Oarlock offers servers: sampling (no tools, no context) and form-mode
  * elicitation. URL-mode elicitation is optional in the spec and not
  * offered, so the SDK refuses it with the spec's Invalid params error.
  */
@@ -148,7 +148,7 @@ export function handleServerRequests(
         server.id,
         "request for information",
         new Error(
-          "Terax does not open URLs for servers (URL-mode elicitation).",
+          "Oarlock does not open URLs for servers (URL-mode elicitation).",
         ),
       );
     }
@@ -156,7 +156,7 @@ export function handleServerRequests(
       throw refusal(
         server.id,
         "request for information",
-        new Error("Terax does not answer requests for information as tasks."),
+        new Error("Oarlock does not answer requests for information as tasks."),
       );
     }
     const form = elicitationFields(params.requestedSchema);

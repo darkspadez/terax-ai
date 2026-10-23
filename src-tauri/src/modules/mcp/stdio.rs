@@ -31,7 +31,7 @@ const EOF_GRACE: Duration = Duration::from_secs(1);
 const TERM_GRACE: Duration = Duration::from_secs(2);
 /// The environment capture marks its shell with this; a server must not
 /// inherit it, or shells it starts would skip the user's setup.
-const RESOLVING_MARKER: &str = "TERAX_RESOLVING_ENVIRONMENT";
+const RESOLVING_MARKER: &str = "OARLOCK_RESOLVING_ENVIRONMENT";
 
 fn spawn_thread(
     name: String,
@@ -85,7 +85,7 @@ pub fn resolve_cwd(cwd: Option<&str>) -> Result<WorkingFolder, String> {
     }
 }
 
-/// The child's environment as an ordered list of changes over Terax's own:
+/// The child's environment as an ordered list of changes over Oarlock's own:
 /// the user's shell environment, then the overrides every child gets
 /// (`workspace::child_env_overrides`), then what the server's settings set,
 /// secrets last. `None` removes a variable.
@@ -124,7 +124,7 @@ pub struct SpawnSpec {
 pub struct StdioExit {
     pub code: Option<i32>,
     pub signal: Option<i32>,
-    /// Why Terax stopped it, when it did (a message over the size limit).
+    /// Why Oarlock stopped it, when it did (a message over the size limit).
     pub reason: Option<String>,
     pub stderr_tail: String,
 }
@@ -170,7 +170,7 @@ impl StdioSession {
         }
         self.close_stdin();
         let session = self.clone();
-        let spawned = spawn_thread(format!("terax-mcp-stop-{}", self.child.id()), move || {
+        let spawned = spawn_thread(format!("oarlock-mcp-stop-{}", self.child.id()), move || {
             if !session.wait_exit(EOF_GRACE) {
                 session.terminate();
                 session.wait_exit(TERM_GRACE);
@@ -296,7 +296,7 @@ pub fn spawn(
     });
     logs.push(
         &server_id,
-        Stream::Terax,
+        Stream::Oarlock,
         format!("Started {} (process {pid})", binary.display()),
     );
 
@@ -305,7 +305,7 @@ pub fn spawn(
     let reader_session = Arc::downgrade(&session);
     let reader_logs = logs.clone();
     let reader_id = server_id.clone();
-    let reader = spawn_thread(format!("terax-mcp-out-{pid}"), move || {
+    let reader = spawn_thread(format!("oarlock-mcp-out-{pid}"), move || {
         let mut decoder = LineDecoder::with_limit(max_message);
         let mut buf = vec![0u8; READ_BUF];
         let mut deliver = |line: Line| -> bool {
@@ -333,7 +333,7 @@ pub fn spawn(
                     }
                     Err(oversize) => {
                         let text = format!("Stopped: the server {oversize}");
-                        reader_logs.push(&reader_id, Stream::Terax, text.clone());
+                        reader_logs.push(&reader_id, Stream::Oarlock, text.clone());
                         if let Some(s) = reader_session.upgrade() {
                             s.kill_with_reason(text);
                         }
@@ -358,7 +358,7 @@ pub fn spawn(
     let stderr_tail = tail.clone();
     let stderr_logs = logs.clone();
     let stderr_id = server_id.clone();
-    let stderr_thread = spawn_thread(format!("terax-mcp-err-{pid}"), move || {
+    let stderr_thread = spawn_thread(format!("oarlock-mcp-err-{pid}"), move || {
         let mut splitter = LineSplitter::default();
         let mut buf = [0u8; 4096];
         let mut emit = |raw: &[u8]| {
@@ -390,7 +390,7 @@ pub fn spawn(
         }
     };
 
-    let waited = spawn_thread(format!("terax-mcp-wait-{pid}"), move || {
+    let waited = spawn_thread(format!("oarlock-mcp-wait-{pid}"), move || {
         let status = child.wait();
         exited.store(true, Ordering::Release);
         // Bounded, not joined: a grandchild that inherited the pipes keeps
@@ -409,7 +409,7 @@ pub fn spawn(
             (None, Some(signal)) => format!("Ended by signal {signal}"),
             (None, None) => "Exited".to_string(),
         };
-        logs.push(&server_id, Stream::Terax, note);
+        logs.push(&server_id, Stream::Oarlock, note);
         let stderr_tail = tail
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -588,7 +588,7 @@ mod tests {
             |stream: Stream, text: &str| lines.iter().any(|l| l.stream == stream && l.text == text);
         assert!(has(Stream::Stdout, "banner"));
         assert!(has(Stream::Stderr, "boom"));
-        assert!(has(Stream::Terax, "Exited with code 3"));
+        assert!(has(Stream::Oarlock, "Exited with code 3"));
     }
 
     #[test]
@@ -668,7 +668,7 @@ mod tests {
             vec![("__NV_DISABLE_EXPLICIT_SYNC", None)],
             &[("TOKEN".to_string(), "configured".to_string())],
         );
-        // What a child sees: Terax's environment with the changes applied in order.
+        // What a child sees: Oarlock's environment with the changes applied in order.
         let mut resolved: HashMap<OsString, OsString> = HashMap::from([(
             OsString::from("__NV_DISABLE_EXPLICIT_SYNC"),
             OsString::from("1"),
@@ -703,7 +703,7 @@ mod tests {
     fn programs_resolve_through_the_given_path() {
         let home = WorkingFolder::Home(dirs::home_dir().unwrap());
         assert!(resolve_program("sh", &HashMap::new(), &home).is_ok());
-        let missing = resolve_program("terax-no-such-mcp-server", &HashMap::new(), &home);
+        let missing = resolve_program("oarlock-no-such-mcp-server", &HashMap::new(), &home);
         assert!(missing.unwrap_err().contains("command not found"));
         assert!(resolve_program(" ", &HashMap::new(), &home).is_err());
     }
@@ -730,14 +730,14 @@ mod tests {
             "{error}"
         );
 
-        // Never the home folder a server without one runs in, nor Terax's own.
+        // Never the home folder a server without one runs in, nor Oarlock's own.
         let unset = WorkingFolder::Home(folder.path().to_owned());
         let error = resolve_program("./bin/serve", &env, &unset).unwrap_err();
         assert!(error.contains("no working folder"), "{error}");
 
         // A bare name comes from PATH, even where a file of that name sits.
-        std::fs::copy(&serve, folder.path().join("terax-no-such-mcp-server")).unwrap();
-        let error = resolve_program("terax-no-such-mcp-server", &env, &set).unwrap_err();
+        std::fs::copy(&serve, folder.path().join("oarlock-no-such-mcp-server")).unwrap();
+        let error = resolve_program("oarlock-no-such-mcp-server", &env, &set).unwrap_err();
         assert!(error.contains("command not found"), "{error}");
     }
 }

@@ -616,7 +616,7 @@ async function occlusion(run: Run) {
 }
 
 /**
- * Raw WebGPU canvas lifecycle probe (no Terax renderer): isolates which canvas teardown
+ * Raw WebGPU canvas lifecycle probe (no Oarlock renderer): isolates which canvas teardown
  * strategy leaves graphics memory behind when the window is occluded and restored. The
  * "destroy" variant reproduces WebGpuCanvasPool's reclaim (unconfigure, 1x1, remove, drop).
  */
@@ -1016,7 +1016,7 @@ export async function runNamedWorkload(name: string, context: LabContext): Promi
   // change the measured memory behaviour. Off by default for the CPU/energy workloads.
   // Renderer tuning knob (renderers that predate it ignore it): idle canvas parking delay.
   const parkMs = context.params.get("parkMs");
-  if (parkMs !== null) localStorage.setItem("terax:terminal-canvas-park-ms", parkMs);
+  if (parkMs !== null) localStorage.setItem("oarlock:terminal-canvas-park-ms", parkMs);
   const instrument =
     context.params.get("instrument") ??
     (["occlusion", "move", "resize", "canvas", "tabs"].includes(name) ? "1" : "0");

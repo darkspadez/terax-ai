@@ -59,7 +59,7 @@ describe("theme file persistence", () => {
   it("writes pretty-printed JSON into the themes dir without recreating it", async () => {
     const path = await writeThemeFile(theme());
 
-    expect(path).toBe("/config/themes/my-theme.terax-theme");
+    expect(path).toBe("/config/themes/my-theme.oarlock-theme");
     expect(core.invoke).toHaveBeenCalledWith("fs_stat", {
       path: "/config/themes",
       workspace: host,
@@ -67,7 +67,7 @@ describe("theme file persistence", () => {
     const calls = core.invoke.mock.calls.filter((c) => c[0] === "fs_create_dir");
     expect(calls).toHaveLength(0);
     expect(core.invoke).toHaveBeenLastCalledWith("fs_write_file", {
-      path: "/config/themes/my-theme.terax-theme",
+      path: "/config/themes/my-theme.oarlock-theme",
       content: JSON.stringify(theme(), null, 2),
       workspace: host,
       source: "theme",
@@ -90,7 +90,7 @@ describe("theme file persistence", () => {
   it("deletes a theme file and swallows a missing-file failure", async () => {
     await deleteThemeFile("my-theme");
     expect(core.invoke).toHaveBeenCalledWith("fs_delete", {
-      path: "/config/themes/my-theme.terax-theme",
+      path: "/config/themes/my-theme.oarlock-theme",
       workspace: host,
     });
 

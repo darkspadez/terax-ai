@@ -137,7 +137,7 @@ export async function createWebGpuImageSupport(
   shaders: WebGpuImageShaderSources,
 ): Promise<WebGpuImageSupport> {
   const screenLayout = device.createBindGroupLayout({
-    label: "Terax terminal image screen",
+    label: "Oarlock terminal image screen",
     entries: [
       {
         binding: 0,
@@ -147,7 +147,7 @@ export async function createWebGpuImageSupport(
     ],
   });
   const textureLayout = device.createBindGroupLayout({
-    label: "Terax terminal image texture",
+    label: "Oarlock terminal image texture",
     entries: [
       {
         binding: 0,
@@ -157,11 +157,11 @@ export async function createWebGpuImageSupport(
     ],
   });
   const imageModule = device.createShaderModule({
-    label: "Terax terminal image shader",
+    label: "Oarlock terminal image shader",
     code: imageShader(shaders.screenStruct),
   });
   const cellsModule = device.createShaderModule({
-    label: "Terax terminal layered cell shader",
+    label: "Oarlock terminal layered cell shader",
     code: layeredCellsShader(shaders.background),
   });
   const cellsLayout = device.createPipelineLayout({
@@ -181,7 +181,7 @@ export async function createWebGpuImageSupport(
   };
   const [image, cellsOverImages, decorations] = await Promise.all([
     device.createRenderPipelineAsync({
-      label: "Terax terminal image pipeline",
+      label: "Oarlock terminal image pipeline",
       layout: device.createPipelineLayout({
         bindGroupLayouts: [screenLayout, textureLayout],
       }),
@@ -210,11 +210,11 @@ export async function createWebGpuImageSupport(
     }),
     cellsPipeline(
       "fragment_over_images",
-      "Terax terminal cells over images pipeline",
+      "Oarlock terminal cells over images pipeline",
     ),
     cellsPipeline(
       "fragment_decorations",
-      "Terax terminal decorations over images pipeline",
+      "Oarlock terminal decorations over images pipeline",
     ),
   ]);
   const pipelines: ImagePipelines = {
@@ -258,7 +258,7 @@ export class WebGpuImageLayer {
     uniform: GPUBuffer,
   ) {
     this.screenGroup = device.createBindGroup({
-      label: "Terax terminal image screen",
+      label: "Oarlock terminal image screen",
       layout: pipelines.screenLayout,
       entries: [{ binding: 0, resource: { buffer: uniform } }],
     });
@@ -266,7 +266,7 @@ export class WebGpuImageLayer {
       maxDimension: device.limits?.maxTextureDimension2D ?? 8192,
       create: (width, height) => {
         const texture = device.createTexture({
-          label: "Terax terminal image",
+          label: "Oarlock terminal image",
           size: [width, height],
           format: "rgba8unorm",
           usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
@@ -274,7 +274,7 @@ export class WebGpuImageLayer {
         return {
           texture,
           bindGroup: device.createBindGroup({
-            label: "Terax terminal image texture",
+            label: "Oarlock terminal image texture",
             layout: pipelines.textureLayout,
             entries: [{ binding: 0, resource: texture.createView() }],
           }),
@@ -400,7 +400,7 @@ export class WebGpuImageLayer {
       let capacity = MIN_INSTANCE_CAPACITY;
       while (capacity < draws.count) capacity *= 2;
       this.instanceBuffer = this.device.createBuffer({
-        label: "Terax terminal image placements",
+        label: "Oarlock terminal image placements",
         size: capacity * IMAGE_INSTANCE_BYTES,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
       });

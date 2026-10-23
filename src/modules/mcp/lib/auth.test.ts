@@ -82,7 +82,7 @@ describe("watchUnauthorized", () => {
       const path = new URL(String(input)).pathname;
       return new Response(null, {
         status: path === "/ok" ? 200 : 401,
-        headers: path === "/sign-in" ? { "x-terax-sign-in": "required" } : {},
+        headers: path === "/sign-in" ? { "x-oarlock-sign-in": "required" } : {},
       });
     }, onUnauthorized);
     expect((await fetch("https://x/ok")).status).toBe(200);

@@ -25,7 +25,7 @@ type Props = {
 };
 
 // Re-renders when the file changes on disk: the watcher reports it (the
-// watch set covers Markdown tabs), and writes made through Terax (AI edits,
+// watch set covers Markdown tabs), and writes made through Oarlock (AI edits,
 // editor saves) are announced at once.
 function useFileRevision(path: string): number {
   const [revision, setRevision] = useState(0);
@@ -125,7 +125,7 @@ export function MarkdownPreviewPane({ path, visible, onSetView }: Props) {
               (refusal ? (
                 <PrivacyRefusalNotice
                   refusal={refusal}
-                  title="Terax cannot open this file"
+                  title="Oarlock cannot open this file"
                   className="items-start text-left"
                 />
               ) : (

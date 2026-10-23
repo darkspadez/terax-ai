@@ -99,7 +99,7 @@ describe("snippet store", () => {
     expect(store.getState().snippets[0].name).toBe("renamed");
 
     await vi.waitFor(() =>
-      expect(events.emit).toHaveBeenCalledWith("terax://ai-snippets-changed"),
+      expect(events.emit).toHaveBeenCalledWith("oarlock://ai-snippets-changed"),
     );
   });
 

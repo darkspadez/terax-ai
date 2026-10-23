@@ -131,7 +131,7 @@ export function createCommandItems(
     },
     {
       id: "app.quit",
-      title: "Quit Terax",
+      title: "Quit Oarlock",
       group: "General",
       keywords: ["exit", "close all windows"],
       icon: Logout01Icon,

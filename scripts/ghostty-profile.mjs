@@ -3,11 +3,11 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-const temporary = await mkdtemp(join(tmpdir(), "terax-core-profile-"));
+const temporary = await mkdtemp(join(tmpdir(), "oarlock-core-profile-"));
 const directories = [resolve("packages/ghostty-core/adapted")];
-if (process.env.TERAX_PROFILE_BASELINE)
-  directories.unshift(resolve(process.env.TERAX_PROFILE_BASELINE));
-if (process.env.TERAX_PROFILE_REVERSE === "1") directories.reverse();
+if (process.env.OARLOCK_PROFILE_BASELINE)
+  directories.unshift(resolve(process.env.OARLOCK_PROFILE_BASELINE));
+if (process.env.OARLOCK_PROFILE_REVERSE === "1") directories.reverse();
 let report;
 const results = [];
 try {
@@ -29,9 +29,9 @@ try {
           shell: process.platform === "win32",
           env: {
             ...process.env,
-            TERAX_PROFILE_CORE_DIR: directory,
-            TERAX_PROFILE_ARTIFACT: artifact,
-            TERAX_PROFILE_REPORT: path,
+            OARLOCK_PROFILE_CORE_DIR: directory,
+            OARLOCK_PROFILE_ARTIFACT: artifact,
+            OARLOCK_PROFILE_REPORT: path,
           },
         },
       );
@@ -50,8 +50,8 @@ try {
     results,
   };
   const output = `${JSON.stringify(report, null, 2)}\n`;
-  if (process.env.TERAX_PROFILE_REPORT)
-    await writeFile(process.env.TERAX_PROFILE_REPORT, output);
+  if (process.env.OARLOCK_PROFILE_REPORT)
+    await writeFile(process.env.OARLOCK_PROFILE_REPORT, output);
   else console.info(output);
 } finally {
   await rm(temporary, { recursive: true, force: true });

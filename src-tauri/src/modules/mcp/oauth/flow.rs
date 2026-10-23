@@ -125,7 +125,7 @@ pub async fn discover(
                 .filter(|url| url.query().is_none())
                 .map(|url| (raw.clone(), url))
         })
-        .ok_or("the server names no authorization server Terax can use (https only)")?;
+        .ok_or("the server names no authorization server Oarlock can use (https only)")?;
     let mut auth = None;
     for url in discovery::auth_server_metadata_urls(&issuer.1) {
         if let Some(body) = metadata(policy, url).await? {
@@ -171,7 +171,7 @@ pub fn parse_registration(
 ) -> Result<Registration, String> {
     if !status.is_success() {
         return Err(format!(
-            "the authorization server refused to register Terax: {}",
+            "the authorization server refused to register Oarlock: {}",
             oauth_error(body).unwrap_or_else(|| format!("HTTP {status}"))
         ));
     }
@@ -188,7 +188,7 @@ pub fn parse_registration(
         Some("client_secret_post") => ClientAuth::ClientSecretPost,
         Some(other) => {
             return Err(format!(
-            "the authorization server registered Terax for {other}, which Terax does not support"
+            "the authorization server registered Oarlock for {other}, which Oarlock does not support"
         ))
         }
         None if client_secret.is_some() => ClientAuth::ClientSecretBasic,
@@ -211,7 +211,7 @@ pub fn parse_registration(
 /// The registration request: a native public client with a loopback redirect.
 pub fn registration_request(redirect_uri: &str, scope: Option<&str>) -> Vec<u8> {
     let mut body = serde_json::json!({
-        "client_name": "Terax",
+        "client_name": "Oarlock",
         "redirect_uris": [redirect_uri],
         "grant_types": ["authorization_code", "refresh_token"],
         "response_types": ["code"],
@@ -354,7 +354,7 @@ pub fn parse_token_response(status: StatusCode, body: &[u8]) -> Result<Granted, 
         Some(kind) if kind.eq_ignore_ascii_case("bearer") => {}
         Some(kind) => {
             return Err(TokenError::Failed(format!(
-                "the server issued a {} token; Terax supports Bearer tokens only",
+                "the server issued a {} token; Oarlock supports Bearer tokens only",
                 clean(kind)
             )))
         }

@@ -4,7 +4,7 @@
 /// Keychain service of MCP secrets. The page writes them through
 /// `mcp_secret_set` and can never read them back: the generic `secrets_*`
 /// commands refuse this service (`secrets::page_may_use_service`).
-pub const SECRET_SERVICE: &str = "terax-mcp";
+pub const SECRET_SERVICE: &str = "oarlock-mcp";
 
 /// `[a-z0-9-]`, 1 to 64 characters: a UUID or a short slug. Part of keychain
 /// accounts and log keys, so nothing that could alias another.

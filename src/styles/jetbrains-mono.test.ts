@@ -42,7 +42,7 @@ describe("JetBrains Mono font faces", () => {
   });
 
   // Overlapping ranges would download two segments for one character; icons
-  // belong to Terax Symbols, and claiming VS16 would pull emoji into a
+  // belong to Oarlock Symbols, and claiming VS16 would pull emoji into a
   // monochrome face.
   it("splits each style into disjoint ranges outside the Private Use Area and VS15/16", () => {
     for (const style of ["normal", "italic"]) {

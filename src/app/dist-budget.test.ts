@@ -209,7 +209,7 @@ describe("built startup graph", () => {
   let outDir = "";
 
   beforeAll(() => {
-    outDir = mkdtempSync(join(tmpdir(), "terax-dist-budget-"));
+    outDir = mkdtempSync(join(tmpdir(), "oarlock-dist-budget-"));
     // Sourcemaps list every module inside each chunk, so the package check does
     // not depend on how a chunk happens to be named. Built into a temp dir:
     // the real dist/ is untouched.
@@ -227,8 +227,8 @@ describe("built startup graph", () => {
       ],
       {
         cwd: root,
-        // TERAX_BENCH is explicitly off: a shipped build must not contain the app-lab driver.
-        env: { ...process.env, NODE_ENV: "production", TERAX_BENCH: "" },
+        // OARLOCK_BENCH is explicitly off: a shipped build must not contain the app-lab driver.
+        env: { ...process.env, NODE_ENV: "production", OARLOCK_BENCH: "" },
         stdio: "pipe",
         timeout: 240_000,
       },
@@ -455,7 +455,7 @@ describe("built startup graph", () => {
           env: {
             ...process.env,
             NODE_ENV: "production",
-            TERAX_BENCH: "1",
+            OARLOCK_BENCH: "1",
             ...extra,
           },
           stdio: "pipe",
@@ -470,10 +470,10 @@ describe("built startup graph", () => {
       }
       return "";
     };
-    expect(failure({ TERAX_BENCH_IDENTIFIER: "" })).toContain(
-      "TERAX_BENCH_IDENTIFIER",
+    expect(failure({ OARLOCK_BENCH_IDENTIFIER: "" })).toContain(
+      "OARLOCK_BENCH_IDENTIFIER",
     );
-    expect(failure({ TERAX_BENCH_IDENTIFIER: "app.crynta.terax" })).toContain(
+    expect(failure({ OARLOCK_BENCH_IDENTIFIER: "sh.oarlock.app" })).toContain(
       "not the product identifier",
     );
     // Nothing was emitted by either attempt.
@@ -499,21 +499,21 @@ describe("built startup graph", () => {
     // Parses every chunk (5.5 MB): a second alone, more beside other suites.
   }, 30_000);
 
-  it("contains none of the app-lab benchmark driver (TERAX_BENCH is off)", () => {
+  it("contains none of the app-lab benchmark driver (OARLOCK_BENCH is off)", () => {
     // The driver (src/bench) and its Tauri commands exist only in builds made with
-    // TERAX_BENCH=1: `__TERAX_BENCH__` is the literal `false` otherwise, so its lazy import, the
+    // OARLOCK_BENCH=1: `__OARLOCK_BENCH__` is the literal `false` otherwise, so its lazy import, the
     // chunks behind it and every bench-only string are removed before bundling.
     const markers = [
       "bench_config",
       "bench_window",
       "bench_exit",
-      "__teraxBenchConfig",
+      "__oarlockBenchConfig",
       // The smoothness probe's seam (src/bench/smoothHooks.ts): product code reports to it
-      // only behind __TERAX_BENCH__, and the lookup itself is gated too.
-      "__teraxSmooth",
-      "terax:bench:",
-      "TERAX_BENCH",
-      "__TERAX_BENCH__",
+      // only behind __OARLOCK_BENCH__, and the lookup itself is gated too.
+      "__oarlockSmooth",
+      "oarlock:bench:",
+      "OARLOCK_BENCH",
+      "__OARLOCK_BENCH__",
     ];
     const files = (dir: string): string[] =>
       readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>

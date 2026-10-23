@@ -100,7 +100,7 @@ describe("LSP binary detection", () => {
     expect(core.invoke).toHaveBeenCalledTimes(2);
   });
 
-  // crynta/terax-ai#1039: servers are looked up through the shell set in Terax.
+  // crynta/terax-ai#1039: servers are looked up through the shell set in Oarlock.
   it("looks binaries up through the configured terminal shell", async () => {
     core.invoke.mockResolvedValue("/usr/bin/gopls");
     usePreferencesStore.setState({ terminalShell: "/usr/bin/fish" });

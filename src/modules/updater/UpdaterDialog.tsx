@@ -12,21 +12,18 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState } from "react";
 import { UPDATES_ENABLED, useUpdater } from "./useUpdater";
 
-type DistroKey = "arch" | "debian" | "fedora";
+type DistroKey = "debian" | "fedora";
 
 function distroCommand(key: DistroKey, version: string): string {
   switch (key) {
-    case "arch":
-      return "yay -S terax-bin";
     case "debian":
-      return `sudo apt install ./Terax_${version}_amd64.deb`;
+      return `sudo apt install ./Oarlock_${version}_amd64.deb`;
     case "fedora":
-      return `sudo dnf install ./Terax-${version}-1.x86_64.rpm`;
+      return `sudo dnf install ./Oarlock-${version}-1.x86_64.rpm`;
   }
 }
 
 const DISTROS: { key: DistroKey; label: string }[] = [
-  { key: "arch", label: "Arch" },
   { key: "debian", label: "Debian / Ubuntu" },
   { key: "fedora", label: "Fedora / RHEL" },
 ];
@@ -45,7 +42,7 @@ export function UpdaterDialog() {
 function UpdatePrompt() {
   const { status, install, dismiss } = useUpdater();
   const [copied, setCopied] = useState(false);
-  const [distro, setDistro] = useState<DistroKey>("arch");
+  const [distro, setDistro] = useState<DistroKey>("debian");
   const manualVersion =
     status.kind === "manual-available" ? status.info.version : "";
   const activeCommand = distroCommand(distro, manualVersion);
@@ -97,12 +94,12 @@ function UpdatePrompt() {
               : downloading
                 ? "Downloading update…"
                 : manual
-                  ? `Terax v${manual.version} is available`
-                  : `Terax v${update?.version} is available`}
+                  ? `Oarlock v${manual.version} is available`
+                  : `Oarlock v${update?.version} is available`}
           </DialogTitle>
           <DialogDescription>
             {ready
-              ? "Restart Terax to finish installing."
+              ? "Restart Oarlock to finish installing."
               : downloading
                 ? progress !== null
                   ? `${progress.toFixed(0)}% — ${formatBytes(status.downloaded)}`

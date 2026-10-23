@@ -12,7 +12,7 @@ describe("resolveAgentNotificationDelivery", () => {
     ).toBe("none");
   });
 
-  it("uses a native alert while Terax is unfocused", () => {
+  it("uses a native alert while Oarlock is unfocused", () => {
     expect(
       resolveAgentNotificationDelivery({
         focused: false,

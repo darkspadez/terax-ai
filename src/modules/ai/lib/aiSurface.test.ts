@@ -28,7 +28,7 @@ describe("AI surfaces", () => {
 
   // crynta/terax-ai#444: the new conversation key reaches a terminal elsewhere.
   it("leave out terminals, the shell input and the rest of the window", () => {
-    expect(isAiSurfaceTarget(inside("[data-terax-terminal-surface]"))).toBe(
+    expect(isAiSurfaceTarget(inside("[data-oarlock-terminal-surface]"))).toBe(
       false,
     );
     // The input bar holds a block terminal's shell input too; only its AI

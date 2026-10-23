@@ -625,7 +625,7 @@ impl Hub {
         self.shared.started.call_once(|| {
             let shared = self.shared.clone();
             std::thread::Builder::new()
-                .name("terax-pty-hub".into())
+                .name("oarlock-pty-hub".into())
                 .stack_size(256 * 1024)
                 .spawn(move || {
                     // Every terminal's stream state lives here, half updated

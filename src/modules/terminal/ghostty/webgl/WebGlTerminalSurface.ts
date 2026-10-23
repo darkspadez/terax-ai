@@ -59,7 +59,7 @@ import type {
 const CURSOR_BLINK_MS = 600;
 const TEXT_BLINK_MS = 600;
 const MAX_SURFACE_CELLS = 262_144;
-/** Safe on every WebGL2 implementation Terax runs on (MAX_TEXTURE_SIZE is at least 8192 there). */
+/** Safe on every WebGL2 implementation Oarlock runs on (MAX_TEXTURE_SIZE is at least 8192 there). */
 const WEBGL_MAX_BACKING_DIMENSION = 8192;
 
 export type WebGlTerminalSurfaceOptions = {
@@ -185,8 +185,8 @@ export class WebGlTerminalSurface
     this.root.className = "absolute inset-0 overflow-hidden";
     this.root.style.userSelect = "none";
     this.updateRootBackground();
-    this.root.setAttribute("data-terax-ghostty-surface", "webgl");
-    this.root.setAttribute("data-terax-terminal-surface", "");
+    this.root.setAttribute("data-oarlock-ghostty-surface", "webgl");
+    this.root.setAttribute("data-oarlock-terminal-surface", "");
     this.input.setAttribute("aria-label", "Terminal input");
     this.input.setAttribute("autocapitalize", "off");
     this.input.setAttribute("autocomplete", "off");

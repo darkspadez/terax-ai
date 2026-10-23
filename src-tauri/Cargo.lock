@@ -2928,6 +2928,91 @@ dependencies = [
 ]
 
 [[package]]
+name = "oarlock"
+version = "0.1.0"
+dependencies = [
+ "apple-native-keyring-store",
+ "arboard",
+ "block2",
+ "bytes",
+ "dirs 7.0.0",
+ "dispatch2",
+ "fontdb",
+ "futures-util",
+ "getrandom 0.4.3",
+ "globset",
+ "grep-regex",
+ "grep-searcher",
+ "gtk",
+ "ignore",
+ "image",
+ "keyring",
+ "keyring-core",
+ "libc",
+ "log",
+ "memchr",
+ "notify",
+ "nucleo-matcher",
+ "oarlock-control-protocol",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
+ "objc2-core-services",
+ "objc2-foundation",
+ "portable-pty",
+ "proptest",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2",
+ "shared_child",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-dialog",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-log",
+ "tauri-plugin-notification",
+ "tauri-plugin-opener",
+ "tauri-plugin-os",
+ "tauri-plugin-process",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-store",
+ "tauri-plugin-updater",
+ "tauri-plugin-window-state",
+ "tempfile",
+ "tokio",
+ "wasmparser",
+ "which",
+ "window-vibrancy",
+ "windows-native-keyring-store",
+ "windows-sys 0.61.2",
+ "zip",
+]
+
+[[package]]
+name = "oarlock-cli"
+version = "0.1.0"
+dependencies = [
+ "dirs 7.0.0",
+ "libc",
+ "oarlock-control-protocol",
+ "serde_json",
+ "tempfile",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "oarlock-control-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "objc2"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5219,91 +5304,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5fed54709c5b3a53d09bb1c113ea4f5ceafd1e772ddcb0030a82e1d56c087b08"
 dependencies = [
  "new_debug_unreachable",
-]
-
-[[package]]
-name = "terax"
-version = "0.9.0"
-dependencies = [
- "apple-native-keyring-store",
- "arboard",
- "block2",
- "bytes",
- "dirs 7.0.0",
- "dispatch2",
- "fontdb",
- "futures-util",
- "getrandom 0.4.3",
- "globset",
- "grep-regex",
- "grep-searcher",
- "gtk",
- "ignore",
- "image",
- "keyring",
- "keyring-core",
- "libc",
- "log",
- "memchr",
- "notify",
- "nucleo-matcher",
- "objc2",
- "objc2-app-kit",
- "objc2-core-foundation",
- "objc2-core-services",
- "objc2-foundation",
- "portable-pty",
- "proptest",
- "reqwest",
- "rustls",
- "serde",
- "serde_json",
- "sha2",
- "shared_child",
- "tauri",
- "tauri-build",
- "tauri-plugin-autostart",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-dialog",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-log",
- "tauri-plugin-notification",
- "tauri-plugin-opener",
- "tauri-plugin-os",
- "tauri-plugin-process",
- "tauri-plugin-single-instance",
- "tauri-plugin-store",
- "tauri-plugin-updater",
- "tauri-plugin-window-state",
- "tempfile",
- "terax-control-protocol",
- "tokio",
- "wasmparser",
- "which",
- "window-vibrancy",
- "windows-native-keyring-store",
- "windows-sys 0.61.2",
- "zip",
-]
-
-[[package]]
-name = "terax-cli"
-version = "0.9.0"
-dependencies = [
- "dirs 7.0.0",
- "libc",
- "serde_json",
- "tempfile",
- "terax-control-protocol",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "terax-control-protocol"
-version = "0.9.0"
-dependencies = [
- "serde",
- "serde_json",
 ]
 
 [[package]]

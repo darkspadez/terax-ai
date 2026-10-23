@@ -13,7 +13,7 @@ export const PROJECT: OpenProject = {
 
 export function skill(overrides: Partial<Skill> = {}): Skill {
   const name = overrides.name ?? "pdf";
-  const source = overrides.source ?? "terax";
+  const source = overrides.source ?? "oarlock";
   const id = overrides.id ?? `${source}/${name}`;
   return {
     id,

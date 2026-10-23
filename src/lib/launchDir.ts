@@ -13,7 +13,7 @@ let openedNow = false;
 const forwardSlashes = (path: string) => path.replace(/\\/g, "/");
 
 /**
- * The main window starts in the folder Terax was launched with (drained
+ * The main window starts in the folder Oarlock was launched with (drained
  * once); another window in the folder a later launch opened it on, else where
  * the window that opened it was (`?cwd=`); else in the process's directory.
  */
@@ -49,7 +49,7 @@ export function getLaunchDir(): string | undefined {
 }
 
 /**
- * A folder Terax was asked to open (command line, Open in Terax, a later
+ * A folder Oarlock was asked to open (command line, Open in Oarlock, a later
  * launch), as opposed to the directory it merely started in: it wins over the
  * restored spaces.
  */

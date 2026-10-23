@@ -14,7 +14,7 @@ use tauri::PhysicalPosition;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_window_state::StateFlags;
 
-/// The folder Terax was launched with (not a launched file's parent), until
+/// The folder Oarlock was launched with (not a launched file's parent), until
 /// the main window reads it: drained so HMR / re-mounts can't replay it.
 struct LaunchDir(Mutex<LaunchFolder>);
 
@@ -51,7 +51,7 @@ impl LaunchDir {
     }
 }
 
-/// Files the OS asked Terax to open, per window, until that window's page
+/// Files the OS asked Oarlock to open, per window, until that window's page
 /// takes them: queued as well as announced, so a file that arrives while the
 /// page boots still opens, and taken once so a reload cannot replay it.
 #[derive(Default)]
@@ -104,7 +104,7 @@ enum LaunchEntry {
 #[derive(Default, Debug, PartialEq)]
 struct LaunchTarget {
     dir: Option<String>,
-    /// The first dir arg: a folder the user asked Terax to open.
+    /// The first dir arg: a folder the user asked Oarlock to open.
     folder: Option<String>,
     files: Vec<String>,
 }
@@ -162,7 +162,7 @@ fn parse_launch_args(args: impl IntoIterator<Item = String>, cwd: Option<&Path>)
     resolve_launch_target(entries)
 }
 
-/// Explorer passes a drive root (Open in Terax on a drive or the background
+/// Explorer passes a drive root (Open in Oarlock on a drive or the background
 /// of one) as `"C:\"`, whose `\"` the argument parser reads as an escaped
 /// quote: `C:"`. No Windows path holds a quote, so a final one is that `\`.
 fn unescape_root_quote(arg: String) -> String {
@@ -194,7 +194,7 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
         if let Some(t) = tab.as_deref().filter(|s| !s.is_empty()) {
             // emit() serializes via JSON — no string-escape footgun, unlike
             // eval() with format!(). Frontend listens via Tauri event API.
-            let _ = window.emit("terax:settings-tab", t);
+            let _ = window.emit("oarlock:settings-tab", t);
         }
         return Ok(());
     }
@@ -270,7 +270,7 @@ pub fn run() {
     #[cfg(windows)]
     {
         let args: Vec<String> = std::env::args().collect();
-        if args.get(1).map(String::as_str) == Some("__terax_notify") {
+        if args.get(1).map(String::as_str) == Some("__oarlock_notify") {
             if let (Some(agent), Some(event)) = (args.get(2), args.get(3)) {
                 agent::emit_conout_marker(agent, event);
             }
@@ -294,7 +294,7 @@ pub fn run() {
     let builder = tauri::Builder::default();
     // First, so a later launch hands over before anything else starts. Debug
     // builds skip it: a dev build would otherwise hand off to an installed
-    // Terax (same identifier) and exit.
+    // Oarlock (same identifier) and exit.
     let builder = if cfg!(debug_assertions) {
         builder
     } else {
@@ -335,7 +335,7 @@ pub fn run() {
         // Open Folder's picker; app windows may only open (capabilities/dialog.json).
         .plugin(tauri_plugin_dialog::init())
         // One async scheme multiplexes every terminal's output; see pty/hub.rs.
-        .register_asynchronous_uri_scheme_protocol("terax-pty", pty::stream_protocol)
+        .register_asynchronous_uri_scheme_protocol("oarlock-pty", pty::stream_protocol)
         // Previews outside the authorized folders while the app may access all of them.
         .register_asynchronous_uri_scheme_protocol(
             modules::asset_all_folders::SCHEME,
@@ -371,7 +371,7 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             modules::color_scheme::follow();
             if let Err(error) = control::start(_app.handle().clone(), control_for_setup.clone()) {
-                log::warn!("could not start Terax control server: {error}");
+                log::warn!("could not start Oarlock control server: {error}");
             }
             // After `main` exists, before any page runs.
             windows::restore(_app.handle());
@@ -841,5 +841,19 @@ mod launch_target_tests {
 
         files.queue("main", vec!["/a/x.rs".into()]);
         assert_eq!(files.take("main"), vec!["/a/x.rs"]);
+    }
+
+    /// The updater plugin parses `plugins.updater` when the app starts, and a configuration it
+    /// cannot parse stops the start. Updates are off until this product publishes releases: no
+    /// signing key, no endpoint, and no updater artifacts to sign at bundle time.
+    #[test]
+    fn the_updater_starts_with_updates_off() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let updater: tauri_plugin_updater::Config =
+            serde_json::from_value(config["plugins"]["updater"].clone()).unwrap();
+        assert!(updater.pubkey.is_empty());
+        assert!(updater.endpoints.is_empty());
+        assert_eq!(config["bundle"]["createUpdaterArtifacts"], false);
     }
 }

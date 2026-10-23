@@ -2,7 +2,7 @@
 //!
 //! The frontmatter is read by a small YAML reader that covers what skill files use: top-level
 //! `key: value` fields whose values are plain, quoted or block scalars, flow or block lists, or
-//! maps. A field Terax uses must parse; any other field is skipped whatever it holds, so a field
+//! maps. A field Oarlock uses must parse; any other field is skipped whatever it holds, so a field
 //! another tool adds never breaks a skill. Validation follows the Agent Skills specification and
 //! Claude Code where the specification is silent: a missing `name` is the folder's name and a
 //! missing `description` the first line of the instructions, each with a warning.
@@ -129,7 +129,7 @@ pub fn parse_skill(text: &str, dir_name: &str) -> Result<SkillMeta, Vec<String>>
     let user_invocable = bool_field(&entries, "user-invocable", true, &mut errors);
     if entries.iter().any(|entry| entry.key == "allowed-tools") {
         warnings.push(
-            "`allowed-tools` is not used: Terax asks before tools run as the conversation's approval mode says"
+            "`allowed-tools` is not used: Oarlock asks before tools run as the conversation's approval mode says"
                 .to_owned(),
         );
     }

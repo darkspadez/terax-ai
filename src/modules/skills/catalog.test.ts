@@ -27,7 +27,7 @@ describe("the skills a run may use", () => {
     skill({ name: "ai-only", userInvocable: false }),
   ];
   const snapshot = {
-    teraxDir: "",
+    oarlockDir: "",
     userDir: null,
     skills: all,
     invalid: [],

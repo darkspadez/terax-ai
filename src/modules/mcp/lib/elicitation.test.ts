@@ -181,7 +181,7 @@ describe("elicitationFields", () => {
       }),
     ).toEqual({
       unsupported:
-        'The field "Address" asks for a kind of value Terax\'s forms do not support.',
+        'The field "Address" asks for a kind of value Oarlock\'s forms do not support.',
     });
   });
 

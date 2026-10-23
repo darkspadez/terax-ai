@@ -118,7 +118,7 @@ export const EMOJI_CONSTRAINT = makeConstraint({
 });
 
 /**
- * Metrics for a cell that is the font's face, as Terax's cells are: the
+ * Metrics for a cell that is the font's face, as Oarlock's cells are: the
  * cell is the line box the text is centred in. `capHeight` is the font's
  * capital height in device pixels.
  */

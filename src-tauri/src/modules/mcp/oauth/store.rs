@@ -25,7 +25,7 @@ pub enum ClientAuth {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum ClientSource {
-    /// Registered by Terax (RFC 7591); the secret, if any, is in the client record.
+    /// Registered by Oarlock (RFC 7591); the secret, if any, is in the client record.
     Registered,
     /// Configured by the user; the secret, if any, is `<server>/oauth/client-secret`.
     Configured,
@@ -71,7 +71,7 @@ impl std::fmt::Debug for TokenSet {
     }
 }
 
-/// A client Terax registered with an authorization server, bound to that server's issuer and
+/// A client Oarlock registered with an authorization server, bound to that server's issuer and
 /// to the redirect URI it was registered with.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

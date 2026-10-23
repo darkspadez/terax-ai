@@ -30,8 +30,8 @@ describe("global motion budget", () => {
     const names = infiniteAnimations(css).join("\n");
     expect(names).toContain("--animate-spin");
     expect(names).toContain("--animate-pulse");
-    expect(names).toContain("terax-shimmer");
-    expect(names).toContain("terax-blink");
+    expect(names).toContain("oarlock-shimmer");
+    expect(names).toContain("oarlock-blink");
   });
 
   it("pauses all animations while the window is inactive", () => {
@@ -43,14 +43,14 @@ describe("global motion budget", () => {
   });
 
   it("keeps a pending approval's pulse finite", () => {
-    const rule = css.match(/\.terax-attention-pulse\s*\{([^}]*)\}/)?.[1] ?? "";
+    const rule = css.match(/\.oarlock-attention-pulse\s*\{([^}]*)\}/)?.[1] ?? "";
     expect(rule).toMatch(/animation:/);
     expect(rule).not.toMatch(/infinite/);
   });
 
   it("removes the repeating indicators under prefers-reduced-motion", () => {
     const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion"));
-    expect(reduced).toMatch(/\.terax-shimmer\s*\{[^}]*animation:\s*none/);
-    expect(reduced).toMatch(/\.terax-blink[^{]*\{[^}]*animation:\s*none/);
+    expect(reduced).toMatch(/\.oarlock-shimmer\s*\{[^}]*animation:\s*none/);
+    expect(reduced).toMatch(/\.oarlock-blink[^{]*\{[^}]*animation:\s*none/);
   });
 });

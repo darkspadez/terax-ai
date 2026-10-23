@@ -85,11 +85,11 @@ import {
   vmmapIOSurfaces,
 } from "./app_report.ts";
 
-const DESCRIPTION = `App lab: ground-truth resource benchmark of the REAL Terax application (macOS).
+const DESCRIPTION = `App lab: ground-truth resource benchmark of the REAL Oarlock application (macOS).
 
 Unlike scripts/renderer-profile (a synthetic renderer in a bare WKWebView) this builds the real
 app, with the full React shell, real PTYs, real tabs/splits and the real window, from a source
-tree compiled with the \`bench\` cargo feature and \`TERAX_BENCH=1\`. A scenario driver compiled into
+tree compiled with the \`bench\` cargo feature and \`OARLOCK_BENCH=1\`. A scenario driver compiled into
 that build (src/bench) runs inside the UI using the app's own tab actions and reports phase events
 to this orchestrator over a local HTTP server (the scripts/pty-smoke pattern). For every event the
 orchestrator samples exactly the app's own processes (host, WebContent, GPU, Networking: the pids
@@ -106,7 +106,7 @@ Scenarios (\`--scenario\`):
   idle           one idle shell for \`--duration\` s
   input          native key events / input-method calls into a PTY reader (pass/fail in page.log)
 
-The app runs from an isolated bundle (identifier app.crynta.terax.app-lab, its own HOME), never
+The app runs from an isolated bundle (identifier sh.oarlock.app.app-lab, its own HOME), never
 the user's profile; the bench build refuses to start under the product identifier. Build once
 (\`--build-only\`, release with the feature, a separate cargo target dir) and reuse with
 \`--reuse-build\`. To measure a pristine revision rather than the working tree use
@@ -117,17 +117,17 @@ human summary); \`--compare A.json [B.json ...]\` prints deltas (medians when re
 
 const HERE = import.meta.dirname;
 const REPO = join(HERE, "../..");
-const IDENTIFIER: string = "app.crynta.terax.app-lab";
-const PRODUCT_NAME = "Terax App Lab";
+const IDENTIFIER: string = "sh.oarlock.app.app-lab";
+const PRODUCT_NAME = "Oarlock App Lab";
 const MAX_ATTEMPTS = 3;
-const LOCK_PATH = join(tmpdir(), "terax-app-lab.lock");
+const LOCK_PATH = join(tmpdir(), "oarlock-app-lab.lock");
 const SCOPE =
-  "The real Terax application (bench build: full React shell, real PTYs and tabs, real window) " +
+  "The real Oarlock application (bench build: full React shell, real PTYs and tabs, real window) " +
   "in an isolated profile, driven by an in-app scenario driver; process pids come from the " +
   "webview itself. A synthetic coding-agent program runs in the PTYs. Single machine, " +
   "single display; not packaged-app signing, other users' fonts/shell config or cross-platform.";
-/** The app's host process is the `terax` binary of the bench bundle. */
-const APP_ROLE_BY_NAME = { ...ROLE_BY_NAME, terax: "host" };
+/** The app's host process is the `oarlock` binary of the bench bundle. */
+const APP_ROLE_BY_NAME = { ...ROLE_BY_NAME, oarlock: "host" };
 
 const parser = new ArgumentParser(
   {
@@ -178,13 +178,13 @@ const parser = new ArgumentParser(
       flag: "--toggle",
       action: "append",
       metavar: "NAME=VALUE",
-      help: "experiment toggle: localStorage terax:bench:NAME (repeatable)",
+      help: "experiment toggle: localStorage oarlock:bench:NAME (repeatable)",
     },
     localStorage: {
       flag: "--local-storage",
       action: "append",
       metavar: "KEY=VALUE",
-      help: "raw localStorage entry (VALUE 'null' removes), e.g. terax:terminal-canvas-park-ms=off",
+      help: "raw localStorage entry (VALUE 'null' removes), e.g. oarlock:terminal-canvas-park-ms=off",
     },
     window: {
       flag: "--window",
@@ -409,8 +409,8 @@ async function otherBenchmarks(): Promise<string[]> {
     const name = basename(command);
     if (
       name === "renderer-lab" ||
-      (name === "terax" &&
-        command.includes("Terax App Lab") &&
+      (name === "oarlock" &&
+        command.includes("Oarlock App Lab") &&
         pid !== process.pid)
     )
       found.push(`${name}[${pid}]`);
@@ -422,7 +422,7 @@ async function otherBenchmarks(): Promise<string[]> {
 // Build
 // ---------------------------------------------------------------------------------------------
 
-/** Frontend with TERAX_BENCH=1, then the Tauri bundle with the `bench` feature. Returns the .app. */
+/** Frontend with OARLOCK_BENCH=1, then the Tauri bundle with the `bench` feature. Returns the .app. */
 async function build(
   args: Args,
   source: string,
@@ -452,8 +452,8 @@ async function build(
   );
   const env = {
     ...process.env,
-    TERAX_BENCH: "1",
-    TERAX_BENCH_IDENTIFIER: IDENTIFIER,
+    OARLOCK_BENCH: "1",
+    OARLOCK_BENCH_IDENTIFIER: IDENTIFIER,
     CARGO_TARGET_DIR: targetDir,
   };
   const started = monotonic();
@@ -461,7 +461,7 @@ async function build(
   const log = openSync(join(output, "build.log"), "w");
   try {
     const logged = { cwd: source, env, stdout: log, stderr: log };
-    console.log("Building the frontend (TERAX_BENCH=1)...");
+    console.log("Building the frontend (OARLOCK_BENCH=1)...");
     await check(
       ["bun", "run", "vite", "build", "--outDir", dist, "--emptyOutDir"],
       logged,
@@ -502,7 +502,7 @@ async function build(
 
 /** Removes everything a previous run left for the bench identifier (never the product's). */
 async function cleanProfile(home: string): Promise<void> {
-  if (IDENTIFIER === "app.crynta.terax") throw new Error("AssertionError");
+  if (IDENTIFIER === "sh.oarlock.app") throw new Error("AssertionError");
   rmSync(home, { recursive: true, force: true });
   // WebKit, Tauri and cfprefsd may resolve the user's real library even with HOME overridden.
   const real = await passwdHome();
@@ -664,7 +664,7 @@ export function scenarioJson(args: Args, bun: string): Dict {
   }
   for (const entry of args.toggle) {
     const [key, value] = partition(entry);
-    local[`terax:bench:${key}`] = value || "1";
+    local[`oarlock:bench:${key}`] = value || "1";
   }
   const cwds = Object.fromEntries(
     (
@@ -827,7 +827,7 @@ async function run(
   } = { qualified: true, failures: [] };
   const samples: Dict[] = [];
   const manifest: Dict = {
-    schema: "terax-app-lab/1",
+    schema: "oarlock-app-lab/1",
     scope: SCOPE,
     config: {
       scenario: args.scenario ?? null,
@@ -870,9 +870,9 @@ async function run(
   );
   Object.assign(env, {
     HOME: home,
-    TERAX_BENCH_ISOLATED: "1",
-    TERAX_BENCH_SCENARIO: JSON.stringify(scenario),
-    TERAX_BENCH_REPORT_URL: server.url,
+    OARLOCK_BENCH_ISOLATED: "1",
+    OARLOCK_BENCH_SCENARIO: JSON.stringify(scenario),
+    OARLOCK_BENCH_REPORT_URL: server.url,
     SHELL: process.env.SHELL ?? "/bin/zsh",
   });
   delete env.ZDOTDIR;
@@ -885,7 +885,7 @@ async function run(
       await check([bun, join(HERE, "fs-churn.mjs"), "prepare", cwdShell, REPO]);
     }
     scenario.cwds = { shell: realResolve(cwdShell) };
-    env.TERAX_BENCH_SCENARIO = JSON.stringify(scenario);
+    env.OARLOCK_BENCH_SCENARIO = JSON.stringify(scenario);
   }
   const launchArgs = cwdShell ? [realResolve(cwdShell)] : [];
   const lightPhases = new RegExp(args.lightPhases, "y");
@@ -1224,7 +1224,7 @@ async function main(): Promise<number> {
     throw new SystemExit("--scenario is required");
   const source = realResolve(args.source ?? REPO);
   const output = realResolve(
-    args.output ?? mkdtempSync(join(tmpdir(), "terax-app-lab-")),
+    args.output ?? mkdtempSync(join(tmpdir(), "oarlock-app-lab-")),
   );
   mkdirSync(output, { recursive: true });
   const targetDir = realResolve(

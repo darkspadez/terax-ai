@@ -9,15 +9,15 @@ let
 
   srcMap = {
     x86_64-linux = fetchurl {
-      url = "https://github.com/crynta/terax-ai/releases/download/v${version}/Terax_${version}_amd64.deb";
+      url = "https://github.com/qopsc/oarlock/releases/download/v${version}/Oarlock_${version}_amd64.deb";
       hash = sources.hashes.x86_64-linux;
     };
     x86_64-darwin = fetchurl {
-      url = "https://github.com/crynta/terax-ai/releases/download/v${version}/Terax_x64.app.tar.gz";
+      url = "https://github.com/qopsc/oarlock/releases/download/v${version}/Oarlock_x64.app.tar.gz";
       hash = sources.hashes.x86_64-darwin;
     };
     aarch64-darwin = fetchurl {
-      url = "https://github.com/crynta/terax-ai/releases/download/v${version}/Terax_aarch64.app.tar.gz";
+      url = "https://github.com/qopsc/oarlock/releases/download/v${version}/Oarlock_aarch64.app.tar.gz";
       hash = sources.hashes.aarch64-darwin;
     };
   };
@@ -26,10 +26,10 @@ let
 in
 
 assert lib.assertMsg (builtins.hasAttr sys srcMap)
-  "terax: unsupported platform ${sys}";
+  "oarlock: unsupported platform ${sys}";
 
 stdenv.mkDerivation {
-  pname = "terax";
+  pname = "oarlock";
   inherit version;
 
   src = srcMap.${sys};
@@ -57,9 +57,9 @@ stdenv.mkDerivation {
   installPhase = if stdenv.hostPlatform.isLinux then ''
     mkdir -p $out/bin $out/share
     cp -r usr/share/* $out/share/
-    install -Dm755 usr/bin/terax $out/bin/terax
+    install -Dm755 usr/bin/oarlock $out/bin/oarlock
 
-    wrapProgram $out/bin/terax \
+    wrapProgram $out/bin/oarlock \
       "''${gappsWrapperArgs[@]}" \
       --prefix GST_PLUGIN_SYSTEM_PATH : "$GST_PLUGIN_SYSTEM_PATH"
   '' else ''
@@ -69,7 +69,7 @@ stdenv.mkDerivation {
 
   meta = with lib; {
     description = "Open-source lightweight cross-platform AI-native terminal (ADE)";
-    homepage = "https://terax.app";
+    homepage = "https://github.com/qopsc/oarlock";
     license = licenses.asl20;
     platforms = [ "x86_64-linux" "x86_64-darwin" "aarch64-darwin" ];
   };

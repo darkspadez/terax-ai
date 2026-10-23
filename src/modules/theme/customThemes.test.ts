@@ -79,7 +79,7 @@ describe("custom theme store", () => {
     const stored = store.data.get("themes") as Theme[];
     expect(stored.map((t) => t.id)).toEqual(["b", "a"]);
     expect(store.save).toHaveBeenCalledTimes(3);
-    expect(events.emit).toHaveBeenCalledWith("terax://custom-themes-changed");
+    expect(events.emit).toHaveBeenCalledWith("oarlock://custom-themes-changed");
   });
 
   it("saves a batch in one write, the last duplicate id winning", async () => {
@@ -139,7 +139,7 @@ describe("custom theme store", () => {
     const store = pluginStore.instances[0];
     const stored = store.data.get("themes") as Theme[];
     expect(stored.map((t) => t.id)).toEqual(["b"]);
-    expect(events.emit).toHaveBeenCalledWith("terax://custom-themes-changed");
+    expect(events.emit).toHaveBeenCalledWith("oarlock://custom-themes-changed");
   });
 
   it("subscribes to store-key changes and cross-window events once", async () => {

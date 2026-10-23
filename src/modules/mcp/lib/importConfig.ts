@@ -99,7 +99,7 @@ export function importProblem(server: ImportedServer): string | null {
   const t = server.transport;
   if (!t) return "It has no command or URL.";
   if (t.type !== "stdio" && !isHttpUrl(t.url))
-    return "Its URL is not an http or https URL Terax can use.";
+    return "Its URL is not an http or https URL Oarlock can use.";
   return null;
 }
 

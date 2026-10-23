@@ -69,7 +69,7 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         return window.set_focus().map_err(|e| e.to_string());
     }
     let window = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("quick.html".into()))
-        .title("Terax Quick Terminal")
+        .title("Oarlock Quick Terminal")
         .decorations(false)
         .always_on_top(true)
         .skip_taskbar(true)

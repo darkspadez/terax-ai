@@ -1,6 +1,6 @@
 import type { GhosttyTerminalModelApi } from "@/modules/terminal/ghostty/GhosttyTerminalModel";
 import { readFile } from "node:fs/promises";
-import { TeraxGhostty } from "@terax/ghostty-core/adapted";
+import { OarlockGhostty } from "@oarlock/ghostty-core/adapted";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { FakeElement, FakeTextArea } from "./fakeTextArea";
 import { AdaptedGhosttyTerminalModel } from "../AdaptedGhosttyTerminalModel";
@@ -35,7 +35,7 @@ describe("GhosttyInputController", () => {
           import.meta.url,
         ),
       );
-      const core = await TeraxGhostty.loadBytes(Uint8Array.from(bytes).buffer);
+      const core = await OarlockGhostty.loadBytes(Uint8Array.from(bytes).buffer);
       const terminal = core.createTerminal(80, 24);
       const input = new FakeTextArea();
       const onData = vi.fn();
@@ -140,7 +140,7 @@ describe("GhosttyInputController", () => {
           import.meta.url,
         ),
       );
-      const core = await TeraxGhostty.loadBytes(Uint8Array.from(bytes).buffer);
+      const core = await OarlockGhostty.loadBytes(Uint8Array.from(bytes).buffer);
       const terminal = core.createTerminal(80, 24);
       const input = new FakeTextArea();
       const onData = vi.fn();
@@ -413,7 +413,7 @@ describe("GhosttyInputController", () => {
 describe.each(["ghostty-vt.wasm", "ghostty-vt-scalar.wasm"])(
   "GhosttyInputController with the Ghostty core (%s)",
   (artifact) => {
-    let core: TeraxGhostty;
+    let core: OarlockGhostty;
     const decoder = new TextDecoder();
 
     beforeAll(async () => {
@@ -423,7 +423,7 @@ describe.each(["ghostty-vt.wasm", "ghostty-vt-scalar.wasm"])(
           import.meta.url,
         ),
       );
-      core = await TeraxGhostty.loadBytes(Uint8Array.from(bytes).buffer);
+      core = await OarlockGhostty.loadBytes(Uint8Array.from(bytes).buffer);
     });
 
     function setup(

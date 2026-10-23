@@ -236,7 +236,7 @@ pub fn parse_entry(name: &str, value: &Value) -> RawEntry {
             }
         }
         if obj.contains_key("envFile") {
-            warnings.push("it reads an envFile, which Terax does not; add those variables".into());
+            warnings.push("it reads an envFile, which Oarlock does not; add those variables".into());
         }
         entry.transport = Some(RawTransport::Stdio {
             command: command.to_owned(),
@@ -256,7 +256,7 @@ pub fn parse_entry(name: &str, value: &Value) -> RawEntry {
         };
         if obj.contains_key("headersHelper") {
             warnings.push(
-                "it gets headers from a helper command, which Terax does not run; add the headers it makes"
+                "it gets headers from a helper command, which Oarlock does not run; add the headers it makes"
                     .into(),
             );
         }
@@ -269,7 +269,7 @@ pub fn parse_entry(name: &str, value: &Value) -> RawEntry {
     if let Some(oauth) = obj.get("oauth").and_then(Value::as_object) {
         if oauth.contains_key("authServerMetadataUrl") {
             warnings.push(
-                "its authServerMetadataUrl is not used; Terax discovers the server's sign-in"
+                "its authServerMetadataUrl is not used; Oarlock discovers the server's sign-in"
                     .into(),
             );
         }
@@ -479,11 +479,11 @@ impl Context<'_> {
         }
     }
 
-    /// Notes the placeholders left in `text` that Terax will not fill in.
+    /// Notes the placeholders left in `text` that Oarlock will not fill in.
     fn warn_placeholders(&self, what: &str, text: &str, warnings: &mut Vec<String>) {
         for inner in placeholders(text) {
             warnings.push(format!(
-                "{what} uses ${{{inner}}}, which Terax does not fill in; edit it before turning the server on"
+                "{what} uses ${{{inner}}}, which Oarlock does not fill in; edit it before turning the server on"
             ));
         }
     }
@@ -512,7 +512,7 @@ impl Context<'_> {
             valid_env_name(name)
         };
         if !valid {
-            warnings.push(format!("{name} cannot be set by Terax; it was left out"));
+            warnings.push(format!("{name} cannot be set by Oarlock; it was left out"));
             return None;
         }
         let kind = if header {
@@ -521,7 +521,7 @@ impl Context<'_> {
             SecretKind::Env
         };
         // `NAME: ${NAME}` passes the variable through: the server gets it from the shell
-        // environment Terax starts it in anyway.
+        // environment Oarlock starts it in anyway.
         if !header && raw.trim() == format!("${{{}{name}}}", self.app.env_prefix()) {
             warnings.push(format!("{name} comes from your shell environment"));
             return None;
@@ -544,7 +544,7 @@ impl Context<'_> {
         self.warn_placeholders(name, &filled, warnings);
         if !valid_value(&filled, kind) {
             warnings.push(format!(
-                "{name} has a value Terax cannot pass on; it was left out"
+                "{name} has a value Oarlock cannot pass on; it was left out"
             ));
             return None;
         }

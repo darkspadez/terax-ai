@@ -1,5 +1,5 @@
 //! Agent Skills: folders with a `SKILL.md` (instructions for the model, with optional reference
-//! files and scripts) from Terax's own skills folder, `~/.claude/skills`, and the open projects'
+//! files and scripts) from Oarlock's own skills folder, `~/.claude/skills`, and the open projects'
 //! `.claude/skills` and `.terax/skills` once the user trusts them (`project_trust`).
 //!
 //! The page lists skills, loads one's instructions and reads its files through these commands,
@@ -36,7 +36,7 @@ use install::{Candidate, STAGING_PREFIX};
 /// Sent to every window when the skills on disk, or their settings, change.
 pub const CHANGED_EVENT: &str = "skills:changed";
 /// Sent to the app window in front with the `SKILL.md` to open in the editor.
-pub const EDIT_EVENT: &str = "terax:skill-edit";
+pub const EDIT_EVENT: &str = "oarlock:skill-edit";
 const STATE_FILE: &str = "skills-state.json";
 const STALE_STAGING: Duration = Duration::from_secs(60 * 60);
 const MAX_ENTRY_DETAIL: usize = 200;
@@ -68,7 +68,7 @@ pub struct SkillsState {
     signature: Mutex<Option<[u8; 32]>>,
 }
 
-fn terax_dir(app: &AppHandle) -> Result<PathBuf, String> {
+fn oarlock_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app
         .path()
         .app_config_dir()
@@ -93,15 +93,15 @@ fn item_kind(kind: SourceKind) -> Option<ItemKind> {
     match kind {
         SourceKind::ClaudeProject => Some(ItemKind::ClaudeSkills),
         SourceKind::TeraxProject => Some(ItemKind::TeraxSkills),
-        SourceKind::Terax | SourceKind::User => None,
+        SourceKind::Oarlock | SourceKind::User => None,
     }
 }
 
 fn global_sources(app: &AppHandle) -> Vec<Source> {
     let mut sources = Vec::new();
-    if let Ok(dir) = terax_dir(app) {
+    if let Ok(dir) = oarlock_dir(app) {
         sources.push(Source {
-            kind: SourceKind::Terax,
+            kind: SourceKind::Oarlock,
             display: to_canon(&dir),
             dir,
             confine: None,
@@ -301,7 +301,7 @@ pub struct InvalidView {
 #[derive(Serialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
-    pub terax_dir: String,
+    pub oarlock_dir: String,
     pub user_dir: Option<String>,
     pub skills: Vec<SkillView>,
     pub invalid: Vec<InvalidView>,
@@ -407,7 +407,7 @@ fn collect(app: &AppHandle, scope: Scope) -> Snapshot {
         project_trust::is_allowed(app, &project.key, kind, hash)
     };
     let mut snapshot = collect_from(&global_sources(app), &projects, all, &disabled, &allowed);
-    snapshot.terax_dir = terax_dir(app).map(|dir| to_canon(&dir)).unwrap_or_default();
+    snapshot.oarlock_dir = oarlock_dir(app).map(|dir| to_canon(&dir)).unwrap_or_default();
     snapshot.user_dir = user_dir().map(|dir| to_canon(&dir));
     if all {
         snapshot.projects = projects
@@ -475,7 +475,7 @@ fn collect_from(
 /// Where the watcher looks: the global folders and every open project's items.
 fn watch_targets(app: &AppHandle) -> Vec<watch::Target> {
     let mut targets = Vec::new();
-    if let Ok(dir) = terax_dir(app) {
+    if let Ok(dir) = oarlock_dir(app) {
         if let Some(parent) = dir.parent() {
             targets.push(watch::Target {
                 stop: parent.to_path_buf(),
@@ -595,7 +595,7 @@ pub struct SkillRef {
 fn parse_id(id: &str) -> Result<(SourceKind, String), String> {
     let (source, dir_name) = id.split_once('/').ok_or("unknown skill")?;
     let kind = [
-        SourceKind::Terax,
+        SourceKind::Oarlock,
         SourceKind::User,
         SourceKind::ClaudeProject,
         SourceKind::TeraxProject,
@@ -757,7 +757,7 @@ pub async fn skills_set_enabled(app: AppHandle, key: String, enabled: bool) -> R
     .await
 }
 
-/// Creates a skill in Terax's folder from the template; returns its id.
+/// Creates a skill in Oarlock's folder from the template; returns its id.
 #[tauri::command]
 pub async fn skills_create(
     app: AppHandle,
@@ -765,10 +765,10 @@ pub async fn skills_create(
     description: String,
 ) -> Result<String, String> {
     blocking(move || {
-        let dir = terax_dir(&app)?;
+        let dir = oarlock_dir(&app)?;
         install::create(&dir, &name, &description)?;
         changed(&app);
-        Ok(skill_id(SourceKind::Terax, &name))
+        Ok(skill_id(SourceKind::Oarlock, &name))
     })
     .await
 }
@@ -783,7 +783,7 @@ pub async fn skills_edit(app: AppHandle, skill: SkillRef) -> Result<(), String> 
             .authorize_opened(&file, Opened::File)
             .map_err(|e| e.to_string())?;
         let window =
-            crate::modules::windows::target_window(&app).ok_or("no Terax window is open")?;
+            crate::modules::windows::target_window(&app).ok_or("no Oarlock window is open")?;
         window
             .emit_to(window.label(), EDIT_EVENT, to_canon(&file))
             .map_err(|e| e.to_string())?;
@@ -799,16 +799,16 @@ pub struct Deleted {
     pub trashed: bool,
 }
 
-/// Deletes a skill from Terax's folder: to the trash, or for good with `permanent` (the page
+/// Deletes a skill from Oarlock's folder: to the trash, or for good with `permanent` (the page
 /// asks for that only after the trash refused). A linked skill folder loses only its link.
 #[tauri::command]
 pub async fn skills_delete(app: AppHandle, id: String, permanent: bool) -> Result<Deleted, String> {
     blocking(move || {
         let (kind, dir_name) = parse_id(&id)?;
-        if kind != SourceKind::Terax {
-            return Err("only skills in Terax's folder can be deleted here".to_owned());
+        if kind != SourceKind::Oarlock {
+            return Err("only skills in Oarlock's folder can be deleted here".to_owned());
         }
-        let dir = terax_dir(&app)?.join(&dir_name);
+        let dir = oarlock_dir(&app)?.join(&dir_name);
         let meta = std::fs::symlink_metadata(&dir).map_err(|_| "the skill is gone".to_owned())?;
         let trashed = if meta.file_type().is_symlink() {
             remove_link(&dir)?;
@@ -901,7 +901,7 @@ fn stage(
     fallback: &str,
     fill: impl FnOnce(&Path) -> Result<PathBuf, String>,
 ) -> Result<InstallPreview, String> {
-    let skills_dir = terax_dir(app)?;
+    let skills_dir = oarlock_dir(app)?;
     std::fs::create_dir_all(&skills_dir).map_err(|e| e.to_string())?;
     sweep_staging(app, &skills_dir);
     let token = random_token()?;
@@ -1047,7 +1047,7 @@ pub async fn skills_install_commit(
             .unwrap_or_else(|e| e.into_inner())
             .remove(&token)
             .ok_or("this install has expired; start it again")?;
-        let skills_dir = terax_dir(&app)?;
+        let skills_dir = oarlock_dir(&app)?;
         let mut installed = Vec::new();
         let mut failures = Vec::new();
         for candidate in staged
@@ -1162,10 +1162,10 @@ mod tests {
         for bad in [
             "pdf",
             "x/pdf",
-            "terax/",
-            "terax/..",
-            "terax/a/b",
-            "terax/.install-1",
+            "oarlock/",
+            "oarlock/..",
+            "oarlock/a/b",
+            "oarlock/.install-1",
         ] {
             assert!(parse_id(bad).is_err(), "{bad}");
         }
@@ -1177,7 +1177,7 @@ mod tests {
         let disabled = BTreeSet::from(["claude-project/pdf@/p".to_owned()]);
         views(
             scanned(&[("pdf", "pdf"), ("only", "only")]),
-            &source(SourceKind::Terax),
+            &source(SourceKind::Oarlock),
             None,
             true,
             &disabled,
@@ -1219,8 +1219,8 @@ mod tests {
         assert_eq!(
             overridden,
             [
-                ("terax/pdf", Some("user/pdf")),
-                ("terax/only", None),
+                ("oarlock/pdf", Some("user/pdf")),
+                ("oarlock/only", None),
                 ("user/pdf", None),
                 ("claude-project/pdf@/p", None),
                 ("terax-project/only@/p", None),
@@ -1246,18 +1246,18 @@ mod tests {
     fn untrusted_project_skills_never_reach_a_conversation() {
         let dir = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
-        let terax = root.join("terax");
+        let oarlock = root.join("oarlock");
         let user = root.join("user");
         let project_root = root.join("project");
-        write_skill(&terax, "pdf");
+        write_skill(&oarlock, "pdf");
         write_skill(&user, "pdf");
         write_skill(&user, "notes");
         write_skill(&project_root.join(".claude/skills"), "pdf");
         write_skill(&project_root.join(".terax/skills"), "deploy");
         let globals = [
             Source {
-                kind: SourceKind::Terax,
-                dir: terax.clone(),
+                kind: SourceKind::Oarlock,
+                dir: oarlock.clone(),
                 display: "T".into(),
                 confine: None,
             },
@@ -1293,20 +1293,20 @@ mod tests {
         assert_eq!(
             listed(&untrusted),
             [
-                ("terax/pdf".to_owned(), false),
+                ("oarlock/pdf".to_owned(), false),
                 ("user/notes".to_owned(), true),
                 ("user/pdf".to_owned(), true),
             ]
         );
 
-        let only_terax_item =
+        let only_oarlock_item =
             |_: &OpenProject, kind: ItemKind, _: &str| kind == ItemKind::TeraxSkills;
         let partly = collect_from(
             &globals,
             std::slice::from_ref(&project),
             false,
             &none,
-            &only_terax_item,
+            &only_oarlock_item,
         );
         assert!(partly
             .skills

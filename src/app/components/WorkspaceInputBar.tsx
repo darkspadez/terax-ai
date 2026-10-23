@@ -27,7 +27,7 @@ const AiComposerInput = lazy(() =>
   })),
 );
 
-export const TOGGLE_BLOCK_INPUT_EVENT = "terax:toggle-block-input";
+export const TOGGLE_BLOCK_INPUT_EVENT = "oarlock:toggle-block-input";
 
 type Props = {
   isBlockTab: boolean;
@@ -207,7 +207,7 @@ export function WorkspaceInputBar({
     <div
       data-ai-input-bar
       data-state={open ? "open" : "closed"}
-      className="terax-reveal"
+      className="oarlock-reveal"
       aria-hidden={!open}
     >
       <div>{content}</div>

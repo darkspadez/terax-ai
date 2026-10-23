@@ -1,9 +1,9 @@
 /**
  * The seam between product code and the smoothness probe (`smoothProbe.ts`, bench builds only).
- * Callers write `if (__TERAX_BENCH__) smoothHooks()?.x(...)`: in a normal build the branch is the
+ * Callers write `if (__OARLOCK_BENCH__) smoothHooks()?.x(...)`: in a normal build the branch is the
  * literal `false` and this module is not part of the bundle.
  */
-export const SMOOTH_KEY = "__teraxSmooth";
+export const SMOOTH_KEY = "__oarlockSmooth";
 
 export type SmoothHooks = {
   /** A pane's host was measured: the grid it should have for that size. */
@@ -49,8 +49,8 @@ export type SmoothHooks = {
 /** The installed probe, or undefined (not a bench run, or not installed yet). */
 export function smoothHooks(): SmoothHooks | undefined {
   // The literal `false` in a normal build: the key string and the lookup are not emitted even
-  // when a call site forgot its own guard (src/app/dist-budget.test.ts locks `__teraxSmooth`).
-  if (!__TERAX_BENCH__) return undefined;
+  // when a call site forgot its own guard (src/app/dist-budget.test.ts locks `__oarlockSmooth`).
+  if (!__OARLOCK_BENCH__) return undefined;
   return (globalThis as unknown as Record<string, SmoothHooks | undefined>)[
     SMOOTH_KEY
   ];

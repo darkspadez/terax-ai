@@ -38,7 +38,7 @@ const proxy = vi.hoisted(() => {
       options?: { headers?: Record<string, string> },
     ) => {
       if (command !== "ai_http_stream") return undefined;
-      const meta = JSON.parse(options?.headers?.["x-terax-ai-request"] ?? "{}");
+      const meta = JSON.parse(options?.headers?.["x-oarlock-ai-request"] ?? "{}");
       requests.push({ url: meta.url, headers: meta.headers ?? {} });
       const channel = channels[channels.length - 1];
       queueMicrotask(() => {
@@ -355,7 +355,7 @@ describe("runAgentStream with MCP tools", () => {
     instructions: [{ server: "srv", text: "Use echo for echoing." }],
   };
 
-  it("offers MCP tools beside Terax's own and gates them", async () => {
+  it("offers MCP tools beside Oarlock's own and gates them", async () => {
     const { run, options } = await startRun({
       mcp,
       approvalState: () => ({ mode: "auto", planMode: false }),

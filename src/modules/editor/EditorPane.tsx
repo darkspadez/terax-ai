@@ -681,7 +681,7 @@ export const EditorPane = memo(
         return (
           <PrivacyRefusalNotice
             refusal={refusal}
-            title="Terax cannot open this file"
+            title="Oarlock cannot open this file"
             className="h-full justify-center px-6"
           />
         );
@@ -776,7 +776,7 @@ export const EditorPane = memo(
           theme={themeExt}
           extensions={extensions}
           height="100%"
-          className="terax-code-editor flex-1 min-h-0 overflow-hidden"
+          className="oarlock-code-editor flex-1 min-h-0 overflow-hidden"
           basicSetup={{
             lineNumbers: true,
             highlightActiveLineGutter: true,

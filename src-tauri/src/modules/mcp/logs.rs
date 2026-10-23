@@ -1,5 +1,5 @@
 //! A bounded log per MCP server: what it wrote to stderr (and stray stdout),
-//! and Terax's own notes on its lifecycle. Settings reads it. Kept per server
+//! and Oarlock's own notes on its lifecycle. Settings reads it. Kept per server
 //! id, not per process, so a crashed server's last words stay readable after
 //! it is gone and across restarts.
 
@@ -22,7 +22,7 @@ const MAX_READ_LINES: usize = 500;
 pub enum Stream {
     Stderr,
     Stdout,
-    Terax,
+    Oarlock,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
@@ -203,7 +203,7 @@ mod tests {
     fn reads_in_order_and_continues_from_next() {
         let logs = LogStore::default();
         logs.push("a", Stream::Stderr, "one".into());
-        logs.push("a", Stream::Terax, "two".into());
+        logs.push("a", Stream::Oarlock, "two".into());
         let page = logs.read("a", 0);
         assert_eq!(texts(&page), ["one", "two"]);
         assert!(!page.gap);
@@ -254,10 +254,10 @@ mod tests {
     fn forgets_the_least_recently_written_server_past_the_server_budget() {
         let logs = LogStore::default();
         for i in 0..MAX_SERVERS {
-            logs.push(&format!("s{i}"), Stream::Terax, "x".into());
+            logs.push(&format!("s{i}"), Stream::Oarlock, "x".into());
         }
-        logs.push("s0", Stream::Terax, "again".into());
-        logs.push("new", Stream::Terax, "x".into());
+        logs.push("s0", Stream::Oarlock, "again".into());
+        logs.push("new", Stream::Oarlock, "x".into());
         assert!(!logs.read("s0", 0).lines.is_empty());
         assert!(logs.read("s1", 0).lines.is_empty(), "s1 was the oldest");
         assert!(!logs.read("new", 0).lines.is_empty());

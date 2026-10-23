@@ -620,7 +620,7 @@ export function useSourceControl(
 
   // While a live consumer shows a repository, follow it without waiting for
   // focus: git activity in it or in a watched folder of its work tree (any
-  // process, a TUI included), a file Terax wrote into it, and commands that
+  // process, a TUI included), a file Oarlock wrote into it, and commands that
   // finish in a terminal inside it. Nothing is watched otherwise.
   useEffect(() => {
     if (!enabled || !live || !repoRoot) return;

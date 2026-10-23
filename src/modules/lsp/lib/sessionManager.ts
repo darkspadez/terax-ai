@@ -4,7 +4,7 @@ import type { Extension } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import type { TeraxLspClient } from "./client";
+import type { OarlockLspClient } from "./client";
 import { detectBinary } from "./detect";
 import { getLspNavigator } from "./navigator";
 import { type LspPreset, rootMarkersOf, serverForLanguage } from "./presets";
@@ -24,7 +24,7 @@ type Managed = {
   key: string;
   preset: LspPreset;
   root: string;
-  client: TeraxLspClient;
+  client: OarlockLspClient;
   transport: TauriLspTransport;
   refs: Map<string, number>;
   idleTimer: ReturnType<typeof setTimeout> | null;
@@ -180,13 +180,13 @@ async function createSession(
   const store = useLspRuntimeStore.getState();
   store.upsertSession({ key, presetId: preset.id, root, status: "starting" });
 
-  const [{ TauriLspTransport }, { TeraxLspClient }] = await Promise.all([
+  const [{ TauriLspTransport }, { OarlockLspClient }] = await Promise.all([
     import("./transport"),
     import("./client"),
   ]);
 
-  if (TeraxLspClient.hostPid === null) {
-    TeraxLspClient.hostPid = await invoke<number>("lsp_host_pid").catch(
+  if (OarlockLspClient.hostPid === null) {
+    OarlockLspClient.hostPid = await invoke<number>("lsp_host_pid").catch(
       () => null,
     );
   }
@@ -210,7 +210,7 @@ async function createSession(
   }
 
   const rootUri = pathToFileUri(root);
-  const client = new TeraxLspClient({
+  const client = new OarlockLspClient({
     transport,
     rootUri,
     workspaceFolders: [{ uri: rootUri, name: basename(root) }],

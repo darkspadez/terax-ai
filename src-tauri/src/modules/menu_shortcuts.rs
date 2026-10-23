@@ -81,29 +81,29 @@ pub enum MenuShortcut {
     ToggleAi,
 }
 
-const SELECT_TAB_MENU_ID: &str = "terax.select-tab-";
+const SELECT_TAB_MENU_ID: &str = "oarlock.select-tab-";
 
 impl MenuShortcut {
     /// The id of the menu item that runs it.
     pub fn menu_id(self) -> String {
         match self {
-            Self::NewTab => "terax.new-tab".into(),
+            Self::NewTab => "oarlock.new-tab".into(),
             Self::SelectTab { tab } => format!("{SELECT_TAB_MENU_ID}{tab}"),
-            Self::NextTab => "terax.next-tab".into(),
-            Self::PreviousTab => "terax.previous-tab".into(),
-            Self::CommandPalette => "terax.command-palette".into(),
-            Self::ToggleAi => "terax.toggle-ai".into(),
+            Self::NextTab => "oarlock.next-tab".into(),
+            Self::PreviousTab => "oarlock.previous-tab".into(),
+            Self::CommandPalette => "oarlock.command-palette".into(),
+            Self::ToggleAi => "oarlock.toggle-ai".into(),
         }
     }
 
     /// The shortcut a menu item runs; `None` for any other item.
     pub fn from_menu_id(id: &str) -> Option<Self> {
         Some(match id {
-            "terax.new-tab" => Self::NewTab,
-            "terax.next-tab" => Self::NextTab,
-            "terax.previous-tab" => Self::PreviousTab,
-            "terax.command-palette" => Self::CommandPalette,
-            "terax.toggle-ai" => Self::ToggleAi,
+            "oarlock.new-tab" => Self::NewTab,
+            "oarlock.next-tab" => Self::NextTab,
+            "oarlock.previous-tab" => Self::PreviousTab,
+            "oarlock.command-palette" => Self::CommandPalette,
+            "oarlock.toggle-ai" => Self::ToggleAi,
             _ => match id.strip_prefix(SELECT_TAB_MENU_ID)?.as_bytes() {
                 [digit @ b'1'..=b'9'] => Self::SelectTab { tab: digit - b'0' },
                 _ => return None,
@@ -144,13 +144,13 @@ mod tests {
     #[test]
     fn other_items_run_no_shortcut() {
         for id in [
-            "terax.quit",
-            "terax.close-tab",
-            "terax.new-window",
-            "terax.select-tab-0",
-            "terax.select-tab-10",
-            "terax.select-tab-+1",
-            "terax.select-tab-",
+            "oarlock.quit",
+            "oarlock.close-tab",
+            "oarlock.new-window",
+            "oarlock.select-tab-0",
+            "oarlock.select-tab-10",
+            "oarlock.select-tab-+1",
+            "oarlock.select-tab-",
             "",
         ] {
             assert_eq!(MenuShortcut::from_menu_id(id), None, "{id}");

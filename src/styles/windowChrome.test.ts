@@ -21,7 +21,7 @@ describe("borderless window frame", () => {
     "squares and unborders every rounded surface while %s",
     (attribute) => {
       const rules = rulesFor(attribute).join("\n");
-      for (const surface of ["#root", "#settings-root", ".terax-bg-surface"]) {
+      for (const surface of ["#root", "#settings-root", ".oarlock-bg-surface"]) {
         expect(rules).toContain(surface);
       }
       expect(rules).toMatch(/border-radius:\s*0;/);

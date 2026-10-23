@@ -1,4 +1,4 @@
-//! The `terax-asset` scheme: what previews load through while "Allow the app to access all
+//! The `oarlock-asset` scheme: what previews load through while "Allow the app to access all
 //! folders" is on. Tauri's asset protocol only serves what `asset_scope` granted, and a grant
 //! there can never be taken back, so files outside the authorized folders come through this
 //! scheme instead, which asks the setting on every request: the moment it is off, it serves no
@@ -24,7 +24,7 @@ use super::pty::AllowedOrigins;
 use super::workspace::{Origin, WorkspaceRegistry};
 
 /// The scheme's name, as the page passes it to `convertFileSrc`.
-pub const SCHEME: &str = "terax-asset";
+pub const SCHEME: &str = "oarlock-asset";
 
 /// The most one range response carries, as Tauri's asset protocol does; media players ask for
 /// the rest as they go.

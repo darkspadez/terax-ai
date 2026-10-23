@@ -43,7 +43,7 @@ type Props = {
   onConfirmAppClose: () => void;
 };
 
-/** The warning; `quits` when Terax quits rather than one window closing. */
+/** The warning; `quits` when Oarlock quits rather than one window closing. */
 export function appCloseMessage(blocker: AppCloseBlocker, quits = true): string {
   const doing = quits ? "Quitting" : "Closing this window";
   const dirty =
@@ -341,7 +341,7 @@ export function CloseDialogs({
             <AlertDialogTitle>
               {pendingAppClose?.quits === false
                 ? "Close Window?"
-                : "Quit Terax?"}
+                : "Quit Oarlock?"}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {pendingAppClose

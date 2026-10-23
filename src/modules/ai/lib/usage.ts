@@ -16,7 +16,7 @@ export type TokenUsage = {
 
 export type UsageMeter = {
   tokens: TokenUsage;
-  /** The same usage by the model that ran it, keyed by its id in Terax. */
+  /** The same usage by the model that ran it, keyed by its id in Oarlock. */
   tokensByModel: ReadonlyMap<string, TokenUsage>;
 };
 

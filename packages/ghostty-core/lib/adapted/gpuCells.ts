@@ -35,7 +35,7 @@ export const GPU_ATTR_OVERLINE = 1 << 4;
 export const GPU_ATTR_BLINK = 1 << 5;
 export const GPU_ATTR_WIDE_LEAD = 1 << 6;
 
-/** Glyph style bits (`TeraxGhosttyGpuGlyph.style`). */
+/** Glyph style bits (`OarlockGhosttyGpuGlyph.style`). */
 export const GPU_GLYPH_BOLD = 1 << 0;
 export const GPU_GLYPH_ITALIC = 1 << 1;
 /**
@@ -58,7 +58,7 @@ export const GPU_GLYPH_LIGATURE_INDEX_SHIFT = 4;
 export const GPU_GLYPH_LIGATURE_INDEX_MASK = 0xf;
 
 /** Decoded view of one record, for tests and diagnostics (not a hot path). */
-export type TeraxGhosttyGpuCell = {
+export type OarlockGhosttyGpuCell = {
   readonly glyphId: number;
   readonly underlineStyle: number;
   readonly strikethrough: boolean;
@@ -74,7 +74,7 @@ export type TeraxGhosttyGpuCell = {
 export function decodeGpuCell(
   words: Uint32Array,
   cellIndex: number,
-): TeraxGhosttyGpuCell {
+): OarlockGhosttyGpuCell {
   const base = cellIndex * GPU_CELL_WORDS;
   const word0 = words[base];
   const attrs = word0 >>> GPU_ATTR_SHIFT;

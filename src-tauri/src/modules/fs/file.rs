@@ -190,7 +190,7 @@ pub async fn fs_write_file(
             .state::<WorkspaceRegistry>()
             .gates(origin.unwrap_or_default())
             .authorized_write_target(&resolve_path(&path, &workspace))?;
-        // Terax's own write into a project's trusted item keeps the user's trust in it.
+        // Oarlock's own write into a project's trusted item keeps the user's trust in it.
         let change = OwnChange::File {
             target: &target,
             content: content.as_bytes(),
@@ -858,7 +858,7 @@ mod tests {
 
         let target = dir.path().join("note.txt");
         // Pre-stage a symlink at the legacy deterministic staging path.
-        let legacy = dir.path().join(".note.txt.terax.tmp");
+        let legacy = dir.path().join(".note.txt.oarlock.tmp");
         symlink(&outside, &legacy).unwrap();
 
         write_atomic(&target, b"payload").unwrap();

@@ -1,4 +1,4 @@
-import type { GhosttyTerminalEvent } from "@terax/ghostty-core/protocol";
+import type { GhosttyTerminalEvent } from "@oarlock/ghostty-core/protocol";
 import type {
   BlockContext,
   BlockMatch,

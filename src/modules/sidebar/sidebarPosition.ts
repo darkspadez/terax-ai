@@ -5,7 +5,7 @@ import {
 } from "@/modules/settings/store";
 import { useEffect, useState } from "react";
 
-const SIDEBAR_POSITION_STORAGE_KEY = "terax.sidebar.position";
+const SIDEBAR_POSITION_STORAGE_KEY = "oarlock.sidebar.position";
 
 /**
  * The side the window last laid the sidebar out on. Preferences load after the

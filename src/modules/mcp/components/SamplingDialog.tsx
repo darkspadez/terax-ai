@@ -163,7 +163,7 @@ export function SamplingDialog({ request }: { request: PendingSampling }) {
       >
         <DialogHeader className="gap-1 border-b border-border/60 px-4 py-3">
           <DialogTitle className="flex items-center gap-2 text-[13px]">
-            <span className="size-1.5 shrink-0 rounded-full bg-amber-500 terax-attention-pulse" />
+            <span className="size-1.5 shrink-0 rounded-full bg-amber-500 oarlock-attention-pulse" />
             <HugeiconsIcon
               icon={McpServerIcon}
               size={14}
@@ -190,7 +190,7 @@ export function SamplingDialog({ request }: { request: PendingSampling }) {
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3 text-[12px]">
           {view.includeContext !== "none" ? (
             <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-800 dark:text-amber-300">
-              It asked to include {CONTEXT_NOTE[view.includeContext]}. Terax
+              It asked to include {CONTEXT_NOTE[view.includeContext]}. Oarlock
               includes none: only the messages below are sent.
             </div>
           ) : null}

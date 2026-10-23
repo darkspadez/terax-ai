@@ -17,7 +17,7 @@ const AREAS: Record<PrivacyArea, { title: string; description: string }> = {
   fullDiskAccess: {
     title: "Full Disk Access",
     description:
-      "Every place below, and the data of apps such as Mail, Messages and Safari. macOS applies a change once Terax is reopened.",
+      "Every place below, and the data of apps such as Mail, Messages and Safari. macOS applies a change once Oarlock is reopened.",
   },
   desktop: { title: "Desktop folder", description: "~/Desktop" },
   documents: { title: "Documents folder", description: "~/Documents" },
@@ -97,8 +97,8 @@ function PrivacyGroup() {
         );
       })}
       <p className="text-[11px] leading-relaxed text-muted-foreground">
-        Programs started in Terax's terminals count as Terax. Without Full Disk
-        Access, macOS tells Terax about a folder only when Terax opens it: it
+        Programs started in Oarlock's terminals count as Oarlock. Without Full Disk
+        Access, macOS tells Oarlock about a folder only when Oarlock opens it: it
         asks the first time and keeps the answer, which you can change under
         Files &amp; Folders. Checking here never asks.
       </p>
@@ -110,7 +110,7 @@ function describe(area: PrivacyArea, status: AreaStatus): string {
   const { description } = AREAS[area];
   if (area === "fullDiskAccess") {
     return status === "unknown"
-      ? `${description} Terax could not tell whether it has it.`
+      ? `${description} Oarlock could not tell whether it has it.`
       : description;
   }
   return status === "allowed"

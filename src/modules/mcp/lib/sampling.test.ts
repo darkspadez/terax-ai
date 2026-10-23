@@ -70,13 +70,13 @@ describe("samplingRequestView", () => {
     });
   });
 
-  it("refuses what Terax cannot or will not run", () => {
+  it("refuses what Oarlock cannot or will not run", () => {
     const refused = (params: Record<string, unknown>) => {
       const out = samplingRequestView({ ...base, ...params });
       return "refused" in out ? out.refused : null;
     };
     expect(refused({ tools: [] })).toBe(
-      "Terax does not offer tools to sampling requests.",
+      "Oarlock does not offer tools to sampling requests.",
     );
     expect(refused({ toolChoice: { mode: "auto" } })).not.toBeNull();
     expect(refused({ task: { ttl: 1 } })).not.toBeNull();
@@ -92,7 +92,7 @@ describe("samplingRequestView", () => {
           },
         ],
       }),
-    ).toBe("Terax cannot send audio to its models.");
+    ).toBe("Oarlock cannot send audio to its models.");
     expect(
       refused({
         messages: [
@@ -102,7 +102,7 @@ describe("samplingRequestView", () => {
           },
         ],
       }),
-    ).toBe("Terax cannot send content of type tool_result.");
+    ).toBe("Oarlock cannot send content of type tool_result.");
     expect(
       refused({
         messages: [
@@ -112,7 +112,7 @@ describe("samplingRequestView", () => {
           },
         ],
       }),
-    ).toBe("Terax cannot send an image of type image/tiff.");
+    ).toBe("Oarlock cannot send an image of type image/tiff.");
     expect(
       refused({
         messages: [

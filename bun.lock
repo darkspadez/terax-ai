@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "terax",
+      "name": "oarlock",
       "dependencies": {
         "@ai-sdk/anthropic": "^4.0.82",
         "@ai-sdk/cerebras": "^3.0.71",
@@ -38,6 +38,7 @@
         "@iconify-json/catppuccin": "^1.2.17",
         "@lezer/highlight": "^1.2.5",
         "@modelcontextprotocol/sdk": "^1.32.1",
+        "@oarlock/ghostty-core": "workspace:*",
         "@radix-ui/react-use-controllable-state": "^1.3.0",
         "@replit/codemirror-lang-svelte": "^6.0.0",
         "@replit/codemirror-vim": "^6.4.0",
@@ -56,7 +57,6 @@
         "@tauri-apps/plugin-store": "~2.5.0",
         "@tauri-apps/plugin-updater": "~2.14.0",
         "@tauri-apps/plugin-window-state": "~2.5.0",
-        "@terax/ghostty-core": "workspace:*",
         "@uiw/codemirror-theme-atomone": "^4.25.12",
         "@uiw/codemirror-theme-aura": "^4.25.12",
         "@uiw/codemirror-theme-copilot": "^4.25.12",
@@ -112,7 +112,7 @@
       },
     },
     "packages/ghostty-core": {
-      "name": "@terax/ghostty-core",
+      "name": "@oarlock/ghostty-core",
       "version": "0.1.0",
     },
   },
@@ -382,6 +382,8 @@
     "@nodelib/fs.stat": ["@nodelib/fs.stat@2.0.5", "", {}, "sha512-RkhPPp2zrqDAQA/2jNhnztcPAlv64XdhIp7a7454A5ovI7Bukxgt7MX7udwAu3zg1DcpPU0rz3VV1SeaqvY4+A=="],
 
     "@nodelib/fs.walk": ["@nodelib/fs.walk@1.2.8", "", { "dependencies": { "@nodelib/fs.scandir": "2.1.5", "fastq": "1.20.3" } }, "sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg=="],
+
+    "@oarlock/ghostty-core": ["@oarlock/ghostty-core@workspace:packages/ghostty-core"],
 
     "@opentelemetry/api": ["@opentelemetry/api@1.9.1", "", {}, "sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q=="],
 
@@ -830,8 +832,6 @@
     "@tauri-apps/plugin-updater": ["@tauri-apps/plugin-updater@2.14.0", "", { "dependencies": { "@tauri-apps/api": "2.12.4" } }, "sha512-gdylJ9tger4hkyOn24QZd6MNOKVo2Eh53iw5th2Qj1vKTR/+u4PIwJWuiis5hohYvobn6iOvlnALfrqIPSzh7Q=="],
 
     "@tauri-apps/plugin-window-state": ["@tauri-apps/plugin-window-state@2.5.0", "", { "dependencies": { "@tauri-apps/api": "2.12.4" } }, "sha512-ySI/32fpC1ZTslIZ00/wf9HujyDnkG3OPL16uuLjG53y1hTgjIJ9G2VPuOL1IV8GVr3xeF6lnr6h2T73HuGXow=="],
-
-    "@terax/ghostty-core": ["@terax/ghostty-core@workspace:packages/ghostty-core"],
 
     "@ts-morph/common": ["@ts-morph/common@0.27.0", "", { "dependencies": { "fast-glob": "3.3.3", "minimatch": "10.2.6", "path-browserify": "1.0.1" } }, "sha512-Wf29UqxWDpc+i61k3oIOzcUfQt79PIT9y/MWfAGlrkjg6lBC1hwDECLXPVJAhWjiGbfBCxZd65F/LIZF3+jeJQ=="],
 

@@ -27,7 +27,7 @@ function aiRoute(allowPrivateNetwork: boolean): Route {
     stream: "ai_http_stream",
     cancel: "ai_http_cancel",
     ack: "ai_http_ack",
-    metadataHeader: "x-terax-ai-request",
+    metadataHeader: "x-oarlock-ai-request",
     extra: { allowPrivateNetwork },
   };
 }
@@ -53,7 +53,7 @@ export function createMcpFetch(session: number): typeof fetch {
     stream: "mcp_http_stream",
     cancel: "mcp_http_cancel",
     ack: "mcp_http_ack",
-    metadataHeader: "x-terax-mcp-request",
+    metadataHeader: "x-oarlock-mcp-request",
     extra: { session },
   };
   return (input, init) => proxyFetchImpl(input, init, route);

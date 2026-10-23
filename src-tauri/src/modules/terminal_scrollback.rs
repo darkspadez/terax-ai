@@ -25,7 +25,7 @@ use super::{ipc_body, windows};
 
 const DIRECTORY: &str = "terminal-scrollback";
 const EXTENSION: &str = ".vt";
-const KEY_HEADER: &str = "x-terax-scrollback";
+const KEY_HEADER: &str = "x-oarlock-scrollback";
 /// A larger body is refused; the webview trims history well below this.
 const MAX_SCROLLBACK_BYTES: usize = 8 * 1024 * 1024;
 /// Far above any real pane count; a longer list is refused, never truncated,
@@ -210,7 +210,7 @@ fn data_dir(app: &tauri::AppHandle, webview: &tauri::Webview) -> Result<PathBuf,
 }
 
 /// Body: the scrollback as UTF-8 bytes; empty deletes it. Header
-/// `x-terax-scrollback`: the pane's key.
+/// `x-oarlock-scrollback`: the pane's key.
 #[tauri::command]
 pub async fn terminal_scrollback_save(
     app: tauri::AppHandle,

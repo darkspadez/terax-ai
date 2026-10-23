@@ -1035,8 +1035,8 @@ let started = false;
 /** Starts the configured scenario once the application has mounted; no-op without one. */
 export async function startBenchDriver(app: () => BenchAppApi): Promise<void> {
   if (started) return;
-  const config = (window as unknown as { __teraxBenchConfig?: BenchConfig })
-    .__teraxBenchConfig;
+  const config = (window as unknown as { __oarlockBenchConfig?: BenchConfig })
+    .__oarlockBenchConfig;
   if (!config?.scenario || !config.reportUrl) return;
   started = true;
   const run = new ScenarioRun(config.reportUrl, config.scenario, app);

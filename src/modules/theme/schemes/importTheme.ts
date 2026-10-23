@@ -32,10 +32,10 @@ export const MAX_THEME_SOURCE_BYTES = 1024 * 1024;
 const MAX_NAME_LENGTH = 64;
 
 const SUPPORTED_FORMATS_LABEL =
-  "Terax .terax-theme, Ghostty themes, iTerm2 .itermcolors, Alacritty .toml or .yml, Windows Terminal .json";
+  "Oarlock .oarlock-theme, Ghostty themes, iTerm2 .itermcolors, Alacritty .toml or .yml, Windows Terminal .json";
 
 const EXTENSION_FORMAT = new Map<string, SourceFormat>([
-  ["terax-theme", "json"],
+  ["oarlock-theme", "json"],
   ["json", "json"],
   ["itermcolors", "iterm2"],
   ["toml", "alacritty-toml"],
@@ -193,8 +193,8 @@ function convert(text: string, options: ThemeImportOptions): Theme[] {
 }
 
 /**
- * Turns the text of a Terax theme or a terminal colour scheme into themes
- * ready to save. Terax themes keep their id (re-importing updates them);
+ * Turns the text of an Oarlock theme or a terminal colour scheme into themes
+ * ready to save. Oarlock themes keep their id (re-importing updates them);
  * schemes get a fresh id derived from their name.
  */
 export function importThemeText(
@@ -239,7 +239,7 @@ export async function importThemeFiles(
     try {
       result = importThemeText(text, { fileName: file.name, takenIds: taken });
     } catch (e) {
-      console.error("[terax] theme import failed:", e);
+      console.error("[oarlock] theme import failed:", e);
       errors.push(`${file.name}: could not be imported`);
       continue;
     }

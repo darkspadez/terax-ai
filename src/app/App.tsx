@@ -179,9 +179,9 @@ import { restartTarget } from "./hooks/terminalRestart";
 import { useTerminalRestart } from "./hooks/useTerminalRestart";
 import { useWorkspaceSwitcher } from "./hooks/useWorkspaceSwitcher";
 
-// Real-application benchmark driver (scripts/app-lab). `__TERAX_BENCH__` is the literal `false`
+// Real-application benchmark driver (scripts/app-lab). `__OARLOCK_BENCH__` is the literal `false`
 // in a normal build, so this is `null` and neither the import nor its chunk is emitted.
-const BenchBridge = __TERAX_BENCH__
+const BenchBridge = __OARLOCK_BENCH__
   ? lazy(() => import("@/bench/BenchBridge"))
   : null;
 
@@ -623,7 +623,7 @@ export default function App() {
       // Dispatch a window event the composer listens for. Same pattern as
       // selections — keeps file-explorer decoupled from the AI module.
       window.dispatchEvent(
-        new CustomEvent<string>("terax:ai-attach-file", { detail: path }),
+        new CustomEvent<string>("oarlock:ai-attach-file", { detail: path }),
       );
       openPanel();
       focusInput(null);
@@ -680,7 +680,7 @@ export default function App() {
     let unlisten: (() => void) | undefined;
     let disposed = false;
     void getCurrentWindow()
-      .listen("terax:new-window-requested", openWindow)
+      .listen("oarlock:new-window-requested", openWindow)
       .then((stop) => {
         if (disposed) stop();
         else unlisten = stop;
@@ -714,7 +714,7 @@ export default function App() {
             agent: request.agent,
           }).catch((error) => {
             console.warn(
-              `[terax] could not enable ${request.agent} notifications:`,
+              `[oarlock] could not enable ${request.agent} notifications:`,
               error,
             );
           })
@@ -725,7 +725,7 @@ export default function App() {
           await Promise.all([whenSessionReady(leafId), hooksReady]);
           if (!writeToSession(leafId, `${command.command}\r`)) {
             console.error(
-              `[terax] agent terminal ${leafId} closed before launch`,
+              `[oarlock] agent terminal ${leafId} closed before launch`,
             );
           }
         })();
@@ -809,7 +809,7 @@ export default function App() {
     let unlisten: (() => void) | undefined;
     let disposed = false;
     void getCurrentWindow()
-      .listen("terax:open-file", () => void takeLaunchFiles())
+      .listen("oarlock:open-file", () => void takeLaunchFiles())
       .catch(() => undefined)
       .then((stop) => {
         if (disposed) {
@@ -1002,7 +1002,7 @@ export default function App() {
     let unlisten: (() => void) | undefined;
     let disposed = false;
     void getCurrentWindow()
-      .listen("terax:close-tab-requested", () => closeTabFromMenu())
+      .listen("oarlock:close-tab-requested", () => closeTabFromMenu())
       .then((stop) => {
         if (disposed) stop();
         else unlisten = stop;
@@ -1759,10 +1759,10 @@ export default function App() {
                     sidebarPosition === "right" ? "pl-0.5 pr-2" : "pl-2 pr-0.5",
                   )}
                 >
-                  <div className="terax-pane flex h-full min-h-0 flex-col">
+                  <div className="oarlock-pane flex h-full min-h-0 flex-col">
                     <div
                       key={sidebarView}
-                      className="min-h-0 flex-1 terax-panel-in"
+                      className="min-h-0 flex-1 oarlock-panel-in"
                     >
                       {sidebarView === "explorer" ? (
                         <FileExplorer
@@ -1825,7 +1825,7 @@ export default function App() {
                   )}
                 >
                   <div
-                    className="terax-pane flex h-full min-h-0 flex-col"
+                    className="oarlock-pane flex h-full min-h-0 flex-col"
                     data-terminal-surface={isTerminalTab ? "" : undefined}
                   >
                     <div className="relative min-h-0 flex-1">

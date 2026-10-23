@@ -1083,7 +1083,7 @@ export function summarize(full: Report): string {
     const mode = get(config, "occlusionMode", "orderout");
     if (workload === "canvas")
       out.push(
-        `  raw WebGPU canvas probe, variant '${pyStr(get(config, "variant"))}' (no Terax renderer)`,
+        `  raw WebGPU canvas probe, variant '${pyStr(get(config, "variant"))}' (no Oarlock renderer)`,
       );
     if (workload === "tabs") {
       out.push(

@@ -17,13 +17,13 @@ import {
   GPU_GLYPH_LIGATURE_INDEX_MASK,
   GPU_GLYPH_LIGATURE_INDEX_SHIFT,
   GPU_GLYPH_TWO_CELLS,
-  TeraxGhostty,
-  type TeraxGhosttyGpuCell,
-  type TeraxGhosttyGpuGlyph,
-  type TeraxGhosttyGpuRenderState,
-  type TeraxGhosttyRenderState,
-  type TeraxGhosttyTerminal,
-} from "@terax/ghostty-core/adapted";
+  OarlockGhostty,
+  type OarlockGhosttyGpuCell,
+  type OarlockGhosttyGpuGlyph,
+  type OarlockGhosttyGpuRenderState,
+  type OarlockGhosttyRenderState,
+  type OarlockGhosttyTerminal,
+} from "@oarlock/ghostty-core/adapted";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   GLYPH_STYLE_LIGATURE,
@@ -54,9 +54,9 @@ const COUPLE = `\u{1F468}${ZWJ}\u{1F469}`;
 class GlyphMap {
   epoch = 0;
   epochChanges = 0;
-  readonly glyphs = new Map<number, TeraxGhosttyGpuGlyph>();
+  readonly glyphs = new Map<number, OarlockGhosttyGpuGlyph>();
 
-  apply(terminal: TeraxGhosttyTerminal, state: TeraxGhosttyGpuRenderState) {
+  apply(terminal: OarlockGhosttyTerminal, state: OarlockGhosttyGpuRenderState) {
     if (state.epoch !== this.epoch) {
       this.glyphs.clear();
       this.epoch = state.epoch;
@@ -67,7 +67,7 @@ class GlyphMap {
   }
 
   /** Rebuild from the full table (a consumer that missed deltas). */
-  resync(terminal: TeraxGhosttyTerminal, state: TeraxGhosttyGpuRenderState) {
+  resync(terminal: OarlockGhosttyTerminal, state: OarlockGhosttyGpuRenderState) {
     this.glyphs.clear();
     this.epoch = state.epoch;
     for (const glyph of terminal.gpuGlyphTable())
@@ -87,7 +87,7 @@ class GlyphMap {
 }
 
 type Snapshot = {
-  readonly state: TeraxGhosttyGpuRenderState;
+  readonly state: OarlockGhosttyGpuRenderState;
   readonly dirty: number[];
   readonly fullDamage: boolean;
   readonly anyDirty: boolean;
@@ -97,7 +97,7 @@ type Snapshot = {
 class GpuHarness {
   readonly map = new GlyphMap();
 
-  constructor(readonly terminal: TeraxGhosttyTerminal) {
+  constructor(readonly terminal: OarlockGhosttyTerminal) {
     terminal.setRenderFormat("gpu");
   }
 
@@ -117,7 +117,7 @@ class GpuHarness {
     };
   }
 
-  cell(snapshot: Snapshot, row: number, column: number): TeraxGhosttyGpuCell {
+  cell(snapshot: Snapshot, row: number, column: number): OarlockGhosttyGpuCell {
     return decodeGpuCell(snapshot.words, row * snapshot.state.cols + column);
   }
 
@@ -164,8 +164,8 @@ type ExpectedCell = {
 };
 
 function expectedFromSoa(
-  terminal: TeraxGhosttyTerminal,
-  state: TeraxGhosttyRenderState,
+  terminal: OarlockGhosttyTerminal,
+  state: OarlockGhosttyRenderState,
   index: number,
 ): ExpectedCell {
   const style = state.styleFlags[index];
@@ -216,7 +216,7 @@ function expectedFromSoa(
  * cell for cell.
  */
 function soaLigatureRuns(
-  state: TeraxGhosttyRenderState,
+  state: OarlockGhosttyRenderState,
   row: number,
 ): Uint16Array {
   const { cols } = state;
@@ -255,8 +255,8 @@ function soaLigatureRuns(
 function expectRecordsMatchSoa(
   harness: GpuHarness,
   snapshot: Snapshot,
-  soa: TeraxGhosttyTerminal,
-  soaState: TeraxGhosttyRenderState,
+  soa: OarlockGhosttyTerminal,
+  soaState: OarlockGhosttyRenderState,
   defaults = { fg: rgba(255, 255, 255), bg: rgba(0, 0, 0) },
   ligatures = true,
 ) {
@@ -279,7 +279,7 @@ function expectRecordsMatchSoa(
   let blinking = 0;
   let runCells = 0;
   for (let row = 0; row < rows; row += 1) {
-    let lead: TeraxGhosttyGpuCell | null = null;
+    let lead: OarlockGhosttyGpuCell | null = null;
     const runs = ligatures ? soaLigatureRuns(soaState, row) : null;
     for (let column = 0; column < cols; column += 1) {
       const index = row * cols + column;
@@ -385,7 +385,7 @@ describe.each([
   ["scalar", "ghostty-vt-scalar.wasm", ADAPTED_GHOSTTY_SCALAR_WASM_SHA256],
 ])("%s Ghostty GPU cell records", (_kind, artifact, _checksum) => {
   let wasmBytes: ArrayBuffer;
-  let ghostty: TeraxGhostty;
+  let ghostty: OarlockGhostty;
 
   beforeAll(async () => {
     const file = await readFile(
@@ -395,7 +395,7 @@ describe.each([
       ),
     );
     wasmBytes = Uint8Array.from(file).buffer;
-    ghostty = await TeraxGhostty.loadBytes(wasmBytes.slice(0));
+    ghostty = await OarlockGhostty.loadBytes(wasmBytes.slice(0));
   });
 
   function gpu(cols: number, rows: number) {
@@ -1567,7 +1567,7 @@ describe.each([
 
     it("allocates lazily, uses less memory than the SoA format and returns it on release", async () => {
       const measure = async (format: "soa" | "gpu") => {
-        const instance = await TeraxGhostty.loadBytes(wasmBytes.slice(0));
+        const instance = await OarlockGhostty.loadBytes(wasmBytes.slice(0));
         const terminals = Array.from({ length: 8 }, () => {
           const terminal = instance.createTerminal(120, 40, {
             maxScrollbackLines: 100,

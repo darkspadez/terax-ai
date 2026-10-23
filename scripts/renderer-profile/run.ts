@@ -75,9 +75,9 @@ import {
   vmmapSummary,
 } from "./procstats.ts";
 
-const DESCRIPTION = `Opt-in, isolated macOS WKWebView renderer lab. Never opens the user's Terax profile.
+const DESCRIPTION = `Opt-in, isolated macOS WKWebView renderer lab. Never opens the user's Oarlock profile.
 
-Builds the real Terax WebGPU renderer and the real Ghostty WASM models into a native WKWebView
+Builds the real Oarlock WebGPU renderer and the real Ghostty WASM models into a native WKWebView
 host, drives a synthetic workload through the model write API (no PTY), and samples physical
 footprint, CPU time and energy of the host plus its WebKit helpers.
 
@@ -85,7 +85,7 @@ Workloads (\`--workload\`):
   default    the original tab-switch / resize / repaint workload (footprint only)
   occlusion  repeated window occlusion (order out, cover window or miniaturize) with a longer
              hold than the 2 s reclaim delay; optional forced-GC probes
-  canvas     the same occlusion cycles on a raw WebGPU canvas (no Terax renderer) to compare
+  canvas     the same occlusion cycles on a raw WebGPU canvas (no Oarlock renderer) to compare
              canvas teardown strategies with --variant
   move       small-step and jump window moves while terminals trickle output
   tabs       alternate between a one-pane and a four-pane tab, dwelling longer than the old
@@ -110,7 +110,7 @@ export const LEGACY_PHASES = new Set([
 ]);
 const SCOPE =
   "Synthetic renderer in an isolated native WKWebView fed through the Ghostty model write API; " +
-  "not full Terax, a real PTY, React, AI streaming, IPC, packaged-app behaviour, or " +
+  "not full Oarlock, a real PTY, React, AI streaming, IPC, packaged-app behaviour, or " +
   "cross-platform qualification. WindowServer CPU is whole-system (all windows), from ps, without energy.";
 
 const parser = new ArgumentParser(
@@ -518,12 +518,12 @@ async function main(): Promise<number> {
   const root = import.meta.dirname;
   const repo = join(root, "../..");
   const output = realResolve(
-    args.output ?? mkdtempSync(join(tmpdir(), "terax-renderer-profile-")),
+    args.output ?? mkdtempSync(join(tmpdir(), "oarlock-renderer-profile-")),
   );
   mkdirSync(output, { recursive: true });
   const source = realResolve(args.source ?? repo);
   const dist = join(output, "dist");
-  const bundle = join(output, "Terax Renderer Lab.app");
+  const bundle = join(output, "Oarlock Renderer Lab.app");
   const executable = join(bundle, "Contents/MacOS/renderer-lab");
   mkdirSync(dirname(executable), { recursive: true });
   const vmmapEnabled =
@@ -568,8 +568,8 @@ async function main(): Promise<number> {
 
   const env = {
     ...process.env,
-    TERAX_PROFILE_SOURCE_ROOT: source,
-    TERAX_RENDERER_DIST: dist,
+    OARLOCK_PROFILE_SOURCE_ROOT: source,
+    OARLOCK_RENDERER_DIST: dist,
   };
   if (
     args.reuseBuild &&
@@ -685,7 +685,7 @@ async function main(): Promise<number> {
   const samples: Dict[] = [];
   const nativeEvents: Dict[] = [];
   const manifest: Dict = {
-    schema: "terax-renderer-lab/2",
+    schema: "oarlock-renderer-lab/2",
     scope: SCOPE,
     config,
     sourceRevision: hasGit ? revision.stdout.trim() : (args.revision ?? null),
@@ -750,12 +750,12 @@ async function main(): Promise<number> {
   writeFileSync(
     join(bundle, "Contents/Info.plist"),
     plist({
-      CFBundleIdentifier: "app.crynta.terax.renderer-lab",
+      CFBundleIdentifier: "sh.oarlock.app.renderer-lab",
       CFBundleExecutable: "renderer-lab",
-      CFBundleName: "Terax Renderer Lab",
+      CFBundleName: "Oarlock Renderer Lab",
       CFBundlePackageType: "APPL",
       NSHighResolutionCapable: true,
-      TeraxLabURL: url,
+      OarlockLabURL: url,
     }),
   );
 
@@ -846,8 +846,8 @@ async function main(): Promise<number> {
       stdio: ["pipe", "pipe", "inherit"],
       env: {
         ...process.env,
-        TERAX_LAB_CONTROL: "1",
-        TERAX_LAB_TIMEOUT: String(hostTimeout),
+        OARLOCK_LAB_CONTROL: "1",
+        OARLOCK_LAB_TIMEOUT: String(hostTimeout),
       },
     },
   );

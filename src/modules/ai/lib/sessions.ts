@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { toast } from "sonner";
 import type { ApprovalMode } from "./approvalMode";
-import { commandTitle, TERAX_CMD_RE } from "./commandMessage";
+import { commandTitle, OARLOCK_CMD_RE } from "./commandMessage";
 import { MESSAGE_BLOCKS_RE } from "./messageBlocks";
 import { messageChips } from "./messageChips";
 
@@ -18,7 +18,7 @@ export type SessionMeta = {
   approvalMode?: ApprovalMode;
 };
 
-const STORE_PATH = "terax-ai-sessions.json";
+const STORE_PATH = "oarlock-ai-sessions.json";
 const KEY_SESSIONS = "sessions";
 /** Each window has its own active chat; the history list is shared. */
 const KEY_ACTIVE = activeChatKey();
@@ -77,7 +77,7 @@ async function saveNative(
 ): Promise<void> {
   await invoke("ai_session_save", encoder.encode(JSON.stringify(messages)), {
     headers: {
-      "x-terax-session": escapeHeader({
+      "x-oarlock-session": escapeHeader({
         id,
         migrate: options.migrate === true,
         durable: options.durable === true,
@@ -396,7 +396,7 @@ export function deriveTitle(messages: UIMessage[]): string {
 }
 
 function textTitle(text: string): string | null {
-  const command = TERAX_CMD_RE.exec(text);
+  const command = OARLOCK_CMD_RE.exec(text);
   const own = (command ? text.slice(command[0].length) : text)
     .replace(/<terminal-context[\s\S]*?<\/terminal-context>\s*/g, "")
     .replace(MESSAGE_BLOCKS_RE, "")

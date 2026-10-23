@@ -47,7 +47,7 @@ import {
 
 export type ThemePref = "system" | "light" | "dark";
 
-export const DEFAULT_THEME_ID = "terax-default";
+export const DEFAULT_THEME_ID = "oarlock-default";
 
 export type BackgroundKind = "none" | "image";
 
@@ -163,7 +163,7 @@ export type Preferences = {
   customInstructions: string;
   /** How new AI conversations start: gated tools ask, or run unasked. */
   aiApprovalMode: ApprovalMode;
-  /** Selecting text in a terminal or the editor offers an Ask Terax button. */
+  /** Selecting text in a terminal or the editor offers an Ask Oarlock button. */
   selectionAskAi: boolean;
   /** The reasoning effort last chosen for each model; absent is its default. */
   reasoningEffortByModel: Record<string, ReasoningEffort>;
@@ -286,7 +286,7 @@ export type LspCustomServer = {
   rootMarkers: string[];
 };
 
-const STORE_PATH = "terax-settings.json";
+const STORE_PATH = "oarlock-settings.json";
 const KEY_THEME = "theme";
 const KEY_THEME_ID = "themeId";
 const KEY_BG_KIND = "backgroundKind";
@@ -430,7 +430,7 @@ export function coerceTerminalLigatures(value: unknown): boolean {
   return value !== false;
 }
 
-/** The Ask Terax button stays on unless it was explicitly turned off. */
+/** The Ask Oarlock button stays on unless it was explicitly turned off. */
 export function coerceSelectionAskAi(value: unknown): boolean {
   return value !== false;
 }
@@ -558,7 +558,7 @@ const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
 // page lives in a separate webview, so writes there never reach the main
 // window's subscribers. Mirror every setter through a Tauri event so any
 // window can listen.
-const PREFS_CHANGED_EVENT = "terax://prefs-changed";
+const PREFS_CHANGED_EVENT = "oarlock://prefs-changed";
 
 async function writePref<T>(key: string, value: T): Promise<void> {
   await store.set(key, value);
@@ -1444,7 +1444,7 @@ export async function onPreferencesChange(
 
 // API key changes are stored in OS keychain (not the prefs store),
 // so we broadcast via a Tauri event for cross-window listeners.
-const KEYS_CHANGED_EVENT = "terax://ai-keys-changed";
+const KEYS_CHANGED_EVENT = "oarlock://ai-keys-changed";
 
 export async function emitKeysChanged(): Promise<void> {
   await emit(KEYS_CHANGED_EVENT);

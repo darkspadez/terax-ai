@@ -16,7 +16,7 @@ vi.mock("@/modules/ai/store/planStore", () => ({
   },
 }));
 
-import { TERAX_CMD_RE } from "./commandMessage";
+import { OARLOCK_CMD_RE } from "./commandMessage";
 import { tryRunSlashCommand } from "./slashCommands";
 
 beforeEach(() => {
@@ -24,19 +24,19 @@ beforeEach(() => {
   planMock.active = false;
 });
 
-describe("TERAX_CMD_RE", () => {
+describe("OARLOCK_CMD_RE", () => {
   it("parses the marker the composer puts before a command's prompt", () => {
-    const match = '<terax-command name="init" />\n\nhi'.match(TERAX_CMD_RE);
+    const match = '<oarlock-command name="init" />\n\nhi'.match(OARLOCK_CMD_RE);
     expect([match?.[1], match?.[2]]).toEqual(["init", undefined]);
   });
 
   it("only matches a marker at the start of the message", () => {
-    expect('say <terax-command name="init" />'.match(TERAX_CMD_RE)).toBeNull();
+    expect('say <oarlock-command name="init" />'.match(OARLOCK_CMD_RE)).toBeNull();
   });
 
   it("captures an optional state attribute", () => {
-    const match = '<terax-command name="plan" state="on" />\n\nx'.match(
-      TERAX_CMD_RE,
+    const match = '<oarlock-command name="plan" state="on" />\n\nx'.match(
+      OARLOCK_CMD_RE,
     );
     expect([match?.[1], match?.[2]]).toEqual(["plan", "on"]);
   });

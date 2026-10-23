@@ -11,10 +11,10 @@ per-terminal frame loop, or per-pane GPU lifecycle.
 - Restty commit: `7700b14a7643ba9240818209ef1e0aa90d83ad77`
 - Zig: `0.16.0`
 - Optimization: `ReleaseFast`, WebAssembly SIMD and scalar variants
-- SIMD artifact size: `1073291` bytes
-- Scalar artifact size: `1014254` bytes
-- SIMD SHA-256: `7373650d0c1cb2a57a4c2e907dccffaab2b731364e11a08c0909581dc060b976`
-- Scalar SHA-256: `10a35e9fed91d27834b822a0ed5ed22b825d857ae594cd08d1b66083c7ba827e`
+- SIMD artifact size: `1073295` bytes
+- Scalar artifact size: `1014270` bytes
+- SIMD SHA-256: `4ce072f77919d1372cfe60a97d5bb216ff7f07ef051a9d1a5633e3941d9339e1`
+- Scalar SHA-256: `548fca54db2d13a63b57b7e5dda72c2df55d96571d8ae477929604a2046d4d35`
 
 Terax-specific changes include:
 

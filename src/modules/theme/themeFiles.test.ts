@@ -7,15 +7,15 @@ import {
 } from "./themeFiles";
 
 describe("isThemeFilePath", () => {
-  it("accepts the terax theme extension in any case", () => {
-    expect(isThemeFilePath("/themes/my.terax-theme")).toBe(true);
-    expect(isThemeFilePath("/themes/MY.TERAX-THEME")).toBe(true);
-    expect(isThemeFilePath("theme.TERAX-Theme")).toBe(true);
+  it("accepts the oarlock theme extension in any case", () => {
+    expect(isThemeFilePath("/themes/my.oarlock-theme")).toBe(true);
+    expect(isThemeFilePath("/themes/MY.OARLOCK-THEME")).toBe(true);
+    expect(isThemeFilePath("theme.OARLOCK-Theme")).toBe(true);
   });
 
   it("refuses other extensions", () => {
     expect(isThemeFilePath("/themes/my.json")).toBe(false);
-    expect(isThemeFilePath("/themes/my.terax-themes")).toBe(false);
+    expect(isThemeFilePath("/themes/my.oarlock-themes")).toBe(false);
     expect(isThemeFilePath("mytheme")).toBe(false);
   });
 });

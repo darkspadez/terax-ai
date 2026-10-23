@@ -152,8 +152,8 @@ export function AiComposerProvider({ children }: ProviderProps) {
         void attachFileByPath(path);
       }
     };
-    window.addEventListener("terax:ai-attach-file", onAttach);
-    return () => window.removeEventListener("terax:ai-attach-file", onAttach);
+    window.addEventListener("oarlock:ai-attach-file", onAttach);
+    return () => window.removeEventListener("oarlock:ai-attach-file", onAttach);
     // attachFileByPath is stable for our purposes (closes over setFiles only)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -404,7 +404,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
       if (outcome.kind === "send-prompt") {
         effectiveText = outcome.prompt;
         if (outcome.commandName) {
-          commandMarker = `<terax-command name="${outcome.commandName}" />`;
+          commandMarker = `<oarlock-command name="${outcome.commandName}" />`;
         }
       }
     }

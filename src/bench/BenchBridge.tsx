@@ -3,7 +3,7 @@ import { startBenchDriver } from "./driver";
 import type { BenchAppApi } from "./types";
 
 /**
- * Mounted by App only in TERAX_BENCH builds. It hands the live tab actions to the scenario driver
+ * Mounted by App only in OARLOCK_BENCH builds. It hands the live tab actions to the scenario driver
  * (which runs once, after the first render) and renders nothing.
  */
 export default function BenchBridge(props: BenchAppApi) {

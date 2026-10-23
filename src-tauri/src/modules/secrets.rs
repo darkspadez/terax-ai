@@ -66,7 +66,7 @@ const ITEM_UNITS: Option<usize> = if cfg!(target_os = "windows") {
 /// Starts the first item of a split value. No key or token starts with a
 /// control character, and a value that starts with this is always written
 /// split, so a whole value is never taken for a head.
-const HEAD: &str = "\x01terax-chunks:";
+const HEAD: &str = "\x01oarlock-chunks:";
 const MAX_CHUNKS: usize = 32;
 /// Hex digits of the value's SHA-256 a head carries.
 const DIGEST_HEX: usize = 16;
@@ -79,7 +79,7 @@ fn chunk_account(account: &str, index: usize) -> String {
     format!("{account}:{index}")
 }
 
-/// Whether `account` is named like a chunk of another. No account Terax
+/// Whether `account` is named like a chunk of another. No account Oarlock
 /// uses is (MCP names never hold `:`), and no page may name one.
 pub(crate) fn is_chunk_account(account: &str) -> bool {
     account
@@ -761,7 +761,7 @@ mod keychain_compat {
             .unwrap()
             .as_nanos();
         Cleanup(
-            format!("app.crynta.terax.test.{}.{nanos}", std::process::id()),
+            format!("sh.oarlock.app.test.{}.{nanos}", std::process::id()),
             "openai".into(),
         )
     }
@@ -788,8 +788,8 @@ mod keychain_compat {
 
         new.set_password("sk-written-by-keyring-core").unwrap();
         assert_eq!(old.get_password().unwrap(), "sk-written-by-keyring-core");
-        write_value(&mut items, account, "sk-written-by-terax", ITEM_UNITS).unwrap();
-        assert_eq!(old.get_password().unwrap(), "sk-written-by-terax");
+        write_value(&mut items, account, "sk-written-by-oarlock", ITEM_UNITS).unwrap();
+        assert_eq!(old.get_password().unwrap(), "sk-written-by-oarlock");
 
         new.delete_credential().unwrap();
         assert!(matches!(old.get_password(), Err(keyring3::Error::NoEntry)));
@@ -892,16 +892,16 @@ mod page_access {
 
     #[test]
     fn pages_cannot_use_the_mcp_secret_service() {
-        assert!(page_may_use("terax-ai", "openai-api-key").is_ok());
+        assert!(page_may_use("oarlock-ai", "openai-api-key").is_ok());
         assert!(page_may_use(crate::modules::mcp::SECRET_SERVICE, "s/env/A").is_err());
     }
 
     #[test]
     fn pages_cannot_name_a_chunk_of_a_long_value() {
-        assert!(page_may_use("terax-ai", "openai-api-key:1").is_err());
-        assert!(page_may_use("terax-ai", "openai-api-key:12").is_err());
-        assert!(page_may_use("terax-ai", "compat-1a2b3c4d-api-key").is_ok());
-        assert!(page_may_use("terax-ai", "a:b").is_ok());
+        assert!(page_may_use("oarlock-ai", "openai-api-key:1").is_err());
+        assert!(page_may_use("oarlock-ai", "openai-api-key:12").is_err());
+        assert!(page_may_use("oarlock-ai", "compat-1a2b3c4d-api-key").is_ok());
+        assert!(page_may_use("oarlock-ai", "a:b").is_ok());
     }
 }
 
@@ -943,7 +943,7 @@ mod chunks {
     fn items(store: &Arc<keyring_core::CredentialStore>) -> KeyringItems<'_> {
         KeyringItems {
             store: store.as_ref(),
-            service: "terax-test",
+            service: "oarlock-test",
         }
     }
 

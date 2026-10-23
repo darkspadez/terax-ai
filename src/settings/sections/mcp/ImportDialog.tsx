@@ -169,7 +169,7 @@ export function ImportDialog({
             Servers configured in other apps on this computer. Imported servers
             start off and untrusted: check each one, then turn it on. Values
             that look like secrets (keys, tokens, passwords, credentials in
-            URLs) go to your system keychain, never into Terax's settings file;
+            URLs) go to your system keychain, never into Oarlock's settings file;
             the others are kept as they are.
           </DialogDescription>
         </DialogHeader>

@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 type LogLine = {
   seq: number;
   atMs: number;
-  stream: "stderr" | "stdout" | "terax";
+  stream: "stderr" | "stdout" | "oarlock";
   text: string;
 };
 
@@ -21,7 +21,7 @@ function time(atMs: number): string {
 }
 
 /**
- * A server's log: what it wrote to stderr (and stray stdout), with Terax's
+ * A server's log: what it wrote to stderr (and stray stdout), with Oarlock's
  * own notes on starting, connecting and failing. Read from the backend while
  * shown, a second apart.
  */
@@ -123,7 +123,7 @@ export function ServerLogs({ serverId }: { serverId: string }) {
               key={line.seq}
               className={cn(
                 "break-all whitespace-pre-wrap",
-                line.stream === "terax" && "text-sky-700 dark:text-sky-400",
+                line.stream === "oarlock" && "text-sky-700 dark:text-sky-400",
                 line.stream === "stdout" && "text-muted-foreground",
               )}
             >

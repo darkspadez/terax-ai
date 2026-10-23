@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { TeraxGhostty } from "@terax/ghostty-core/adapted";
+import { OarlockGhostty } from "@oarlock/ghostty-core/adapted";
 import { describe, expect, it } from "vitest";
 import {
   adversarialInputs,
@@ -27,7 +27,7 @@ describe.each([
     const bytes = Uint8Array.from(file);
     return {
       layout: readWasmLayout(bytes),
-      core: await TeraxGhostty.loadBytes(bytes.buffer),
+      core: await OarlockGhostty.loadBytes(bytes.buffer),
     };
   }
 

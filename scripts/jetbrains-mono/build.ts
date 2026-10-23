@@ -10,7 +10,7 @@
 //
 // Every OpenType feature is kept (ligatures, stylistic sets, character
 // variants), and so are the variation tables, so each file covers the whole
-// weight axis. Private Use Area code points are left to "Terax Symbols" and the
+// weight axis. Private Use Area code points are left to "Oarlock Symbols" and the
 // emoji variation selectors to the system's emoji font. Re-run after changing
 // the pinned release or the segment table:
 //
@@ -123,7 +123,7 @@ export const SEGMENTS: readonly (readonly [string, readonly Range[]])[] = [
 
 export function excluded(codepoint: number): boolean {
   return (
-    (codepoint >= 0xe000 && codepoint <= 0xf8ff) || // Terax Symbols
+    (codepoint >= 0xe000 && codepoint <= 0xf8ff) || // Oarlock Symbols
     (codepoint >= 0xf0000 && codepoint <= 0x10fffd) ||
     (codepoint >= 0xfe00 && codepoint <= 0xfe0f) // emoji presentation
   );
@@ -152,7 +152,7 @@ async function download(): Promise<{
   licence: string;
 }> {
   const archive = await fetchVerified(URL_, SHA256);
-  const scratch = await mkdtemp(join(tmpdir(), "terax-jetbrains-mono-"));
+  const scratch = await mkdtemp(join(tmpdir(), "oarlock-jetbrains-mono-"));
   try {
     const path = join(scratch, "archive.zip");
     const out = join(scratch, "out");
@@ -229,7 +229,7 @@ async function main(): Promise<void> {
       " * The variable fonts with every glyph and feature, upright and italic, split by\n" +
       " * Unicode range: a segment downloads the first time one of its characters is\n" +
       ` * drawn. Private Use Area code points (U+${hex(0xe000)}-${hex(0xf8ff)} and planes 15-16)\n` +
-      " * are left to Terax Symbols, emoji variation selectors to the system. */\n" +
+      " * are left to Oarlock Symbols, emoji variation selectors to the system. */\n" +
       faces.join("\n"),
   );
   await writeFile(

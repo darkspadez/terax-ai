@@ -5,10 +5,10 @@
 // idle. RSS is not used: macOS keeps freed pages in it until memory pressure.
 //
 //   bun scripts/ghostty-webkit-memory.mjs
-//   TERAX_WEBKIT_RECLAIM=0 bun scripts/ghostty-webkit-memory.mjs   # no collection hint
+//   OARLOCK_WEBKIT_RECLAIM=0 bun scripts/ghostty-webkit-memory.mjs   # no collection hint
 //
-// Environment: TERAX_WEBKIT_ARTIFACT (ghostty-vt.wasm), TERAX_WEBKIT_OPEN (20),
-// TERAX_WEBKIT_CLOSE (15), TERAX_WEBKIT_RECLAIM (1), TERAX_WEBKIT_REPORT (json path).
+// Environment: OARLOCK_WEBKIT_ARTIFACT (ghostty-vt.wasm), OARLOCK_WEBKIT_OPEN (20),
+// OARLOCK_WEBKIT_CLOSE (15), OARLOCK_WEBKIT_RECLAIM (1), OARLOCK_WEBKIT_REPORT (json path).
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -20,11 +20,11 @@ if (process.platform !== "darwin") {
   process.exit(2);
 }
 
-const artifact = process.env.TERAX_WEBKIT_ARTIFACT ?? "ghostty-vt.wasm";
-const open = Number(process.env.TERAX_WEBKIT_OPEN ?? 20);
-const close = Number(process.env.TERAX_WEBKIT_CLOSE ?? 15);
-const reclaim = process.env.TERAX_WEBKIT_RECLAIM !== "0";
-const temporary = await mkdtemp(join(tmpdir(), "terax-webkit-memory-"));
+const artifact = process.env.OARLOCK_WEBKIT_ARTIFACT ?? "ghostty-vt.wasm";
+const open = Number(process.env.OARLOCK_WEBKIT_OPEN ?? 20);
+const close = Number(process.env.OARLOCK_WEBKIT_CLOSE ?? 15);
+const reclaim = process.env.OARLOCK_WEBKIT_RECLAIM !== "0";
+const temporary = await mkdtemp(join(tmpdir(), "oarlock-webkit-memory-"));
 
 function footprintMegabytes(pid) {
   const output = spawnSync("footprint", [String(pid)], { encoding: "utf8" }).stdout;
@@ -97,7 +97,7 @@ try {
   if (!done) throw new Error("WKWebView host did not finish");
   await Promise.race([exited, new Promise((tick) => setTimeout(tick, 5000))]);
   const report = { artifact, open, close, reclaim, recordedAt: new Date().toISOString(), phases };
-  if (process.env.TERAX_WEBKIT_REPORT) await writeFile(process.env.TERAX_WEBKIT_REPORT, `${JSON.stringify(report, null, 2)}\n`);
+  if (process.env.OARLOCK_WEBKIT_REPORT) await writeFile(process.env.OARLOCK_WEBKIT_REPORT, `${JSON.stringify(report, null, 2)}\n`);
 } finally {
   child?.kill();
   await rm(temporary, { recursive: true, force: true });

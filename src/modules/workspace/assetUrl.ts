@@ -14,7 +14,7 @@ import {
  * cannot be taken back, while this one asks the setting on every request
  * (and still serves no dot folders).
  */
-const ALL_FOLDERS_SCHEME = "terax-asset";
+const ALL_FOLDERS_SCHEME = "oarlock-asset";
 
 /** A host path as a URL the webview loads it from. */
 function assetSrc(hostPath: string, allFolders: boolean): string {

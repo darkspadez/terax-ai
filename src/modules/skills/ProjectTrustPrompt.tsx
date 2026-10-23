@@ -114,7 +114,7 @@ export function ProjectTrustPrompt({ status, onDismiss, onDecided }: Props) {
       <div className="flex flex-col gap-1.5 text-[11px] leading-relaxed text-muted-foreground">
         {groups.instructions ? (
           <p>
-            TERAX.md holds the project's instructions: Terax adds them to every
+            TERAX.md holds the project's instructions: Oarlock adds them to every
             AI run here and the AI follows them (each edit and command still
             asks as the conversation's approval mode says).
           </p>
@@ -128,7 +128,7 @@ export function ProjectTrustPrompt({ status, onDismiss, onDecided }: Props) {
         ) : null}
         {groups.servers ? (
           <p>
-            MCP servers in .mcp.json are programs Terax starts with your rights,
+            MCP servers in .mcp.json are programs Oarlock starts with your rights,
             outside its folder limits, or remote services the AI sends data to.
             Their tools ask before every call unless you mark a server Trusted
             in Settings.
@@ -136,7 +136,7 @@ export function ProjectTrustPrompt({ status, onDismiss, onDecided }: Props) {
         ) : null}
         <p>
           Use them only from projects you trust. Until then the AI never sees
-          them. Edits made in Terax keep your answer; a change from anywhere
+          them. Edits made in Oarlock keep your answer; a change from anywhere
           else asks again.
         </p>
       </div>

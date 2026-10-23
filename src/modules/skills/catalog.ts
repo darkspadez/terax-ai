@@ -37,7 +37,7 @@ export async function loadAgentSkills(
   try {
     return agentSkillsFrom(await listSkills(project), project, env);
   } catch (error) {
-    console.warn("[terax] skills unavailable:", error);
+    console.warn("[oarlock] skills unavailable:", error);
     return { skills: [], project, env };
   }
 }

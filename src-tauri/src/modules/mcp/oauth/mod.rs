@@ -13,7 +13,7 @@
 //!   here (`bearer`), refreshed before expiry or once on a 401 (`after_unauthorized`); a refresh
 //!   the server refuses deletes them and reports sign-in required.
 //!
-//! Client ID metadata documents are not offered: they need an https document Terax would host.
+//! Client ID metadata documents are not offered: they need an https document Oarlock would host.
 
 mod callback;
 pub mod challenge;
@@ -42,7 +42,7 @@ use flow::{Client, TokenError};
 use store::{ClientSource, Registration, TokenSet};
 
 /// Sent to every window when a server's sign-in state changes: `{ serverId }`.
-pub const AUTH_EVENT: &str = "terax://mcp-auth";
+pub const AUTH_EVENT: &str = "oarlock://mcp-auth";
 /// How long the browser has to come back.
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// Refresh this long before the access token expires.
@@ -358,7 +358,7 @@ pub async fn after_unauthorized(
 
 /// The response header that tells the page's client the server needs sign-in (the backend has
 /// tried refreshing by then), so it waits for the user instead of reconnecting.
-pub const SIGN_IN_HEADER: &str = "x-terax-sign-in";
+pub const SIGN_IN_HEADER: &str = "x-oarlock-sign-in";
 
 // ---- Status ----
 
@@ -717,11 +717,11 @@ async fn sign_in(
     let page = match &result {
         Ok(_) => callback::page(
             "Signed in",
-            "Terax is signed in to the server. You can close this tab.",
+            "Oarlock is signed in to the server. You can close this tab.",
         ),
         Err(error) => callback::page(
             "Sign-in failed",
-            &format!("{error}. You can close this tab and try again from Terax's Settings."),
+            &format!("{error}. You can close this tab and try again from Oarlock's Settings."),
         ),
     };
     let _ = callback::respond(&mut stream, 200, &page).await;

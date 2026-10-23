@@ -19,8 +19,8 @@ const PARSE_CACHE_CAP: usize = 2048;
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[serde(rename_all = "kebab-case")]
 pub enum SourceKind {
-    /// Terax's own skills folder.
-    Terax,
+    /// Oarlock's own skills folder.
+    Oarlock,
     /// `~/.claude/skills`.
     User,
     /// A project's `.claude/skills`.
@@ -32,7 +32,7 @@ pub enum SourceKind {
 impl SourceKind {
     pub fn id(self) -> &'static str {
         match self {
-            SourceKind::Terax => "terax",
+            SourceKind::Oarlock => "oarlock",
             SourceKind::User => "user",
             SourceKind::ClaudeProject => "claude-project",
             SourceKind::TeraxProject => "terax-project",
@@ -40,10 +40,10 @@ impl SourceKind {
     }
 
     /// A name found in several sources is taken from the highest: a project over the user's
-    /// `~/.claude/skills` over Terax's folder, and in a project `.terax/skills` over `.claude/skills`.
+    /// `~/.claude/skills` over Oarlock's folder, and in a project `.terax/skills` over `.claude/skills`.
     pub fn precedence(self) -> u8 {
         match self {
-            SourceKind::Terax => 0,
+            SourceKind::Oarlock => 0,
             SourceKind::User => 1,
             SourceKind::ClaudeProject => 2,
             SourceKind::TeraxProject => 3,
@@ -138,7 +138,7 @@ pub fn read_skill_text(path: &Path) -> Result<String, Vec<String>> {
 
 fn skipped(name: &str) -> bool {
     // Claude Code keeps skills it syncs from claude.ai in `synced` and never loads a skill of
-    // that name; dot folders hold tool state (`.trash`) and Terax's install staging.
+    // that name; dot folders hold tool state (`.trash`) and Oarlock's install staging.
     name.starts_with('.') || name.eq_ignore_ascii_case("synced")
 }
 
@@ -310,7 +310,7 @@ mod tests {
         write(&root.join(".install-1/SKILL.md"), &skill_md("staged", "x"));
         write(&root.join("synced/SKILL.md"), &skill_md("synced", "x"));
         write(&root.join("loose.md"), "a file");
-        let scanned = scan(&source(root, SourceKind::Terax), &mut ParseCache::default());
+        let scanned = scan(&source(root, SourceKind::Oarlock), &mut ParseCache::default());
         let names: Vec<_> = scanned
             .skills
             .iter()
@@ -326,7 +326,7 @@ mod tests {
     #[test]
     fn a_missing_folder_has_no_skills() {
         let scanned = scan(
-            &source(Path::new("/nonexistent/terax/skills"), SourceKind::User),
+            &source(Path::new("/nonexistent/oarlock/skills"), SourceKind::User),
             &mut ParseCache::default(),
         );
         assert!(scanned.skills.is_empty() && scanned.invalid.is_empty());
@@ -466,13 +466,13 @@ mod tests {
     #[test]
     fn the_highest_source_wins_a_name() {
         let candidates = [
-            (SourceKind::Terax, "pdf"),
+            (SourceKind::Oarlock, "pdf"),
             (SourceKind::User, "pdf"),
             (SourceKind::ClaudeProject, "pdf"),
-            (SourceKind::Terax, "only"),
+            (SourceKind::Oarlock, "only"),
             (SourceKind::TeraxProject, "pdf"),
             (SourceKind::User, "two"),
-            (SourceKind::Terax, "two"),
+            (SourceKind::Oarlock, "two"),
         ];
         assert_eq!(
             winners(&candidates),

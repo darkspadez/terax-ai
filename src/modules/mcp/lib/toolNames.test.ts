@@ -74,7 +74,7 @@ describe("exposedToolNames", () => {
 });
 
 describe("helpers", () => {
-  it("tells MCP tools from Terax's own", () => {
+  it("tells MCP tools from Oarlock's own", () => {
     expect(isMcpToolName("mcp__github__x")).toBe(true);
     expect(isMcpToolName("bash_run")).toBe(false);
   });

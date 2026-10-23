@@ -59,9 +59,9 @@ describe("content security policy", () => {
     "%s allows previews from every folder on every platform",
     (directive) => {
       for (const url of [
-        `terax-asset://localhost/${encodeURIComponent("/srv/pic.png")}`,
-        `http://terax-asset.localhost/${encodeURIComponent("D:\\pic.png")}`,
-        `https://terax-asset.localhost/${encodeURIComponent("D:\\pic.png")}`,
+        `oarlock-asset://localhost/${encodeURIComponent("/srv/pic.png")}`,
+        `http://oarlock-asset.localhost/${encodeURIComponent("D:\\pic.png")}`,
+        `https://oarlock-asset.localhost/${encodeURIComponent("D:\\pic.png")}`,
       ]) {
         expect(allows(directive, url), url).toBe(true);
       }

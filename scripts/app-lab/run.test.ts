@@ -72,8 +72,8 @@ describe("scenarioJson", () => {
       localStorage: {
         a: null,
         b: "c=d",
-        "terax:bench:keep-canvas": "1",
-        "terax:bench:fixed-backing": "2560x1700",
+        "oarlock:bench:keep-canvas": "1",
+        "oarlock:bench:fixed-backing": "2560x1700",
       },
       gc: "private",
       noSwitch: true,
@@ -125,7 +125,7 @@ describe("descendants", () => {
   it("walks the process tree below a pid", () => {
     const table = new Map<number, [number, string]>([
       [1, [0, "launchd"]],
-      [10, [1, "terax"]],
+      [10, [1, "oarlock"]],
       [11, [10, "zsh"]],
       [12, [11, "bun"]],
       [13, [10, "zsh"]],

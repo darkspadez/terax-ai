@@ -64,7 +64,7 @@ export function canOptOutOfAppClosePrompt(blocker: AppCloseBlocker): boolean {
 
 /** A close or quit waiting for the user to confirm. */
 export type PendingAppClose = AppCloseBlocker & {
-  /** Terax quits: a quit request, or the last window closing. */
+  /** Oarlock quits: a quit request, or the last window closing. */
   quits: boolean;
   /** The quit request this answers (`windows.rs`); null for a close. */
   quitRound: number | null;
@@ -75,7 +75,7 @@ function answerQuit(round: number, ok: boolean): void {
 }
 
 /**
- * Guards closing this window and quitting Terax (asked of each window in turn
+ * Guards closing this window and quitting Oarlock (asked of each window in turn
  * by `windows.rs`): running commands and unsaved files are confirmed first,
  * then chat history, scrollback and spaces are saved.
  */
@@ -202,7 +202,7 @@ export function useAppCloseGuard(tabsRef: RefObject<Tab[]>) {
     let disposed = false;
     const window = getCurrentWindow();
     void window
-      .listen<number>("terax:quit-requested", async ({ payload: round }) => {
+      .listen<number>("oarlock:quit-requested", async ({ payload: round }) => {
         const found = await blocker();
         if (!found) {
           void finishQuit(round);

@@ -87,7 +87,7 @@ jobs:
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TERAX_CLI_TARGET: ${{ matrix.rust-target }}
+          OARLOCK_CLI_TARGET: ${{ matrix.rust-target }}
 
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -100,7 +100,7 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "Terax ${{ github.ref_name }}"
+          releaseName: "Oarlock ${{ github.ref_name }}"
           releaseBody: "See the assets to download and install."
           releaseDraft: true
           prerelease: false
@@ -137,8 +137,8 @@ jobs:
           chmod +x "./$BASENAME"
           "./$BASENAME" --appimage-extract >/dev/null
 
-          test -x squashfs-root/usr/bin/terax \
-            || { echo "terax binary missing from AppImage"; exit 1; }
+          test -x squashfs-root/usr/bin/oarlock \
+            || { echo "oarlock binary missing from AppImage"; exit 1; }
 
           # linuxdeploy may already exclude some of these libraries.
           find squashfs-root \( -type f -o -type l \) \
@@ -158,8 +158,8 @@ jobs:
             echo "Wayland library still present after repack"
             exit 1
           fi
-          test -x squashfs-root/usr/bin/terax \
-            || { echo "terax binary missing from repacked AppImage"; exit 1; }
+          test -x squashfs-root/usr/bin/oarlock \
+            || { echo "oarlock binary missing from repacked AppImage"; exit 1; }
           popd >/dev/null
 
           cp "$WORK/$BASENAME" "$APPIMAGE"

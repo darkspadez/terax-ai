@@ -5,7 +5,7 @@ import {
   needsFontGate,
 } from "./GlyphFontGate";
 
-const FONT = '400 28px "JetBrains Mono", "Terax Symbols", monospace';
+const FONT = '400 28px "JetBrains Mono", "Oarlock Symbols", monospace';
 
 function deferredLoader() {
   const loads: Array<{ resolve: () => void; reject: () => void }> = [];

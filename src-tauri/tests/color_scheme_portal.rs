@@ -82,7 +82,7 @@ fn follows_the_portal_color_scheme() {
     );
     spin_until("the portal name", || portal.lock().unwrap().is_some());
 
-    terax_lib::modules::color_scheme::follow();
+    oarlock_lib::modules::color_scheme::follow();
     spin_until("dark from ReadOne", || {
         settings.is_gtk_application_prefer_dark_theme()
     });

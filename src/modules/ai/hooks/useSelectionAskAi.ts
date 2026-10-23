@@ -21,7 +21,7 @@ export function endsContentSelection(
 type Params = {
   captureActiveSelection: () => string | null;
   askFromSelection: () => void;
-  /** Settings' "Ask Terax on selected text"; off, no popup and no listeners. */
+  /** Settings' "Ask Oarlock on selected text"; off, no popup and no listeners. */
   enabled: boolean;
 };
 

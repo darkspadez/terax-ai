@@ -20,7 +20,7 @@ export type OpenFolderDeps = {
 };
 
 /**
- * Open Folder: the folder the user picks opens the way `terax <dir>` does at
+ * Open Folder: the folder the user picks opens the way `oarlock <dir>` does at
  * launch (`planOpenFolder`), authorized before any shell starts in it.
  * Cancelling the picker does nothing.
  */

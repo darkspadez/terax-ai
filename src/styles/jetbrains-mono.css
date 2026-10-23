@@ -2,7 +2,7 @@
  * The variable fonts with every glyph and feature, upright and italic, split by
  * Unicode range: a segment downloads the first time one of its characters is
  * drawn. Private Use Area code points (U+E000-F8FF and planes 15-16)
- * are left to Terax Symbols, emoji variation selectors to the system. */
+ * are left to Oarlock Symbols, emoji variation selectors to the system. */
 @font-face {
   font-family: 'JetBrains Mono';
   font-style: normal;

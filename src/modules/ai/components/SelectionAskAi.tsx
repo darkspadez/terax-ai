@@ -57,7 +57,7 @@ export function SelectionAskAi({
         className="flex h-7 w-full items-center justify-between gap-1.5 rounded-md border border-border/60 bg-card px-2 text-xs shadow-lg hover:border-border hover:bg-accent"
       >
         <span className="min-w-0 flex-1 truncate whitespace-nowrap">
-          Ask Terax
+          Ask Oarlock
         </span>
         <KbdGroup>
           <Kbd className="h-4 min-w-4 px-1 text-[10px]">{shortcut}</Kbd>

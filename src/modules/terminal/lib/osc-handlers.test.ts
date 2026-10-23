@@ -42,7 +42,7 @@ describe("terminal semantic boundaries", () => {
   );
 
   it("takes clipboard writes of megabytes and rejects larger ones", () => {
-    const text = "terax ".repeat(512 * 1024);
+    const text = "oarlock ".repeat(512 * 1024);
     expect(
       parseOsc52Clipboard(`c;${Buffer.from(text).toString("base64")}`),
     ).toBe(text);

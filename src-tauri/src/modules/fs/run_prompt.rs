@@ -188,7 +188,7 @@ fn show(
     // The dialog runs its own message loop until answered, so it gets a thread of its own; the
     // window, owned by the main thread, stays disabled meanwhile.
     let spawned = std::thread::Builder::new()
-        .name("terax-run-question".into())
+        .name("oarlock-run-question".into())
         .spawn(move || {
             let _ = answer.send(task_dialog(owner as _, &title, &message));
         });

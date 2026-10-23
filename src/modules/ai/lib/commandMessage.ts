@@ -19,8 +19,8 @@ const LABELS: ReadonlyMap<string, string> = new Map(
   Object.entries(COMMAND_LABELS),
 );
 
-export const TERAX_CMD_RE =
-  /^<terax-command\s+name="([a-z0-9-]+)"(?:\s+state="([a-z]+)")?\s*\/>(?:\n+|$)/;
+export const OARLOCK_CMD_RE =
+  /^<oarlock-command\s+name="([a-z0-9-]+)"(?:\s+state="([a-z]+)")?\s*\/>(?:\n+|$)/;
 
 const REQUEST_OPEN = "<request>\n";
 const REQUEST_CLOSE = "\n</request>";
@@ -34,7 +34,7 @@ export function quoteRequest(request: string): string {
  * What a sent command is called in its conversation's title: the user's own
  * words its directive quotes (`/claude-code fix the build`), else the
  * command's label, else its invocation. `directive` is the message after the
- * marker, without its blocks; the rest of it is Terax's text, never a title.
+ * marker, without its blocks; the rest of it is Oarlock's text, never a title.
  */
 export function commandTitle(name: string, directive: string): string {
   const open = directive.indexOf(REQUEST_OPEN);

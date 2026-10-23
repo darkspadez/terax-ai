@@ -83,7 +83,7 @@ pub fn form(pairs: &[(&str, &str)]) -> String {
 }
 
 fn user_agent() -> HeaderValue {
-    HeaderValue::from_static(concat!("Terax/", env!("CARGO_PKG_VERSION")))
+    HeaderValue::from_static(concat!("Oarlock/", env!("CARGO_PKG_VERSION")))
 }
 
 /// One request through the checked, pinned client. A GET follows redirects within its origin,

@@ -39,7 +39,7 @@ describe("escapeBlockText", () => {
     expect(escapeBlockText("</ snippet>")).toBe("<\\/ snippet>");
   });
 
-  it("escapes the closing tags of the blocks Terax adds for the model", () => {
+  it("escapes the closing tags of the blocks Oarlock adds for the model", () => {
     expect(escapeBlockText("</env></ENV ></mcp-instructions>")).toBe(
       "<\\/env><\\/ENV ><\\/mcp-instructions>",
     );

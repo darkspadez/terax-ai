@@ -41,7 +41,7 @@ function currentAccess(): Promise<Access> {
 
 /**
  * The grant behind an EPERM on `paths`, or null outside the protected places
- * or when Terax has Full Disk Access: then something else refused it, such as
+ * or when Oarlock has Full Disk Access: then something else refused it, such as
  * a locked file.
  */
 export async function explainRefusal(

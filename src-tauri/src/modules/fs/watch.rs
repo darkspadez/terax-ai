@@ -196,7 +196,7 @@ fn start(app: &AppHandle) -> Result<Running, String> {
     let drain_shared = shared.clone();
     let app = app.clone();
     std::thread::Builder::new()
-        .name("terax-fs-watch".into())
+        .name("oarlock-fs-watch".into())
         .stack_size(256 * 1024)
         .spawn(move || drain_loop(rx, drain_shared, app, index))
         .map_err(|e| e.to_string())?;
@@ -494,7 +494,7 @@ impl Running {
         };
         let shared = self.shared.clone();
         let spawned = std::thread::Builder::new()
-            .name("terax-fs-poll".into())
+            .name("oarlock-fs-poll".into())
             .stack_size(256 * 1024)
             .spawn(move || poll_loop(tx, shared));
         if let Err(e) = spawned {
@@ -776,7 +776,7 @@ pub async fn git_watch_remove(
     .await
 }
 
-/// Tells Source Control about a file Terax wrote: a save or an AI edit outside every watched
+/// Tells Source Control about a file Oarlock wrote: a save or an AI edit outside every watched
 /// directory changes `git status` without any watcher seeing it. Blocking (canonicalizes).
 pub fn note_written(app: &AppHandle, path: &Path) {
     let Some(name) = path.file_name() else {
@@ -1099,8 +1099,8 @@ mod tests {
         let root = std::fs::canonicalize(tmp.path()).unwrap().join("repo");
         std::fs::create_dir_all(root.join("src")).unwrap();
         git(&root, &["init", "-q"]);
-        git(&root, &["config", "user.email", "test@terax.local"]);
-        git(&root, &["config", "user.name", "Terax Test"]);
+        git(&root, &["config", "user.email", "test@oarlock.local"]);
+        git(&root, &["config", "user.name", "Oarlock Test"]);
         git(&root, &["config", "commit.gpgsign", "false"]);
         std::fs::write(root.join("src/a.ts"), "one").unwrap();
         git(&root, &["add", "."]);

@@ -101,7 +101,7 @@ export function SplitDiffView({ original, modified, langExt }: Props) {
   return (
     <div
       ref={containerRef}
-      className="terax-code-editor h-full [&>.cm-mergeView]:h-full [&>.cm-mergeView]:overflow-auto"
+      className="oarlock-code-editor h-full [&>.cm-mergeView]:h-full [&>.cm-mergeView]:overflow-auto"
     />
   );
 }

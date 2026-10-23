@@ -2,7 +2,7 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useEffect } from "react";
 
 /** `skills::EDIT_EVENT`: Settings asked this window to open a skill's SKILL.md. */
-const SKILL_EDIT_EVENT = "terax:skill-edit";
+const SKILL_EDIT_EVENT = "oarlock:skill-edit";
 
 /** Opens the SKILL.md Settings hands over in an editor tab; the backend already let the
  *  file commands reach its folder. */

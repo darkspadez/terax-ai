@@ -1,4 +1,4 @@
-// The client side for real: the official SDK client, Terax's transports and
+// The client side for real: the official SDK client, Oarlock's transports and
 // the native fetch protocol, against the SDK's own server, with the backend's
 // commands emulated in process (stdio pipe; HTTP proxy with its origin gate).
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -239,7 +239,7 @@ describe("connectServer over HTTP through the backend proxy", () => {
         body: Uint8Array,
         options: { headers: Record<string, string> },
       ) => {
-        const meta = JSON.parse(options.headers["x-terax-mcp-request"]);
+        const meta = JSON.parse(options.headers["x-oarlock-mcp-request"]);
         const channel = host.channels.get(meta.onEvent);
         const send = (kind: number, bytes: Uint8Array = new Uint8Array()) => {
           const packet = new Uint8Array(bytes.length + 1);
@@ -337,7 +337,7 @@ function answerEvery(
   host.handlers.set(
     "mcp_http_stream",
     async (_body: Uint8Array, options: { headers: Record<string, string> }) => {
-      const meta = JSON.parse(options.headers["x-terax-mcp-request"]);
+      const meta = JSON.parse(options.headers["x-oarlock-mcp-request"]);
       seen.push({ url: meta.url, headers: meta.headers });
       const channel = host.channels.get(meta.onEvent);
       const send = (kind: number, bytes: Uint8Array = new Uint8Array()) => {
@@ -374,7 +374,7 @@ describe("signing in", () => {
       {
         "www-authenticate":
           'Bearer resource_metadata="https://mcp.example.test/.well-known/oauth-protected-resource"',
-        "x-terax-sign-in": "required",
+        "x-oarlock-sign-in": "required",
       },
       seen,
     );

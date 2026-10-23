@@ -24,8 +24,8 @@ if (import.meta.env.DEV && import.meta.env.VITE_REACT_SCAN === "true") {
 }
 
 // Real-application benchmark (scripts/app-lab): scenario flags must be in force before any
-// terminal module reads them. Removed entirely unless the build sets TERAX_BENCH=1.
-if (__TERAX_BENCH__) {
+// terminal module reads them. Removed entirely unless the build sets OARLOCK_BENCH=1.
+if (__OARLOCK_BENCH__) {
   const { installBenchEarly } = await import("@/bench/early");
   await installBenchEarly();
 }

@@ -17,7 +17,7 @@ export type McpAnnotations = {
   openWorldHint?: boolean;
 };
 
-/** The parts of a listed tool Terax uses (`Tool` in the MCP schema). */
+/** The parts of a listed tool Oarlock uses (`Tool` in the MCP schema). */
 export type McpListedTool = {
   name: string;
   title?: string;

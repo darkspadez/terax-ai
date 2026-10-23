@@ -1,4 +1,4 @@
-//! Watches the skill folders (Terax's, `~/.claude/skills`, the open projects' items) so a change
+//! Watches the skill folders (Oarlock's, `~/.claude/skills`, the open projects' items) so a change
 //! on disk reaches Settings, the composer and the trust prompt. A folder that does not exist yet
 //! is watched through its nearest existing parent, without recursion, so its creation is seen.
 //! Events only wake a debounced rescan; what windows hear about is decided by comparing the
@@ -125,7 +125,7 @@ fn start(app: AppHandle, on_change: fn(&AppHandle)) -> Result<Running, String> {
     let targets: Targets = Arc::new(RwLock::new(Vec::new()));
     let backend = platform::create(tx, targets.clone())?;
     std::thread::Builder::new()
-        .name("terax-skills-watch".into())
+        .name("oarlock-skills-watch".into())
         .stack_size(256 * 1024)
         .spawn(move || loop {
             if rx.recv().is_err() {
@@ -290,7 +290,7 @@ mod platform {
         targets: Targets,
     ) -> Result<Box<dyn Backend>, String> {
         Ok(Box::new(FsEvents {
-            queue: DispatchQueue::new("app.crynta.terax.skills-watch", None),
+            queue: DispatchQueue::new("sh.oarlock.app.skills-watch", None),
             tx,
             targets,
             roots: Vec::new(),
@@ -377,15 +377,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let home = std::fs::canonicalize(dir.path()).unwrap();
         std::fs::create_dir_all(home.join(".claude")).unwrap();
-        std::fs::create_dir_all(home.join("terax/skills")).unwrap();
+        std::fs::create_dir_all(home.join("oarlock/skills")).unwrap();
         let targets = [
             Target {
                 path: home.join(".claude/skills"),
                 stop: home.clone(),
             },
             Target {
-                path: home.join("terax/skills"),
-                stop: home.join("terax"),
+                path: home.join("oarlock/skills"),
+                stop: home.join("oarlock"),
             },
             Target {
                 path: home.join("project/.terax/skills"),
@@ -395,13 +395,13 @@ mod tests {
         let (real, watches) = plan(&targets);
         assert_eq!(
             real,
-            vec![home.join(".claude/skills"), home.join("terax/skills")]
+            vec![home.join(".claude/skills"), home.join("oarlock/skills")]
         );
         assert_eq!(
             watches,
             vec![
                 (home.join(".claude"), false),
-                (home.join("terax/skills"), true)
+                (home.join("oarlock/skills"), true)
             ]
         );
     }

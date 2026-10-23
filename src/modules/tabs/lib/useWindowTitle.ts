@@ -3,7 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { findLeafCwd } from "@/modules/terminal/lib/panes";
 import type { Tab } from "./useTabs";
 
-const APP_NAME = "Terax";
+const APP_NAME = "Oarlock";
 
 function basename(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
@@ -25,9 +25,9 @@ function tabLabel(tab: Tab | undefined): string {
  * Spotify shows the current track instead of just the app name. Without this
  * the window keeps the build-time default ("Tauri App" on Linux).
  *
- * Format: `<project> — <tab>` (e.g. `terax-ai — src`), collapsing to just the
- * project when the focused terminal sits at the project root. Falls back to the
- * app name when there's nothing to show.
+ * Format: the project and the tab joined by an em dash (e.g. `oarlock` and
+ * `src`), collapsing to just the project when the focused terminal sits at the
+ * project root. Falls back to the app name when there's nothing to show.
  */
 export function useWindowTitle(
   activeTab: Tab | undefined,

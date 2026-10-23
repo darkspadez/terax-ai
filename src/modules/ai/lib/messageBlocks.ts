@@ -10,7 +10,7 @@
  * on its line (`jsonText`, `pathText`). `messageChips.ts` reads them back for
  * the transcript. Pure.
  *
- * Terax adds two blocks for the model only, never stored: the run's `<env>`
+ * Oarlock adds two blocks for the model only, never stored: the run's `<env>`
  * before the last user message (`transport.ts`) and each MCP server's
  * `<mcp-instructions>` in the system prompt (`agent.ts`). Their closing tags
  * are escaped too.
@@ -30,7 +30,7 @@ export type MessageBlockKind = (typeof MESSAGE_BLOCK_KINDS)[number];
 
 const KINDS = MESSAGE_BLOCK_KINDS.join("|");
 
-/** The blocks Terax adds for the model only (see above). */
+/** The blocks Oarlock adds for the model only (see above). */
 const MODEL_BLOCK_KINDS = ["env", "mcp-instructions"];
 
 const ATTRIBUTE_ESCAPES: Record<string, string> = {

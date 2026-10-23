@@ -119,7 +119,7 @@ export class TerminalScrollbackRegistry {
         return text;
       },
       (error: unknown) => {
-        console.warn("[terax] could not restore terminal scrollback:", error);
+        console.warn("[oarlock] could not restore terminal scrollback:", error);
         value = null;
         return null;
       },
@@ -252,7 +252,7 @@ export class TerminalScrollbackRegistry {
         this.purged = true;
         this.saved = new WeakMap();
       } catch (error) {
-        console.warn("[terax] could not delete terminal scrollback:", error);
+        console.warn("[oarlock] could not delete terminal scrollback:", error);
       }
       return;
     }
@@ -286,7 +286,7 @@ export class TerminalScrollbackRegistry {
       failure ??= error;
     }
     if (failure !== null) {
-      console.warn("[terax] could not save terminal scrollback:", failure);
+      console.warn("[oarlock] could not save terminal scrollback:", failure);
     }
   }
 }
@@ -380,7 +380,7 @@ const nativeBackend: ScrollbackBackend = {
   },
   async save(key, body) {
     await invoke("terminal_scrollback_save", textEncoder.encode(body), {
-      headers: { "x-terax-scrollback": key },
+      headers: { "x-oarlock-scrollback": key },
     });
   },
   retain: (keys) => invoke<number>("terminal_scrollback_retain", { keys }),

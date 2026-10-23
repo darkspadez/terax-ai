@@ -3,7 +3,7 @@
  * Copyright (c) 2017-2019 The xterm.js authors. MIT licensed.
  */
 
-import { CellFlags } from "@terax/ghostty-core/protocol";
+import { CellFlags } from "@oarlock/ghostty-core/protocol";
 import { isBuiltinGlyph } from "../gpu/BuiltinGlyphs";
 import {
   documentGlyphFontGate,

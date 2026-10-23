@@ -43,7 +43,7 @@ export type ServerDraft = {
   env: ValueRow[];
   url: string;
   headers: ValueRow[];
-  /** A sign-in client of the user's own (remote servers); empty: Terax registers. */
+  /** A sign-in client of the user's own (remote servers); empty: Oarlock registers. */
   oauthClientId: string;
   /** A new client secret, or "" to keep the saved one. */
   oauthSecret: string;
@@ -253,7 +253,7 @@ export function draftErrors(
       (draft.oauthSecret || draft.oauthScopes.trim() || port)
     ) {
       errors.oauth =
-        "Enter the client ID these belong to, or clear them to let Terax register itself.";
+        "Enter the client ID these belong to, or clear them to let Oarlock register itself.";
     } else if (port && !isPort(Number(port))) {
       errors.oauth = "The callback port is a number from 1 to 65535.";
     }

@@ -260,7 +260,7 @@ export function TerminalBehaviorSettings() {
       </SettingRow>
       <SettingRow
         title="Restore scrollback after restart"
-        description={`Keep each terminal's last ${SCROLLBACK_MAX_LINES.toLocaleString()} lines on this device and show them again when Terax reopens its tabs. Private terminals are never saved; turning this off deletes what was saved.`}
+        description={`Keep each terminal's last ${SCROLLBACK_MAX_LINES.toLocaleString()} lines on this device and show them again when Oarlock reopens its tabs. Private terminals are never saved; turning this off deletes what was saved.`}
       >
         <Switch
           checked={behavior.restoreScrollback}

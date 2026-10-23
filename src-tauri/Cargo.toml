@@ -1,19 +1,19 @@
 [package]
-name = "terax"
-version = "0.9.0"
-description = "Terax — an open-source AI-native terminal emulator"
+name = "oarlock"
+version = "0.1.0"
+description = "Oarlock, an open-source AI-native terminal emulator"
 authors = ["crynta"]
 license = "Apache-2.0"
 edition = "2021"
-default-run = "terax"
+default-run = "oarlock"
 
 [workspace]
-members = ["crates/terax-cli", "crates/terax-control-protocol"]
-default-members = [".", "crates/terax-cli", "crates/terax-control-protocol"]
+members = ["crates/oarlock-cli", "crates/oarlock-control-protocol"]
+default-members = [".", "crates/oarlock-cli", "crates/oarlock-control-protocol"]
 resolver = "2"
 
 [workspace.package]
-version = "0.9.0"
+version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -28,7 +28,7 @@ bench = []
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "terax_lib"
+name = "oarlock_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -45,7 +45,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 getrandom = "0.4"
 memchr = "2"
-terax-control-protocol = { path = "crates/terax-control-protocol" }
+oarlock-control-protocol = { path = "crates/oarlock-control-protocol" }
 portable-pty = "0.9"
 dirs = "7"
 log = "0.4"
@@ -170,7 +170,7 @@ opt-level = "s"
 panic = "unwind"
 strip = true
 
-# Speed where Terax spends CPU per byte or per keystroke; everything else stays
+# Speed where Oarlock spends CPU per byte or per keystroke; everything else stays
 # size-optimized. Generic code (serde derives, grep-searcher's search loop) is
 # compiled in the crate that instantiates it, so only these crates' own code is
 # affected.

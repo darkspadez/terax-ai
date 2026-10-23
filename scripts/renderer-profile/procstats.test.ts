@@ -42,18 +42,18 @@ describe("ps parsing", () => {
 
   it("reads the process table, commands with spaces included", () => {
     const table = parseProcessTable(
-      "  501     1 /sbin/launchd\n 4242   501 /Users/me/Terax App Lab.app/Contents/MacOS/terax\n bad line\n",
+      "  501     1 /sbin/launchd\n 4242   501 /Users/me/Oarlock App Lab.app/Contents/MacOS/oarlock\n bad line\n",
     );
     expect([...table]).toEqual([
       [501, [1, "/sbin/launchd"]],
-      [4242, [501, "/Users/me/Terax App Lab.app/Contents/MacOS/terax"]],
+      [4242, [501, "/Users/me/Oarlock App Lab.app/Contents/MacOS/oarlock"]],
     ]);
   });
 
   it("maps the pids the host reported to roles and warns about the rest", () => {
     const table = parseProcessTable(
       [
-        "4242 1 /Users/me/Terax App Lab.app/Contents/MacOS/terax",
+        "4242 1 /Users/me/Oarlock App Lab.app/Contents/MacOS/oarlock",
         "4300 4242 /System/Library/Frameworks/WebKit.framework/XPCServices/com.apple.WebKit.WebContent",
         "4301 4242 com.apple.WebKit.GPU",
         "4302 4242 com.apple.WebKit.Networking",
@@ -77,7 +77,7 @@ describe("ps parsing", () => {
     expect(warnings).toEqual(["pid 4242 is not the expected host process"]);
     const [app] = membersFrom(native, table, {
       ...ROLE_BY_NAME,
-      terax: "host",
+      oarlock: "host",
     });
     expect(app.get(4242)).toBe("host");
     expect(membersFrom({ gpuPid: 0 }, table)[1]).toEqual([

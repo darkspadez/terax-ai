@@ -1,6 +1,6 @@
 //! A project's `.mcp.json` (Claude Code's format: `{"mcpServers": {...}}`), used only through
 //! the shared project trust: an `ItemKind::McpJson` item whose inspector lists each server's
-//! command or URL, hashed by content, so a change asks again (one Terax makes itself keeps the
+//! command or URL, hashed by content, so a change asks again (one Oarlock makes itself keeps the
 //! answer, `project_trust::keeping_trust`); an empty file provides nothing. Its servers belong to
 //! the windows that have the project open, run only while the user allows the file's current
 //! content, and are never trusted automatically (the page keeps the per-server Trusted switch
@@ -510,7 +510,7 @@ pub struct Binding {
 
 /// Whether the server may still run: its window still has the project open, the user allows
 /// the file's current content, and that content declares this server exactly as it started.
-/// An edit to the file that the user allows (Terax's own edits keep the trust) and that leaves
+/// An edit to the file that the user allows (Oarlock's own edits keep the trust) and that leaves
 /// this server's entry alone keeps it running; any other change stops it.
 pub fn still_allowed(app: &AppHandle, binding: &Binding) -> bool {
     let Some(project) =
@@ -605,7 +605,7 @@ pub fn resolve(
 
 pub type Lookup = HashMap<String, String>;
 
-/// Looks a variable up in the shell environment Terax gives servers, then its own.
+/// Looks a variable up in the shell environment Oarlock gives servers, then its own.
 pub fn lookup(shell: &Lookup) -> impl Fn(&str) -> Option<String> + '_ {
     move |name| {
         shell
@@ -878,7 +878,7 @@ mod tests {
     }
 
     #[test]
-    fn what_it_holds_for_terax_s_own_changes() {
+    fn what_it_holds_for_oarlock_s_own_changes() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(FILE);
         let hash = |bytes: &[u8]| hex(&Sha256::digest(bytes));

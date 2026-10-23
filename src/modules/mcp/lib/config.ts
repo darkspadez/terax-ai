@@ -23,7 +23,7 @@ type McpStdioTransport = {
 
 /**
  * A client the user registered with the server's authorization server, for
- * sign-in. Without one, Terax registers itself (dynamic client registration).
+ * sign-in. Without one, Oarlock registers itself (dynamic client registration).
  */
 export type McpOAuthClient = {
   clientId: string;
@@ -40,7 +40,7 @@ type McpHttpTransport = {
   type: "http" | "sse";
   url: string;
   headers: McpNamedValue[];
-  /** Sign-in with a client of the user's own; absent when Terax registers. */
+  /** Sign-in with a client of the user's own; absent when Oarlock registers. */
   oauth?: McpOAuthClient;
 };
 
@@ -368,7 +368,7 @@ export function validateServer(
     const bad = t.headers.find((h) => !isValidHeaderName(h.name));
     if (bad) errors.values = `"${bad.name}" cannot be used as a header name.`;
     if (t.oauth && !t.oauth.clientId.trim())
-      errors.oauth = "Enter the client ID, or leave sign-in to Terax.";
+      errors.oauth = "Enter the client ID, or leave sign-in to Oarlock.";
   }
   const entries = t.type === "stdio" ? t.env : t.headers;
   const seen = new Set<string>();

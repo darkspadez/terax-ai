@@ -12,11 +12,11 @@ describe("agentMark", () => {
     expect(agentMark("Claude")).toBe(ClaudeIcon);
     expect(agentMark("antigravity")).toBe(GoogleIcon);
     expect(agentMark("pi")).toBe("pi");
-    expect(agentMark("Terax")).toBe("terax");
+    expect(agentMark("Oarlock")).toBe("oarlock");
   });
 
   it("draws any other name with the generic mark", () => {
-    for (const name of ["my-agent", "gjc", "claude-phish", "terax-evil", ""]) {
+    for (const name of ["my-agent", "gjc", "claude-phish", "oarlock-evil", ""]) {
       expect(agentMark(name)).toBe(AiBrowserIcon);
     }
     // Inherited properties are not known agents either.

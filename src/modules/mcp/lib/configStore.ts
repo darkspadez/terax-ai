@@ -14,7 +14,7 @@ import { capText, cleanAnnotations, type McpAnnotations } from "./toolSchema";
  * Servers, what the user chose for project servers, and the tools each listed
  * when it last ran (for Settings).
  */
-const STORE_PATH = "terax-mcp.json";
+const STORE_PATH = "oarlock-mcp.json";
 const KEY_SERVERS = "servers";
 const KEY_PROJECT_SERVERS = "projectServers";
 const TOOLS_PREFIX = "tools:";
@@ -24,7 +24,7 @@ const MAX_KNOWN_TOOLS = 500;
  * Store change events reach only the writing webview, so every write is
  * announced: windows restart what changed, Settings re-reads.
  */
-const MCP_CHANGED_EVENT = "terax://mcp-changed";
+const MCP_CHANGED_EVENT = "oarlock://mcp-changed";
 /**
  * What a window may run from its project changes with trust decisions
  * (`project_trust::CHANGED_EVENT`, also sent when a window opens or leaves a

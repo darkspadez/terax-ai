@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { TeraxGhostty } from "@terax/ghostty-core/adapted";
+import { OarlockGhostty } from "@oarlock/ghostty-core/adapted";
 import { beforeAll, describe, expect, it } from "vitest";
 import { AdaptedGhosttyTerminalModel } from "./AdaptedGhosttyTerminalModel";
 
@@ -10,7 +10,7 @@ const red = Buffer.from([255, 0, 0]).toString("base64");
 describe.each(["ghostty-vt", "ghostty-vt-scalar"])(
   "adapted Ghostty model protocols (%s)",
   (artifact) => {
-    let core: TeraxGhostty;
+    let core: OarlockGhostty;
 
     beforeAll(async () => {
       const file = await readFile(
@@ -19,7 +19,7 @@ describe.each(["ghostty-vt", "ghostty-vt-scalar"])(
           import.meta.url,
         ),
       );
-      core = await TeraxGhostty.loadBytes(Uint8Array.from(file).buffer);
+      core = await OarlockGhostty.loadBytes(Uint8Array.from(file).buffer);
     });
 
     function create(
@@ -95,9 +95,9 @@ describe.each(["ghostty-vt", "ghostty-vt-scalar"])(
         model.setColorScheme("light");
         model.setVisible(false);
         expect(replies).toEqual(["\x1b[?997;2n", "\x1b[?999;2n"]);
-        model.setTerminalVersion("terax 9.9.9");
+        model.setTerminalVersion("oarlock 9.9.9");
         write("\x1b[>q");
-        expect(replies[replies.length - 1]).toBe("\x1bP>|terax 9.9.9\x1b\\");
+        expect(replies[replies.length - 1]).toBe("\x1bP>|oarlock 9.9.9\x1b\\");
       } finally {
         model.dispose();
       }
@@ -190,15 +190,15 @@ describe.each(["ghostty-vt", "ghostty-vt-scalar"])(
       const { model, write } = create();
       try {
         write(
-          "see \x1b]8;;https://terax.app\x1b\\terax\x1b]8;;\x1b\\ and src/main.rs:4",
+          "see \x1b]8;;https://oarlock.app\x1b\\oarlock\x1b]8;;\x1b\\ and src/main.rs:4",
         );
         expect(model.linkAtViewportCell(0, 6)).toEqual({
-          uri: "https://terax.app",
-          spans: [{ row: 0, startColumn: 4, endColumn: 8 }],
+          uri: "https://oarlock.app",
+          spans: [{ row: 0, startColumn: 4, endColumn: 10 }],
         });
         expect(model.linkAtViewportCell(0, 18)).toEqual({
           uri: "src/main.rs:4",
-          spans: [{ row: 0, startColumn: 14, endColumn: 26 }],
+          spans: [{ row: 0, startColumn: 16, endColumn: 28 }],
         });
         expect(model.linkAtViewportCell(0, 1)).toBeNull();
       } finally {

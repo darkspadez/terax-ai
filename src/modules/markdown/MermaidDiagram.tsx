@@ -31,7 +31,7 @@ const renderDiagram = serialized(
     signal.throwIfAborted();
     const mermaid = plugin.getMermaid(mermaidConfig(mode));
     renders += 1;
-    const { svg } = await mermaid.render(`terax-mermaid-${renders}`, source);
+    const { svg } = await mermaid.render(`oarlock-mermaid-${renders}`, source);
     return stripSvgLinks(svg);
   },
 );

@@ -19,7 +19,7 @@ const ZSHRC_SCRIPT: &str = include_str!("scripts/zshrc.zsh");
 #[cfg(windows)]
 const FISH_INIT_SCRIPT: &str = include_str!("scripts/init.fish");
 const FISH_REINSTALL_PROMPT: &str =
-    "functions -q __terax_install_prompt; and __terax_install_prompt";
+    "functions -q __oarlock_install_prompt; and __oarlock_install_prompt";
 
 #[cfg(windows)]
 fn bashrc_script() -> &'static str {
@@ -116,7 +116,7 @@ pub fn detect_shell_name() -> String {
 pub struct ShellInfo {
     pub name: String,
     pub path: String,
-    /// True when Terax injects OSC 7/133 integration for this shell (cwd
+    /// True when Oarlock injects OSC 7/133 integration for this shell (cwd
     /// tracking, command blocks, agent detection). Others spawn bare.
     pub integrated: bool,
 }
@@ -152,7 +152,7 @@ fn ensure_utf8_locale(cmd: &mut CommandBuilder) {
     cmd.env("LANG", fallback);
 }
 
-/// Replaces whatever terminal launched Terax with Terax as the shell's terminal.
+/// Replaces whatever terminal launched Oarlock with Oarlock as the shell's terminal.
 fn apply_terminal_identity(cmd: &mut CommandBuilder) {
     for key in terminal_env::inherited_identity(cmd.iter_full_env_as_str()) {
         cmd.env_remove(key);
@@ -160,7 +160,7 @@ fn apply_terminal_identity(cmd: &mut CommandBuilder) {
     for (key, value) in terminal_env::IDENTITY {
         cmd.env(key, value);
     }
-    cmd.env("TERAX_TERMINAL", "1");
+    cmd.env("OARLOCK_TERMINAL", "1");
 }
 
 fn apply_common(
@@ -171,7 +171,7 @@ fn apply_common(
 ) {
     apply_terminal_identity(cmd);
     if blocks {
-        cmd.env("TERAX_BLOCKS", "1");
+        cmd.env("OARLOCK_BLOCKS", "1");
     }
     let env_overrides = workspace::child_env_overrides();
     let clean_path = match env_overrides.iter().find(|(key, _)| *key == "PATH") {
@@ -189,11 +189,11 @@ fn apply_common(
         }
     }
     if let Some(control) = control {
-        cmd.env("TERAX_CONTROL_ADDR", &control.address);
-        cmd.env("TERAX_CONTROL_TOKEN", &control.token);
-        cmd.env("TERAX_PANE_ID", control.pane_id.to_string());
+        cmd.env("OARLOCK_CONTROL_ADDR", &control.address);
+        cmd.env("OARLOCK_CONTROL_TOKEN", &control.token);
+        cmd.env("OARLOCK_PANE_ID", control.pane_id.to_string());
         if let Some(path) = &control.cli_path {
-            cmd.env("TERAX_CLI", path);
+            cmd.env("OARLOCK_CLI", path);
         }
         if let Some(bin_dir) = &control.cli_bin_dir {
             let paths = std::iter::once(bin_dir.clone()).chain(
@@ -344,10 +344,10 @@ mod unix {
             Shell::Zsh => {
                 match prepare_zdotdir() {
                     Ok(zdotdir) => {
-                        // Guard against Terax-in-Terax :)
+                        // Guard against Oarlock-in-Oarlock :)
                         if let Ok(user_zd) = std::env::var("ZDOTDIR") {
                             if Path::new(&user_zd) != zdotdir.as_path() {
-                                cmd.env("TERAX_USER_ZDOTDIR", user_zd);
+                                cmd.env("OARLOCK_USER_ZDOTDIR", user_zd);
                             }
                         }
                         cmd.env("ZDOTDIR", &zdotdir);
@@ -401,7 +401,7 @@ mod unix {
 
     fn integration_root() -> Result<PathBuf, String> {
         let home = dirs::home_dir().ok_or_else(|| "could not resolve home dir".to_string())?;
-        let root = home.join(".cache").join("terax").join("shell-integration");
+        let root = home.join(".cache").join("oarlock").join("shell-integration");
         fs::create_dir_all(&root).map_err(|e| format!("create {}: {e}", root.display()))?;
         Ok(root)
     }
@@ -428,7 +428,7 @@ mod unix {
         let home = dirs::home_dir().ok_or_else(|| "could not resolve home dir".to_string())?;
         let dir = home.join(".config").join("fish").join("conf.d");
         fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
-        write_if_changed(&dir.join("terax.fish"), FISH_INIT)?;
+        write_if_changed(&dir.join("oarlock.fish"), FISH_INIT)?;
         Ok(())
     }
 
@@ -440,7 +440,7 @@ mod unix {
         }
         // Atomic replace: a parallel shell startup must never source a half-written file.
         let mut tmp: OsString = path.as_os_str().to_owned();
-        tmp.push(".__terax_tmp__");
+        tmp.push(".__oarlock_tmp__");
         let tmp = PathBuf::from(tmp);
         fs::write(&tmp, content).map_err(|e| format!("write {}: {e}", tmp.display()))?;
         fs::rename(&tmp, path).map_err(|e| {
@@ -529,7 +529,7 @@ mod unix {
                 }
                 let tmp = tempfile::tempdir().unwrap();
                 let home = tmp.path().join("home");
-                let wrapper = home.join(".cache/terax/shell-integration/zsh");
+                let wrapper = home.join(".cache/oarlock/shell-integration/zsh");
                 fs::create_dir_all(&wrapper).unwrap();
                 for (name, script) in [
                     (".zshenv", ZSHENV),
@@ -597,7 +597,7 @@ mod unix {
                 ".config/zsh/.zshenv",
                 "for f in \"$ZDOTDIR\"/conf.d/*.zsh; do source \"$f\"; done\n",
             );
-            zsh.write(".config/zsh/conf.d/a.zsh", "TERAX_TEST_CONF_D=1\n");
+            zsh.write(".config/zsh/conf.d/a.zsh", "OARLOCK_TEST_CONF_D=1\n");
             for name in ["zprofile", "zshrc", "zlogin"] {
                 zsh.write(
                     &format!(".config/zsh/.{name}"),
@@ -606,8 +606,8 @@ mod unix {
             }
 
             let stderr = zsh.run(
-                &[("TERAX_USER_ZDOTDIR", &user)],
-                "print -r -- \"$TERAX_TEST_CONF_D $ZDOTDIR\" > \"$HOME/result\"\n",
+                &[("OARLOCK_USER_ZDOTDIR", &user)],
+                "print -r -- \"$OARLOCK_TEST_CONF_D $ZDOTDIR\" > \"$HOME/result\"\n",
             );
 
             assert!(!stderr.contains("no matches found"), "{stderr}");
@@ -627,18 +627,18 @@ mod unix {
             // The XDG layout: ~/.zshenv moves the rest of the config.
             let Some(zsh) = ZshLaunch::new() else { return };
             zsh.write(".zshenv", "export ZDOTDIR=\"$HOME/.config/zsh\"\n");
-            zsh.write(".config/zsh/.zshrc", "TERAX_TEST_USER_RC=1\n");
+            zsh.write(".config/zsh/.zshrc", "OARLOCK_TEST_USER_RC=1\n");
 
             zsh.run(
                 &[],
-                "print -r -- \"$TERAX_TEST_USER_RC $(whence -w _terax_precmd) \
-                 $ZDOTDIR $TERAX_USER_ZDOTDIR\" > \"$HOME/result\"\n",
+                "print -r -- \"$OARLOCK_TEST_USER_RC $(whence -w _oarlock_precmd) \
+                 $ZDOTDIR $OARLOCK_USER_ZDOTDIR\" > \"$HOME/result\"\n",
             );
 
             assert_eq!(
                 zsh.read("result").trim(),
                 format!(
-                    "1 _terax_precmd: function {} {}",
+                    "1 _oarlock_precmd: function {} {}",
                     zsh.wrapper.display(),
                     zsh.home.join(".config/zsh").display()
                 )
@@ -660,7 +660,7 @@ mod unix {
             );
             zsh.write(
                 ".zsh_history",
-                ": 1700000000:0;terax-test-earlier-command\n",
+                ": 1700000000:0;oarlock-test-earlier-command\n",
             );
 
             zsh.run(
@@ -677,7 +677,7 @@ mod unix {
             // Read once, by zsh itself: an extra `fc -R` would list it twice.
             assert_eq!(
                 lines
-                    .filter(|line| *line == "terax-test-earlier-command")
+                    .filter(|line| *line == "oarlock-test-earlier-command")
                     .count(),
                 1,
                 "{result}"
@@ -924,7 +924,7 @@ mod windows {
             ) => {
                 args.push("env".to_string());
                 if let Some(user_zdotdir) = user_zdotdir {
-                    args.push(format!("TERAX_USER_ZDOTDIR={user_zdotdir}"));
+                    args.push(format!("OARLOCK_USER_ZDOTDIR={user_zdotdir}"));
                 }
                 args.push(format!("ZDOTDIR={zdotdir}"));
                 args.push(shell_path.to_string());
@@ -978,7 +978,7 @@ mod windows {
     fn prepare_wsl_integration_dir(distro: &str, shell: &str) -> Result<(String, PathBuf), String> {
         let home = crate::modules::workspace::wsl_home(distro.to_string())?;
         let linux_dir = format!(
-            "{}/.cache/terax/shell-integration/{shell}",
+            "{}/.cache/oarlock/shell-integration/{shell}",
             home.trim_end_matches('/')
         );
         let unc_dir = crate::modules::workspace::wsl_path_to_unc(distro, &linux_dir);
@@ -1025,7 +1025,7 @@ mod windows {
         let linux_dir = format!("{}/.config/fish/conf.d", home.trim_end_matches('/'));
         let unc_dir = crate::modules::workspace::wsl_path_to_unc(distro, &linux_dir);
         fs::create_dir_all(&unc_dir).map_err(|e| format!("create {}: {e}", unc_dir.display()))?;
-        let unc_file = unc_dir.join("terax.fish");
+        let unc_file = unc_dir.join("oarlock.fish");
         let content = normalize_script(super::fish_init_script());
         write_if_changed(&unc_file, &content)?;
         Ok(())
@@ -1033,7 +1033,7 @@ mod windows {
 
     fn integration_root() -> Result<PathBuf, String> {
         let home = dirs::home_dir().ok_or_else(|| "could not resolve home dir".to_string())?;
-        let root = home.join(".cache").join("terax").join("shell-integration");
+        let root = home.join(".cache").join("oarlock").join("shell-integration");
         fs::create_dir_all(&root).map_err(|e| format!("create {}: {e}", root.display()))?;
         Ok(root)
     }
@@ -1133,7 +1133,7 @@ mod windows {
             }
         }
         let mut tmp: OsString = path.as_os_str().to_owned();
-        tmp.push(".__terax_tmp__");
+        tmp.push(".__oarlock_tmp__");
         let tmp = PathBuf::from(tmp);
         fs::write(&tmp, content).map_err(|e| format!("write {}: {e}", tmp.display()))?;
         fs::rename(&tmp, path).map_err(|e| {
@@ -1154,7 +1154,7 @@ mod windows {
                 "/usr/bin/zsh",
                 ShellKind::Zsh,
                 WslShellIntegration::Zsh {
-                    zdotdir: "/home/vinicios/.cache/terax/shell-integration/zsh".into(),
+                    zdotdir: "/home/vinicios/.cache/oarlock/shell-integration/zsh".into(),
                     user_zdotdir: None,
                 },
             );
@@ -1167,7 +1167,7 @@ mod windows {
                     "/home/vinicios/repo".to_string(),
                     "--exec".to_string(),
                     "env".to_string(),
-                    "ZDOTDIR=/home/vinicios/.cache/terax/shell-integration/zsh".to_string(),
+                    "ZDOTDIR=/home/vinicios/.cache/oarlock/shell-integration/zsh".to_string(),
                     "/usr/bin/zsh".to_string(),
                     "-l".to_string(),
                 ]
@@ -1182,7 +1182,7 @@ mod windows {
                 "/usr/bin/zsh",
                 ShellKind::Zsh,
                 WslShellIntegration::Zsh {
-                    zdotdir: "/home/vinicios/.cache/terax/shell-integration/zsh".into(),
+                    zdotdir: "/home/vinicios/.cache/oarlock/shell-integration/zsh".into(),
                     user_zdotdir: Some("/home/vinicios/.config/zsh".into()),
                 },
             );
@@ -1195,8 +1195,8 @@ mod windows {
                     "/home/vinicios/repo".to_string(),
                     "--exec".to_string(),
                     "env".to_string(),
-                    "TERAX_USER_ZDOTDIR=/home/vinicios/.config/zsh".to_string(),
-                    "ZDOTDIR=/home/vinicios/.cache/terax/shell-integration/zsh".to_string(),
+                    "OARLOCK_USER_ZDOTDIR=/home/vinicios/.config/zsh".to_string(),
+                    "ZDOTDIR=/home/vinicios/.cache/oarlock/shell-integration/zsh".to_string(),
                     "/usr/bin/zsh".to_string(),
                     "-l".to_string(),
                 ]
@@ -1234,7 +1234,7 @@ mod windows {
                 "/bin/bash",
                 ShellKind::Bash,
                 WslShellIntegration::Bash {
-                    rcfile: "/home/vinicios/.cache/terax/shell-integration/bash/bashrc".into(),
+                    rcfile: "/home/vinicios/.cache/oarlock/shell-integration/bash/bashrc".into(),
                 },
             );
             assert_eq!(
@@ -1247,7 +1247,7 @@ mod windows {
                     "--exec".to_string(),
                     "/bin/bash".to_string(),
                     "--rcfile".to_string(),
-                    "/home/vinicios/.cache/terax/shell-integration/bash/bashrc".to_string(),
+                    "/home/vinicios/.cache/oarlock/shell-integration/bash/bashrc".to_string(),
                     "-i".to_string(),
                 ]
             );
@@ -1444,17 +1444,17 @@ mod tests {
     }
 
     #[test]
-    fn common_env_is_terax_and_not_the_launching_terminal() {
+    fn common_env_is_oarlock_and_not_the_launching_terminal() {
         let mut command = CommandBuilder::new("shell");
-        // What Terax inherits when a dev build is started from Ghostty in tmux
-        // inside another Terax.
+        // What Oarlock inherits when a dev build is started from Ghostty in tmux
+        // inside another Oarlock.
         for (key, value) in [
             ("TERM", "xterm-ghostty"),
             ("TERM_PROGRAM", "ghostty"),
             ("GHOSTTY_RESOURCES_DIR", "/opt/ghostty/share/ghostty"),
             ("TMUX", "/tmp/tmux-1000/default,1,0"),
-            ("TERAX_BLOCKS", "1"),
-            ("TERAX_CONTROL_TOKEN", "parent-secret"),
+            ("OARLOCK_BLOCKS", "1"),
+            ("OARLOCK_CONTROL_TOKEN", "parent-secret"),
             ("MY_TOOL_CONFIG", "kept"),
         ] {
             command.env(key, value);
@@ -1465,9 +1465,9 @@ mod tests {
         for (key, value) in [
             ("TERM", "xterm-256color"),
             ("COLORTERM", "truecolor"),
-            ("TERM_PROGRAM", "terax"),
+            ("TERM_PROGRAM", "oarlock"),
             ("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION")),
-            ("TERAX_TERMINAL", "1"),
+            ("OARLOCK_TERMINAL", "1"),
             ("MY_TOOL_CONFIG", "kept"),
         ] {
             assert_eq!(command.get_env(key), Some(OsStr::new(value)), "{key}");
@@ -1475,8 +1475,8 @@ mod tests {
         for key in [
             "GHOSTTY_RESOURCES_DIR",
             "TMUX",
-            "TERAX_BLOCKS",
-            "TERAX_CONTROL_TOKEN",
+            "OARLOCK_BLOCKS",
+            "OARLOCK_CONTROL_TOKEN",
         ] {
             assert_eq!(command.get_env(key), None, "{key}");
         }
@@ -1490,23 +1490,23 @@ mod tests {
             address: "127.0.0.1:1234".into(),
             token: "secret".into(),
             pane_id: 42,
-            cli_path: Some("/app/terax-cli".into()),
+            cli_path: Some("/app/oarlock-cli".into()),
             cli_bin_dir: Some(std::path::PathBuf::from("/app/bin")),
         };
         apply_common(&mut command, None, false, Some(&control));
 
         assert_eq!(
-            command.get_env("TERAX_CONTROL_ADDR"),
+            command.get_env("OARLOCK_CONTROL_ADDR"),
             Some(OsStr::new("127.0.0.1:1234"))
         );
         assert_eq!(
-            command.get_env("TERAX_CONTROL_TOKEN"),
+            command.get_env("OARLOCK_CONTROL_TOKEN"),
             Some(OsStr::new("secret"))
         );
-        assert_eq!(command.get_env("TERAX_PANE_ID"), Some(OsStr::new("42")));
+        assert_eq!(command.get_env("OARLOCK_PANE_ID"), Some(OsStr::new("42")));
         assert_eq!(
-            command.get_env("TERAX_CLI"),
-            Some(OsStr::new("/app/terax-cli"))
+            command.get_env("OARLOCK_CLI"),
+            Some(OsStr::new("/app/oarlock-cli"))
         );
         assert_eq!(
             command
@@ -1556,7 +1556,7 @@ mod tests {
         .collect();
         assert!(marks.windows(2).all(|w| w[0] < w[1]), "{prompt}");
         // No preexec hook: block tabs keep cmd's own prompt.
-        assert!(prompt.ends_with("]133;B;terax_blocks=0$E\\\""), "{prompt}");
+        assert!(prompt.ends_with("]133;B;oarlock_blocks=0$E\\\""), "{prompt}");
     }
 
     #[test]
@@ -1597,7 +1597,7 @@ Remove-Variable -Scope Global LASTEXITCODE
 Write-Error failed -ErrorAction SilentlyContinue
 $p = prompt
 $codes += Code $p
-$env:TERAX_BLOCKS = '1'
+$env:OARLOCK_BLOCKS = '1'
 $p = prompt
 $codes += Code $p
 "markers=$markers codes=$($codes -join ',') kept=$kept added=$(Test-Path Variable:global:LASTEXITCODE)"
@@ -1611,7 +1611,7 @@ $codes += Code $p
                 "-Command",
                 &script,
             ])
-            .env_remove("TERAX_BLOCKS")
+            .env_remove("OARLOCK_BLOCKS")
             .output()
             .unwrap();
         let stdout = String::from_utf8_lossy(&out.stdout);

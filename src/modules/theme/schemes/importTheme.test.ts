@@ -32,7 +32,7 @@ describe("detectSourceFormat", () => {
     expect(detectSourceFormat("x", "theme.yml")).toBe("alacritty-yaml");
     expect(detectSourceFormat("x", "theme.yaml")).toBe("alacritty-yaml");
     expect(detectSourceFormat("x", "scheme.json")).toBe("json");
-    expect(detectSourceFormat("x", "mine.terax-theme")).toBe("json");
+    expect(detectSourceFormat("x", "mine.oarlock-theme")).toBe("json");
   });
 
   it("sniffs content when the name says nothing", () => {
@@ -79,7 +79,7 @@ describe("names and ids", () => {
 });
 
 describe("importThemeText", () => {
-  it("turns a Ghostty theme into a Terax theme with the exact palette", () => {
+  it("turns a Ghostty theme into an Oarlock theme with the exact palette", () => {
     const [theme] = imported(fixture("ghostty/One Half Dark"), "One Half Dark");
     expect(theme.id).toBe("one-half-dark");
     expect(theme.name).toBe("One Half Dark");
@@ -132,14 +132,14 @@ describe("importThemeText", () => {
     ]);
   });
 
-  it("keeps a Terax theme's own id so re-importing updates it", () => {
+  it("keeps an Oarlock theme's own id so re-importing updates it", () => {
     const theme = {
       id: "nord",
       name: "My Nord",
       variants: { dark: { colors: { background: "#000000" } } },
     };
     const result = importThemeText(JSON.stringify(theme), {
-      fileName: "mine.terax-theme",
+      fileName: "mine.oarlock-theme",
       takenIds: ["nord"],
     });
     expect(result.ok && result.themes.map((t) => [t.id, t.name])).toEqual([

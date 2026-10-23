@@ -159,15 +159,15 @@ export function SkillsSection() {
     () => (snapshot ? skillGroups(snapshot) : []),
     [snapshot],
   );
-  const teraxNames = useMemo(
+  const oarlockNames = useMemo(
     () =>
       new Set(
         (snapshot?.skills ?? [])
-          .filter((s) => s.source === "terax")
+          .filter((s) => s.source === "oarlock")
           .map((s) => s.name)
           .concat(
             (snapshot?.invalid ?? [])
-              .filter((s) => s.source === "terax")
+              .filter((s) => s.source === "oarlock")
               .map((s) => s.dirName),
           ),
       ),
@@ -189,7 +189,7 @@ export function SkillsSection() {
           className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400"
         />
         <span>
-          A skill's scripts run with your rights, outside Terax's folder limits,
+          A skill's scripts run with your rights, outside Oarlock's folder limits,
           through the AI's shell tool: each command asks first unless the
           conversation is in Auto-approve. A skill's text is input to the AI and
           never changes what needs your approval. Add skills only from sources
@@ -307,7 +307,7 @@ export function SkillsSection() {
 
       <NewSkillDialog
         open={creating}
-        taken={teraxNames}
+        taken={oarlockNames}
         onClose={() => setCreating(false)}
         onCreate={async (name, description) => {
           const id = await createSkill(name, description);
@@ -395,7 +395,7 @@ function SkillGroupSection({
   onTrust: (status: ProjectTrustStatus, allow: boolean) => void;
   onRevoke: (key: string, kinds: TrustItemKind[]) => void;
 }) {
-  const deletable = group.id === "terax";
+  const deletable = group.id === "oarlock";
   const empty = group.skills.length === 0 && group.invalid.length === 0;
   return (
     <section className="flex flex-col gap-2">
@@ -424,7 +424,7 @@ function SkillGroupSection({
 
       {empty ? (
         <div className="rounded-lg border border-dashed border-border/60 bg-card/30 px-4 py-4 text-center text-[11px] text-muted-foreground">
-          {group.id === "terax"
+          {group.id === "oarlock"
             ? "No skills yet. Create one, or install skills from a Git repository or a zip file."
             : "No skills here."}
         </div>

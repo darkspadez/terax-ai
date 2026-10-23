@@ -18,7 +18,7 @@ type Params = {
 
 /**
  * Open Folder for this window (palette, explorer, Spaces menu, and the macOS
- * File menu through `terax:open-folder-requested`). One picker at a time.
+ * File menu through `oarlock:open-folder-requested`). One picker at a time.
  */
 export function useOpenFolder({
   tabsRef,
@@ -57,7 +57,7 @@ export function useOpenFolder({
     let unlisten: (() => void) | undefined;
     let disposed = false;
     void getCurrentWindow()
-      .listen("terax:open-folder-requested", open)
+      .listen("oarlock:open-folder-requested", open)
       .then((stop) => {
         if (disposed) stop();
         else unlisten = stop;

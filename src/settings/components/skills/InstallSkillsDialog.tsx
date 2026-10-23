@@ -144,7 +144,7 @@ export function InstallSkillsDialog({ source, onClose, onInstalled }: Props) {
               : "Install skills from Git"}
           </DialogTitle>
           <DialogDescription>
-            Skills are copied into Terax's skills folder. Their scripts run
+            Skills are copied into Oarlock's skills folder. Their scripts run
             through the AI's shell tool, so install skills only from sources you
             trust.
           </DialogDescription>

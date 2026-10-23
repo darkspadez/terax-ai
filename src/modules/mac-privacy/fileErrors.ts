@@ -20,7 +20,7 @@ const REFUSAL_TOAST_MS = 10_000;
 
 /**
  * The privacy grant that refused a file operation on `paths`, or null: off
- * macOS, for any other error, outside the protected places, or when Terax has
+ * macOS, for any other error, outside the protected places, or when Oarlock has
  * Full Disk Access.
  */
 export async function explainFileError(

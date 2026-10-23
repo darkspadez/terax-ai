@@ -19,7 +19,7 @@ export type MenuShortcutId =
   | "commandPalette.open"
   | "ai.toggle";
 
-/** A shortcut chosen in the menu bar (`terax:menu-shortcut`). */
+/** A shortcut chosen in the menu bar (`oarlock:menu-shortcut`). */
 export type MenuShortcut =
   | { id: Exclude<MenuShortcutId, "tab.selectByIndex"> }
   | { id: "tab.selectByIndex"; tab: number };
@@ -45,7 +45,7 @@ export type MenuShortcutPlan = {
   chords: KeyBinding[];
 };
 
-export const MENU_SHORTCUT_EVENT = "terax:menu-shortcut";
+export const MENU_SHORTCUT_EVENT = "oarlock:menu-shortcut";
 
 const NAMED_KEYS: Readonly<Record<string, string>> = {
   "`": "Backquote",
@@ -192,7 +192,7 @@ const PLAIN_MENU_SHORTCUTS: ReadonlySet<string> = new Set([
   "ai.toggle",
 ]);
 
-/** The shortcut a `terax:menu-shortcut` event names, or null. */
+/** The shortcut a `oarlock:menu-shortcut` event names, or null. */
 export function parseMenuShortcut(payload: unknown): MenuShortcut | null {
   if (typeof payload !== "object" || payload === null) return null;
   const { id, tab } = payload as { id?: unknown; tab?: unknown };

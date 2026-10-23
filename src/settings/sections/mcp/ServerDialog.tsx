@@ -31,12 +31,12 @@ const TYPES: { type: McpTransportType; label: string; hint: string }[] = [
   {
     type: "stdio",
     label: "Local command",
-    hint: "A program Terax starts and talks to over stdin and stdout.",
+    hint: "A program Oarlock starts and talks to over stdin and stdout.",
   },
   {
     type: "http",
     label: "Streamable HTTP",
-    hint: "A remote server's MCP endpoint, reached through Terax's network gate.",
+    hint: "A remote server's MCP endpoint, reached through Oarlock's network gate.",
   },
   {
     type: "sse",
@@ -177,7 +177,7 @@ function SignInClient({
       <div className="flex flex-col gap-1">
         <Label className="text-[11px]">Sign-in</Label>
         <span className="text-[10.5px] text-muted-foreground">
-          If the server asks you to sign in, Terax registers itself with its
+          If the server asks you to sign in, Oarlock registers itself with its
           sign-in service; sign in from the server's card.{" "}
           <button
             type="button"
@@ -194,7 +194,7 @@ function SignInClient({
     <Field
       label="Sign-in client"
       error={error}
-      hint={`For a sign-in service that needs a client you registered there. Register http://127.0.0.1:${port}/callback as its redirect URI. Leave the client ID empty to let Terax register itself.`}
+      hint={`For a sign-in service that needs a client you registered there. Register http://127.0.0.1:${port}/callback as its redirect URI. Leave the client ID empty to let Oarlock register itself.`}
     >
       <div className="grid grid-cols-2 gap-1.5">
         <Input
@@ -300,7 +300,7 @@ export function ServerDialog({
             {initial.base ? `Edit ${initial.base.name}` : "Add MCP server"}
           </DialogTitle>
           <DialogDescription className="text-[11px]">
-            Secret values are kept in your system keychain. Terax reads them
+            Secret values are kept in your system keychain. Oarlock reads them
             only when it starts the server or sends it a request.
           </DialogDescription>
         </DialogHeader>

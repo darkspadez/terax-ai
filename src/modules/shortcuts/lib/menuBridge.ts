@@ -26,7 +26,7 @@ export function startMenuBridge(
     invoke("app_menu_set_shortcuts", {
       accelerators: plan.accelerators,
     }).catch((error: unknown) =>
-      console.warn("[terax] could not set the menu's shortcuts:", error),
+      console.warn("[oarlock] could not set the menu's shortcuts:", error),
     );
   };
   carry(usePreferencesStore.getState().shortcuts);

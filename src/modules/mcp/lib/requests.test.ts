@@ -45,7 +45,7 @@ describe("server requests", () => {
         { serverId: "s1", serverName: "S", message: "", fields: [] },
         new AbortController().signal,
       ),
-    ).rejects.toThrow("No Terax window can show this request right now.");
+    ).rejects.toThrow("No Oarlock window can show this request right now.");
   });
 
   it("wait for the user's answer, and only one at a time per server", async () => {

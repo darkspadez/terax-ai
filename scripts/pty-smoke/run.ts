@@ -105,9 +105,9 @@ function checkGate(gate: Gate | null | undefined): void {
     .map(([name]) => name);
   if (failed.length)
     throw new RuntimeError(
-      `terax-pty admission checks failed: ${pyRepr(failed)}\n${asciiJson(JSON.stringify(gate, null, 2))}`,
+      `oarlock-pty admission checks failed: ${pyRepr(failed)}\n${asciiJson(JSON.stringify(gate, null, 2))}`,
     );
-  console.log("terax-pty admission checks passed");
+  console.log("oarlock-pty admission checks passed");
 }
 
 function freePort(): Promise<number> {
@@ -144,7 +144,7 @@ async function main(): Promise<void> {
   const root = import.meta.dirname;
   const repo = realResolve(args.repo ?? join(root, "../.."));
   const output = realResolve(
-    args.output ?? mkdtempSync(join(tmpdir(), "terax-pty-smoke-")),
+    args.output ?? mkdtempSync(join(tmpdir(), "oarlock-pty-smoke-")),
   );
   mkdirSync(output, { recursive: true });
   let result: Record<string, unknown> = {};
@@ -189,7 +189,7 @@ async function main(): Promise<void> {
       response.end();
     }
   });
-  const identifier = `app.crynta.terax.pty-smoke-${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+  const identifier = `sh.oarlock.app.pty-smoke-${randomUUID().replaceAll("-", "").slice(0, 12)}`;
   const real = JSON.parse(
     readFileSync(join(repo, "src-tauri/tauri.conf.json"), "utf8"),
   );
@@ -203,7 +203,7 @@ async function main(): Promise<void> {
   writeFileSync(
     config,
     JSON.stringify({
-      productName: "Terax PTY Smoke",
+      productName: "Oarlock PTY Smoke",
       identifier,
       build: buildConfig,
       // The real CSP, so the custom scheme is checked against production policy.
@@ -212,7 +212,7 @@ async function main(): Promise<void> {
         windows: [
           {
             label: "main",
-            title: "Terax PTY Smoke",
+            title: "Oarlock PTY Smoke",
             width: 900,
             height: 600,
             visible: true,
@@ -224,13 +224,13 @@ async function main(): Promise<void> {
   );
   const env = {
     ...process.env,
-    TERAX_SMOKE_BASE_URL: server.url,
-    TERAX_SMOKE_DIST: join(output, "dist"),
-    TERAX_SMOKE_DRIVER: args.driver,
-    TERAX_SMOKE_ONLY: args.only,
-    TERAX_SMOKE_FAST: args.fast ? "1" : "0",
-    TERAX_SMOKE_IDLE_MS: String(args.idleMs),
-    TERAX_SMOKE_SPIN_SECONDS: String(args.spinSeconds),
+    OARLOCK_SMOKE_BASE_URL: server.url,
+    OARLOCK_SMOKE_DIST: join(output, "dist"),
+    OARLOCK_SMOKE_DRIVER: args.driver,
+    OARLOCK_SMOKE_ONLY: args.only,
+    OARLOCK_SMOKE_FAST: args.fast ? "1" : "0",
+    OARLOCK_SMOKE_IDLE_MS: String(args.idleMs),
+    OARLOCK_SMOKE_SPIN_SECONDS: String(args.spinSeconds),
   };
   let app: ChildProcess | undefined;
   let devServer: ChildProcess | undefined;
@@ -314,7 +314,7 @@ async function main(): Promise<void> {
     const appLog = openSync(join(output, "app.log"), "w");
     try {
       app = await launched(
-        spawn(join(target, "debug/terax"), [], {
+        spawn(join(target, "debug/oarlock"), [], {
           cwd: repo,
           stdio: ["inherit", appLog, appLog],
         }),
@@ -334,7 +334,7 @@ async function main(): Promise<void> {
         );
       if ((await exitedWithin(app, 15)) === undefined)
         throw new Error(
-          `Command '${join(target, "debug/terax")}' timed out after 15 seconds`,
+          `Command '${join(target, "debug/oarlock")}' timed out after 15 seconds`,
         );
     } finally {
       closeSync(appLog);

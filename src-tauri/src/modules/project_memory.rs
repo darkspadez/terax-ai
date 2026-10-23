@@ -1,11 +1,11 @@
-//! A project's `TERAX.md`: instructions Terax adds to every AI run in the project (the system
+//! A project's `TERAX.md`: instructions Oarlock adds to every AI run in the project (the system
 //! prompt's project section), used only through the shared project trust. It is an
 //! `ItemKind::TeraxMd` item whose inspector shows its size, line count and first lines, hashed by
 //! content, so a change asks again. There is no size limit: the model gets the whole allowed
 //! file, and a run whose instructions cannot fit the model's context says so.
 //!
 //! The model gets it only through `project_memory_read`, which reads the file once and checks the
-//! decision against the hash of exactly the bytes it returns. Terax's own writes keep an allowed
+//! decision against the hash of exactly the bytes it returns. Oarlock's own writes keep an allowed
 //! file allowed (`project_trust::keeping_trust`); a change made anywhere else asks again.
 
 use std::io::Read;
@@ -482,7 +482,7 @@ pub async fn project_memory_read(
     .await
 }
 
-// ---- Terax's own changes (`project_trust::keeping_trust`) ----
+// ---- Oarlock's own changes (`project_trust::keeping_trust`) ----
 
 /// The hash of the TERAX.md at `path` (its real path), read in chunks, and whether it holds
 /// nothing (empty or blank).
@@ -727,7 +727,7 @@ mod tests {
     }
 
     #[test]
-    fn what_it_holds_for_terax_s_own_changes() {
+    fn what_it_holds_for_oarlock_s_own_changes() {
         let (_dir, root) = project_dir();
         let path = root.join(FILE);
         std::fs::write(&path, "\u{feff} \n").unwrap();

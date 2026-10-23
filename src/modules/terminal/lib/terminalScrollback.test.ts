@@ -11,14 +11,14 @@ import {
   sanitizeScrollback,
   trimScrollback,
 } from "@/modules/terminal/lib/terminalScrollback";
-import { TeraxGhostty } from "@terax/ghostty-core/adapted";
+import { OarlockGhostty } from "@oarlock/ghostty-core/adapted";
 import { beforeAll, describe, expect, it } from "vitest";
 
 const encoder = new TextEncoder();
 const savedAt = Date.UTC(2026, 9, 22, 14, 3);
 const formatDate = (at: number) => new Date(at).toISOString();
 
-let core: TeraxGhostty;
+let core: OarlockGhostty;
 
 beforeAll(async () => {
   const file = await readFile(
@@ -27,7 +27,7 @@ beforeAll(async () => {
       import.meta.url,
     ),
   );
-  core = await TeraxGhostty.loadBytes(Uint8Array.from(file).buffer);
+  core = await OarlockGhostty.loadBytes(Uint8Array.from(file).buffer);
 });
 
 function terminal(cols = 40, rows = 6) {
@@ -240,9 +240,9 @@ describe("scrollback files", () => {
     for (const bad of [
       "",
       "a\r\nb",
-      "terax-scrollback 1 x\nhistory",
-      "terax-scrollback 2 1\nhistory",
-      "terax-scrollback 1 99999999999999999\nhistory",
+      "oarlock-scrollback 1 x\nhistory",
+      "oarlock-scrollback 2 1\nhistory",
+      "oarlock-scrollback 1 99999999999999999\nhistory",
       "\0\0\0\0",
     ]) {
       expect(decodeScrollbackFile(bad)).toBeNull();

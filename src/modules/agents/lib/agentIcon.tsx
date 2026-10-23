@@ -29,7 +29,7 @@ function PiIcon({ size, className }: { size: number; className?: string }) {
   );
 }
 
-// Brand marks for the agents Terax knows, by exact id. A name reported by a
+// Brand marks for the agents Oarlock knows, by exact id. A name reported by a
 // terminal is untrusted text: anything else, including names that merely
 // contain a known one, gets the generic mark.
 const BRAND_ICONS: ReadonlyMap<string, IconSvgElement> = new Map([
@@ -41,10 +41,10 @@ const BRAND_ICONS: ReadonlyMap<string, IconSvgElement> = new Map([
   ["grok", Grok02Icon],
 ]);
 
-/** The mark an agent is drawn with: Pi's and Terax's own, or an icon. */
-export function agentMark(agent: string): "pi" | "terax" | IconSvgElement {
+/** The mark an agent is drawn with: Pi's and Oarlock's own, or an icon. */
+export function agentMark(agent: string): "pi" | "oarlock" | IconSvgElement {
   const id = agent.toLowerCase();
-  if (id === "pi" || id === "terax") return id;
+  if (id === "pi" || id === "oarlock") return id;
   return BRAND_ICONS.get(id) ?? AiBrowserIcon;
 }
 
@@ -61,7 +61,7 @@ export function AgentIcon({
   if (mark === "pi") {
     return <PiIcon size={size} className={className} />;
   }
-  if (mark === "terax") {
+  if (mark === "oarlock") {
     return (
       <img
         src="/logo.png"

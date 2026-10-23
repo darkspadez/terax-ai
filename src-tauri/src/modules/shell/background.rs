@@ -103,7 +103,7 @@ impl BackgroundProc {
                 let _ = child.wait_timeout(TERM_GRACE);
                 unsafe { libc::killpg(group, libc::SIGKILL) };
             };
-            if spawn_thread("terax-bg-kill", escalate).is_err() {
+            if spawn_thread("oarlock-bg-kill", escalate).is_err() {
                 unsafe { libc::killpg(group, libc::SIGKILL) };
             }
             return;
@@ -212,11 +212,11 @@ pub fn spawn(
     };
     for (name, pipe) in [
         (
-            "terax-bg-out",
+            "oarlock-bg-out",
             Box::new(stdout_pipe) as Box<dyn Read + Send>,
         ),
         (
-            "terax-bg-err",
+            "oarlock-bg-err",
             Box::new(stderr_pipe) as Box<dyn Read + Send>,
         ),
     ] {
@@ -226,7 +226,7 @@ pub fn spawn(
     {
         let proc_ref = proc.clone();
         let child_for_wait = proc.child.clone();
-        spawn_thread("terax-bg-wait", move || {
+        spawn_thread("oarlock-bg-wait", move || {
             match child_for_wait.wait() {
                 Ok(status) => match status.code() {
                     Some(code) => proc_ref.exit_code.store(code, Ordering::Release),

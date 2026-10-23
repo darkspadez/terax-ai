@@ -195,7 +195,7 @@ describe("PTY bridge over the multiplexed stream", () => {
     const session = await openPty(80, 24, { onData });
     await flush();
     expect(polls()).toHaveLength(1);
-    expect(heldPoll().url).toBe("terax-pty://localhost/poll");
+    expect(heldPoll().url).toBe("oarlock-pty://localhost/poll");
     expect(heldPoll().acks).toEqual([{ id: session.id, bytes: 0 }]);
     heldPoll().reply([
       {

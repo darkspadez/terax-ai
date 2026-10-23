@@ -67,7 +67,7 @@ describe("suggestFullDiskAccess", () => {
     expect(env.keep).toHaveBeenCalledOnce();
   });
 
-  it("never shows when Terax has Full Disk Access or may have it", async () => {
+  it("never shows when Oarlock has Full Disk Access or may have it", async () => {
     for (const access of ["allowed", "unknown"]) {
       env.fullDiskAccess.mockResolvedValue(access);
       await suggestFullDiskAccess(env.keep);

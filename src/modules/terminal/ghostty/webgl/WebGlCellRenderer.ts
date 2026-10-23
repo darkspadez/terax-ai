@@ -4,7 +4,7 @@
  */
 
 import type { TerminalDamage } from "@/modules/terminal/backend/contracts";
-import { CellFlags } from "@terax/ghostty-core/protocol";
+import { CellFlags } from "@oarlock/ghostty-core/protocol";
 import type { Rgb, TerminalCellReader } from "../core/packedCells";
 import type { GhosttyTerminalModelApi } from "../GhosttyTerminalModel";
 import { isBuiltinGlyph } from "../gpu/BuiltinGlyphs";
@@ -1253,7 +1253,7 @@ export class WebGlCellRenderer {
       }
       const runner = module.CustomShaderRunner.create(this.gl, source);
       if (typeof runner === "string") {
-        console.warn(`[terax] custom shader: ${runner}`);
+        console.warn(`[oarlock] custom shader: ${runner}`);
         this.shaderFailedSource = source;
         return null;
       }

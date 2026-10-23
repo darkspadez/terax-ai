@@ -26,10 +26,10 @@ const DEFAULT_AGENTS: &[(&str, &str)] = &[
     ("gjc", "gjc"),
 ];
 
-// OSC 777 marker our agent hooks emit. Legacy 3-field `notify;Terax;<event>`
-// (Claude) or 4-field `notify;Terax;<agent>;<event>` (Codex, Gemini, Pi,
+// OSC 777 marker our agent hooks emit. Legacy 3-field `notify;Oarlock;<event>`
+// (Claude) or 4-field `notify;Oarlock;<agent>;<event>` (Codex, Gemini, Pi,
 // Antigravity, and any other agent that emits it).
-const TERAX_MARKER: &[u8] = b"notify;Terax;";
+const OARLOCK_MARKER: &[u8] = b"notify;Oarlock;";
 
 /// Longest agent name a marker may carry, in characters; the rest is cut.
 const AGENT_NAME_MAX: usize = 32;
@@ -239,7 +239,7 @@ impl AgentDetector {
     }
 
     fn handle_osc777<F: FnMut(Transition)>(&mut self, pt: &[u8], emit: &mut F) {
-        if let Some(tail) = pt.strip_prefix(TERAX_MARKER) {
+        if let Some(tail) = pt.strip_prefix(OARLOCK_MARKER) {
             // Any agent that emits the marker is reported, known or not; its
             // name is sanitized here and stays a label everywhere after.
             let (agent, event) = match tail.iter().position(|&c| c == b';') {
@@ -430,20 +430,20 @@ mod tests {
     }
 
     #[test]
-    fn terax_marker_drives_status() {
+    fn oarlock_marker_drives_status() {
         let mut d = AgentDetector::new();
         run(&mut d, &osc("133;C;claude"));
-        assert_eq!(run(&mut d, &osc("777;notify;Terax;attention")), vec![Transition::Attention]);
-        assert_eq!(run(&mut d, &osc("777;notify;Terax;working")), vec![Transition::Working]);
-        assert!(run(&mut d, &osc("777;notify;Terax;working")).is_empty());
-        assert_eq!(run(&mut d, &osc("777;notify;Terax;finished")), vec![Transition::Finished]);
+        assert_eq!(run(&mut d, &osc("777;notify;Oarlock;attention")), vec![Transition::Attention]);
+        assert_eq!(run(&mut d, &osc("777;notify;Oarlock;working")), vec![Transition::Working]);
+        assert!(run(&mut d, &osc("777;notify;Oarlock;working")).is_empty());
+        assert_eq!(run(&mut d, &osc("777;notify;Oarlock;finished")), vec![Transition::Finished]);
     }
 
     #[test]
-    fn terax_marker_auto_arms_without_preexec() {
+    fn oarlock_marker_auto_arms_without_preexec() {
         let mut d = AgentDetector::new();
         assert_eq!(
-            run(&mut d, &osc("777;notify;Terax;attention")),
+            run(&mut d, &osc("777;notify;Oarlock;attention")),
             vec![started("claude"), Transition::Attention]
         );
     }
@@ -452,10 +452,10 @@ mod tests {
     fn four_field_marker_self_arms_named_agent() {
         // Fresh arm already implies Working, so `working` emits only Started.
         let mut d = AgentDetector::new();
-        assert_eq!(run(&mut d, &osc("777;notify;Terax;codex;working")), vec![started("codex")]);
+        assert_eq!(run(&mut d, &osc("777;notify;Oarlock;codex;working")), vec![started("codex")]);
         let mut g = AgentDetector::new();
         assert_eq!(
-            run(&mut g, &osc("777;notify;Terax;gemini;finished")),
+            run(&mut g, &osc("777;notify;Oarlock;gemini;finished")),
             vec![started("gemini"), Transition::Finished]
         );
     }
@@ -464,17 +464,17 @@ mod tests {
     fn pi_marker_self_arms_and_drives_status() {
         let mut d = AgentDetector::new();
         assert_eq!(
-            run(&mut d, &osc("777;notify;Terax;pi;working")),
+            run(&mut d, &osc("777;notify;Oarlock;pi;working")),
             vec![started("pi")]
         );
         assert_eq!(
-            run(&mut d, &osc("777;notify;Terax;pi;finished")),
+            run(&mut d, &osc("777;notify;Oarlock;pi;finished")),
             vec![Transition::Finished]
         );
     }
 
     #[test]
-    fn four_field_marker_reports_agents_terax_does_not_know() {
+    fn four_field_marker_reports_agents_oarlock_does_not_know() {
         for name in [
             "my-agent-9",
             "Some Agent",
@@ -482,7 +482,7 @@ mod tests {
         ] {
             let mut d = AgentDetector::new();
             assert_eq!(
-                run(&mut d, &osc(&format!("777;notify;Terax;{name};attention"))),
+                run(&mut d, &osc(&format!("777;notify;Oarlock;{name};attention"))),
                 vec![started(name), Transition::Attention],
                 "{name:?}"
             );
@@ -536,10 +536,10 @@ mod tests {
     #[test]
     fn a_marker_with_nothing_visible_to_name_does_not_arm() {
         let mut d = AgentDetector::new();
-        assert!(run(&mut d, &osc("777;notify;Terax;\u{202E} ;attention")).is_empty());
-        assert!(run(&mut d, &osc("777;notify;Terax;;working")).is_empty());
+        assert!(run(&mut d, &osc("777;notify;Oarlock;\u{202E} ;attention")).is_empty());
+        assert!(run(&mut d, &osc("777;notify;Oarlock;;working")).is_empty());
         assert_eq!(
-            run(&mut d, &osc("777;notify;Terax;codex;attention")),
+            run(&mut d, &osc("777;notify;Oarlock;codex;attention")),
             vec![started("codex"), Transition::Attention]
         );
     }
@@ -548,11 +548,11 @@ mod tests {
     fn the_first_name_sticks_until_the_agent_exits() {
         let mut d = AgentDetector::new();
         assert_eq!(
-            run(&mut d, &osc("777;notify;Terax;first;working")),
+            run(&mut d, &osc("777;notify;Oarlock;first;working")),
             vec![started("first")]
         );
         assert_eq!(
-            run(&mut d, &osc("777;notify;Terax;second;attention")),
+            run(&mut d, &osc("777;notify;Oarlock;second;attention")),
             vec![Transition::Attention]
         );
     }
@@ -568,16 +568,16 @@ mod tests {
         );
         let mut d = AgentDetector::new();
         assert_eq!(
-            run(&mut d, &osc("777;notify;Terax;antigravity;finished")),
+            run(&mut d, &osc("777;notify;Oarlock;antigravity;finished")),
             vec![started("antigravity"), Transition::Finished]
         );
         let mut d = AgentDetector::new();
         assert_eq!(
-            run(&mut d, &osc("777;notify;Terax;gjc;working")),
+            run(&mut d, &osc("777;notify;Oarlock;gjc;working")),
             vec![started("gjc")]
         );
         assert_eq!(
-            run(&mut d, &osc("777;notify;Terax;gjc;finished")),
+            run(&mut d, &osc("777;notify;Oarlock;gjc;finished")),
             vec![Transition::Finished]
         );
     }
@@ -592,9 +592,9 @@ mod tests {
     fn four_field_marker_drives_status_after_preexec() {
         let mut d = AgentDetector::new();
         run(&mut d, &osc("133;C;gemini"));
-        assert_eq!(run(&mut d, &osc("777;notify;Terax;gemini;attention")), vec![Transition::Attention]);
-        assert_eq!(run(&mut d, &osc("777;notify;Terax;gemini;working")), vec![Transition::Working]);
-        assert_eq!(run(&mut d, &osc("777;notify;Terax;gemini;finished")), vec![Transition::Finished]);
+        assert_eq!(run(&mut d, &osc("777;notify;Oarlock;gemini;attention")), vec![Transition::Attention]);
+        assert_eq!(run(&mut d, &osc("777;notify;Oarlock;gemini;working")), vec![Transition::Working]);
+        assert_eq!(run(&mut d, &osc("777;notify;Oarlock;gemini;finished")), vec![Transition::Finished]);
     }
 
     thread_local! {
@@ -649,7 +649,7 @@ mod tests {
         let mut d = timed();
         run(&mut d, &osc("133;C;claude"));
         assert_eq!(run(&mut d, &osc("9;done")), vec![Transition::Attention]);
-        assert_eq!(run(&mut d, &osc("777;notify;Terax;working")), vec![Transition::Working]);
+        assert_eq!(run(&mut d, &osc("777;notify;Oarlock;working")), vec![Transition::Working]);
         assert_eq!(run(&mut d, &osc("9;done again")), vec![Transition::Attention]);
     }
 
@@ -657,7 +657,7 @@ mod tests {
     fn a_hook_marker_and_its_generic_twin_are_one_attention() {
         let mut d = timed();
         run(&mut d, &osc("133;C;codex"));
-        assert_eq!(run(&mut d, &osc("777;notify;Terax;codex;finished")), vec![Transition::Finished]);
+        assert_eq!(run(&mut d, &osc("777;notify;Oarlock;codex;finished")), vec![Transition::Finished]);
         assert!(run(&mut d, &osc("9;Agent turn complete")).is_empty());
         advance(ATTENTION_REPEAT);
         assert_eq!(run(&mut d, &osc("9;Agent turn complete")), vec![Transition::Attention]);
@@ -679,7 +679,7 @@ mod tests {
         run(&mut d, &osc("133;C;claude"));
         let big = vec![b'a'; 1024 * 1024];
         assert!(run(&mut d, &big).is_empty());
-        let marker = osc("777;notify;Terax;attention");
+        let marker = osc("777;notify;Oarlock;attention");
         // Every split point of the marker, embedded in plain text.
         for split in 1..marker.len() {
             let mut d = AgentDetector::new();
@@ -700,7 +700,7 @@ mod tests {
         let too_long = format!("9;{}", "x".repeat(OSC_MAX - 1));
         assert!(run(&mut d, &osc(&too_long)).is_empty());
         // The decoder resynchronises on the next sequence.
-        assert_eq!(run(&mut d, &osc("777;notify;Terax;attention")), vec![Transition::Attention]);
+        assert_eq!(run(&mut d, &osc("777;notify;Oarlock;attention")), vec![Transition::Attention]);
     }
 
     #[test]
@@ -751,6 +751,6 @@ mod tests {
         seq.extend(std::iter::repeat_n(b'x', OSC_MAX + 100));
         seq.extend_from_slice(&[ESC, ST_FINAL]);
         assert!(run(&mut d, &seq).is_empty());
-        assert_eq!(run(&mut d, &osc("777;notify;Terax;attention")), vec![Transition::Attention]);
+        assert_eq!(run(&mut d, &osc("777;notify;Oarlock;attention")), vec![Transition::Attention]);
     }
 }

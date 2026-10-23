@@ -9,7 +9,7 @@
 //!
 //! The font database is built on first use (it reads every installed font's
 //! name table) and rebuilt when a family is missing, at most every
-//! `RESCAN_INTERVAL`, so a font installed while Terax runs is found.
+//! `RESCAN_INTERVAL`, so a font installed while Oarlock runs is found.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};

@@ -6,7 +6,7 @@ import { IMAGE_TYPES, MAX_IMAGE_BASE64, MAX_RESULT_IMAGES } from "./results";
  * A server's sampling request (`sampling/createMessage`) as the approval
  * dialog shows and edits it, what the model is given once the user
  * approves, and what goes back to the server once the user approves the
- * result. Terax offers no tools to sampling and includes no context of its
+ * result. Oarlock offers no tools to sampling and includes no context of its
  * own (`includeContext` is shown, never honoured). Pure.
  */
 
@@ -50,16 +50,16 @@ function priority(value: unknown): number | null {
   return typeof value === "number" && value >= 0 && value <= 1 ? value : null;
 }
 
-/** The request as the dialog shows it, or why Terax refuses it outright. */
+/** The request as the dialog shows it, or why Oarlock refuses it outright. */
 export function samplingRequestView(
   params: unknown,
 ): { view: SamplingRequestView } | { refused: string } {
   if (!isRecord(params)) return { refused: "The request has no parameters." };
   if (params.tools !== undefined || params.toolChoice !== undefined) {
-    return { refused: "Terax does not offer tools to sampling requests." };
+    return { refused: "Oarlock does not offer tools to sampling requests." };
   }
   if (params.task !== undefined) {
-    return { refused: "Terax does not run sampling requests as tasks." };
+    return { refused: "Oarlock does not run sampling requests as tasks." };
   }
   const rawMessages = Array.isArray(params.messages) ? params.messages : [];
   if (rawMessages.length === 0)
@@ -96,12 +96,12 @@ export function samplingRequestView(
         const data = typeof part.data === "string" ? part.data : "";
         if (role === "assistant") {
           return {
-            refused: "Terax cannot send images as the model's own words.",
+            refused: "Oarlock cannot send images as the model's own words.",
           };
         }
         if (!IMAGE_TYPES.has(mime)) {
           return {
-            refused: `Terax cannot send an image of type ${mime || "unknown"}.`,
+            refused: `Oarlock cannot send an image of type ${mime || "unknown"}.`,
           };
         }
         images += 1;
@@ -116,10 +116,10 @@ export function samplingRequestView(
         }
         messageImages.push({ mediaType: mime, data });
       } else if (part.type === "audio") {
-        return { refused: "Terax cannot send audio to its models." };
+        return { refused: "Oarlock cannot send audio to its models." };
       } else {
         return {
-          refused: `Terax cannot send content of type ${String(part.type)}.`,
+          refused: `Oarlock cannot send content of type ${String(part.type)}.`,
         };
       }
     }

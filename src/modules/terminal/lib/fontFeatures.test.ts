@@ -155,11 +155,11 @@ describe("feature families", () => {
     const settings = '"zero" 1';
     const featured = withFontFeatures(stack, settings);
     expect(featured).toBe(
-      '"JetBrains Mono (Terax features 1)", "Fira Code", monospace',
+      '"JetBrains Mono (Oarlock features 1)", "Fira Code", monospace',
     );
     expect(added).toEqual([
       {
-        family: "JetBrains Mono (Terax features 1)",
+        family: "JetBrains Mono (Oarlock features 1)",
         source: 'url("https://app.test/fonts/latin.woff2") format("woff2")',
         settings,
       },
@@ -209,7 +209,7 @@ describe("feature families", () => {
 
     // Until the lookup answers the installed font draws as named.
     const first = withFontFeatures(stack, settings);
-    expect(first).toMatch(/^"Nerd Mono", "Bundled Mono \(Terax features \d+\)", Menlo, monospace$/);
+    expect(first).toMatch(/^"Nerd Mono", "Bundled Mono \(Oarlock features \d+\)", Menlo, monospace$/);
     await vi.waitFor(() => expect(changed).toHaveBeenCalledOnce());
     stop();
     expect(fontFeaturesRevision()).toBe(before + 1);
@@ -219,7 +219,7 @@ describe("feature families", () => {
     ]);
 
     const second = withFontFeatures(stack, settings);
-    const nerd = /^"(Nerd Mono \(Terax features \d+\))"/.exec(second)?.[1];
+    const nerd = /^"(Nerd Mono \(Oarlock features \d+\))"/.exec(second)?.[1];
     expect(nerd).toBeDefined();
     const faces = added.filter((face) => face.family === nerd);
     expect(faces).toEqual([
@@ -281,7 +281,7 @@ describe("feature families", () => {
       ["system_font_faces", { family: "Plain Nerd" }],
     ]);
     const plain = withFontFeatures(stack, "normal", true);
-    const nerd = /^"(Plain Nerd \(Terax features \d+\))", "Plain Bundled", Menlo, monospace$/.exec(plain)?.[1];
+    const nerd = /^"(Plain Nerd \(Oarlock features \d+\))", "Plain Bundled", Menlo, monospace$/.exec(plain)?.[1];
     expect(nerd).toBeDefined();
     expect(added).toEqual([
       {

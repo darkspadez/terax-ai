@@ -3,8 +3,8 @@ Bundled terminal colour schemes
 The terminal palettes of the themes below are taken verbatim from the copies
 Ghostty bundles: the ghostty/ directory of iTerm2-Color-Schemes
 (https://github.com/mbadolato/iTerm2-Color-Schemes, commit 86a776d947b6),
-so a scheme looks the same in Terax as with `theme = <name>` in Ghostty.
-Where a scheme selects by inverting text (Terax draws selections as an
+so a scheme looks the same in Oarlock as with `theme = <name>` in Ghostty.
+Where a scheme selects by inverting text (Oarlock draws selections as an
 overlay), the selection colour comes from the scheme's own editor theme. The
 surrounding app colours are taken from each scheme's upstream palette.
 

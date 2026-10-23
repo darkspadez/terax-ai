@@ -43,7 +43,7 @@ export type ScrollbackSource = {
 };
 
 const KEY = /^[A-Za-z0-9_-]{1,128}$/;
-const FILE_HEADER = /^terax-scrollback 1 (\d{1,16})$/;
+const FILE_HEADER = /^oarlock-scrollback 1 (\d{1,16})$/;
 const MAX_DATE_MS = 8_640_000_000_000_000;
 const LINE_BREAK = "\r\n";
 
@@ -194,7 +194,7 @@ export function exportScrollback(
 }
 
 export function encodeScrollbackFile(vt: string, savedAt: number): string {
-  return `terax-scrollback 1 ${Math.max(0, Math.trunc(savedAt))}\n${vt}`;
+  return `oarlock-scrollback 1 ${Math.max(0, Math.trunc(savedAt))}\n${vt}`;
 }
 
 export function decodeScrollbackFile(

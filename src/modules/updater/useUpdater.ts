@@ -5,17 +5,18 @@ import { useCallback, useEffect, useState } from "react";
 import { IS_LINUX } from "@/lib/platform";
 
 /**
- * Updates are off until this fork publishes its own releases. Turning them on
- * takes `plugins.updater` in `tauri.conf.json` (endpoint and signing key) and
- * `updater:default` back in the desktop capability; the release feed below
- * already reads this fork's releases.
+ * Updates are not set up for this build: Oarlock has no releases or signing key
+ * yet. Turning them on takes `plugins.updater` in `tauri.conf.json` (endpoint
+ * and signing key), `bundle.createUpdaterArtifacts`, the release workflow's
+ * signing secrets and `updater:default` back in the desktop capability; the
+ * release feed below already reads Oarlock's releases.
  */
 export const UPDATES_ENABLED = false;
 
-const LAST_CHECK_KEY = "terax:updater:last-check";
+const LAST_CHECK_KEY = "oarlock:updater:last-check";
 const CHECK_INTERVAL_MS = 30 * 60 * 1000;
 export const GITHUB_LATEST_RELEASE =
-  "https://api.github.com/repos/darkspadez/terax-ai/releases/latest";
+  "https://api.github.com/repos/qopsc/oarlock/releases/latest";
 
 export interface ManualUpdateInfo {
   version: string;

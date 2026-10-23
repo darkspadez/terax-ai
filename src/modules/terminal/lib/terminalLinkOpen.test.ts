@@ -73,8 +73,8 @@ describe("opening terminal links", () => {
     await openTerminalLink("http://localhost:3000/", null, settled);
     expect(native.openUrl).not.toHaveBeenCalled();
 
-    await openTerminalLink("https://terax.app/", null, settled);
-    expect(native.openUrl).toHaveBeenCalledWith("https://terax.app/");
+    await openTerminalLink("https://oarlock.app/", null, settled);
+    expect(native.openUrl).toHaveBeenCalledWith("https://oarlock.app/");
     expect(settled).toHaveBeenCalledOnce();
     setTerminalPreviewOpener(null);
   });
@@ -95,9 +95,9 @@ describe("terminal link preview routing", () => {
       return url.includes("localhost");
     });
     expect(openTerminalPreview("http://localhost:5173")).toBe(true);
-    expect(openTerminalPreview("https://terax.app")).toBe(false);
+    expect(openTerminalPreview("https://oarlock.app")).toBe(false);
     setTerminalPreviewOpener(null);
     expect(openTerminalPreview("http://localhost:5173")).toBe(false);
-    expect(seen).toEqual(["http://localhost:5173", "https://terax.app"]);
+    expect(seen).toEqual(["http://localhost:5173", "https://oarlock.app"]);
   });
 });

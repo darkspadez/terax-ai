@@ -162,7 +162,7 @@ pub mod macos {
                 pty.set_window_hidden(label, next.hidden());
             }
         }
-        let _ = app.emit_to(label, "terax:window-presentation", next);
+        let _ = app.emit_to(label, "oarlock:window-presentation", next);
     }
 
     /// Sleep and wake notifications, then every app window open now.

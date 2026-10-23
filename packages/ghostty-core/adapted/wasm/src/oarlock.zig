@@ -338,7 +338,7 @@ const max_retained_link_count: usize = 4 * 1024;
 const render_state_reset_interval: u32 = 100_000;
 const max_xtversion_bytes: usize = 128;
 /// XTVERSION name until the host sets one with `restty_set_xtversion`.
-const default_xtversion = "terax";
+const default_xtversion = "oarlock";
 /// Kitty image storage per screen. Ghostty's 320 MB default suits a native
 /// process; here it is linear memory that WebAssembly never returns until the
 /// terminal (its instance) is closed, so the bound is tighter.
@@ -1276,7 +1276,7 @@ const StreamHandler = struct {
                 switch (value.action) {
                     .fresh_line_new_prompt, .prompt_start => try self.emitEvent(.prompt_start, &.{}),
                     .end_prompt_start_input, .end_prompt_start_input_terminate_eol => {
-                        const block_input = [_]u8{@intFromBool(!std.mem.eql(u8, value.options_unvalidated, "terax_blocks=0"))};
+                        const block_input = [_]u8{@intFromBool(!std.mem.eql(u8, value.options_unvalidated, "oarlock_blocks=0"))};
                         try self.emitEvent(.prompt_end, &.{&block_input});
                     },
                     .end_input_start_output => {
@@ -3011,7 +3011,7 @@ pub export fn restty_set_color_scheme(handle: ?*Restty, scheme: u8) u32 {
     return @intFromEnum(ErrorCode.ok);
 }
 
-/// The XTVERSION (CSI > q) name and version, e.g. "terax 0.6.3".
+/// The XTVERSION (CSI > q) name and version, e.g. "oarlock 0.6.3".
 pub export fn restty_set_xtversion(handle: ?*Restty, ptr: [*]const u8, len: usize) u32 {
     const h = handle orelse return @intFromEnum(ErrorCode.invalid_handle);
     if (len == 0 or len > max_xtversion_bytes) return @intFromEnum(ErrorCode.invalid_arg);

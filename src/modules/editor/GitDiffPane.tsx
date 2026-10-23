@@ -289,7 +289,7 @@ export function GitDiffPane({ source, chipLabel, active }: Props) {
             extensions={extensions}
             editable={false}
             height="100%"
-            className="terax-code-editor h-full"
+            className="oarlock-code-editor h-full"
             basicSetup={{
               lineNumbers: true,
               foldGutter: true,

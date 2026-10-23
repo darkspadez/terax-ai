@@ -76,9 +76,9 @@ fn zsh_histfile(
 }
 
 #[cfg(unix)]
-const ZDOTDIR_MARKER: &str = "__TERAX_ZDOTDIR_3c9e__";
+const ZDOTDIR_MARKER: &str = "__OARLOCK_ZDOTDIR_3c9e__";
 
-/// zsh's `ZDOTDIR`: Terax's own, or the one the user's `.zshenv` sets (often
+/// zsh's `ZDOTDIR`: Oarlock's own, or the one the user's `.zshenv` sets (often
 /// `~/.config/zsh`), which a GUI app's environment lacks. zsh reads
 /// `.zshenv` for every shell, so a non-interactive one answers quickly.
 #[cfg(unix)]
@@ -104,7 +104,7 @@ fn zsh_dotdir_query(zsh: &std::path::Path) -> std::process::Command {
     let mut cmd = Command::new(zsh);
     cmd.arg("-c")
         .arg(format!("print -rn -- \"{ZDOTDIR_MARKER}$ZDOTDIR\""))
-        .env("TERAX_RESOLVING_ENVIRONMENT", "1")
+        .env("OARLOCK_RESOLVING_ENVIRONMENT", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

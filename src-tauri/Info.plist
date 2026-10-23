@@ -3,21 +3,21 @@
 <plist version="1.0">
 <dict>
 	<key>NSCameraUsageDescription</key>
-	<string>A program running within Terax would like to use the camera.</string>
+	<string>A program running within Oarlock would like to use the camera.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>A program running within Terax would like to use your microphone.</string>
+	<string>A program running within Oarlock would like to use your microphone.</string>
 	<key>NSDesktopFolderUsageDescription</key>
-	<string>Terax, and the programs running in its terminals, read and change files in your Desktop folder when you work with them.</string>
+	<string>Oarlock, and the programs running in its terminals, read and change files in your Desktop folder when you work with them.</string>
 	<key>NSDocumentsFolderUsageDescription</key>
-	<string>Terax, and the programs running in its terminals, read and change files in your Documents folder when you work with them.</string>
+	<string>Oarlock, and the programs running in its terminals, read and change files in your Documents folder when you work with them.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
-	<string>Terax, and the programs running in its terminals, read and change files in your Downloads folder when you work with them.</string>
+	<string>Oarlock, and the programs running in its terminals, read and change files in your Downloads folder when you work with them.</string>
 	<key>NSRemovableVolumesUsageDescription</key>
-	<string>Terax, and the programs running in its terminals, read and change files on removable volumes such as USB drives when you work with them.</string>
+	<string>Oarlock, and the programs running in its terminals, read and change files on removable volumes such as USB drives when you work with them.</string>
 	<key>NSNetworkVolumesUsageDescription</key>
-	<string>Terax, and the programs running in its terminals, read and change files on network volumes when you work with them.</string>
+	<string>Oarlock, and the programs running in its terminals, read and change files on network volumes when you work with them.</string>
 	<key>NSFileProviderDomainUsageDescription</key>
-	<string>Terax, and the programs running in its terminals, read and change files in iCloud Drive and other cloud storage when you work with them.</string>
+	<string>Oarlock, and the programs running in its terminals, read and change files in iCloud Drive and other cloud storage when you work with them.</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>

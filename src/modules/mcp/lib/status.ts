@@ -6,9 +6,9 @@
 type ReportedState = "starting" | "running" | "crashed";
 
 /** Each report a window makes, as the backend announces it. */
-export const MCP_STATUS_EVENT = "terax://mcp-status";
+export const MCP_STATUS_EVENT = "oarlock://mcp-status";
 /** Settings asks the windows running a server to restart it. */
-export const MCP_RESTART_EVENT = "terax://mcp-restart";
+export const MCP_RESTART_EVENT = "oarlock://mcp-restart";
 
 /** One window's report, as `mcp_status_list` and `MCP_STATUS_EVENT` give it. */
 export type WindowStatus = {
@@ -78,7 +78,7 @@ export function statusView(
   };
 }
 
-/** Applies one `terax://mcp-status` event to the known reports. */
+/** Applies one `oarlock://mcp-status` event to the known reports. */
 export function applyStatusEvent(
   reports: readonly WindowStatus[],
   event: {

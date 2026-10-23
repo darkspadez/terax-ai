@@ -43,7 +43,7 @@ function footprint(
       {
         pid: 10,
         role: "host",
-        name: "terax",
+        name: "oarlock",
         footprint: host,
         peak: null,
         categories: { "WebKit malloc": [MIB, 0, 0, 0, 0, 1] },
@@ -140,7 +140,7 @@ function tabsReport(): AppReport {
         warmupS: 5.5,
         window: { width: 1280.5, height: 820.25 },
         live: true,
-        localStorage: { "terax:bench:keep": "1" },
+        localStorage: { "oarlock:bench:keep": "1" },
         cwds: { shell: "/tmp/x" },
         cycles: 3,
       },
@@ -241,7 +241,7 @@ describe("summarize", () => {
         "== app lab: tabs == [demo]",
         "  source abcdef012345  profile release  qualified: True",
         "  dwellMs 3000, warmupS 5.5, cwds {'shell': '/tmp/x'}, cycles 3; window {'width': 1280.5, 'height': 820.25}",
-        "  localStorage: {'terax:bench:keep': '1'}",
+        "  localStorage: {'oarlock:bench:keep': '1'}",
         "",
         "Footprint (MiB). WC = WebContent; malloc = 'WebKit malloc' dirty (incl. compressed); iosurf = IOSurface dirty;",
         "recl = IOSurface reclaimable (volatile, not in the footprint total); gfx = vmmap 'owned unmapped (graphics)'; pool = WebGPU canvases created/reused/destroyed:",
@@ -298,7 +298,7 @@ describe("compaction", () => {
         processes: [
           {
             pid: 4242,
-            name: "terax",
+            name: "oarlock",
             footprint: 100,
             auxiliary: { phys_footprint_peak: 120 },
             categories: {
@@ -326,7 +326,7 @@ describe("compaction", () => {
         {
           pid: 4242,
           role: "host",
-          name: "terax",
+          name: "oarlock",
           footprint: 100,
           peak: 120,
           categories: { "WebKit malloc": [5, 0, 1, 0, 0, 3] },

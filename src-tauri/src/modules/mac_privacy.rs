@@ -1,11 +1,11 @@
-//! What macOS privacy controls (TCC) let Terax reach, as far as an app can tell
+//! What macOS privacy controls (TCC) let Oarlock reach, as far as an app can tell
 //! without macOS asking the user.
 //!
-//! TCC treats Terax and every program its terminals start as one app. Full Disk
+//! TCC treats Oarlock and every program its terminals start as one app. Full Disk
 //! Access is the only grant an app can test silently: the files that need it are
 //! refused (`EPERM`) without a prompt, and open with it. Desktop, Documents,
 //! Downloads, iCloud Drive and removable and network volumes are asked about the
-//! first time Terax opens them, so opening one to find out could put up that
+//! first time Oarlock opens them, so opening one to find out could put up that
 //! prompt. Their state is therefore known here only through Full Disk Access; the
 //! page explains a refusal where it happens.
 
@@ -91,7 +91,7 @@ pub enum SettingsPane {
     FullDiskAccess,
     /// Every folder and volume switch. The per-folder anchors
     /// (`Privacy_DesktopFolder`, ...) are left from System Preferences; System
-    /// Settings (macOS 13, Terax's minimum) lists them all for each app under
+    /// Settings (macOS 13, Oarlock's minimum) lists them all for each app under
     /// Files and Folders.
     FilesAndFolders,
 }

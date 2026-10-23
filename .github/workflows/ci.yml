@@ -184,11 +184,11 @@ jobs:
       - name: Prepare a test keychain
         if: matrix.os == 'macos'
         run: |
-          security create-keychain -p terax-ci terax-ci.keychain-db
-          security set-keychain-settings terax-ci.keychain-db
-          security unlock-keychain -p terax-ci terax-ci.keychain-db
-          security list-keychains -d user -s terax-ci.keychain-db $(security list-keychains -d user | tr -d '"')
-          security default-keychain -d user -s terax-ci.keychain-db
+          security create-keychain -p oarlock-ci oarlock-ci.keychain-db
+          security set-keychain-settings oarlock-ci.keychain-db
+          security unlock-keychain -p oarlock-ci oarlock-ci.keychain-db
+          security list-keychains -d user -s oarlock-ci.keychain-db $(security list-keychains -d user | tr -d '"')
+          security default-keychain -d user -s oarlock-ci.keychain-db
 
       - name: Saved keys stay readable (keychain_compat)
         working-directory: src-tauri

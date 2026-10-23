@@ -11,7 +11,7 @@ const OS_LABEL = IS_MAC
       : null;
 
 let shellPromise: Promise<string | null> | null = null;
-/** The shell Terax starts when none is configured (`pty_shell_name`). */
+/** The shell Oarlock starts when none is configured (`pty_shell_name`). */
 export function detectShell(): Promise<string | null> {
   if (!shellPromise) {
     shellPromise = invoke<string>("pty_shell_name")

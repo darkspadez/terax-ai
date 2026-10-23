@@ -902,7 +902,7 @@ describe("WebGPU surface resource lifecycle", () => {
   it("keeps its DOM background until the window canvas has shown its first frame", async () => {
     const h = await harness();
     const root = h.elements.find(
-      (e) => e.getAttribute("data-terax-ghostty-surface") === "webgpu",
+      (e) => e.getAttribute("data-oarlock-ghostty-surface") === "webgpu",
     ) as unknown as { style: { backgroundColor: string } };
     expect(root.style.backgroundColor).toBe("rgb(0 0 0)");
     h.render();
@@ -1102,7 +1102,7 @@ describe("a resize gesture ending in a prompt redraw hold", () => {
 describe("failure paths", () => {
   const root = (h: Awaited<ReturnType<typeof harness>>) =>
     h.elements.find(
-      (e) => e.getAttribute("data-terax-ghostty-surface") === "webgpu",
+      (e) => e.getAttribute("data-oarlock-ghostty-surface") === "webgpu",
     ) as unknown as { style: { backgroundColor: string } };
 
   it("covers the canvas with its own background when the runtime fails, until the fallback takes over", async () => {
@@ -1481,7 +1481,7 @@ describe("hovered link underline", () => {
     expect(hyperlinkAtViewportCell).toHaveBeenCalledWith(1, 1);
     expect(h.schedule).not.toHaveBeenCalled();
     const root = h.elements.find(
-      (e) => e.getAttribute("data-terax-ghostty-surface") === "webgpu",
+      (e) => e.getAttribute("data-oarlock-ghostty-surface") === "webgpu",
     ) as unknown as { style: { cursor: string } };
     expect(root.style.cursor).toBe("pointer");
   });
@@ -1941,7 +1941,7 @@ async function harness(options: { scale?: number; images?: boolean } = {}) {
         top: entry.top,
       });
       const root = elements.find(
-        (e) => e.getAttribute("data-terax-ghostty-surface") === "webgpu",
+        (e) => e.getAttribute("data-oarlock-ghostty-surface") === "webgpu",
       );
       if (root) {
         root.getBoundingClientRect = () => ({

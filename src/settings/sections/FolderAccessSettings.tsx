@@ -30,7 +30,7 @@ export function FolderAccessSettings() {
         Folder access
       </span>
       <p className="text-[11px] text-muted-foreground">
-        Terax works in the folders you open, browse or run a terminal in. Each
+        Oarlock works in the folders you open, browse or run a terminal in. Each
         switch below lifts that limit for one side only.
       </p>
       <SettingRow

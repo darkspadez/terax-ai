@@ -31,7 +31,7 @@ export type Connection = {
 
 let clientVersion: Promise<string> | null = null;
 
-function terax(): Promise<string> {
+function oarlock(): Promise<string> {
   clientVersion ??= getVersion().catch(() => "0.0.0");
   return clientVersion;
 }
@@ -39,7 +39,7 @@ function terax(): Promise<string> {
 /**
  * A connected MCP client for `server`: the transport (the native stdio host,
  * or HTTP through the backend's MCP gate), then the initialize handshake.
- * Terax offers sampling and form elicitation, each answered only by the user
+ * Oarlock offers sampling and form elicitation, each answered only by the user
  * (`serverRequests.ts`); no roots.
  */
 export async function connectServer(
@@ -47,7 +47,7 @@ export async function connectServer(
   shell: string | null,
 ): Promise<Connection> {
   const client = new Client(
-    { name: "Terax", version: await terax() },
+    { name: "Oarlock", version: await oarlock() },
     {
       capabilities: CLIENT_CAPABILITIES,
       jsonSchemaValidator: new PassThroughValidator(),

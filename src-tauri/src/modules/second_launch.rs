@@ -1,4 +1,4 @@
-//! A later launch of Terax (Open in Terax, `terax <dir>`, a launcher) while
+//! A later launch of Oarlock (Open in Oarlock, `oarlock <dir>`, a launcher) while
 //! one runs: `tauri-plugin-single-instance` hands its arguments and directory
 //! to the running process, which opens them, instead of a second process
 //! starting on the same state files.
@@ -11,7 +11,7 @@ use super::{fs, windows, workspace};
 use crate::{parse_launch_args, LaunchFiles, LaunchTarget};
 
 /// Tells a window that files wait for it in `get_launch_files`.
-const OPEN_FILES_EVENT: &str = "terax:open-file";
+const OPEN_FILES_EVENT: &str = "oarlock:open-file";
 
 /// What a later launch asks the running process to do.
 #[derive(Debug, PartialEq)]
@@ -48,7 +48,7 @@ pub fn on_second_launch(app: &tauri::AppHandle, args: Vec<String>, cwd: String) 
     forward(app, action);
 }
 
-/// A folder macOS opens in the running Terax (Open With, the Dock icon).
+/// A folder macOS opens in the running Oarlock (Open With, the Dock icon).
 #[cfg(target_os = "macos")]
 pub fn open_folder(app: &tauri::AppHandle, folder: String) {
     forward(app, SecondLaunch::Folder(folder));

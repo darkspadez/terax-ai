@@ -2,11 +2,11 @@ mod common;
 
 use common::{git_available, GitRepoFixture};
 use tempfile::TempDir;
-use terax_lib::modules::fs::to_canon;
-use terax_lib::modules::git::errors::GitError;
-use terax_lib::modules::git::operations;
-use terax_lib::modules::git::types::DiscardEntry;
-use terax_lib::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
+use oarlock_lib::modules::fs::to_canon;
+use oarlock_lib::modules::git::errors::GitError;
+use oarlock_lib::modules::git::operations;
+use oarlock_lib::modules::git::types::DiscardEntry;
+use oarlock_lib::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
 
 fn skip_if_no_git() -> bool {
     if !git_available() {
@@ -831,7 +831,7 @@ fn log_reports_the_branches_and_tags_on_each_commit() {
 
     let log = || operations::log(&fx.registry, &fx.repo_str(), 10, 0, None, &fx.workspace).unwrap();
     let refs =
-        |entry: &terax_lib::modules::git::types::GitLogEntry| -> Vec<(String, String, bool)> {
+        |entry: &oarlock_lib::modules::git::types::GitLogEntry| -> Vec<(String, String, bool)> {
             let json = serde_json::to_value(&entry.refs).unwrap();
             json.as_array()
                 .unwrap()

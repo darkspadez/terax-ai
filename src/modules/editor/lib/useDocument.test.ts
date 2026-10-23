@@ -17,7 +17,7 @@ const ubuntu = { kind: "wsl", distro: "Ubuntu" } as const;
 const host = { kind: "local" };
 
 const themeFile =
-  "C:\\Users\\me\\AppData\\Roaming\\app.crynta.terax\\themes\\mine.terax-theme";
+  "C:\\Users\\me\\AppData\\Roaming\\sh.oarlock.app\\themes\\mine.oarlock-theme";
 
 beforeEach(() => {
   invoke.mockReset();

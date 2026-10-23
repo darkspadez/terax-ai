@@ -15,7 +15,7 @@ const OVERLAYS = [
 
 describe("background image under modal overlays", () => {
   it("drops below every modal overlay while one is open", () => {
-    const rule = /body:has\(([^{]*)\)\s*\.terax-bg-surface\s*\{([^}]*)\}/.exec(
+    const rule = /body:has\(([^{]*)\)\s*\.oarlock-bg-surface\s*\{([^}]*)\}/.exec(
       css,
     );
     expect(rule).not.toBeNull();

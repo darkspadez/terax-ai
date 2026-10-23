@@ -67,7 +67,7 @@ async fn answer(
     match classify(&head, state) {
         Request::Callback(params) => Some((params, stream)),
         Request::Other(status, message) => {
-            let _ = respond(&mut stream, status, &page("Terax", message)).await;
+            let _ = respond(&mut stream, status, &page("Oarlock", message)).await;
             None
         }
     }
@@ -103,10 +103,10 @@ fn classify(head: &str, state: &str) -> Request {
     let line = head.lines().next().unwrap_or("");
     let mut parts = line.split(' ');
     let (Some(method), Some(target)) = (parts.next(), parts.next()) else {
-        return Request::Other(400, "This is not a request Terax understands.");
+        return Request::Other(400, "This is not a request Oarlock understands.");
     };
     let Ok(url) = Url::parse(&format!("http://127.0.0.1{target}")) else {
-        return Request::Other(400, "This is not a request Terax understands.");
+        return Request::Other(400, "This is not a request Oarlock understands.");
     };
     if method != "GET" || url.path() != CALLBACK_PATH {
         return Request::Other(404, "Nothing here.");
@@ -125,7 +125,7 @@ fn classify(head: &str, state: &str) -> Request {
         Some(got) if super::pkce::same_secret(got, state) => Request::Callback(params),
         _ => Request::Other(
             400,
-            "This sign-in response is not the one Terax is waiting for. Start sign-in again from Terax's Settings.",
+            "This sign-in response is not the one Oarlock is waiting for. Start sign-in again from Oarlock's Settings.",
         ),
     }
 }

@@ -7,7 +7,7 @@ import { traceEager } from "./eager-graph.mjs";
 let fixtureDir: string;
 
 beforeEach(() => {
-  fixtureDir = mkdtempSync(join(tmpdir(), "terax-eager-graph-"));
+  fixtureDir = mkdtempSync(join(tmpdir(), "oarlock-eager-graph-"));
 });
 
 afterEach(() => {

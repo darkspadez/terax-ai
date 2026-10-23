@@ -8,7 +8,7 @@ import WebKit
 //   stdout  one JSON object per line. Page events ("phase"), native events ("native") and
 //           sync events (page events with a "sync" id) are all emitted here.
 //   stdin   "ack <id>" releases a pending sync request; EOF terminates the host. Only read when
-//           TERAX_LAB_CONTROL=1, so running the executable by hand never exits on a closed stdin.
+//           OARLOCK_LAB_CONTROL=1, so running the executable by hand never exits on a closed stdin.
 // Channels to the page:
 //   messageHandlers.report   fire-and-forget (legacy default workload)
 //   messageHandlers.native   request/response; implements window actions used by workloads
@@ -57,7 +57,7 @@ final class Delegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
     // so the host's own timers stay accurate while its window is ordered out.
     activity = ProcessInfo.processInfo.beginActivity(
       options: [.userInitiated, .idleDisplaySleepDisabled, .idleSystemSleepDisabled],
-      reason: "Terax renderer lab")
+      reason: "Oarlock renderer lab")
     let config = WKWebViewConfiguration()
     config.websiteDataStore = .nonPersistent()
     config.userContentController.add(self, name: "report")
@@ -68,7 +68,7 @@ final class Delegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
     window = NSWindow(
       contentRect: web.frame, styleMask: [.titled, .closable, .resizable, .miniaturizable],
       backing: .buffered, defer: false)
-    window.title = "Terax Renderer Lab"
+    window.title = "Oarlock Renderer Lab"
     window.contentView = web
     window.isReleasedWhenClosed = false
     window.center()
@@ -78,12 +78,12 @@ final class Delegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
     let url =
       CommandLine.arguments.count > 1
       ? CommandLine.arguments[1]
-      : Bundle.main.object(forInfoDictionaryKey: "TeraxLabURL") as? String ?? "about:blank"
+      : Bundle.main.object(forInfoDictionaryKey: "OarlockLabURL") as? String ?? "about:blank"
     web.load(URLRequest(url: URL(string: url)!))
-    let environmentTimeout = Double(ProcessInfo.processInfo.environment["TERAX_LAB_TIMEOUT"] ?? "")
+    let environmentTimeout = Double(ProcessInfo.processInfo.environment["OARLOCK_LAB_TIMEOUT"] ?? "")
     let timeout = environmentTimeout ?? (CommandLine.arguments.count > 2 ? 600 : 120)
     DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { NSApp.terminate(nil) }
-    if ProcessInfo.processInfo.environment["TERAX_LAB_CONTROL"] == "1" { startAckReader() }
+    if ProcessInfo.processInfo.environment["OARLOCK_LAB_CONTROL"] == "1" { startAckReader() }
   }
 
   // MARK: - Native events
@@ -361,9 +361,9 @@ final class Delegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
     let start = uptimeMs()
     if live {
       web.viewWillStartLiveResize()
-      // What Terax gets from NSWindowWillStartLiveResizeNotification in the real app; a page
+      // What Oarlock gets from NSWindowWillStartLiveResizeNotification in the real app; a page
       // without the hook (older renderers, or the heuristic-only variant) ignores it.
-      web.evaluateJavaScript("window.__teraxLiveResize && window.__teraxLiveResize(true)")
+      web.evaluateJavaScript("window.__oarlockLiveResize && window.__oarlockLiveResize(true)")
     }
     Timer.scheduledTimer(withTimeInterval: intervalMs / 1000, repeats: true) { timer in
       var frame = self.window.frame
@@ -377,7 +377,7 @@ final class Delegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler,
         timer.invalidate()
         if live {
           self.web.viewDidEndLiveResize()
-          self.web.evaluateJavaScript("window.__teraxLiveResize && window.__teraxLiveResize(false)")
+          self.web.evaluateJavaScript("window.__oarlockLiveResize && window.__oarlockLiveResize(false)")
         }
         reply(["ok": true, "steps": done, "ms": uptimeMs() - start])
       }

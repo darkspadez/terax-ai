@@ -94,7 +94,7 @@ export class PtyOutputReceiver {
     this.cancelYield = null;
     this.queue.length = 0;
     this.setStatus("failed");
-    console.error("[terax] PTY output delivery paused:", error);
+    console.error("[oarlock] PTY output delivery paused:", error);
   }
 
   diagnostics() {
@@ -203,7 +203,7 @@ export class PtyOutputReceiver {
     try {
       this.onProgress(this.processed);
     } catch (error) {
-      console.error("[terax] PTY progress report failed:", error);
+      console.error("[oarlock] PTY progress report failed:", error);
     }
   }
 
@@ -225,7 +225,7 @@ export class PtyOutputReceiver {
     try {
       this.onStatus(status);
     } catch (error) {
-      console.error("[terax] PTY status notification failed:", error);
+      console.error("[oarlock] PTY status notification failed:", error);
     }
   }
 }

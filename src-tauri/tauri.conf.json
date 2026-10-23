@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Terax",
-  "version": "0.9.0",
-  "identifier": "app.crynta.terax",
+  "productName": "Oarlock",
+  "version": "0.1.0",
+  "identifier": "sh.oarlock.app",
   "build": {
     "beforeDevCommand": "bun run build:cli:dev && bun run dev",
     "devUrl": "http://localhost:1420",
@@ -14,7 +14,7 @@
     "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "Terax",
+        "title": "Oarlock",
         "width": 800,
         "height": 600,
         "minWidth": 420,
@@ -27,7 +27,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: http://asset.localhost https://asset.localhost terax-asset: http://terax-asset.localhost https://terax-asset.localhost blob:; media-src 'self' asset: http://asset.localhost https://asset.localhost terax-asset: http://terax-asset.localhost https://terax-asset.localhost blob:; font-src 'self' data: asset: http://asset.localhost https://asset.localhost; connect-src 'self' ipc: http://ipc.localhost terax-pty: http://terax-pty.localhost https: http://localhost:* http://127.0.0.1:*; frame-src 'self' http: https: asset: https://asset.localhost terax-asset: https://terax-asset.localhost; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'",
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: http://asset.localhost https://asset.localhost oarlock-asset: http://oarlock-asset.localhost https://oarlock-asset.localhost blob:; media-src 'self' asset: http://asset.localhost https://asset.localhost oarlock-asset: http://oarlock-asset.localhost https://oarlock-asset.localhost blob:; font-src 'self' data: asset: http://asset.localhost https://asset.localhost; connect-src 'self' ipc: http://ipc.localhost oarlock-pty: http://oarlock-pty.localhost https: http://localhost:* http://127.0.0.1:*; frame-src 'self' http: https: asset: https://asset.localhost oarlock-asset: https://oarlock-asset.localhost; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'",
       "assetProtocol": {
         "enable": true,
         "scope": {
@@ -40,19 +40,19 @@
   "bundle": {
     "active": true,
     "externalBin": [
-      "binaries/terax-cli"
+      "binaries/oarlock-cli"
     ],
     "resources": {
       "../packages/ghostty-core/LICENSE": "licenses/terminal/ghostty-web.txt",
       "../packages/ghostty-core/adapted/LICENSE.ghostty": "licenses/terminal/ghostty.txt",
       "../packages/ghostty-core/adapted/LICENSE.restty": "licenses/terminal/restty.txt",
       "../src/modules/terminal/ghostty/webgl/LICENSE.xterm-js": "licenses/terminal/xterm-js.txt",
-      "../src/assets/fonts/symbols/NOTICE.txt": "licenses/fonts/terax-symbols.txt",
+      "../src/assets/fonts/symbols/NOTICE.txt": "licenses/fonts/oarlock-symbols.txt",
       "../src/assets/fonts/jetbrains-mono/OFL.txt": "licenses/fonts/jetbrains-mono.txt",
       "../src/modules/theme/themes/NOTICE.txt": "licenses/themes/terminal-themes.txt"
     },
     "targets": "all",
-    "createUpdaterArtifacts": true,
+    "createUpdaterArtifacts": false,
     "copyright": "Copyright 2026 Crynta",
     "license": "Apache-2.0",
     "publisher": "Crynta",
@@ -70,14 +70,14 @@
     "linux": {
       "deb": {
         "section": "utils",
-        "desktopTemplate": "./linux/terax.desktop",
+        "desktopTemplate": "./linux/oarlock.desktop",
         "depends": [
           "libwebkit2gtk-4.1-0",
           "libgtk-3-0"
         ]
       },
       "rpm": {
-        "desktopTemplate": "./linux/terax.desktop",
+        "desktopTemplate": "./linux/oarlock.desktop",
         "depends": [
           "webkit2gtk4.1",
           "gtk3"
@@ -103,11 +103,11 @@
     },
     "category": "DeveloperTool",
     "shortDescription": "AI-native terminal emulator",
-    "longDescription": "Terax, an open-source AI-native terminal emulator with multi-tab, file explorer, code editor, web preview, voice input, and AI agents."
+    "longDescription": "Oarlock, an open-source AI-native terminal emulator with multi-tab, file explorer, code editor, web preview, voice input, and AI agents."
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNCQUJGRDhBQjYwRTM0NjkKUldScE5BNjJpdjJyT3dIN0dqbUpHaDA4QW1GaDVmTTllRXdZVk96dFNTRUZ3Y2hiVGszYjFqRloK",
+      "pubkey": "",
       "endpoints": []
     }
   }

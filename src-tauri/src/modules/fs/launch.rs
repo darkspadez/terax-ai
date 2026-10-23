@@ -1,6 +1,6 @@
 //! Whether the OS would run a file as a program when it opens it in its default app.
 //! "Open in Default App" (`file::fs_open_default`) opens documents at once and asks the user
-//! first for anything classified here as a program. The OS picks the handler, which Terax
+//! first for anything classified here as a program. The OS picks the handler, which Oarlock
 //! cannot see, so the rules err toward asking: an unneeded question costs a click, a missed one
 //! runs code.
 

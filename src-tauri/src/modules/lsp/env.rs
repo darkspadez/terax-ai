@@ -14,7 +14,7 @@ pub type ServerEnv = HashMap<String, String>;
 const CAPTURE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The environment language servers get: that of the shell configured in
-/// Terax (an enumerated shell only), else the user's login shell, as new
+/// Oarlock (an enumerated shell only), else the user's login shell, as new
 /// terminals run them. A configured shell whose capture fails falls back to
 /// the login shell. Empty on Windows (the full user env is inherited there)
 /// or when every capture failed.
@@ -94,8 +94,8 @@ pub fn is_relative_path(command: &str) -> bool {
 }
 
 /// The program `command` names for a process that runs in `cwd`: an absolute
-/// path as is, a relative path inside `cwd` (never Terax's own folder), a bare
-/// name through the PATH of `env`, else Terax's own PATH.
+/// path as is, a relative path inside `cwd` (never Oarlock's own folder), a bare
+/// name through the PATH of `env`, else Oarlock's own PATH.
 pub fn resolve_binary(command: &str, env: &ServerEnv, cwd: &Path) -> Option<PathBuf> {
     let command = command.trim();
     if command.is_empty() {
@@ -130,7 +130,7 @@ pub fn detect_binary(command: &str, env: &ServerEnv) -> Option<String> {
 }
 
 #[cfg(unix)]
-const ENV_MARKER: &str = "__TERAX_ENV_6b1f__";
+const ENV_MARKER: &str = "__OARLOCK_ENV_6b1f__";
 #[cfg(unix)]
 const MAX_ENV_BYTES: usize = 1024 * 1024;
 
@@ -158,12 +158,12 @@ fn capture_command(shell: &str, interactive: bool) -> std::process::Command {
         &format!("printf '%s' {ENV_MARKER}; /usr/bin/env -0; printf '%s' {ENV_MARKER}"),
     ])
     // Lets an rc file skip slow interactive setup for this run.
-    .env("TERAX_RESOLVING_ENVIRONMENT", "1")
+    .env("OARLOCK_RESOLVING_ENVIRONMENT", "1")
     .stdin(Stdio::null())
     .stdout(Stdio::piped())
     .stderr(Stdio::piped());
     // A session of its own without a controlling terminal: an interactive
-    // shell would otherwise take over the terminal Terax was started from.
+    // shell would otherwise take over the terminal Oarlock was started from.
     unsafe {
         cmd.pre_exec(|| {
             libc::setsid();
@@ -241,20 +241,20 @@ mod tests {
         let cwd = Path::new("/");
         assert!(resolve_binary("", &env, cwd).is_none());
         assert!(resolve_binary("   ", &env, cwd).is_none());
-        assert!(resolve_binary("terax-definitely-not-a-real-binary", &env, cwd).is_none());
+        assert!(resolve_binary("oarlock-definitely-not-a-real-binary", &env, cwd).is_none());
     }
 
     #[test]
     fn resolve_binary_searches_the_captured_path() {
         let dir = tempfile::tempdir().unwrap();
-        let server = executable(dir.path(), "terax-test-language-server");
+        let server = executable(dir.path(), "oarlock-test-language-server");
         let env = HashMap::from([("PATH".to_string(), dir.path().display().to_string())]);
         let cwd = Path::new("/");
         assert_eq!(
-            resolve_binary("terax-test-language-server", &env, cwd),
+            resolve_binary("oarlock-test-language-server", &env, cwd),
             Some(server)
         );
-        assert!(resolve_binary("terax-test-language-server", &HashMap::new(), cwd).is_none());
+        assert!(resolve_binary("oarlock-test-language-server", &HashMap::new(), cwd).is_none());
     }
 
     #[test]
@@ -291,12 +291,12 @@ mod tests {
     fn a_bare_name_never_comes_from_the_folder_it_runs_in() {
         let project = tempfile::tempdir().unwrap();
         let bin = tempfile::tempdir().unwrap();
-        executable(project.path(), "terax-test-server");
+        executable(project.path(), "oarlock-test-server");
         let env = HashMap::from([("PATH".to_string(), bin.path().display().to_string())]);
-        assert!(resolve_binary("terax-test-server", &env, project.path()).is_none());
-        let on_path = executable(bin.path(), "terax-test-server");
+        assert!(resolve_binary("oarlock-test-server", &env, project.path()).is_none());
+        let on_path = executable(bin.path(), "oarlock-test-server");
         assert_eq!(
-            resolve_binary("terax-test-server", &env, project.path()),
+            resolve_binary("oarlock-test-server", &env, project.path()),
             Some(on_path)
         );
     }
@@ -309,14 +309,14 @@ mod tests {
             Some("./node_modules/.bin/server")
         );
         assert!(detect_binary("sh", &env).is_some_and(|p| Path::new(&p).is_absolute()));
-        assert!(detect_binary("terax-definitely-not-a-real-binary", &env).is_none());
+        assert!(detect_binary("oarlock-definitely-not-a-real-binary", &env).is_none());
     }
 
     fn env_with(key: &str) -> Arc<ServerEnv> {
         Arc::new(HashMap::from([(key.to_string(), "1".to_string())]))
     }
 
-    // crynta/terax-ai#1039: servers see the PATH of the shell chosen in Terax.
+    // crynta/terax-ai#1039: servers see the PATH of the shell chosen in Oarlock.
     #[test]
     fn the_configured_shell_wins_and_falls_back_to_the_login_shell() {
         let env_of = |shell: &str| match shell {
@@ -416,17 +416,17 @@ mod tests {
         let shell = fake_shell(
             dir.path(),
             r#"for a; do last=$a; done
-case " $* " in *" -i "*) export TERAX_TEST_INTERACTIVE=1;; esac
+case " $* " in *" -i "*) export OARLOCK_TEST_INTERACTIVE=1;; esac
 echo banner
 exec /bin/sh -c "$last""#,
         );
         let env = capture_shell_env(&shell).unwrap();
         assert_eq!(
-            env.get("TERAX_TEST_INTERACTIVE").map(String::as_str),
+            env.get("OARLOCK_TEST_INTERACTIVE").map(String::as_str),
             Some("1")
         );
         assert_eq!(
-            env.get("TERAX_RESOLVING_ENVIRONMENT").map(String::as_str),
+            env.get("OARLOCK_RESOLVING_ENVIRONMENT").map(String::as_str),
             Some("1")
         );
     }
@@ -442,7 +442,7 @@ exec /bin/sh -c "$last""#,
         );
         let env = capture_shell_env(&shell).unwrap();
         assert!(env.contains_key("PATH"));
-        assert!(!env.contains_key("TERAX_TEST_INTERACTIVE"));
+        assert!(!env.contains_key("OARLOCK_TEST_INTERACTIVE"));
     }
 
     // crynta/terax-ai#1039: Ubuntu's .bashrc returns early unless interactive,

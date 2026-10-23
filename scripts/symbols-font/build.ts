@@ -1,4 +1,4 @@
-// Builds the bundled Nerd Font symbol fallback ("Terax Symbols").
+// Builds the bundled Nerd Font symbol fallback ("Oarlock Symbols").
 //
 // Downloads the pinned Symbols Nerd Font release, checks its digest, splits the
 // font's Private Use Area glyphs into one WOFF2 per icon set and writes:
@@ -50,7 +50,7 @@ const URL_ =
 const SHA256 =
   "01172f37db8543edb102e5cb5c64101c9f4686630804d49b419aa07b23a69996";
 const FONT = "SymbolsNerdFont-Regular.ttf";
-const FAMILY = "Terax Symbols";
+const FAMILY = "Oarlock Symbols";
 
 type Range = readonly [start: number, end: number];
 
@@ -128,7 +128,7 @@ export function assign(codepoints: Iterable<number>): Map<string, number[]> {
 
 async function download(): Promise<{ source: Uint8Array; licence: string }> {
   const archive = await fetchVerified(URL_, SHA256);
-  const scratch = await mkdtemp(join(tmpdir(), "terax-symbols-font-"));
+  const scratch = await mkdtemp(join(tmpdir(), "oarlock-symbols-font-"));
   try {
     const path = join(scratch, "archive.tar.xz");
     const out = join(scratch, "out");
@@ -210,7 +210,7 @@ async function main(): Promise<void> {
   );
   await writeFile(
     join(ASSETS, "NOTICE.txt"),
-    `Terax Symbols is Symbols Nerd Font ${VERSION} (https://github.com/ryanoasis/nerd-fonts),\n` +
+    `Oarlock Symbols is Symbols Nerd Font ${VERSION} (https://github.com/ryanoasis/nerd-fonts),\n` +
       "split into one WOFF2 file per icon set and stripped of hinting by\n" +
       "scripts/symbols-font/build.ts. Glyph outlines are unchanged.\n\n" +
       "The glyphs come from these projects, under these licences:\n\n" +

@@ -126,8 +126,8 @@ export function AgentsSection() {
       <section className="flex flex-col gap-2">
         <Label>Selections</Label>
         <SettingRow
-          title="Ask Terax on selected text"
-          description="Show an Ask Terax button when you select text in a terminal or the editor. The Ask AI about selection shortcut works either way."
+          title="Ask Oarlock on selected text"
+          description="Show an Ask Oarlock button when you select text in a terminal or the editor. The Ask AI about selection shortcut works either way."
         >
           <Switch
             checked={selectionAskAi}
@@ -453,7 +453,7 @@ function AgentEditorDialog({
               onChange={(e) =>
                 setDraft({ ...draft, instructions: e.target.value })
               }
-              placeholder="Persona & rules. Appended to Terax's core system prompt."
+              placeholder="Persona & rules. Appended to Oarlock's core system prompt."
               className="min-h-40 resize-y text-[12px] leading-relaxed"
             />
           </div>

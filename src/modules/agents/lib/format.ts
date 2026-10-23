@@ -7,7 +7,7 @@ const LABELS: Record<string, string> = {
   gjc: "GJC",
   opencode: "OpenCode",
   grok: "Grok",
-  terax: "Terax",
+  oarlock: "Oarlock",
 };
 
 export function displayAgent(agent: string): string {

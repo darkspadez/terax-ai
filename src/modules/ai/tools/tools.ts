@@ -63,7 +63,7 @@ export type ToolName = keyof ReturnType<typeof buildTools>;
 /**
  * How each tool is gated. The record is exhaustive, so a new tool does not
  * compile until it is classified here.
- *  - `none`: read-only or confined to Terax's own state; never asks.
+ *  - `none`: read-only or confined to Oarlock's own state; never asks.
  *  - `approvable`: changes files. Asks in Ask mode and runs unasked in
  *    Auto-approve; `execute` still refuses protected paths, and plan mode
  *    queues the change for review instead of writing it.

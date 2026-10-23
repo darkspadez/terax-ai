@@ -5,7 +5,7 @@ import {
   setSelectedTerminalBackend,
 } from "./selection";
 
-const STORAGE_KEY = "terax.experimental.terminal-backend";
+const STORAGE_KEY = "oarlock.experimental.terminal-backend";
 
 describe("terminal backend selection", () => {
   afterEach(() => vi.unstubAllGlobals());

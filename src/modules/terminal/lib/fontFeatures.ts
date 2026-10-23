@@ -11,7 +11,7 @@ import { IS_MAC } from "@/lib/platform";
  * faces themselves: each family of the font stack is declared again under a
  * derived name through the `FontFace` API with `featureSettings`, and the stack
  * names the derived family instead. A family an `@font-face` rule declares
- * (the bundled JetBrains Mono, Terax Symbols) is copied from its rules; an
+ * (the bundled JetBrains Mono, Oarlock Symbols) is copied from its rules; an
  * installed one (a Nerd Font) from its face files, which the native side finds
  * (`system_fonts.rs`) and the asset protocol serves when a face is first drawn
  * (`local()` cannot name faces reliably). Installed families are looked up
@@ -309,7 +309,7 @@ function isSystemFace(path: string): boolean {
 }
 
 function derivedFamilyName(family: string): string {
-  return `${family} (Terax features ${derivedNames.size + 1})`;
+  return `${family} (Oarlock features ${derivedNames.size + 1})`;
 }
 
 function installedFamily(family: string, settings: string): string | null {
