@@ -13,6 +13,7 @@ import type { ToolContext } from "../tools/tools";
 import {
   chats,
   countConversationUsage,
+  patchConversationMeta,
   seedMessages,
   sessionApprovalMode,
   touchChat,
@@ -89,22 +90,22 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       usePreferencesStore.getState().openrouterModelId,
     getCustomEndpoints: () => usePreferencesStore.getState().customEndpoints,
     getCustomEndpointKeys: () => useChatStore.getState().customEndpointKeys,
+    // What the run reports is this conversation's: it shows while this is
+    // the open conversation and changes nothing for another one.
     onStep: (step) => {
-      useChatStore.getState().patchAgentMeta({ step });
+      patchConversationMeta(sessionId, { step });
     },
     onCompact: (info) => {
-      useChatStore.getState().patchAgentMeta({
+      patchConversationMeta(sessionId, {
         compactionNotice: { droppedCount: info.droppedCount, at: Date.now() },
       });
     },
     onFinishMeta: (info) => {
-      useChatStore.getState().patchAgentMeta({ hitStepCap: info.hitStepCap });
+      patchConversationMeta(sessionId, { hitStepCap: info.hitStepCap });
     },
     onUsage: ({ modelId, lastInputTokens, lastCachedTokens, ...usage }) => {
       if (!countConversationUsage(sessionId, modelId, usage)) return;
-      useChatStore
-        .getState()
-        .patchAgentMeta({ lastInputTokens, lastCachedTokens });
+      patchConversationMeta(sessionId, { lastInputTokens, lastCachedTokens });
     },
   }) as unknown as ChatTransport<UIMessage>;
 
@@ -117,7 +118,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     messages: initialMessages,
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
     onError: (e) => {
-      useChatStore.getState().patchAgentMeta({
+      patchConversationMeta(sessionId, {
         status: "error",
         error: e instanceof Error ? e.message : String(e),
       });

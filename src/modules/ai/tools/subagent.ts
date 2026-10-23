@@ -2,7 +2,11 @@ import { tool } from "ai";
 import { z } from "zod";
 import { runSubagent } from "../agents/runSubagent";
 import { SUBAGENTS, type SubagentType } from "../agents/registry";
-import { countConversationUsage, useChatStore } from "../store/chatStore";
+import {
+  countConversationUsage,
+  patchConversationMeta,
+  useChatStore,
+} from "../store/chatStore";
 import { liveModelConfig } from "../store/modelConfig";
 import type { ToolContext } from "./context";
 
@@ -30,8 +34,7 @@ Auto-executes (no approval) — subagents are read-only by design.`,
           .describe("Short label shown in the chat UI for the spawn card."),
       }),
       execute: async ({ type, prompt, description }) => {
-        const { apiKeys, selectedModelId, patchAgentMeta } =
-          useChatStore.getState();
+        const { apiKeys, selectedModelId } = useChatStore.getState();
         const sessionId = ctx.getSessionId();
         try {
           const r = await runSubagent({
@@ -41,9 +44,11 @@ Auto-executes (no approval) — subagents are read-only by design.`,
             modelId: selectedModelId,
             config: liveModelConfig(),
             toolContext: ctx,
-            onStep: (label) => patchAgentMeta({ step: label }),
-            // Its tokens are the conversation's, counted like the agent's
-            // own steps: in its meter while it is the open one.
+            // Its steps and tokens are the conversation's, shown and counted
+            // like the agent's own: only while it is the open one.
+            onStep: (label) => {
+              if (sessionId) patchConversationMeta(sessionId, { step: label });
+            },
             onUsage: (modelId, usage) => {
               if (sessionId) countConversationUsage(sessionId, modelId, usage);
             },

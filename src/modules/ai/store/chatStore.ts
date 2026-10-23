@@ -518,6 +518,23 @@ export function useActiveApprovalMode(): ApprovalMode {
 }
 
 /**
+ * Applies what a run of conversation `sessionId` reports (its step label,
+ * compaction notice, step cap, error) to `agentMeta`, which is the open
+ * conversation's. The store keeps no such state per conversation (a switch
+ * starts `agentMeta` again), so a run of any other conversation, one still
+ * answering after a switch, changes nothing. True when it applied.
+ */
+export function patchConversationMeta(
+  sessionId: string,
+  patch: Partial<AgentMeta>,
+): boolean {
+  const state = useChatStore.getState();
+  if (state.activeSessionId !== sessionId) return false;
+  state.patchAgentMeta(patch);
+  return true;
+}
+
+/**
  * Counts what `modelId` used for a conversation in its meter. The meter is
  * the open conversation's and starts again when another opens, so usage for
  * any other (a run still answering after a switch) is not counted. True when

@@ -1,7 +1,8 @@
 import type { ToolExecutionOptions } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// A sub-agent's tokens in the meter, with the real chat store and runner.
+// A sub-agent's steps and tokens in its conversation, with the real chat
+// store and runner.
 
 const provider = vi.hoisted(() => ({
   /** Usage of each step: input, cached, output. The last one answers. */
@@ -167,5 +168,26 @@ describe("a sub-agent's usage", () => {
     openConversation("s-b");
     await runFrom("s-a");
     expect(useChatStore.getState().agentMeta.tokens).toEqual(ZERO_USAGE);
+  });
+});
+
+describe("a sub-agent's step label", () => {
+  it("shows in the conversation that started it while it is open", async () => {
+    const steps: (string | null)[] = [];
+    provider.beforeStep = () =>
+      steps.push(useChatStore.getState().agentMeta.step);
+    await runFrom("s-a");
+    expect(steps).toEqual([null, "explore: glob"]);
+  });
+
+  it("never shows in a conversation the user opened while it ran", async () => {
+    const steps: (string | null)[] = [];
+    provider.beforeStep = (step) => {
+      if (step === 0) openConversation("s-b");
+      steps.push(useChatStore.getState().agentMeta.step);
+    };
+    await runFrom("s-a");
+    expect(steps).toEqual([null, null]);
+    expect(useChatStore.getState().agentMeta.step).toBeNull();
   });
 });
