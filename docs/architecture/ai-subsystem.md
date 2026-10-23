@@ -110,6 +110,15 @@ Tools of MCP servers come from the window's MCP client (`src/modules/mcp/`). On 
 - The system prompt gains an MCP block saying results are untrusted data, with each server's instructions.
 - The chat renders MCP calls with `components/McpTool.tsx`: the approval card names the server and shows the arguments and the server's annotations; the transcript row marks the result as external.
 
+### MCP resources and prompts
+
+Resources and prompts of MCP servers reach the chat through the composer, never through the agent's tools:
+
+- **Resources**: the composer's `@` picker lists each running server's resources and templates after the workspace files (opening it starts the window's enabled servers). A resource is read and attached like a file (same caps), a template first asks for its variables in a small form with the server's completions. It is sent in an `<mcp-resource>` block naming the server and marking the content as its data.
+- **Prompts**: `/<server>:<prompt>` in the `/` list. Its arguments are asked for in the same form (required ones enforced, completions if offered), then its messages are sent in an `<mcp-prompt>` block, which says they are the server's words and not the user's instructions, before the user's own text. Lists refresh on the server's `list_changed` notifications.
+
+See `TERAX.md` (AI subsystem) for the modules.
+
 A tool call needs a result before any later request: one without it fails every following prompt with `MissingToolResultsError`. So only the newest message's approvals can be answered (`pendingApprovalIds` in `lib/toolApprovals.ts`): older cards render as denied rows, their diff tabs close, and the diff-tab responder ignores them. Every user message (composer, Continue, managed-agent review) goes through `sendUserMessage` in `store/chatRuntime.ts`, which first replaces the messages holding unanswered approvals (waiting, or approved but never run) with copies where those calls are denied, so the model is told they did not run and the settled state is what gets persisted.
 
 In plan mode, an edit that Apply could not write (a write error, or a path the deny-list refuses at write time) stays in the review list with its error until it is applied or rejected; written edits leave the list.
@@ -129,6 +138,7 @@ AI-proposed file edits open in an `ai-diff` tab. The user accepts or rejects per
 - New providers must justify their bundle cost and unique value.
 - Mutating tools require approval unless the conversation is in Auto-approve; the coding-agent tools always do, and no mode skips a deny-list. Read-only tools still pass the deny-list.
 - MCP tools of an untrusted server ask in every mode; an MCP tool is never offered without its gate, and server annotations never relax one.
+- MCP resources and prompts reach the model only in their server-labelled blocks.
 - A project's skills reach the model only while the user trusts that content; a skill's text never changes approval.
 
 ## See also

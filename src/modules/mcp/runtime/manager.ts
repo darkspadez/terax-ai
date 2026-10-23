@@ -27,6 +27,7 @@ import {
   toolDescription,
 } from "../lib/toolSchema";
 import { type Connection, connectServer } from "./connect";
+import { McpExtras } from "./extras";
 
 const MAX_TOOL_PAGES = 20;
 const MAX_TOOLS_PER_SERVER = 1000;
@@ -116,6 +117,8 @@ export class McpManager {
   private generation = 0;
   private offered = new Map<string, OfferedTool>();
   private listening: Promise<void> | null = null;
+  /** Resources and prompts of the running servers, for the composer. */
+  readonly extras = new McpExtras();
 
   /** Follows Settings: configuration changes and restart requests. */
   listen(): Promise<void> {
@@ -155,6 +158,7 @@ export class McpManager {
           if (run) {
             run.server = plan.server;
             changed = true;
+            this.extras.updated(plan.server);
           }
           break;
         }
@@ -371,6 +375,7 @@ export class McpManager {
       this.report(run);
       this.publish();
       this.remember(run);
+      this.extras.connected(run.server, opened.client, capabilities);
     } catch (error) {
       if (connection && run.connection !== connection) {
         await connection.close().catch(() => {});
@@ -386,6 +391,7 @@ export class McpManager {
     run.connection = null;
     if (connection) void connection.close();
     if (run.refreshTimer) clearTimeout(run.refreshTimer);
+    this.extras.ended(run.server.id);
     const now = Date.now();
     const next = afterCrash(run.crashes, now);
     run.state = "crashed";
@@ -415,6 +421,7 @@ export class McpManager {
     this.runs.delete(id);
     if (run.retryTimer) clearTimeout(run.retryTimer);
     if (run.refreshTimer) clearTimeout(run.refreshTimer);
+    this.extras.ended(id);
     void invoke("mcp_status_report", {
       report: {
         serverId: id,

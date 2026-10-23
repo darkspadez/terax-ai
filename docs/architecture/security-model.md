@@ -140,6 +140,7 @@ MCP servers (`src-tauri/src/modules/mcp/`, `src/modules/mcp/`) are programs and 
 - **Network.** A remote server is reached only through the backend (`mcp_http_stream`): every request must stay within the origin the user configured, goes through the SSRF classification and DNS pinning of `net.rs`, may reach private or loopback addresses only when the configured host itself is local or private, and is never redirected by the backend; the client follows a redirect only within that origin, as a new checked request. A server cannot make Terax fetch another host (a legacy SSE server's endpoint on another origin is refused by the client and by the backend).
 - **Secrets.** Environment variables and headers marked secret live in the keychain under the service `terax-mcp`. Settings writes them (`mcp_secret_set`, only from the settings window); the backend reads them only when it starts the server or opens its session; no page can read them back, because `secrets_get` and `secrets_get_all` refuse that service. The configuration store holds only their names.
 - **Configuration.** `terax-mcp.json` is a plain-named store in the app data folder; a damaged entry is dropped, never started. Imported and project servers (later) start disabled and untrusted.
+- **Resources and prompts.** What the user attaches from a server (a resource under `@`) or runs (a prompt as `/<server>:<prompt>`) is the server's text: it travels in an `<mcp-resource>` or `<mcp-prompt>` block that names the server and tells the model it is the server's data, not the user's instructions, and that it never changes the rules or what needs approval; closing tags inside are escaped so it cannot end its block. Chips in the composer and the transcript name the server. A resource is capped like a file attachment (200 KB of text, images within provider limits, other binary content refused); a prompt over 200 KB of text is refused. Names, titles and descriptions a server lists are shown without control or bidi characters and capped, and an address with control characters or over 2,048 characters is not offered.
 
 ## Secret storage
 
@@ -181,6 +182,7 @@ macOS privacy controls (TCC) sit below the registry: a folder the registry autho
 - New plugin APIs must be added to `src-tauri/capabilities/default.json`.
 - Keys, tokens, and credentials stay in the keychain / Linux secrets file.
 - An MCP tool is offered only with its gate; an untrusted server's tools ask in every mode, and server annotations never relax a gate. MCP requests stay within the configured server origin, and MCP secret values are read only by the backend.
+- Resource contents and prompt messages from MCP servers reach the model only inside their server-labelled blocks.
 - Content a project provides (its skills now, its `.mcp.json` later) is used only while `project_trust` allows that item with its current content hash; untrusted project content never reaches the model.
 - A skill's files are read only inside its real folder; a skill's text never changes approval.
 

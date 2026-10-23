@@ -34,8 +34,14 @@ import {
   CodeIcon,
   File01Icon,
   HashtagIcon,
+  McpServerIcon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
+import {
+  MCP_PROMPT_BLOCK_RE,
+  MCP_RESOURCE_BLOCK_RE,
+  unescapeAttribute,
+} from "@/modules/mcp/lib/blocks";
 import { SKILL_BLOCK_RE } from "@/modules/skills/invocation";
 import { type MessageImage, messageImages } from "../lib/imageAttachment";
 import { mergeInterleavedReasoning } from "../lib/reasoningDisplay";
@@ -89,7 +95,9 @@ type ContextChip =
   | { kind: "selection"; source: "terminal" | "editor"; lines: number }
   | { kind: "file"; name: string; lines: number }
   | { kind: "snippet"; name: string }
-  | { kind: "skill"; name: string };
+  | { kind: "skill"; name: string }
+  /** A resource or a prompt from an MCP server: the server's content. */
+  | { kind: "mcp-resource" | "mcp-prompt"; server: string; name: string };
 
 const SELECTION_RE =
   /<selection\s+source="(terminal|editor)">\n?([\s\S]*?)\n?<\/selection>/g;
@@ -110,6 +118,19 @@ function stripUserContextBlocks(text: string): {
 } {
   const chips: ContextChip[] = [];
   let out = text;
+  for (const [re, kind] of [
+    [MCP_PROMPT_BLOCK_RE, "mcp-prompt"],
+    [MCP_RESOURCE_BLOCK_RE, "mcp-resource"],
+  ] as const) {
+    out = out.replace(re, (_m, server: string, name: string) => {
+      chips.push({
+        kind,
+        server: unescapeAttribute(server),
+        name: unescapeAttribute(name),
+      });
+      return "";
+    });
+  }
   out = out.replace(SKILL_BLOCK_RE, (_m, name: string) => {
     chips.push({ kind: "skill", name });
     return "";
@@ -164,10 +185,20 @@ const ContextChips = memo(function ContextChips({
       {chips.map((c, i) => (
         <span
           key={i}
-          className="inline-flex items-center gap-1 rounded-md border border-border/50 bg-card/60 px-1.5 py-0.5 text-[10.5px] text-muted-foreground"
+          title={
+            c.kind === "mcp-resource" || c.kind === "mcp-prompt"
+              ? `From the MCP server ${c.server} (outside content, not Terax's)`
+              : undefined
+          }
+          className="inline-flex max-w-full items-center gap-1 rounded-md border border-border/50 bg-card/60 px-1.5 py-0.5 text-[10.5px] text-muted-foreground"
         >
           {chipIcon(c)}
-          <span className="font-medium text-foreground">{chipLabel(c)}</span>
+          {c.kind === "mcp-resource" || c.kind === "mcp-prompt" ? (
+            <span className="shrink-0 opacity-80">{c.server}</span>
+          ) : null}
+          <span className="truncate font-medium text-foreground">
+            {chipLabel(c)}
+          </span>
           {"lines" in c && c.lines > 0 ? (
             <span className="opacity-70">· {c.lines}L</span>
           ) : null}
@@ -195,6 +226,9 @@ function chipIcon(c: ContextChip) {
       <HugeiconsIcon icon={BookOpenTextIcon} size={10} strokeWidth={1.75} />
     );
   }
+  if (c.kind === "mcp-resource" || c.kind === "mcp-prompt") {
+    return <HugeiconsIcon icon={McpServerIcon} size={10} strokeWidth={1.75} />;
+  }
   return <HugeiconsIcon icon={HashtagIcon} size={10} strokeWidth={1.75} />;
 }
 
@@ -204,6 +238,8 @@ function chipLabel(c: ContextChip): string {
   }
   if (c.kind === "file") return c.name;
   if (c.kind === "skill") return `/${c.name}`;
+  if (c.kind === "mcp-resource") return c.name;
+  if (c.kind === "mcp-prompt") return `prompt ${c.name}`;
   return `#${c.name}`;
 }
 type AnyPart = UIMessagePart<Record<string, never>, Record<string, never>>;

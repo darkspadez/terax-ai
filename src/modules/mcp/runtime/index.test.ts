@@ -9,6 +9,7 @@ const manager = vi.hoisted(() => ({
 
 vi.mock("./manager", () => ({
   McpManager: class {
+    extras = { kind: "extras" };
     listen = async () => {};
     sync = (servers: unknown) => manager.synced.push(servers);
     hasStarting = () => manager.starting;
@@ -43,7 +44,7 @@ vi.mock("./manager", () => ({
   },
 }));
 
-import { toolsForRun } from "./index";
+import { extras, prepareExtras, toolsForRun } from "./index";
 
 describe("toolsForRun", () => {
   it("syncs the window's servers, waits for starting ones and builds agent tools", async () => {
@@ -83,5 +84,19 @@ describe("toolsForRun", () => {
     const onWaiting = vi.fn();
     await toolsForRun([], { onWaiting });
     expect(onWaiting).not.toHaveBeenCalled();
+  });
+});
+
+describe("prepareExtras", () => {
+  it("syncs the window's servers for the composer and waits for starting ones", async () => {
+    manager.starting = true;
+    const synced = manager.synced.length;
+    const waited = manager.waited;
+    const onWaiting = vi.fn();
+    await prepareExtras([], onWaiting);
+    expect(manager.synced).toHaveLength(synced + 1);
+    expect(manager.waited).toBe(waited + 1);
+    expect(onWaiting).toHaveBeenCalledTimes(1);
+    expect(extras()).toEqual({ kind: "extras" });
   });
 });

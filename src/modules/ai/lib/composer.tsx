@@ -27,6 +27,8 @@ import {
   readPickedFile,
   textTooLarge,
 } from "./pathAttachment";
+import type { ArgumentsFormRequest } from "@/modules/mcp/lib/argumentsForm";
+import { parseMcpPromptInvocation } from "@/modules/mcp/slash";
 import { parseSkillInvocation } from "@/modules/skills/slash";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import {
@@ -47,6 +49,10 @@ export type FileAttachment = {
   size: number;
   /** For kind === "selection": which surface it came from. */
   source?: "terminal" | "editor";
+  /** Read from an MCP server's resource: shown as that server's. */
+  mcp?: { server: string; uri: string };
+  /** The block it sends instead of a `<file>` one (an MCP resource's). */
+  block?: string;
 };
 
 type MessagePart =
@@ -69,6 +75,11 @@ type ComposerCtx = {
   pasteClipboardImage: () => Promise<void>;
   /** Attach a file by absolute path — used by the file explorer's "Attach to Agent". */
   attachFileByPath: (path: string) => Promise<void>;
+  /** Attach prepared attachments (MCP resources); one already attached is kept once. */
+  attachFiles: (files: readonly FileAttachment[]) => void;
+  /** The open form of an MCP prompt or resource template, if any. */
+  mcpForm: ArgumentsFormRequest | null;
+  setMcpForm: (form: ArgumentsFormRequest | null) => void;
   removeFile: (id: string) => void;
   pickedSnippets: Snippet[];
   addSnippet: (s: Snippet) => void;
@@ -105,6 +116,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const [files, setFiles] = useState<FileAttachment[]>([]);
   const [pickedSnippets, setPickedSnippets] = useState<Snippet[]>([]);
   const [pickedCommands, setPickedCommands] = useState<SlashCommandMeta[]>([]);
+  const [mcpForm, setMcpForm] = useState<ArgumentsFormRequest | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const focusSignal = useChatStore((s) => s.focusSignal);
@@ -196,6 +208,13 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const removeFile = (id: string) =>
     setFiles((prev) => prev.filter((f) => f.id !== id));
 
+  const attachFiles = (added: readonly FileAttachment[]) =>
+    setFiles((prev) => {
+      const ids = new Set(prev.map((f) => f.id));
+      const next = added.filter((f) => !ids.has(f.id));
+      return next.length > 0 ? [...prev, ...next] : prev;
+    });
+
   const addSnippet = (s: Snippet) =>
     setPickedSnippets((prev) =>
       prev.some((p) => p.id === s.id) ? prev : [...prev, s],
@@ -285,11 +304,12 @@ export function AiComposerProvider({ children }: ProviderProps) {
     return () => window.removeEventListener(COMPOSER_DROP_EVENT, onDrop);
   }, []);
 
-  // A skill is loaded before its message is sent; nothing else is sent meanwhile.
-  const loadingSkill = useRef(false);
+  // A skill or an MCP prompt is loaded (an MCP prompt's arguments asked for)
+  // before its message is sent; nothing else is sent meanwhile.
+  const preparing = useRef(false);
 
   const submit = () => {
-    if (isBusy || loadingSkill.current) return;
+    if (isBusy || preparing.current) return;
     const trimmed = value.trim();
     if (
       !trimmed &&
@@ -298,6 +318,34 @@ export function AiComposerProvider({ children }: ProviderProps) {
       pickedCommands.length === 0
     )
       return;
+
+    // `/server:prompt ...` (typed, or picked as a chip) sends the MCP
+    // prompt's messages with the user's text, after its form if it takes
+    // arguments. A typed one no running server offers is sent as written.
+    const pickedPrompt = pickedCommands.find((c) => c.prompt);
+    const typedPrompt = pickedPrompt ? null : parseMcpPromptInvocation(trimmed);
+    const promptCall = pickedPrompt
+      ? { command: pickedPrompt.name, text: trimmed }
+      : typedPrompt;
+    if (promptCall) {
+      preparing.current = true;
+      void import("@/modules/mcp/composer")
+        .then(({ runPromptCall }) =>
+          runPromptCall({
+            command: promptCall.command,
+            picked: pickedPrompt !== undefined,
+            showForm: setMcpForm,
+            send: (block, images) =>
+              send(promptCall.text, null, [block], images),
+            sendAsWritten: () => send(trimmed, null, []),
+          }),
+        )
+        .finally(() => {
+          setMcpForm(null);
+          preparing.current = false;
+        });
+      return;
+    }
 
     // `/skill-name ...` (typed, or picked as a chip) sends the skill's
     // instructions with the user's text. Built-in commands keep their names.
@@ -309,7 +357,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
         ? typedSkill
         : null;
     if (skillCall) {
-      loadingSkill.current = true;
+      preparing.current = true;
       void (async () => {
         try {
           const { skillInvocation } = await import("@/modules/skills/composer");
@@ -331,7 +379,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
             description: e instanceof Error ? e.message : String(e),
           });
         } finally {
-          loadingSkill.current = false;
+          preparing.current = false;
         }
       })();
       return;
@@ -362,20 +410,25 @@ export function AiComposerProvider({ children }: ProviderProps) {
     send(effectiveText, commandMarker, []);
   };
 
-  /** Sends the message: the command marker, `leading` blocks (a skill's), snippets,
-   *  selections and files, then the text. */
+  /** Sends the message: the command marker, `leading` blocks (a skill's or an
+   *  MCP prompt's, whose images come as `leadingImages`), snippets, selections
+   *  and files, then the text. */
   const send = (
     effectiveText: string,
     commandMarker: string | null,
     leading: string[],
+    leadingImages: readonly { mediaType: string; data: string }[] = [],
   ) => {
     const parts: MessagePart[] = [];
-    const fileBlocks = files
-      .filter((f) => f.kind === "text")
-      .map(
-        (f) =>
-          `<file name="${f.name}" mediaType="${f.mediaType}">\n${f.text ?? ""}\n</file>`,
-      );
+    const fileBlocks = files.flatMap((f) =>
+      f.block
+        ? [f.block]
+        : f.kind === "text"
+          ? [
+              `<file name="${f.name}" mediaType="${f.mediaType}">\n${f.text ?? ""}\n</file>`,
+            ]
+          : [],
+    );
     const selectionBlocks = files
       .filter((f) => f.kind === "selection")
       .map(
@@ -412,6 +465,14 @@ export function AiComposerProvider({ children }: ProviderProps) {
       .filter(Boolean)
       .join("\n\n");
     if (composed) parts.push({ type: "text", text: composed });
+
+    for (const image of leadingImages) {
+      parts.push({
+        type: "file",
+        mediaType: image.mediaType,
+        url: `data:${image.mediaType};base64,${image.data}`,
+      });
+    }
 
     for (const f of files) {
       if (f.kind === "image" && f.url) {
@@ -465,6 +526,9 @@ export function AiComposerProvider({ children }: ProviderProps) {
     addFiles,
     pasteClipboardImage,
     attachFileByPath,
+    attachFiles,
+    mcpForm,
+    setMcpForm,
     removeFile,
     pickedSnippets,
     addSnippet,

@@ -48,6 +48,8 @@ export type SlashCommandMeta = {
   icon: typeof SparklesIcon;
   /** A skill called with `/name`, not a built-in command. */
   skill?: boolean;
+  /** An MCP server's prompt, `/server:prompt`. */
+  prompt?: boolean;
 };
 
 export const SLASH_COMMANDS: Record<string, SlashCommandMeta> = {
