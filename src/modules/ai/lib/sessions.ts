@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { toast } from "sonner";
 import type { ApprovalMode } from "./approvalMode";
+import { MESSAGE_BLOCKS_RE } from "./messageBlocks";
 
 export type SessionMeta = {
   id: string;
@@ -379,8 +380,7 @@ export function deriveTitle(messages: UIMessage[]): string {
       if (p.type !== "text") continue;
       const text = (p as { text: string }).text
         .replace(/<terminal-context[\s\S]*?<\/terminal-context>\s*/g, "")
-        .replace(/<selection[\s\S]*?<\/selection>\s*/g, "")
-        .replace(/<file[\s\S]*?<\/file>\s*/g, "")
+        .replace(MESSAGE_BLOCKS_RE, "")
         .trim();
       if (!text) continue;
       const first = text.split("\n")[0].trim();

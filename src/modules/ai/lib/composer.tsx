@@ -18,6 +18,7 @@ import {
 } from "./composerDrop";
 import type { ReadResult } from "./native";
 import { encodeForSending, imageNeedsEncoding } from "./imageAttachment";
+import { fileBlock, selectionBlock, snippetBlock } from "./messageBlocks";
 import { readClipboardImageFile } from "./pastedImages";
 import {
   attachableText,
@@ -424,17 +425,12 @@ export function AiComposerProvider({ children }: ProviderProps) {
       f.block
         ? [f.block]
         : f.kind === "text"
-          ? [
-              `<file name="${f.name}" mediaType="${f.mediaType}">\n${f.text ?? ""}\n</file>`,
-            ]
+          ? [fileBlock(f.name, f.mediaType, f.text ?? "")]
           : [],
     );
     const selectionBlocks = files
       .filter((f) => f.kind === "selection")
-      .map(
-        (f) =>
-          `<selection source="${f.source ?? "terminal"}">\n${f.text ?? ""}\n</selection>`,
-      );
+      .map((f) => selectionBlock(f.source ?? "terminal", f.text ?? ""));
     const { body: bodyAfterTokens, blocks: snippetBlocks } = expandSnippetTokens(
       effectiveText,
       useSnippetsStore.getState().snippets,
@@ -444,9 +440,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     for (const s of pickedSnippets) {
       if (seenHandles.has(s.handle)) continue;
       seenHandles.add(s.handle);
-      allSnippetBlocks.push(
-        `<snippet name="${s.handle}">\n${s.content}\n</snippet>`,
-      );
+      allSnippetBlocks.push(snippetBlock(s.handle, s.content));
     }
     for (const block of snippetBlocks) {
       const m = block.match(/^<snippet name="([^"]+)"/);

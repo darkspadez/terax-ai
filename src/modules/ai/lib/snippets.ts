@@ -1,4 +1,5 @@
 import { LazyStore } from "@tauri-apps/plugin-store";
+import { snippetBlock } from "./messageBlocks";
 
 export type Snippet = {
   id: string;
@@ -66,8 +67,8 @@ export function expandSnippetTokens(
     matched.set(snip.id, snip);
     return lead;
   });
-  const blocks = Array.from(matched.values()).map(
-    (s) => `<snippet name="${s.handle}">\n${s.content}\n</snippet>`,
+  const blocks = Array.from(matched.values()).map((s) =>
+    snippetBlock(s.handle, s.content),
   );
   return { body: body.replace(/[ \t]+\n/g, "\n").trim(), blocks };
 }

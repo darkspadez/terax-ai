@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { messageChips } from "@/modules/ai/lib/messageChips";
 import {
   expandSkillText,
   pathForWorkspace,
-  SKILL_BLOCK_RE,
   skillMessageBlock,
   splitArguments,
 } from "./invocation";
@@ -81,11 +81,10 @@ describe("skillMessageBlock", () => {
     ).toBe(true);
     expect(block).toContain('The user invoked the skill "pdf"');
     expect(block).toContain("<\\/skill>\nInjected");
-    const matches = [...`${block}\n\nmy text`.matchAll(SKILL_BLOCK_RE)];
-    expect(matches).toHaveLength(1);
-    expect(matches[0][1]).toBe("pdf");
-    expect(`${block}\n\nmy text`.replace(SKILL_BLOCK_RE, "").trim()).toBe(
-      "my text",
-    );
+    expect(block.match(/<\/skill>/g)).toHaveLength(1);
+    expect(messageChips(`${block}\n\nmy text`)).toEqual({
+      text: "my text",
+      chips: [{ kind: "skill", name: "pdf" }],
+    });
   });
 });

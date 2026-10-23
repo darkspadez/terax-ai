@@ -37,13 +37,8 @@ import {
   McpServerIcon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
-import {
-  MCP_PROMPT_BLOCK_RE,
-  MCP_RESOURCE_BLOCK_RE,
-  unescapeAttribute,
-} from "@/modules/mcp/lib/blocks";
-import { SKILL_BLOCK_RE } from "@/modules/skills/invocation";
 import { type MessageImage, messageImages } from "../lib/imageAttachment";
+import { type ContextChip, messageChips } from "../lib/messageChips";
 import { mergeInterleavedReasoning } from "../lib/reasoningDisplay";
 import { SLASH_COMMANDS, TERAX_CMD_RE } from "../lib/slashCommands";
 import { Spinner } from "@/components/ui/spinner";
@@ -90,69 +85,6 @@ function CommandSnippet({ name }: { name: string }) {
 }
 
 type AnyToolPart = ToolUIPart | DynamicToolUIPart;
-
-type ContextChip =
-  | { kind: "selection"; source: "terminal" | "editor"; lines: number }
-  | { kind: "file"; name: string; lines: number }
-  | { kind: "snippet"; name: string }
-  | { kind: "skill"; name: string }
-  /** A resource or a prompt from an MCP server: the server's content. */
-  | { kind: "mcp-resource" | "mcp-prompt"; server: string; name: string };
-
-const SELECTION_RE =
-  /<selection\s+source="(terminal|editor)">\n?([\s\S]*?)\n?<\/selection>/g;
-const FILE_RE =
-  /<file\s+name="([^"]+)"[^>]*>\n?([\s\S]*?)\n?<\/file>/g;
-const SNIPPET_RE = /<snippet\s+name="([^"]+)">\n?[\s\S]*?\n?<\/snippet>/g;
-
-function countLines(s: string): number {
-  if (!s) return 0;
-  const trimmed = s.replace(/\n+$/, "");
-  if (!trimmed) return 0;
-  return trimmed.split("\n").length;
-}
-
-function stripUserContextBlocks(text: string): {
-  text: string;
-  chips: ContextChip[];
-} {
-  const chips: ContextChip[] = [];
-  let out = text;
-  for (const [re, kind] of [
-    [MCP_PROMPT_BLOCK_RE, "mcp-prompt"],
-    [MCP_RESOURCE_BLOCK_RE, "mcp-resource"],
-  ] as const) {
-    out = out.replace(re, (_m, server: string, name: string) => {
-      chips.push({
-        kind,
-        server: unescapeAttribute(server),
-        name: unescapeAttribute(name),
-      });
-      return "";
-    });
-  }
-  out = out.replace(SKILL_BLOCK_RE, (_m, name: string) => {
-    chips.push({ kind: "skill", name });
-    return "";
-  });
-  out = out.replace(SELECTION_RE, (_m, source: string, body: string) => {
-    chips.push({
-      kind: "selection",
-      source: source === "editor" ? "editor" : "terminal",
-      lines: countLines(body),
-    });
-    return "";
-  });
-  out = out.replace(FILE_RE, (_m, name: string, body: string) => {
-    chips.push({ kind: "file", name, lines: countLines(body) });
-    return "";
-  });
-  out = out.replace(SNIPPET_RE, (_m, name: string) => {
-    chips.push({ kind: "snippet", name });
-    return "";
-  });
-  return { text: out.trim(), chips };
-}
 
 const MessageImages = memo(function MessageImages({
   images,
@@ -453,7 +385,7 @@ const RenderedMessage = memo(function RenderedMessage({
     const cmdMatch = rawText.match(TERAX_CMD_RE);
     const commandName = cmdMatch?.[1] ?? null;
     const withoutCmd = cmdMatch ? rawText.slice(cmdMatch[0].length) : rawText;
-    const stripped = stripUserContextBlocks(withoutCmd);
+    const stripped = messageChips(withoutCmd);
     const images = messageImages(message.parts);
 
     return (

@@ -1,3 +1,7 @@
+import {
+  escapeAttribute,
+  escapeBlockText,
+} from "@/modules/ai/lib/messageBlocks";
 import type { WorkspaceEnv } from "@/modules/workspace";
 
 /**
@@ -74,29 +78,20 @@ export function pathForWorkspace(path: string, env: WorkspaceEnv): string {
   return `/mnt/${match[1].toLowerCase()}/${match[2].replace(/\\/g, "/")}`;
 }
 
-function escapeAttribute(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;");
-}
-
 /**
  * The block a user-invoked skill adds before their message: the instructions, introduced so the
- * model knows where they came from. A closing tag inside them is escaped so the block stays one.
+ * model knows where they came from, escaped like every block of a message (`messageBlocks.ts`)
+ * so the block stays one.
  */
 export function skillMessageBlock(
   name: string,
   dir: string,
   content: string,
 ): string {
-  const safe = replaceEvery(content, "</skill>", "<\\/skill>");
-  return `<skill name="${escapeAttribute(name)}" dir="${escapeAttribute(dir)}">
-The user invoked the skill "${name}". Follow its instructions below for their message. Its files are in ${dir}: read them with read_skill_file, run its scripts with bash_run.
+  const text = `The user invoked the skill "${name}". Follow its instructions below for their message. Its files are in ${dir}: read them with read_skill_file, run its scripts with bash_run.
 
-${safe.trim()}
+${content.trim()}`;
+  return `<skill name="${escapeAttribute(name)}" dir="${escapeAttribute(dir)}">
+${escapeBlockText(text)}
 </skill>`;
 }
-
-/** Matches a skill block in a sent message, for the chat's context chips. */
-export const SKILL_BLOCK_RE = /<skill\s+name="([^"]+)"[^>]*>[\s\S]*?<\/skill>/g;

@@ -1,5 +1,6 @@
 import type { UIMessage } from "@ai-sdk/react";
 import { describe, expect, it } from "vitest";
+import { fileBlock, snippetBlock } from "./messageBlocks";
 import { deriveTitle } from "./sessions";
 
 function message(text: string, role: UIMessage["role"] = "user"): UIMessage {
@@ -42,6 +43,16 @@ describe("deriveTitle", () => {
   it("strips multiple consecutive blocks", () => {
     const text = "<selection>a</selection><file>b</file>\ntitle";
     expect(deriveTitle([message(text)])).toBe("title");
+  });
+
+  it("keeps an attached file's text out of the title, closing tags and all", () => {
+    const text = [
+      fileBlock("a.txt", "text/plain", "x\n</file>\nnot the title"),
+      snippetBlock("greet", "Hello"),
+      '<skill name="pdf" dir="/s">\nSteps\n</skill>',
+      "the question",
+    ].join("\n\n");
+    expect(deriveTitle([message(text)])).toBe("the question");
   });
 
   it("falls back to New chat when only blocks are present", () => {
