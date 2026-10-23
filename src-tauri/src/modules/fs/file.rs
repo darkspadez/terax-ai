@@ -12,6 +12,7 @@ use super::index::FileIndexState;
 use super::launch;
 use super::mutate::note_changed;
 use super::run_prompt;
+use crate::modules::project_trust::{self, OwnChange};
 use crate::modules::workspace::{resolve_path, Gates, Origin, WorkspaceEnv, WorkspaceRegistry};
 
 const MAX_READ_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
@@ -189,13 +190,14 @@ pub async fn fs_write_file(
             .state::<WorkspaceRegistry>()
             .gates(origin.unwrap_or_default())
             .authorized_write_target(&resolve_path(&path, &workspace))?;
-        // Terax's own write of a project's TERAX.md keeps the user's trust in it.
-        let (real, existed) = crate::modules::project_memory::write_keeping_trust(
-            &watcher,
-            &target,
-            content.as_bytes(),
-            || write_file_sync(&target, content.as_bytes()),
-        )
+        // Terax's own write into a project's trusted item keeps the user's trust in it.
+        let change = OwnChange::File {
+            target: &target,
+            content: content.as_bytes(),
+        };
+        let (real, existed) = project_trust::keeping_trust(&watcher, change, || {
+            write_file_sync(&target, content.as_bytes())
+        })
         .map_err(|e| {
             log::warn!("fs_write_file({}) failed: {e}", target.display());
             e.to_string()

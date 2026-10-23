@@ -116,8 +116,7 @@ export function ProjectTrustPrompt({ status, onDismiss, onDecided }: Props) {
           <p>
             TERAX.md holds the project's instructions: Terax adds them to every
             AI run here and the AI follows them (each edit and command still
-            asks as the conversation's approval mode says). Edits made in Terax
-            keep your answer; a change from anywhere else asks again.
+            asks as the conversation's approval mode says).
           </p>
         ) : null}
         {groups.skills ? (
@@ -137,7 +136,8 @@ export function ProjectTrustPrompt({ status, onDismiss, onDecided }: Props) {
         ) : null}
         <p>
           Use them only from projects you trust. Until then the AI never sees
-          them.
+          them. Edits made in Terax keep your answer; a change from anywhere
+          else asks again.
         </p>
       </div>
 

@@ -1,5 +1,6 @@
 use super::blocking;
 use super::index::FileIndexState;
+use crate::modules::project_trust::{self, OwnChange};
 use crate::modules::workspace::{
     is_plain_name, resolve_path, Origin, WorkspaceEnv, WorkspaceRegistry,
 };
@@ -254,7 +255,12 @@ pub async fn fs_create_file(
             .state::<WorkspaceRegistry>()
             .gates(Origin::App)
             .authorized_new(&resolve_path(&path, &workspace))?;
-        create_file(&p)?;
+        // Terax's own new file in a project's trusted item keeps the user's trust in it.
+        let change = OwnChange::File {
+            target: &p,
+            content: &[],
+        };
+        project_trust::keeping_trust(&app, change, || create_file(&p))?;
         note_changed(&index, &p);
         Ok(())
     })
@@ -289,7 +295,9 @@ pub async fn fs_create_dir(
             .state::<WorkspaceRegistry>()
             .gates(origin.unwrap_or_default())
             .authorized_new(&resolve_path(&path, &workspace))?;
-        create_dir(&p)?;
+        // Terax's own new folder in a project's trusted item keeps the user's trust in it.
+        let change = OwnChange::Folder { target: &p };
+        project_trust::keeping_trust(&app, change, || create_dir(&p))?;
         note_changed(&index, &p);
         Ok(())
     })

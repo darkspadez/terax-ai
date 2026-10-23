@@ -30,7 +30,7 @@ const TRUST_BARS: Omit<TrustBar, "status">[] = [
     id: "skills",
     kinds: ["claude-skills", "terax-skills"],
     accept: "Use skills",
-    note: "The AI sees a project's skills only after you allow them, and asks again when they change.",
+    note: "The AI sees a project's skills only after you allow them. Edits made in Terax keep your answer; a change from anywhere else asks again.",
   },
 ];
 

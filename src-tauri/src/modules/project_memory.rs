@@ -6,12 +6,10 @@
 //!
 //! The model gets it only through `project_memory_read`, which reads the file once and checks the
 //! decision against the hash of exactly the bytes it returns. Terax's own writes keep an allowed
-//! file allowed (`write_keeping_trust`, called by `fs_write_file`); a change made anywhere else
-//! asks again.
+//! file allowed (`project_trust::keeping_trust`); a change made anywhere else asks again.
 
 use std::io::Read;
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -19,8 +17,7 @@ use tauri::{AppHandle, Manager, Webview};
 
 use crate::modules::fs::blocking;
 use crate::modules::project_trust::{
-    self, item_path, open_projects, resolve_project, window_project, Inspected, ItemEntry,
-    ItemKind, OpenProject,
+    self, item_path, resolve_project, window_project, Inspected, ItemEntry, ItemKind,
 };
 use crate::modules::skills::frontmatter::clean_text;
 use crate::modules::workspace::{Origin, WorkspaceEnv, WorkspaceRegistry};
@@ -485,136 +482,19 @@ pub async fn project_memory_read(
     .await
 }
 
-// ---- Terax's own writes ----
+// ---- Terax's own changes (`project_trust::keeping_trust`) ----
 
-/// What a project's TERAX.md held before Terax wrote it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum Before {
-    /// No file, or one that held nothing.
-    Nothing,
-    /// Content with this hash.
-    Content(String),
-    /// Content that could not be used: never allowed, so the write keeps nothing.
-    Unusable,
+/// The hash of the TERAX.md at `path` (its real path), read in chunks, and whether it holds
+/// nothing (empty or blank).
+pub fn held(path: &Path) -> Result<(String, bool), String> {
+    let scanned = scan_file(path)?;
+    let nothing = scanned.problem.is_none() && scanned.blank;
+    Ok((scanned.hash, nothing))
 }
 
-impl Before {
-    fn of(root: &Path) -> Self {
-        let real = match item_path(root, ItemKind::TeraxMd) {
-            None => return Before::Nothing,
-            Some(Err(_)) => return Before::Unusable,
-            Some(Ok(real)) => real,
-        };
-        match scan_file(&real) {
-            Ok(scanned) if scanned.problem.is_some() => Before::Unusable,
-            Ok(scanned) if scanned.blank => Before::Nothing,
-            Ok(scanned) => Before::Content(scanned.hash),
-            Err(_) => Before::Unusable,
-        }
-    }
-
-    /// The hash the user must have allowed for the write to keep the trust (None: nothing to
-    /// have allowed), or None overall when the write keeps nothing.
-    fn previous(&self) -> Option<Option<&str>> {
-        match self {
-            Before::Nothing => Some(None),
-            Before::Content(hash) => Some(Some(hash)),
-            Before::Unusable => None,
-        }
-    }
-}
-
-/// The hash a TERAX.md with this content is allowed under, when such a file can be used.
-fn usable_hash(content: &[u8]) -> Option<String> {
-    text_of(content)?.ok()?;
-    Some(hex(&Sha256::digest(content)))
-}
-
-/// Whether `target` (a real path, as the write gates return it) is the TERAX.md of the project at
-/// `root`: the item's real path, or where it would be created.
-fn is_memory_of(root: &Path, target: &Path) -> bool {
-    match item_path(root, ItemKind::TeraxMd) {
-        Some(Ok(real)) => real == target,
-        Some(Err(_)) => false,
-        None => root.join(FILE) == target,
-    }
-}
-
-/// Serializes Terax's own TERAX.md writes, so each one sees what the previous one recorded.
-fn write_lock() -> MutexGuard<'static, ()> {
-    static LOCK: Mutex<()> = Mutex::new(());
-    LOCK.lock().unwrap_or_else(|e| e.into_inner())
-}
-
-/// Runs `write`, Terax's own write of `content` to `target` (a real path: `fs_write_file`, which
-/// serves the editor's save and the AI's file writes, every one approved or run under
-/// Auto-approve). When `target` is the TERAX.md of a project a window has open, and the user
-/// allowed what it held (or it held nothing), the content written is allowed too, so Terax's own
-/// edit does not ask again. Decided here from the file itself, never on the page's word: no
-/// command marks content allowed, and a change made outside this write (git, another editor, a
-/// shell command, a move or copy onto the file) still asks.
-pub fn write_keeping_trust<T, E>(
-    app: &AppHandle,
-    target: &Path,
-    content: &[u8],
-    write: impl FnOnce() -> Result<T, E>,
-) -> Result<T, E> {
-    if app
-        .try_state::<project_trust::ProjectTrustState>()
-        .is_none()
-    {
-        return write();
-    }
-    keeping_trust(
-        open_projects(app),
-        target,
-        content,
-        write,
-        |project, previous, hash| {
-            if let Err(error) =
-                project_trust::allow_own_write(app, project, ItemKind::TeraxMd, previous, hash)
-            {
-                log::warn!("could not keep the trust of {}: {error}", target.display());
-            }
-        },
-    )
-}
-
-/// `write_keeping_trust` over the open projects: `allow` is asked to allow the content written
-/// for each project whose TERAX.md `target` is, with the hash it was allowed with before (None:
-/// it held nothing), once the write succeeded.
-fn keeping_trust<T, E>(
-    open: Vec<OpenProject>,
-    target: &Path,
-    content: &[u8],
-    write: impl FnOnce() -> Result<T, E>,
-    mut allow: impl FnMut(&OpenProject, Option<&str>, &str),
-) -> Result<T, E> {
-    let projects: Vec<OpenProject> = open
-        .into_iter()
-        .filter(|project| target.starts_with(&project.real) && is_memory_of(&project.real, target))
-        .collect();
-    if projects.is_empty() {
-        return write();
-    }
-    let _serial = write_lock();
-    let before: Vec<(OpenProject, Before)> = projects
-        .into_iter()
-        .map(|project| {
-            let before = Before::of(&project.real);
-            (project, before)
-        })
-        .collect();
-    let written = write()?;
-    let Some(hash) = usable_hash(content) else {
-        return Ok(written);
-    };
-    for (project, before) in &before {
-        if let Some(previous) = before.previous() {
-            allow(project, previous, &hash);
-        }
-    }
-    Ok(written)
+/// Whether a TERAX.md with this content holds nothing (empty or blank).
+pub fn holds_nothing(content: &[u8]) -> bool {
+    text_of(content).is_none()
 }
 
 #[cfg(test)]
@@ -847,134 +727,30 @@ mod tests {
     }
 
     #[test]
-    fn a_write_keeps_the_trust_only_of_content_allowed_or_absent() {
+    fn what_it_holds_for_terax_s_own_changes() {
         let (_dir, root) = project_dir();
-        assert_eq!(Before::of(&root), Before::Nothing);
-        assert_eq!(Before::of(&root).previous(), Some(None));
-        std::fs::write(root.join(FILE), "\n").unwrap();
-        assert_eq!(Before::of(&root), Before::Nothing, "blank holds nothing");
-        std::fs::write(root.join(FILE), "# Rules").unwrap();
-        let before = Before::of(&root);
-        let hash = hex(&Sha256::digest(b"# Rules"));
-        assert_eq!(before, Before::Content(hash.clone()));
-        assert_eq!(before.previous(), Some(Some(hash.as_str())));
-        std::fs::write(root.join(FILE), b"\xff").unwrap();
-        assert_eq!(Before::of(&root), Before::Unusable);
-        assert_eq!(Before::Unusable.previous(), None);
-
-        assert_eq!(usable_hash(b"# New"), Some(hex(&Sha256::digest(b"# New"))));
-        assert_eq!(usable_hash(b"  \n"), None, "nothing to allow");
-        assert_eq!(usable_hash(b"\xff"), None);
-        let large = "a".repeat(40_000);
+        let path = root.join(FILE);
+        std::fs::write(&path, "\u{feff} \n").unwrap();
         assert_eq!(
-            usable_hash(large.as_bytes()),
-            Some(hex(&Sha256::digest(large.as_bytes()))),
-            "any size can be used"
+            held(&path).unwrap(),
+            (hex(&Sha256::digest("\u{feff} \n".as_bytes())), true),
+            "blank holds nothing"
         );
-    }
-
-    #[test]
-    fn only_a_project_s_own_terax_md_is_its_item() {
-        let (_dir, root) = project_dir();
-        assert!(is_memory_of(&root, &root.join(FILE)), "to be created");
-        assert!(!is_memory_of(&root, &root.join("sub").join(FILE)));
-        assert!(!is_memory_of(&root, &root.join("README.md")));
-        std::fs::write(root.join(FILE), "x").unwrap();
-        assert!(is_memory_of(&root, &root.join(FILE)));
-        #[cfg(unix)]
-        {
-            std::fs::remove_file(root.join(FILE)).unwrap();
-            std::fs::create_dir(root.join("docs")).unwrap();
-            std::fs::write(root.join("docs/AGENTS.md"), "rules").unwrap();
-            std::os::unix::fs::symlink(root.join("docs/AGENTS.md"), root.join(FILE)).unwrap();
-            assert!(
-                is_memory_of(&root, &root.join("docs/AGENTS.md")),
-                "a write through the link lands in the item"
-            );
-            assert!(!is_memory_of(&root, &root.join(FILE)));
-        }
-    }
-
-    fn open(root: &Path) -> OpenProject {
-        OpenProject {
-            real: root.to_path_buf(),
-            key: root.to_string_lossy().into_owned(),
-            root: root.to_string_lossy().into_owned(),
-            workspace: WorkspaceEnv::Local,
-        }
-    }
-
-    /// What `keeping_trust` asked to allow: the project's key, the previous hash, the new one.
-    type Asked = Vec<(String, Option<String>, String)>;
-
-    /// Writes `content` to `target` as `fs_write_file` does, through `keeping_trust`, and
-    /// returns what it asked to allow.
-    fn write_through(
-        projects: Vec<OpenProject>,
-        target: &Path,
-        content: &str,
-    ) -> (std::io::Result<()>, Asked) {
-        let mut asked = Vec::new();
-        let result = keeping_trust(
-            projects,
-            target,
-            content.as_bytes(),
-            || std::fs::write(target, content),
-            |project, previous, hash| {
-                asked.push((
-                    project.key.clone(),
-                    previous.map(str::to_owned),
-                    hash.to_owned(),
-                ))
-            },
-        );
-        (result, asked)
-    }
-
-    #[test]
-    fn terax_s_write_asks_to_keep_the_trust_of_what_it_replaced() {
-        let (_dir, root) = project_dir();
-        let key = root.to_string_lossy().into_owned();
-        let target = root.join(FILE);
-        let hash = |text: &str| hex(&Sha256::digest(text.as_bytes()));
-
-        let (result, asked) = write_through(vec![open(&root)], &target, "# Created");
-        assert!(result.is_ok());
-        assert_eq!(asked, vec![(key.clone(), None, hash("# Created"))]);
-
-        let (_, asked) = write_through(vec![open(&root)], &target, "# Edited");
+        std::fs::write(&path, "# Rules").unwrap();
         assert_eq!(
-            asked,
-            vec![(key.clone(), Some(hash("# Created")), hash("# Edited"))]
+            held(&path).unwrap(),
+            (hex(&Sha256::digest(b"# Rules")), false)
         );
-
-        let (_, asked) = write_through(vec![open(&root)], &target, "   ");
-        assert!(asked.is_empty(), "a blank file has nothing to allow");
-        let large = "a".repeat(40_000);
-        let (_, asked) = write_through(vec![open(&root)], &target, &large);
-        assert_eq!(asked, vec![(key.clone(), None, hash(&large))], "any size");
-        let (_, asked) = write_through(vec![open(&root)], &target, "caf\0");
-        assert!(asked.is_empty(), "not text, so it cannot be used");
-        let (_, asked) = write_through(vec![open(&root)], &target, "# Usable again");
-        assert!(
-            asked.is_empty(),
-            "what it replaced could not be used, so it was never allowed"
+        std::fs::write(&path, b"# Rules\0").unwrap();
+        assert_eq!(
+            held(&path).unwrap(),
+            (hex(&Sha256::digest(b"# Rules\0")), false),
+            "content that cannot be used is still content"
         );
-
-        let (_, asked) = write_through(vec![open(&root)], &root.join("NOTES.md"), "# Notes");
-        assert!(asked.is_empty(), "not the project's TERAX.md");
-        let (_, asked) = write_through(Vec::new(), &target, "# No window");
-        assert!(asked.is_empty(), "no window has the project open");
-
-        let mut asked = Vec::new();
-        let failed: Result<(), &str> = keeping_trust(
-            vec![open(&root)],
-            &target,
-            b"# Never written",
-            || Err("disk full"),
-            |project, _, _| asked.push(project.key.clone()),
-        );
-        assert_eq!(failed, Err("disk full"));
-        assert!(asked.is_empty(), "a failed write keeps nothing");
+        assert!(holds_nothing(b""));
+        assert!(holds_nothing("\u{feff}\t\r\n".as_bytes()));
+        assert!(!holds_nothing(b"# New"));
+        assert!(!holds_nothing(b"\0"));
+        assert!(!holds_nothing(b"\xff"));
     }
 }

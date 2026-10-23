@@ -1,9 +1,10 @@
 //! A project's `.mcp.json` (Claude Code's format: `{"mcpServers": {...}}`), used only through
 //! the shared project trust: an `ItemKind::McpJson` item whose inspector lists each server's
-//! command or URL, hashed by content, so a change asks again. Its servers belong to the windows
-//! that have the project open, run only while the user allows the file's current content, and
-//! are never trusted automatically (the page keeps the per-server Trusted switch, bound to the
-//! server's own entry).
+//! command or URL, hashed by content, so a change asks again (one Terax makes itself keeps the
+//! answer, `project_trust::keeping_trust`); an empty file provides nothing. Its servers belong to
+//! the windows that have the project open, run only while the user allows the file's current
+//! content, and are never trusted automatically (the page keeps the per-server Trusted switch
+//! and Always allow choices, bound to the server's own entry, so they lapse when it changes).
 //!
 //! The page lists the servers as written; the backend expands `${VAR}` and `${VAR:-default}`
 //! (as Claude Code does) from the shell environment when it starts one, so the values never
@@ -141,8 +142,18 @@ pub struct ProjectEntry {
     pub variables: Vec<String>,
 }
 
+/// Whether a `.mcp.json`'s bytes are blank (an empty file provides nothing, as one with no
+/// server does).
+fn is_blank(bytes: &[u8]) -> bool {
+    std::str::from_utf8(bytes)
+        .is_ok_and(|text| text.trim_start_matches('\u{feff}').trim().is_empty())
+}
+
 /// The servers a `.mcp.json` declares, by name.
 pub fn parse(bytes: &[u8], project_key: &str) -> Result<Vec<ProjectEntry>, String> {
+    if is_blank(bytes) {
+        return Ok(Vec::new());
+    }
     let value: serde_json::Value =
         serde_json::from_slice(bytes).map_err(|e| format!("not valid JSON: {e}"))?;
     let Some(object) = value.as_object() else {
@@ -201,6 +212,32 @@ pub fn read(root: &Path, project_key: &str) -> Option<Result<McpJson, String>> {
             entries,
         })
     })())
+}
+
+/// Whether a `.mcp.json` with this content provides nothing: blank, or no server in it.
+pub fn holds_nothing(content: &[u8]) -> bool {
+    content.len() as u64 <= MAX_FILE && parse(content, "").is_ok_and(|entries| entries.is_empty())
+}
+
+/// The hash of the `.mcp.json` at `path` (its real path), read from its bytes, and whether it
+/// provides nothing (`project_trust::keeping_trust`).
+pub fn held(path: &Path) -> Result<(String, bool), String> {
+    let mut file = project_trust::open_regular(path).map_err(|e| e.to_string())?;
+    let len = file.metadata().map_err(|e| e.to_string())?.len();
+    let mut bytes = Vec::with_capacity(len.min(MAX_FILE + 1) as usize);
+    std::io::Read::read_to_end(
+        &mut std::io::Read::take(&mut file, MAX_FILE + 1),
+        &mut bytes,
+    )
+    .map_err(|e| e.to_string())?;
+    if bytes.len() as u64 <= MAX_FILE {
+        return Ok((hex(&Sha256::digest(&bytes)), holds_nothing(&bytes)));
+    }
+    // Too large to be used: only its hash, read on.
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    std::io::copy(&mut file, &mut hasher).map_err(|e| e.to_string())?;
+    Ok((hex(&hasher.finalize()), false))
 }
 
 fn quote(word: &str) -> String {
@@ -714,6 +751,34 @@ mod tests {
     }
 
     #[test]
+    fn what_it_holds_for_terax_s_own_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(FILE);
+        let hash = |bytes: &[u8]| hex(&Sha256::digest(bytes));
+        for (content, nothing) in [
+            ("", true),
+            ("  \n", true),
+            (r#"{"mcpServers": {}}"#, true),
+            ("{}", true),
+            (FILE_TEXT, false),
+            (r#"{"mcpServers": {"db": {"command": "np"#, false),
+        ] {
+            assert_eq!(holds_nothing(content.as_bytes()), nothing, "{content}");
+            std::fs::write(&path, content).unwrap();
+            assert_eq!(
+                held(&path).unwrap(),
+                (hash(content.as_bytes()), nothing),
+                "{content}"
+            );
+        }
+        // Too large to be used: hashed whole all the same, and never nothing.
+        let large = vec![b' '; MAX_FILE as usize + 10];
+        assert!(!holds_nothing(&large));
+        std::fs::write(&path, &large).unwrap();
+        assert_eq!(held(&path).unwrap(), (hash(&large), false));
+    }
+
+    #[test]
     fn the_inspector_hashes_the_file_and_refuses_what_it_cannot_review() {
         let dir = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
@@ -734,6 +799,10 @@ mod tests {
         assert!(inspect(&root).unwrap().hash.is_err());
         std::fs::write(root.join(FILE), r#"{"mcpServers": {}}"#).unwrap();
         assert!(inspect(&root).is_none());
+        for blank in ["", " \n\t", "\u{feff}\n"] {
+            std::fs::write(root.join(FILE), blank).unwrap();
+            assert!(inspect(&root).is_none(), "an empty file provides nothing");
+        }
         std::fs::write(root.join(FILE), vec![b' '; MAX_FILE as usize + 1]).unwrap();
         assert!(inspect(&root)
             .unwrap()
