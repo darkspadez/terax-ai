@@ -67,6 +67,14 @@ fn shell_has_children(shell_pid: u32) -> bool { ... }
 
 Tests for ConPTY/Job Object belong behind `#[cfg(windows)]`; tests for Unix PTY lifecycle belong behind `#[cfg(unix)]`. Do not assume a helper that works on one platform works on the other.
 
+## macOS filesystem watcher tests
+
+The FSEvents integration tests require access to the macOS service `com.apple.FSEvents`, including its Mach lookup. Filesystem read/write access alone does not grant that service. In the restricted agent execution environment, a diagnostic probe found that `sandbox_check` denied this lookup, `FSEventsGetCurrentEventId()` returned 0, stream creation succeeded, and `FSEventStreamStart()` returned false. That made all eight original watcher integration tests fail before they could receive events. The same revision passed all eight tests in the macOS CI job.
+
+The fixture reports the failed startup stage explicitly. Keep these tests enabled: run the full suite in an environment that can access FSEvents, such as the macOS CI runner. Do not turn service unavailability into a passing test or add watcher exclusions. The fault-injection tests exercise retry and replay state without requiring the service.
+
+A failed startup leaves the backend retryable, including when a subsequent registration does not change the watch roots. Its first usable event cursor is retained across failures so recovery can replay changes from the interrupted watch; removing all watches clears the failed state and cursor. Healthy registrations still avoid rebuilding the stream.
+
 ## Security function tests
 
 When testing `src/modules/ai/lib/security.ts` or the Rust equivalents, cover:

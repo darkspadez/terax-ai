@@ -44,6 +44,9 @@ trait Backend: Send {
     /// Brings the OS watches in line with `set`. Called after every change to
     /// the set; implementations must be a no-op when nothing relevant moved.
     fn sync(&mut self, set: &WatchSet);
+    fn needs_retry(&self) -> bool {
+        false
+    }
 }
 
 /// What a backend callback needs: the live set of watched directories to
@@ -472,10 +475,11 @@ impl FsWatchState {
 
 impl Running {
     /// `change` reports whether the set of watched directories moved; file
-    /// bookkeeping alone never touches the OS watches.
+    /// bookkeeping alone never touches healthy OS watches.
     fn apply(&mut self, change: impl FnOnce(&mut WatchSet) -> bool) {
         let mut set = self.shared.set.lock().unwrap_or_else(|e| e.into_inner());
-        if !change(&mut set) {
+        let moved = change(&mut set);
+        if !moved && !self.backend.needs_retry() {
             return;
         }
         *self.shared.dirs.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(set.snapshot());
@@ -833,6 +837,37 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn an_unchanged_watch_set_retries_a_failed_backend_but_not_a_healthy_one() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct Retrying {
+            calls: Arc<AtomicUsize>,
+            failed: bool,
+        }
+        impl Backend for Retrying {
+            fn sync(&mut self, _: &WatchSet) {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                self.failed = false;
+            }
+            fn needs_retry(&self) -> bool {
+                self.failed
+            }
+        }
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut running = Running {
+            shared: Arc::new(Shared::new()),
+            backend: Box::new(Retrying {
+                calls: calls.clone(),
+                failed: true,
+            }),
+            poll_tx: None,
+        };
+        running.apply(|_| false);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        running.apply(|_| false);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
 
     fn shared_watching(dir: &std::path::Path) -> Shared {
         let key = to_canon(dir);

@@ -98,8 +98,8 @@ impl Stream {
         queue: &DispatchQueue,
         context: CallbackContext,
         since: fs::FSEventStreamEventId,
-    ) -> Option<Self> {
-        let paths = cf_string_array(&spec.roots)?;
+    ) -> Result<Self, &'static str> {
+        let paths = cf_string_array(&spec.roots).ok_or("no FSEvents roots")?;
         let context = Box::into_raw(Box::new(context));
         let mut stream_context = fs::FSEventStreamContext {
             version: 0,
@@ -121,7 +121,7 @@ impl Stream {
             );
             if raw.is_null() {
                 release_context(context as *const c_void);
-                return None;
+                return Err("FSEventStreamCreate failed");
             }
             if let Some(excluded) = cf_string_array(&spec.exclusions) {
                 if !fs::FSEventStreamSetExclusionPaths(raw, excluded.as_opaque()) {
@@ -132,9 +132,9 @@ impl Stream {
             if !fs::FSEventStreamStart(raw) {
                 fs::FSEventStreamInvalidate(raw);
                 fs::FSEventStreamRelease(raw);
-                return None;
+                return Err("FSEventStreamStart failed: the macOS FSEvents service is unavailable or access is denied");
             }
-            Some(Self { raw })
+            Ok(Self { raw })
         }
     }
 }
@@ -163,6 +163,7 @@ pub struct FsEvents {
     sink: Sink,
     spec: Option<StreamSpec>,
     stream: Option<Stream>,
+    last_error: Option<&'static str>,
     /// Last event id the previous stream delivered, kept until a replacement
     /// starts so a failed start does not widen the gap.
     resume_from: Option<fs::FSEventStreamEventId>,
@@ -175,6 +176,7 @@ impl FsEvents {
             sink,
             spec: None,
             stream: None,
+            last_error: None,
             resume_from: None,
         })
     }
@@ -191,48 +193,70 @@ fn is_dir(path: &str) -> bool {
     Path::new(path).is_dir()
 }
 
-impl Backend for FsEvents {
-    fn sync(&mut self, set: &WatchSet) {
+impl FsEvents {
+    fn sync_with(
+        &mut self,
+        set: &WatchSet,
+        current_id: impl FnOnce() -> fs::FSEventStreamEventId,
+        start: impl FnOnce(
+            &StreamSpec,
+            &DispatchQueue,
+            CallbackContext,
+            fs::FSEventStreamEventId,
+        ) -> Result<Stream, &'static str>,
+    ) {
         let roots = set.covering_roots();
         let wanted = (!roots.is_empty()).then(|| StreamSpec {
             exclusions: plan::exclusion_paths(&roots, set, &is_dir),
             roots,
         });
-        if wanted == self.spec {
+        if wanted == self.spec && self.last_error.is_none() {
             return;
         }
-        // Drop the old stream before creating the next so no two streams ever
-        // deliver the same change. Its last delivered id is read first: the
-        // replacement starts after it, so what changed while the swap was in
-        // progress (including events still inside the latency window) is
-        // replayed rather than lost.
+        // Resume before stopping: changes still in the coalescing window must be replayed.
         if let Some(old) = self.stream.take() {
             self.resume_from = Some(old.latest_event_id());
         }
-        if wanted.is_none() {
-            self.resume_from = None;
-        }
-        self.stream = wanted.as_ref().and_then(|spec| {
-            let since =
-                plan::resume_after(self.resume_from, unsafe { FSEventsGetCurrentEventId() });
-            let stream = Stream::start(
+        self.last_error = None;
+        if let Some(spec) = &wanted {
+            let since = plan::resume_after(self.resume_from, current_id());
+            // Keep the first attempt's cursor even if no stream has started yet.
+            self.resume_from = Some(since);
+            match start(
                 spec,
                 &self.queue,
                 CallbackContext {
                     sink: self.sink.clone(),
                 },
                 since,
-            );
-            if stream.is_none() {
-                log::warn!("fsevents: could not start a stream for {:?}", spec.roots);
+            ) {
+                Ok(stream) => {
+                    self.stream = Some(stream);
+                    self.resume_from = None;
+                }
+                Err(error) => {
+                    self.last_error = Some(error);
+                    log::warn!("fsevents: {error}; roots: {:?}", spec.roots);
+                }
             }
-            stream
-        });
-        if self.stream.is_some() {
+        } else {
             self.resume_from = None;
         }
-        // A failed start leaves the spec unset so the next change retries.
         self.spec = wanted.filter(|_| self.stream.is_some());
+    }
+}
+
+impl Backend for FsEvents {
+    fn sync(&mut self, set: &WatchSet) {
+        self.sync_with(
+            set,
+            || unsafe { FSEventsGetCurrentEventId() },
+            Stream::start,
+        );
+    }
+
+    fn needs_retry(&self) -> bool {
+        self.last_error.is_some()
     }
 }
 
@@ -276,6 +300,11 @@ mod tests {
             self.set.add_dir(key.clone(), key, canonical, false);
             *self.sink.dirs.write().unwrap() = Arc::new(self.set.snapshot());
             self.backend.sync(&self.set);
+            assert!(
+                self.backend.last_error.is_none(),
+                "macOS watcher startup: {:?}",
+                self.backend.last_error
+            );
         }
 
         fn watch(&mut self, dir: &Path) {
@@ -300,6 +329,50 @@ mod tests {
 
     fn canon(path: &Path) -> String {
         to_canon(std::fs::canonicalize(path).unwrap())
+    }
+
+    #[test]
+    fn failed_initial_start_retries_from_the_original_cursor() {
+        let root = tempfile::tempdir().unwrap();
+        let mut fx = Fixture::new();
+        let canonical = std::fs::canonicalize(root.path()).unwrap();
+        let key = to_canon(&canonical);
+        fx.set.add_dir(key.clone(), key, canonical, false);
+        let mut cursors = Vec::new();
+        for now in [100, 200, 300] {
+            fx.backend.sync_with(
+                &fx.set,
+                || now,
+                |_, _, _, since| {
+                    cursors.push(since);
+                    Err("injected start failure")
+                },
+            );
+            assert!(fx.backend.needs_retry());
+            assert!(fx.backend.spec.is_none());
+        }
+        assert_eq!(cursors, [100, 100, 100]);
+    }
+
+    #[test]
+    fn unwatching_after_a_failed_start_clears_retry_and_replay_state() {
+        let root = tempfile::tempdir().unwrap();
+        let mut fx = Fixture::new();
+        let canonical = std::fs::canonicalize(root.path()).unwrap();
+        let key = to_canon(&canonical);
+        fx.set.add_dir(key.clone(), key.clone(), canonical, false);
+        fx.backend
+            .sync_with(&fx.set, || 100, |_, _, _, _| Err("injected failure"));
+        assert!(fx.backend.needs_retry());
+        fx.set.remove_dir(&key, &key);
+        fx.backend.sync_with(
+            &fx.set,
+            || panic!("no event id needed"),
+            |_, _, _, _| panic!("no stream needed"),
+        );
+        assert!(!fx.backend.needs_retry());
+        assert!(fx.backend.resume_from.is_none());
+        assert!(fx.backend.spec.is_none());
     }
 
     #[test]
