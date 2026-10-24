@@ -290,7 +290,7 @@ mod platform {
         targets: Targets,
     ) -> Result<Box<dyn Backend>, String> {
         Ok(Box::new(FsEvents {
-            queue: DispatchQueue::new("sh.oarlock.app.skills-watch", None),
+            queue: DispatchQueue::new("consulting.quantumops.oarlock.skills-watch", None),
             tx,
             targets,
             roots: Vec::new(),

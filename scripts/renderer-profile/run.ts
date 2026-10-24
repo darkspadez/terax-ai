@@ -750,7 +750,7 @@ async function main(): Promise<number> {
   writeFileSync(
     join(bundle, "Contents/Info.plist"),
     plist({
-      CFBundleIdentifier: "sh.oarlock.app.renderer-lab",
+      CFBundleIdentifier: "consulting.quantumops.oarlock.renderer-lab",
       CFBundleExecutable: "renderer-lab",
       CFBundleName: "Oarlock Renderer Lab",
       CFBundlePackageType: "APPL",

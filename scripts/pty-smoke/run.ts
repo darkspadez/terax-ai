@@ -189,7 +189,7 @@ async function main(): Promise<void> {
       response.end();
     }
   });
-  const identifier = `sh.oarlock.app.pty-smoke-${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+  const identifier = `consulting.quantumops.oarlock.pty-smoke-${randomUUID().replaceAll("-", "").slice(0, 12)}`;
   const real = JSON.parse(
     readFileSync(join(repo, "src-tauri/tauri.conf.json"), "utf8"),
   );

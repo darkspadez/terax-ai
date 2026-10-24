@@ -9,8 +9,8 @@ const ubuntu = { kind: "wsl", distro: "Ubuntu" } as const;
 describe("workspaceEnvForPath", () => {
   it("reads a Windows path on the host in a WSL window", () => {
     for (const path of [
-      "C:\\Users\\me\\AppData\\Roaming\\sh.oarlock.app\\themes\\mine.oarlock-theme",
-      "c:/Users/me/AppData/Roaming/sh.oarlock.app/themes",
+      "C:\\Users\\me\\AppData\\Roaming\\consulting.quantumops.oarlock\\themes\\mine.oarlock-theme",
+      "c:/Users/me/AppData/Roaming/consulting.quantumops.oarlock/themes",
       "D:\\",
       "\\\\fileserver\\profiles\\me\\AppData\\Roaming",
       "\\\\?\\C:\\Users\\me",

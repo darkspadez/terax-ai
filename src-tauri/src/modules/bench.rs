@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, WebviewWindow};
 
 /// Identifier of the shipped application; a bench build must not run under it.
-const PRODUCT_IDENTIFIER: &str = "sh.oarlock.app";
+const PRODUCT_IDENTIFIER: &str = "consulting.quantumops.oarlock";
 
 /// Called from `setup` and by every bench command. A bench build must not run under the
 /// product identifier (it would share the installed app's profile), and only starts when the
@@ -729,14 +729,14 @@ mod tests {
 
     #[test]
     fn product_identifier_is_refused() {
-        assert!(guard_environment("sh.oarlock.app", Some("1")).is_err());
-        assert!(guard_environment("sh.oarlock.app.app-lab", Some("1")).is_ok());
+        assert!(guard_environment("consulting.quantumops.oarlock", Some("1")).is_err());
+        assert!(guard_environment("consulting.quantumops.oarlock.app-lab", Some("1")).is_ok());
     }
 
     #[test]
     fn isolation_must_be_declared() {
-        assert!(guard_environment("sh.oarlock.app.app-lab", None).is_err());
-        assert!(guard_environment("sh.oarlock.app.app-lab", Some("0")).is_err());
+        assert!(guard_environment("consulting.quantumops.oarlock.app-lab", None).is_err());
+        assert!(guard_environment("consulting.quantumops.oarlock.app-lab", Some("0")).is_err());
     }
 
     #[test]

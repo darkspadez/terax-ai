@@ -108,7 +108,7 @@ async function main(): Promise<void> {
       response.end();
     }
   });
-  const identifier = `sh.oarlock.app.ipc-lab-${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+  const identifier = `consulting.quantumops.oarlock.ipc-lab-${randomUUID().replaceAll("-", "").slice(0, 12)}`;
   const config = join(output, "tauri.conf.json");
   writeFileSync(
     config,

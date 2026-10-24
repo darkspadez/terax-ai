@@ -473,7 +473,7 @@ describe("built startup graph", () => {
     expect(failure({ OARLOCK_BENCH_IDENTIFIER: "" })).toContain(
       "OARLOCK_BENCH_IDENTIFIER",
     );
-    expect(failure({ OARLOCK_BENCH_IDENTIFIER: "sh.oarlock.app" })).toContain(
+    expect(failure({ OARLOCK_BENCH_IDENTIFIER: "consulting.quantumops.oarlock" })).toContain(
       "not the product identifier",
     );
     // Nothing was emitted by either attempt.

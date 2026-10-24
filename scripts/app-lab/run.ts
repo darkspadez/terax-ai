@@ -106,7 +106,7 @@ Scenarios (\`--scenario\`):
   idle           one idle shell for \`--duration\` s
   input          native key events / input-method calls into a PTY reader (pass/fail in page.log)
 
-The app runs from an isolated bundle (identifier sh.oarlock.app.app-lab, its own HOME), never
+The app runs from an isolated bundle (identifier consulting.quantumops.oarlock.app-lab, its own HOME), never
 the user's profile; the bench build refuses to start under the product identifier. Build once
 (\`--build-only\`, release with the feature, a separate cargo target dir) and reuse with
 \`--reuse-build\`. To measure a pristine revision rather than the working tree use
@@ -117,7 +117,7 @@ human summary); \`--compare A.json [B.json ...]\` prints deltas (medians when re
 
 const HERE = import.meta.dirname;
 const REPO = join(HERE, "../..");
-const IDENTIFIER: string = "sh.oarlock.app.app-lab";
+const IDENTIFIER: string = "consulting.quantumops.oarlock.app-lab";
 const PRODUCT_NAME = "Oarlock App Lab";
 const MAX_ATTEMPTS = 3;
 const LOCK_PATH = join(tmpdir(), "oarlock-app-lab.lock");
@@ -502,7 +502,7 @@ async function build(
 
 /** Removes everything a previous run left for the bench identifier (never the product's). */
 async function cleanProfile(home: string): Promise<void> {
-  if (IDENTIFIER === "sh.oarlock.app") throw new Error("AssertionError");
+  if (IDENTIFIER === "consulting.quantumops.oarlock") throw new Error("AssertionError");
   rmSync(home, { recursive: true, force: true });
   // WebKit, Tauri and cfprefsd may resolve the user's real library even with HOME overridden.
   const real = await passwdHome();

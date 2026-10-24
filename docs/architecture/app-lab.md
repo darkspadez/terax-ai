@@ -79,7 +79,7 @@ backing size, so none is ever resized).
 
 ## Isolation
 
-The bundle is `Oarlock App Lab.app` with the identifier `sh.oarlock.app.app-lab`, launched with
+The bundle is `Oarlock App Lab.app` with the identifier `consulting.quantumops.oarlock.app-lab`, launched with
 its own `HOME` (so the control-server descriptor, shell-integration files and history never touch
 the real user's) and `OARLOCK_BENCH_ISOLATED=1`. The bench binary refuses to start under the product
 identifier or without that variable (`modules/bench.rs::guard`, unit tested), and the profile

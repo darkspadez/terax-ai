@@ -761,7 +761,10 @@ mod keychain_compat {
             .unwrap()
             .as_nanos();
         Cleanup(
-            format!("sh.oarlock.app.test.{}.{nanos}", std::process::id()),
+            format!(
+                "consulting.quantumops.oarlock.test.{}.{nanos}",
+                std::process::id()
+            ),
             "openai".into(),
         )
     }

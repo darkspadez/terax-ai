@@ -171,7 +171,7 @@ pub struct FsEvents {
 impl FsEvents {
     pub fn new(sink: Sink) -> Result<Self, String> {
         Ok(Self {
-            queue: DispatchQueue::new("sh.oarlock.app.fsevents", None),
+            queue: DispatchQueue::new("consulting.quantumops.oarlock.fsevents", None),
             sink,
             spec: None,
             stream: None,

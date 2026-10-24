@@ -6,7 +6,7 @@ This file is the project's instructions for coding agents and its living archite
 
 **Oarlock**: open-source AI-native terminal emulator. Tauri 2 + Rust (`portable-pty`) backend, React 19 + TypeScript + libghostty-vt WASM client (WebGPU, Oarlock WebGL fallback), BYOK AI via Vercel AI SDK v7.
 
-- Bundle id: `sh.oarlock.app`
+- Bundle id: `consulting.quantumops.oarlock`
 - Package manager and runtime: **Bun** (`bun install`, `bun run <script>`). `bunfig.toml` runs scripts and their tools on Bun rather than Node, keeps a three-day minimum release age, and uses the isolated linker so undeclared dependencies fail
 - Platforms: macOS, Linux, Windows
 - Frontend checks: `bun run lint`, `bun run check-types`, `bun run test`
