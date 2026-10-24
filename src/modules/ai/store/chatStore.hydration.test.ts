@@ -1,6 +1,7 @@
+import type { UIMessage } from "@ai-sdk/react";
 import { expect, it, vi } from "vitest";
 import type { SessionMeta } from "@/modules/ai/lib/sessions";
-import { useChatStore } from "@/modules/ai/store/chatStore";
+import { seedMessages, useChatStore } from "@/modules/ai/store/chatStore";
 
 const sessions = vi.hoisted(() => ({
   loadAll: vi.fn(async () => ({
@@ -8,6 +9,7 @@ const sessions = vi.hoisted(() => ({
     activeId: null,
     activeElsewhere: new Set<string>(),
   })),
+  loadMessages: vi.fn(async () => null as UIMessage[] | null),
   onSessionsChanged: vi.fn(async () => () => {}),
   newSessionId: vi.fn(() => "s-new"),
   saveSessionsList: vi.fn(async () => {}),
@@ -17,7 +19,6 @@ vi.mock("@/modules/ai/lib/sessions", () => ({
   ...sessions,
   deleteSessionData: vi.fn(),
   deriveTitle: vi.fn(),
-  loadMessages: vi.fn(),
   saveMessages: vi.fn(),
 }));
 
@@ -78,4 +79,22 @@ it("prepends a fresh conversation when the newest one has a title", async () => 
     "New chat",
     "Real work",
   ]);
+});
+
+it("loads reused history before it can save, acquiring its native revision", async () => {
+  useChatStore.setState({ sessions: [], sessionsHydrated: false });
+  seedMessages.clear();
+  const messages: UIMessage[] = [
+    { id: "m", role: "user", parts: [{ type: "text", text: "retained" }] },
+  ];
+  sessions.loadAll.mockResolvedValueOnce({
+    sessions: [meta("reused", "New chat")],
+    activeId: null,
+    activeElsewhere: new Set(),
+  });
+  sessions.loadMessages.mockResolvedValueOnce(messages);
+  await useChatStore.getState().hydrateSessions();
+  expect(sessions.loadMessages).toHaveBeenCalledWith("reused");
+  expect(seedMessages.get("reused")).toEqual(messages);
+  expect(useChatStore.getState().activeSessionId).toBe("reused");
 });

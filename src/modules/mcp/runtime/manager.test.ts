@@ -209,6 +209,33 @@ describe("McpManager", () => {
     ).toEqual([["a", true]]);
   });
 
+  it("refuses old run tools after denial, trust revocation or a tighter approval gate", async () => {
+    fakes.tools.set("s", [tool("a")]);
+    const manager = new McpManager();
+    const original = server("s", { trusted: true, tools: { a: "allow" } });
+    manager.sync([original]);
+    await settle(manager);
+    const access = { trusted: true, alwaysAllow: true };
+    await manager.callTool("s", "a", {}, undefined, access);
+    const call = fakes.clients.get("s")?.callTool;
+    expect(call).toHaveBeenCalledOnce();
+    for (const change of [
+      { ...original, tools: { a: "deny" as const } },
+      { ...original, trusted: false },
+      { ...original, tools: {} },
+    ]) {
+      manager.sync([change]);
+      await expect(
+        manager.callTool("s", "a", {}, undefined, access),
+      ).rejects.toThrow("permissions changed");
+    }
+    expect(call).toHaveBeenCalledOnce();
+    manager.sync([{ ...original, tools: { a: "deny" } }]);
+    await expect(manager.callTool("s", "a", {})).rejects.toThrow(
+      "permissions changed",
+    );
+  });
+
   it("restarts a server whose launch settings change, and stops a disabled one", async () => {
     const manager = new McpManager();
     manager.sync([server("s")]);

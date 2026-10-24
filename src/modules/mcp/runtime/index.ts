@@ -31,7 +31,10 @@ function agentTool(manager: McpManager, offered: OfferedTool): Tool {
       },
     },
     execute: (input, { abortSignal }) =>
-      manager.callTool(info.serverId, info.tool, input, abortSignal),
+      manager.callTool(info.serverId, info.tool, input, abortSignal, {
+        trusted: info.trusted,
+        alwaysAllow: offered.alwaysAllow,
+      }),
     toModelOutput: ({ output }) => mcpToModelOutput(output),
   });
 }
@@ -80,6 +83,11 @@ export async function prepareExtras(
     onWaiting?.();
     await current.waitForStarting();
   }
+  if (current.hasStarting())
+    throw new Error(
+      "MCP servers are still starting. Try the prompt again shortly.",
+    );
+  await current.extras.waitForLists();
 }
 
 /** Resources, prompts and completions of the window's running servers. */

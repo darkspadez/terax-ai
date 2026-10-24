@@ -731,6 +731,21 @@ pub fn quit_answer(app: &AppHandle, label: &str, round: u64, ok: bool) {
     }
 }
 
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(tag = "action", rename_all = "lowercase")]
+pub enum ThemeEditRequest {
+    Create,
+    Edit { id: String },
+}
+
+#[tauri::command]
+pub fn app_theme_edit(app: AppHandle, request: ThemeEditRequest) -> Result<(), String> {
+    let window = target_window(&app).ok_or("no Oarlock window is open")?;
+    window
+        .emit_to(window.label(), "oarlock://theme-edit", request)
+        .map_err(|e| e.to_string())
+}
+
 /// Opens a new window near the calling one; returns its label.
 #[tauri::command]
 pub fn app_window_open(

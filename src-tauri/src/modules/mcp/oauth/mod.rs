@@ -150,7 +150,11 @@ async fn forget_tokens(app: &AppHandle, server_id: &str) {
 }
 
 fn refresh_lock(app: &AppHandle, server_id: &str) -> Arc<tokio::sync::Mutex<()>> {
-    lock(&state(app).refreshing)
+    credential_lock(state(app), server_id)
+}
+
+fn credential_lock(state: &OAuthState, server_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    lock(&state.refreshing)
         .entry(server_id.to_owned())
         .or_default()
         .clone()
@@ -534,6 +538,7 @@ async fn prepare(
     server: &Url,
     policy: &Policy,
     input: &ClientInput,
+    cancel: &Notify,
 ) -> Result<Prepared, String> {
     let required = lock(&state(app).required).get(server_id).cloned();
     let challenge = required
@@ -600,6 +605,14 @@ async fn prepare(
                     let registration =
                         flow::register(policy, auth, &redirect_uri, scope.as_deref(), now_secs())
                             .await?;
+                    let guard = refresh_lock(app, server_id);
+                    let _held = guard.lock().await;
+                    if !lock(&state(app).pending)
+                        .as_ref()
+                        .is_some_and(|p| std::ptr::eq(p.cancel.as_ref(), cancel))
+                    {
+                        return Err("sign-in was cancelled".into());
+                    }
                     store::write(app, server_id, OauthItem::Client, &registration).await?;
                     registration
                 }
@@ -705,7 +718,13 @@ async fn sign_in(
 ) -> Result<TokenSet, String> {
     let host = server.host_str().ok_or("mcp: the URL has no host")?;
     let policy = Policy::for_server(server, crate::modules::net::host_is_private(host).await?);
-    let prepared = prepare(app, server_id, server, &policy, input).await?;
+    let prepared = prepare(app, server_id, server, &policy, input, cancel).await?;
+    if !lock(&state(app).pending)
+        .as_ref()
+        .is_some_and(|p| std::ptr::eq(p.cancel.as_ref(), cancel))
+    {
+        return Err("sign-in was cancelled".into());
+    }
     open_browser(app, &prepared.authorization_url).await?;
     let waited = tokio::select! {
         got = prepared.listener.wait(&prepared.state) => Ok(got),
@@ -752,6 +771,17 @@ pub async fn mcp_oauth_sign_in(
     }
     announce(&app, &server_id);
     let result = sign_in(&app, &server_id, &server, &input, &cancel).await;
+    let guard = refresh_lock(&app, &server_id);
+    let _held = guard.lock().await;
+    let current = {
+        let pending = lock(&state(&app).pending);
+        pending
+            .as_ref()
+            .is_some_and(|p| Arc::ptr_eq(&p.cancel, &cancel))
+    };
+    if !current {
+        return Err("mcp: sign-in was cancelled".into());
+    }
     {
         let mut pending = lock(&state(&app).pending);
         if pending
@@ -779,12 +809,7 @@ pub fn mcp_oauth_cancel(
     server_id: String,
 ) -> Result<(), String> {
     require_settings(&window)?;
-    if let Some(pending) = lock(&state(&app).pending)
-        .as_ref()
-        .filter(|p| p.server_id == server_id)
-    {
-        pending.cancel.notify_one();
-    }
+    cancel_pending(state(&app), &server_id);
     Ok(())
 }
 
@@ -800,8 +825,20 @@ pub async fn mcp_oauth_sign_out(
     forget(&app, &server_id).await
 }
 
+fn cancel_pending(state: &OAuthState, server_id: &str) {
+    let mut pending = lock(&state.pending);
+    if pending.as_ref().is_some_and(|p| p.server_id == server_id) {
+        if let Some(pending) = pending.take() {
+            pending.cancel.notify_one();
+        }
+    }
+}
+
 /// Forgets everything sign-in kept for a server (sign out, or the server was removed).
 pub async fn forget(app: &AppHandle, server_id: &str) -> Result<(), String> {
+    cancel_pending(state(app), server_id);
+    let guard = refresh_lock(app, server_id);
+    let _held = guard.lock().await;
     forget_tokens(app, server_id).await;
     store::delete(app, server_id, OauthItem::Client).await?;
     clear_required(app, server_id);
@@ -812,6 +849,48 @@ pub async fn forget(app: &AppHandle, server_id: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn sign_out_serializes_after_an_in_flight_refresh() {
+        let state = OAuthState::default();
+        let refresh = credential_lock(&state, "server");
+        let sign_out = credential_lock(&state, "server");
+        let tokens = Arc::new(Mutex::new(Some("old")));
+        let held = refresh.lock_owned().await;
+        let saved = tokens.clone();
+        let task = tokio::spawn(async move {
+            let _held = sign_out.lock().await;
+            *lock(&saved) = None;
+        });
+        tokio::task::yield_now().await;
+        assert!(!task.is_finished());
+        *lock(&tokens) = Some("refreshed");
+        drop(held);
+        task.await.unwrap();
+        assert!(lock(&tokens).is_none());
+    }
+
+    #[test]
+    fn sign_out_invalidates_a_pending_sign_in_identity() {
+        let state = OAuthState::default();
+        let cancel = Arc::new(Notify::new());
+        *lock(&state.pending) = Some(Pending {
+            server_id: "server".into(),
+            cancel: cancel.clone(),
+        });
+        cancel_pending(&state, "other");
+        assert!(lock(&state.pending).is_some());
+        cancel_pending(&state, "server");
+        assert!(lock(&state.pending).is_none());
+        let replacement = Arc::new(Notify::new());
+        *lock(&state.pending) = Some(Pending {
+            server_id: "server".into(),
+            cancel: replacement,
+        });
+        assert!(!lock(&state.pending)
+            .as_ref()
+            .is_some_and(|p| Arc::ptr_eq(&p.cancel, &cancel)));
+    }
 
     fn tokens(url: &str) -> TokenSet {
         TokenSet {

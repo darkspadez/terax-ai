@@ -58,6 +58,7 @@ const MAX_SEARCH_LIMIT: usize = 1000;
 #[allow(clippy::too_many_arguments)]
 pub async fn fs_search(
     app: AppHandle,
+    window: tauri::Window,
     index: State<'_, FileIndexState>,
     supersede: State<'_, Supersede>,
     root: String,
@@ -67,7 +68,9 @@ pub async fn fs_search(
     show_hidden: Option<bool>,
     request_key: Option<String>,
 ) -> Result<SearchResult, String> {
-    let ticket = request_key.as_deref().map(|key| supersede.begin(key));
+    let ticket = request_key
+        .as_deref()
+        .map(|key| supersede.begin_window(window.label(), key));
     let index = index.inner().clone();
     blocking(move || {
         authorized_root(&app, &root, workspace.as_ref(), Origin::App)?;

@@ -78,6 +78,8 @@ Conversations are organized into sessions (`src/modules/ai/lib/sessions.ts`):
 
 - `oarlock-ai-sessions.json` (`tauri-plugin-store`) holds only session metadata and the active id.
 - Message arrays live in per-session `conversations/session-<id>.json` files owned by Rust (`src-tauri/src/modules/ai_sessions.rs`, commands `ai_session_load` / `ai_session_save` / `ai_session_delete`). Writes are atomic, keep a `.bak` of the previous version, and set a damaged file aside as `.corrupt`.
+- Each native load returns a little-endian u32 revision before the raw JSON bytes. Saves carry `expectedRevision` in `x-oarlock-session` and return the next revision. The native I/O gate checks and increments revisions atomically, including on deletion. A stale window cannot replace another window's messages or resurrect a deleted conversation; its save error offers **Save a copy**, retaining that window's messages in a separate conversation. Disk files remain plain JSON.
+
 - Conversations from older versions, stored under `messages:<id>` keys of the metadata store, are migrated per session (`ai_session_finish_migration`, `ai_session_prune_backup`).
 
 `AGENTS.md` documents the durability rules (flush cadence, fsync, close-time flush).

@@ -570,6 +570,7 @@ pub fn run() {
             vibrancy::window_set_backdrop,
             modules::window_presentation::window_presentation_state,
             modules::system_fonts::system_font_faces,
+            windows::app_theme_edit,
             windows::app_window_open,
             windows::app_window_ready,
             windows::app_quit,

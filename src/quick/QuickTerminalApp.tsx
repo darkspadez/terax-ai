@@ -1,6 +1,6 @@
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { TerminalPromptDialog } from "@/modules/terminal";
+import { disposeSession, TerminalPromptDialog } from "@/modules/terminal";
 import { TerminalPane } from "@/modules/terminal/TerminalPane";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -46,9 +46,10 @@ export function QuickTerminalApp() {
   }, []);
 
   const onExit = useCallback(() => {
-    setLeafId((id) => id + 1);
+    disposeSession(leafId);
+    setLeafId(leafId + 1);
     void getCurrentWindow().hide();
-  }, []);
+  }, [leafId]);
 
   return (
     <TooltipProvider>

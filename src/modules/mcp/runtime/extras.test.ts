@@ -98,6 +98,32 @@ afterEach(() => {
 });
 
 describe("McpExtras", () => {
+  it("waits for the initial prompt list before a first-use lookup", async () => {
+    const server = docsServer();
+    const client = await connect(server);
+    const list = client.listPrompts.bind(client);
+    let release!: () => void;
+    vi.spyOn(client, "listPrompts").mockImplementation(async (...args) => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return list(...args);
+    });
+    const extras = new McpExtras();
+    extras.connected(config(), client, client.getServerCapabilities() ?? null);
+    let settled = false;
+    const ready = extras.waitForLists().then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(useMcpExtras.getState().servers[0]?.prompts).toEqual([]);
+    release();
+    await ready;
+    expect(useMcpExtras.getState().servers[0]?.prompts[0]?.name).toBe("review");
+    await client.close();
+    await server.close();
+  });
   it("lists a server's resources, templates and prompts for the composer", async () => {
     const client = await connect(docsServer());
     const extras = new McpExtras();

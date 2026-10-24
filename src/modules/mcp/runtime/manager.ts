@@ -240,6 +240,7 @@ export class McpManager {
     tool: string,
     input: unknown,
     signal?: AbortSignal,
+    access?: { trusted: boolean; alwaysAllow: boolean },
   ): Promise<McpToolOutput> {
     const run = this.runs.get(serverId);
     const connection = run?.state === "running" ? run.connection : null;
@@ -247,6 +248,17 @@ export class McpManager {
       const name = run?.server.name ?? "This MCP server";
       throw new Error(
         `${name} is not running${run?.error ? ` (${run.error})` : ""}.`,
+      );
+    }
+    const policy = run.server.tools[tool];
+    if (
+      !run.server.enabled ||
+      policy === "deny" ||
+      (access?.trusted === true && !run.server.trusted) ||
+      (access?.alwaysAllow === true && policy !== "allow")
+    ) {
+      throw new Error(
+        "MCP permissions changed. Send a new message to use the current permissions.",
       );
     }
     const generation = run.generation;

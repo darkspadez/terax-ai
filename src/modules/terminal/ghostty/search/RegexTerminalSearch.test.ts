@@ -17,6 +17,20 @@ describe("regex terminal search patterns", () => {
     expect(compileTerminalPattern("")).toBeNull();
   });
 
+  it("advances zero-width matches past complete Unicode characters", () => {
+    const cells = ["\u{1f600}", "", "a"];
+    for (const pattern of ["(?=.)", "(?=.)|a"]) {
+      const regex = compileTerminalPattern(pattern);
+      if (!regex) throw new Error("Expected a valid regex");
+      expect(matchLine(cells, 0, regex, 10)).toEqual([]);
+    }
+    const mixed = compileTerminalPattern("(?=\\p{Emoji})|a");
+    if (!mixed) throw new Error("Expected a valid regex");
+    expect(matchLine(cells, 0, mixed, 10)).toEqual([
+      { line: 0, startColumn: 2, endColumn: 3 },
+    ]);
+  });
+
   it("maps matches to columns across wide characters", () => {
     const cells = ["a", "日", "", "b", "1", "2", " "];
     const regex = compileTerminalPattern("日b|\\d+");

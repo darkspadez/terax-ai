@@ -61,6 +61,7 @@ const pendingWrites = new Map<string, { op: WriteOp; waiters: Waiter[] }>();
 /** The latest write that failed per session, retried on request and at close. */
 const failedWrites = new Map<string, WriteOp>();
 const notices = new Set<string>();
+const revisions = new Map<string, number>();
 
 function escapeHeader(value: unknown): string {
   return JSON.stringify(value).replace(
@@ -75,15 +76,21 @@ async function saveNative(
   messages: UIMessage[],
   options: { migrate?: boolean; durable?: boolean } = {},
 ): Promise<void> {
-  await invoke("ai_session_save", encoder.encode(JSON.stringify(messages)), {
-    headers: {
-      "x-oarlock-session": escapeHeader({
-        id,
-        migrate: options.migrate === true,
-        durable: options.durable === true,
-      }),
+  const revision = await invoke<number>(
+    "ai_session_save",
+    encoder.encode(JSON.stringify(messages)),
+    {
+      headers: {
+        "x-oarlock-session": escapeHeader({
+          id,
+          migrate: options.migrate === true,
+          durable: options.durable === true,
+          expectedRevision: revisions.get(id) ?? null,
+        }),
+      },
     },
-  });
+  );
+  revisions.set(id, revision);
 }
 
 /**
@@ -171,22 +178,59 @@ async function execute(id: string, op: WriteOp): Promise<void> {
   if (await store.has(legacyKey)) await store.delete(legacyKey);
 }
 
+async function saveConflictCopy(id: string): Promise<void> {
+  const latest = failedWrites.get(id);
+  if (latest?.kind !== "save") return;
+  const copyId = newSessionId();
+  await saveMessages(copyId, latest.messages, { durable: true });
+  const current = (await store.get<SessionMeta[]>(KEY_SESSIONS)) ?? [];
+  const now = Date.now();
+  await saveSessionsList([
+    {
+      id: copyId,
+      title: `${deriveTitle(latest.messages)} (copy)`,
+      createdAt: now,
+      updatedAt: now,
+      approvalMode: current.find((s) => s.id === id)?.approvalMode,
+    },
+    ...current,
+  ]);
+  await store.save();
+  if (failedWrites.get(id) === latest) {
+    failedWrites.delete(id);
+    notices.delete(id);
+    toast.dismiss(`conversation-save:${id}`);
+  }
+}
+
 function reportFailure(id: string, error: unknown) {
   notices.add(id);
-  toast.error("Could not save conversation", {
-    id: `conversation-save:${id}`,
-    duration: Number.POSITIVE_INFINITY,
-    description: String(error),
-    action: {
-      label: "Retry",
-      onClick: () => {
-        const latest = failedWrites.get(id);
-        if (latest && !pendingWrites.has(id)) {
-          void write(id, latest).catch(() => {});
-        }
+  const conflict = String(error).includes("conflict:");
+  toast.error(
+    conflict
+      ? "Conversation changed in another window"
+      : "Could not save conversation",
+    {
+      id: `conversation-save:${id}`,
+      duration: Number.POSITIVE_INFINITY,
+      description: String(error),
+      action: {
+        label: conflict ? "Save a copy" : "Retry",
+        onClick: () => {
+          if (conflict) {
+            void saveConflictCopy(id).catch((failure) =>
+              reportFailure(id, failure),
+            );
+            return;
+          }
+          const latest = failedWrites.get(id);
+          if (latest && !pendingWrites.has(id)) {
+            void write(id, latest).catch(() => {});
+          }
+        },
       },
     },
-  });
+  );
 }
 
 async function runPending(id: string): Promise<void> {
@@ -273,9 +317,14 @@ export async function loadMessages(id: string): Promise<UIMessage[] | null> {
   try {
     return await serial(id, async () => {
       const buffer = await invoke<ArrayBuffer>("ai_session_load", { id });
-      return buffer.byteLength === 0
+      if (buffer.byteLength < 4)
+        throw new Error("Invalid conversation response");
+      revisions.set(id, new DataView(buffer).getUint32(0, true));
+      return buffer.byteLength === 4
         ? null
-        : (JSON.parse(decoder.decode(buffer)) as UIMessage[]);
+        : (JSON.parse(
+            decoder.decode(new Uint8Array(buffer, 4)),
+          ) as UIMessage[]);
     });
   } catch (error) {
     if (!String(error).includes("corrupt:")) throw error;

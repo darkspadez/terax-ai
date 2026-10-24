@@ -59,7 +59,8 @@ export function matchLine(
     found = regex.exec(text)
   ) {
     if (found[0].length === 0) {
-      regex.lastIndex += 1;
+      regex.lastIndex +=
+        (text.codePointAt(regex.lastIndex) ?? 0) > 0xffff ? 2 : 1;
       continue;
     }
     const startColumn = columnAt[found.index];

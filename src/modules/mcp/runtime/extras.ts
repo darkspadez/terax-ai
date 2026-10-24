@@ -40,6 +40,7 @@ type Entry = {
   templates: McpTemplateEntry[];
   prompts: McpPromptEntry[];
   timers: Partial<Record<ListKind, ReturnType<typeof setTimeout>>>;
+  ready: Promise<void>;
 };
 
 /** Where a completion is asked for: a prompt's argument or a template's variable. */
@@ -98,6 +99,7 @@ export class McpExtras {
       templates: [],
       prompts: [],
       timers: {},
+      ready: Promise.resolve(),
     };
     this.entries.set(server.id, entry);
     if (capabilities?.resources?.listChanged) {
@@ -111,8 +113,14 @@ export class McpExtras {
       );
     }
     this.publish();
-    if (capabilities?.resources) void this.refresh(entry, "resources");
-    if (capabilities?.prompts) void this.refresh(entry, "prompts");
+    entry.ready = Promise.all([
+      capabilities?.resources ? this.refresh(entry, "resources") : undefined,
+      capabilities?.prompts ? this.refresh(entry, "prompts") : undefined,
+    ]).then(() => undefined);
+  }
+
+  async waitForLists(): Promise<void> {
+    await Promise.all([...this.entries.values()].map((entry) => entry.ready));
   }
 
   /** The server stopped, crashed or is restarting: its lists go. */

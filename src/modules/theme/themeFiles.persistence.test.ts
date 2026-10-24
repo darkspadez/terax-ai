@@ -10,7 +10,9 @@ vi.mock("@tauri-apps/api/core", () => core);
 
 const paths = vi.hoisted(() => ({
   appConfigDir: vi.fn(async () => "/config"),
-  join: vi.fn(async (...parts: string[]) => parts.join("/").replace(/\/+/g, "/")),
+  join: vi.fn(async (...parts: string[]) =>
+    parts.join("/").replace(/\/+/g, "/"),
+  ),
 }));
 
 vi.mock("@tauri-apps/api/path", () => paths);
@@ -21,18 +23,28 @@ const events = vi.hoisted(() => {
   const listeners: ((payload: unknown) => void)[] = [];
   return {
     listeners,
-    listen: vi.fn(async (_event: string, handler: (payload: unknown) => void) => {
-      listeners.push(handler);
-      return () => undefined;
-    }),
+    listen: vi.fn(
+      async (_event: string, handler: (payload: unknown) => void) => {
+        listeners.push(handler);
+        return () => undefined;
+      },
+    ),
     emit: vi.fn(async () => undefined),
   };
 });
 
 vi.mock("@tauri-apps/api/event", () => events);
+vi.mock("@tauri-apps/api/webviewWindow", () => ({
+  getCurrentWebviewWindow: () => ({ listen: events.listen }),
+}));
 
 import { useWorkspaceEnvStore } from "@/modules/workspace";
-import { deleteThemeFile, onThemeEdit, writeThemeFile } from "./themeFiles";
+import {
+  deleteThemeFile,
+  handOffThemeEdit,
+  onThemeEdit,
+  writeThemeFile,
+} from "./themeFiles";
 
 const host = { kind: "local" };
 
@@ -64,7 +76,9 @@ describe("theme file persistence", () => {
       path: "/config/themes",
       workspace: host,
     });
-    const calls = core.invoke.mock.calls.filter((c) => c[0] === "fs_create_dir");
+    const calls = core.invoke.mock.calls.filter(
+      (c) => c[0] === "fs_create_dir",
+    );
     expect(calls).toHaveLength(0);
     expect(core.invoke).toHaveBeenLastCalledWith("fs_write_file", {
       path: "/config/themes/my-theme.oarlock-theme",
@@ -76,7 +90,9 @@ describe("theme file persistence", () => {
 
   it("creates the themes dir first when it does not exist yet", async () => {
     core.invoke.mockImplementation((cmd: string) =>
-      cmd === "fs_stat" ? Promise.reject(new Error("missing")) : Promise.resolve(undefined),
+      cmd === "fs_stat"
+        ? Promise.reject(new Error("missing"))
+        : Promise.resolve(undefined),
     );
 
     await writeThemeFile(theme("t2"));
@@ -96,6 +112,18 @@ describe("theme file persistence", () => {
 
     core.invoke.mockRejectedValueOnce(new Error("enoent"));
     await expect(deleteThemeFile("gone")).resolves.toBeUndefined();
+  });
+
+  it("hands theme creation to native window routing instead of broadcasting", async () => {
+    const close = vi.fn(async () => {});
+    await expect(handOffThemeEdit({ action: "create" }, close)).resolves.toBe(
+      true,
+    );
+    expect(core.invoke).toHaveBeenCalledWith("app_theme_edit", {
+      request: { action: "create" },
+    });
+    expect(events.emit).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it("delivers theme-edit event payloads to the listener", async () => {

@@ -1,6 +1,7 @@
 import { LOCAL_WORKSPACE } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
-import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { appConfigDir, join } from "@tauri-apps/api/path";
 import type { Theme } from "./types";
 import { validateTheme, type ValidationResult } from "./validateTheme";
@@ -115,7 +116,7 @@ export function starterTheme(): Theme {
 }
 
 function emitThemeEdit(req: ThemeEditRequest): Promise<void> {
-  return emit(THEME_EDIT_EVENT, req);
+  return invoke("app_theme_edit", { request: req });
 }
 
 /**
@@ -147,5 +148,8 @@ export async function handOffThemeEdit(
 export function onThemeEdit(
   cb: (req: ThemeEditRequest) => void,
 ): Promise<UnlistenFn> {
-  return listen<ThemeEditRequest>(THEME_EDIT_EVENT, (e) => cb(e.payload));
+  return getCurrentWebviewWindow().listen<ThemeEditRequest>(
+    THEME_EDIT_EVENT,
+    (e) => cb(e.payload),
+  );
 }

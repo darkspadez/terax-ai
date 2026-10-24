@@ -345,7 +345,13 @@ async function answerClipboardRead(
     (access === "ask" &&
       (await requestTerminalPrompt({ kind: "clipboard-read" })) === "allow");
   // A denied read is answered empty so the program does not wait for it.
-  const text = allowed ? await readTerminalClipboard() : "";
+  const text = allowed
+    ? selection === "p"
+      ? ((await readPrimarySelection()) ?? "")
+      : selection === "c" || selection === "s" || selection === ""
+        ? await readTerminalClipboard()
+        : ""
+    : "";
   context.reply(
     encoder.encode(clipboardReadReply(selection, text, terminator)),
   );

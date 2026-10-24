@@ -18,7 +18,6 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { Tab } from "@/modules/tabs";
 import { leafHasForegroundProcess, leafIds } from "@/modules/terminal";
 import { flushSpaces } from "@/modules/spaces/lib/useSpacePersistence";
-import { flushTerminalScrollback } from "@/modules/terminal/lib/terminalScrollbackRestore";
 
 async function anyTerminalBusy(tabs: Tab[]): Promise<boolean> {
   const leaves = tabs.flatMap((t) =>
@@ -47,6 +46,25 @@ export function closeAfterFlush(
   alreadyWarned: boolean,
 ): "close" | "warn" {
   return flush.ok || alreadyWarned ? "close" : "warn";
+}
+
+export async function boundedSpaceFlush(
+  flush: () => Promise<void>,
+  timeoutMs: number,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      Promise.resolve().then(flush),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+  } catch (error) {
+    console.warn("Could not save spaces before closing", error);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export type AppCloseBlocker = {
@@ -115,8 +133,7 @@ export function useAppCloseGuard(tabsRef: RefObject<Tab[]>) {
     flushPersist();
     const [flush] = await Promise.all([
       flushSessionWrites({ timeoutMs: CLOSE_FLUSH_TIMEOUT_MS }),
-      flushTerminalScrollback(CLOSE_SCROLLBACK_TIMEOUT_MS),
-      flushSpaces(),
+      boundedSpaceFlush(flushSpaces, CLOSE_SCROLLBACK_TIMEOUT_MS),
     ]);
     return flush;
   }, []);

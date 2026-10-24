@@ -25,9 +25,9 @@ let preparing: Promise<void> | null = null;
 /**
  * Starts the window's enabled servers when the composer first lists what
  * they offer (with none enabled it only reads the configuration). Never
- * fails: a server that does not start says why in Settings.
+ * fails for pickers; strict callers report a failure instead of sending raw text.
  */
-export function ensureMcpExtras(): Promise<void> {
+export function ensureMcpExtras(strict = false): Promise<void> {
   preparing ??= (async () => {
     const { setStarting } = useMcpExtras.getState();
     try {
@@ -38,12 +38,13 @@ export function ensureMcpExtras(): Promise<void> {
       );
     } catch (error) {
       console.warn("[mcp] servers unavailable for the composer", error);
+      throw error;
     } finally {
       setStarting(false);
       preparing = null;
     }
   })();
-  return preparing;
+  return strict ? preparing : preparing.catch(() => {});
 }
 
 export async function readMcpResource(

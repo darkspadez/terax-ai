@@ -9,12 +9,13 @@ const manager = vi.hoisted(() => ({
 
 vi.mock("./manager", () => ({
   McpManager: class {
-    extras = { kind: "extras" };
+    extras = { kind: "extras", waitForLists: async () => {} };
     listen = async () => {};
     sync = (servers: unknown) => manager.synced.push(servers);
     hasStarting = () => manager.starting;
     waitForStarting = async () => {
       manager.waited += 1;
+      manager.starting = false;
     };
     instructions = () => [{ server: "srv", text: "hi" }];
     offeredTools = () => [
@@ -72,7 +73,9 @@ describe("toolsForRun", () => {
     });
     const signal = new AbortController().signal;
     const output = await tool.execute({ a: 1 }, { abortSignal: signal });
-    expect(manager.calls).toEqual([["s1", "echo", { a: 1 }, signal]]);
+    expect(manager.calls).toEqual([
+      ["s1", "echo", { a: 1 }, signal, { trusted: true, alwaysAllow: false }],
+    ]);
     expect(tool.toModelOutput({ output })).toEqual({
       type: "text",
       value: "back",
@@ -97,6 +100,6 @@ describe("prepareExtras", () => {
     expect(manager.synced).toHaveLength(synced + 1);
     expect(manager.waited).toBe(waited + 1);
     expect(onWaiting).toHaveBeenCalledTimes(1);
-    expect(extras()).toEqual({ kind: "extras" });
+    expect(extras()).toMatchObject({ kind: "extras" });
   });
 });

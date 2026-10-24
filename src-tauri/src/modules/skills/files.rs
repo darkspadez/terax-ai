@@ -13,6 +13,48 @@ const MAX_RELATIVE_PATH: usize = 1024;
 /// Text files the model may read; larger ones are refused.
 pub const MAX_READ_BYTES: u64 = 1024 * 1024;
 
+fn readable(path: &Path) -> bool {
+    use std::sync::OnceLock;
+    #[derive(serde::Deserialize)]
+    struct Rules {
+        basenames: Vec<String>,
+        directories: Vec<String>,
+    }
+    static RULES: OnceLock<(regex::RegexSet, Vec<String>)> = OnceLock::new();
+    let (basenames, directories) = RULES.get_or_init(|| {
+        let rules: Rules = serde_json::from_str(include_str!(
+            "../../../../src/modules/ai/lib/secretPaths.json"
+        ))
+        .expect("valid shared secret path rules");
+        let patterns = regex::RegexSetBuilder::new(&rules.basenames)
+            .case_insensitive(true)
+            .build()
+            .expect("valid shared secret basename patterns");
+        (patterns, rules.directories)
+    });
+    let path = path.to_string_lossy().replace('\\', "/");
+    if path.chars().any(char::is_control)
+        || basenames.is_match(path.rsplit('/').next().unwrap_or(""))
+    {
+        return false;
+    }
+    let comparison = path
+        .split('/')
+        .map(|part| {
+            part.split(':')
+                .next()
+                .unwrap_or("")
+                .trim_end_matches(|c: char| c == '.' || c.is_whitespace())
+                .to_lowercase()
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+        + "/";
+    !directories
+        .iter()
+        .any(|dir| comparison.contains(&format!("{dir}/")))
+}
+
 /// The file at `relative` inside `real_dir` (the skill's canonical folder), as it really is.
 pub fn resolve_inside(real_dir: &Path, relative: &str) -> Result<PathBuf, String> {
     let refused = || format!("`{relative}` is not a file inside the skill's folder");
@@ -40,7 +82,13 @@ pub fn resolve_inside(real_dir: &Path, relative: &str) -> Result<PathBuf, String
     ) {
         return Err(refused());
     }
+    if !readable(&path) {
+        return Err("refused: sensitive skill file".into());
+    }
     let real = std::fs::canonicalize(&path).map_err(|_| refused())?;
+    if !readable(&real) {
+        return Err("refused: sensitive skill file".into());
+    }
     if !real.starts_with(real_dir) || real == real_dir || !real.is_file() {
         return Err(refused());
     }
@@ -108,6 +156,9 @@ fn walk(root: &Path, dir: &Path, prefix: &str, depth: usize, files: &mut Vec<Str
             }
             continue;
         }
+        if resolve_inside(root, &relative).is_err() && !meta.is_dir() {
+            continue;
+        }
         let is_file = if meta.file_type().is_symlink() {
             std::fs::canonicalize(&path).is_ok_and(|real| real.starts_with(root) && real.is_file())
         } else {
@@ -139,6 +190,22 @@ mod tests {
         std::fs::write(root.join("scripts/run.py"), "print(1)").unwrap();
         std::fs::write(root.join(".hidden"), "x").unwrap();
         (dir, root)
+    }
+
+    #[test]
+    fn refuses_sensitive_files_and_internal_symlink_aliases() {
+        let (_dir, root) = skill_dir();
+        std::fs::write(root.join(".env"), "fake secret").unwrap();
+        assert!(resolve_inside(&root, ".env").is_err());
+        assert!(!readable(&root.join(".aws/config")));
+        assert!(!readable(&root.join("id_ed25519")));
+        assert!(readable(&root.join("guide.md")));
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(root.join(".env"), root.join("reference.txt")).unwrap();
+            assert!(resolve_inside(&root, "reference.txt").is_err());
+            assert!(!list_files(&root).0.contains(&"reference.txt".to_owned()));
+        }
     }
 
     #[test]

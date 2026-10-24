@@ -260,8 +260,10 @@ pub fn run_grep(
 /// when the command is dispatched, so the previous walk stops even though it
 /// is still occupying a blocking thread.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn fs_grep_interactive(
     app: AppHandle,
+    window: tauri::Window,
     supersede: State<'_, Supersede>,
     pattern: String,
     root: String,
@@ -269,7 +271,8 @@ pub async fn fs_grep_interactive(
     workspace: Option<WorkspaceEnv>,
     channel: Option<GrepChannel>,
 ) -> Result<GrepResponse, String> {
-    let ticket = supersede.begin(channel.unwrap_or_default().supersede_key());
+    let ticket =
+        supersede.begin_window(window.label(), channel.unwrap_or_default().supersede_key());
     blocking(move || {
         authorized_root(&app, &root, workspace.as_ref(), Origin::App)?;
         privacy_refused_root(&root)?;
@@ -408,7 +411,10 @@ mod tests {
         let newer_palette = supersede.begin(GrepChannel::Palette.supersede_key());
         assert!(palette.is_superseded());
         assert!(newer_palette.is_current());
-        assert!(sidebar.is_current(), "the palette never cancels the sidebar");
+        assert!(
+            sidebar.is_current(),
+            "the palette never cancels the sidebar"
+        );
     }
 
     #[test]

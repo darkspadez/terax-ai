@@ -60,7 +60,7 @@ async function findPrompt(command: string): Promise<McpPromptCommand | null> {
     ) ?? null;
   const found = find();
   if (found) return found;
-  await ensureMcpExtras();
+  await ensureMcpExtras(true);
   return find();
 }
 

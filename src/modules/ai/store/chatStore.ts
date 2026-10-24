@@ -9,7 +9,11 @@ import {
   type UsageMeter,
   ZERO_USAGE,
 } from "../lib/usage";
-import { EMPTY_PROVIDER_KEYS, type ProviderKeys, type CustomEndpointKeys } from "../lib/keyring";
+import {
+  EMPTY_PROVIDER_KEYS,
+  type ProviderKeys,
+  type CustomEndpointKeys,
+} from "../lib/keyring";
 import {
   deleteSessionData,
   deriveTitle,
@@ -86,10 +90,7 @@ type PendingSelection = {
   source: "terminal" | "editor";
 };
 
-type ApprovalResponder = (
-  approvalId: string,
-  approved: boolean,
-) => void;
+type ApprovalResponder = (approvalId: string, approved: boolean) => void;
 
 type StoreState = {
   live: Live;
@@ -318,7 +319,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
     set((s) => ({
       panelOpen: true,
       focusSignal: s.focusSignal + 1,
-      pendingSelections: [...s.pendingSelections, { id, text: trimmed, source }],
+      pendingSelections: [
+        ...s.pendingSelections,
+        { id, text: trimmed, source },
+      ],
     }));
   },
   consumeSelections: () => {
@@ -352,10 +356,22 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // Reuse the most recent untitled "New chat" session if one exists from
     // the previous run — no point stacking empty placeholder sessions every
     // launch — unless another window has it open. Otherwise prepend a fresh one.
-    const reusable =
+    let reusable =
       sessions[0]?.title === "New chat" && !activeElsewhere?.has(sessions[0].id)
         ? sessions[0]
         : null;
+    if (reusable) {
+      try {
+        const messages = await loadMessages(reusable.id);
+        if (messages?.length) seedMessages.set(reusable.id, messages);
+      } catch (error) {
+        toast.error("Could not reopen conversation", {
+          description: String(error),
+        });
+        reusable = null;
+      }
+      if (get().sessionsHydrated) return;
+    }
     let nextSessions: SessionMeta[];
     let freshId: string;
     if (reusable) {
