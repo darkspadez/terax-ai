@@ -26,9 +26,10 @@ vi.mock("@/modules/workspace", () => ({
 
 import { buildShellTools } from "./shell";
 
-const toolOptions: ToolExecutionOptions = {
+const toolOptions: ToolExecutionOptions<Record<string, unknown>> = {
   toolCallId: "tool-call",
   messages: [],
+  context: {},
 };
 
 function makeContext(sessionId: string | null = "session"): ToolContext {

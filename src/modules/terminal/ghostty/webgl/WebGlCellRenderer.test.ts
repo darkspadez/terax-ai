@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { TerminalGpuTheme } from "../gpu/terminalVisuals";
+import { detectPlatform } from "../gpu/textContrast";
 import {
   nextWebGlCellCapacity,
   rendererProfileKey,
   resetGlyphGrid,
   type WebGlRendererProfile,
+  webGlContextAttributes,
 } from "./WebGlCellRenderer";
 
 const theme: TerminalGpuTheme = {
@@ -118,5 +120,32 @@ describe("nextWebGlCellCapacity", () => {
     expect(initial).toBe(1_280);
     expect(nextWebGlCellCapacity(initial, 2_000)).toBe(2_048);
     expect(() => nextWebGlCellCapacity(0, 262_145)).toThrow(RangeError);
+  });
+});
+
+describe("webGlContextAttributes", () => {
+  it("preserves the drawing buffer on Linux, where WebKitGTK shows it a frame late otherwise", () => {
+    const webKitGtk = detectPlatform(
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
+    );
+    expect(webGlContextAttributes(webKitGtk).preserveDrawingBuffer).toBe(true);
+  });
+
+  it("lets the drawing buffer be swapped elsewhere", () => {
+    for (const platform of ["mac", "windows", "other"] as const) {
+      expect(webGlContextAttributes(platform)).toMatchObject({
+        alpha: false,
+        preserveDrawingBuffer: false,
+      });
+    }
+  });
+
+  // crynta/terax-ai#556: translucent terminals need a drawing buffer with alpha.
+  it("has an alpha channel, premultiplied, only for translucent terminals", () => {
+    expect(webGlContextAttributes("mac", true)).toMatchObject({
+      alpha: true,
+      premultipliedAlpha: true,
+    });
+    expect(webGlContextAttributes("linux", false).alpha).toBe(false);
   });
 });

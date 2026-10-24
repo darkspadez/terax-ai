@@ -72,6 +72,43 @@ export function clearAgentActivity(id: number): void {
   useAgentActivityStore.getState().clear(id);
 }
 
+const AGENT_NAME_MAX = 32;
+
+/** C0/C1 controls, line and paragraph separators, and bidi controls, which
+ * could reorder or hide the text around an agent name. */
+function isHiddenNameChar(code: number): boolean {
+  return (
+    code < 0x20 ||
+    (code >= 0x7f && code <= 0x9f) ||
+    code === 0x061c ||
+    code === 0x200e ||
+    code === 0x200f ||
+    (code >= 0x2028 && code <= 0x202e) ||
+    (code >= 0x2066 && code <= 0x2069)
+  );
+}
+
+/**
+ * The agent name a signal carries, as display text, or `null` when nothing
+ * visible is left. Any name the terminal reports is shown, but it came from PTY
+ * output: it only ever labels the agent, never picks a command, path or icon
+ * file. The detector already sanitizes it; this keeps the frontend safe on its
+ * own.
+ */
+export function sanitizeAgentName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  let name = "";
+  let count = 0;
+  for (const char of value) {
+    if (isHiddenNameChar(char.codePointAt(0) ?? 0)) continue;
+    if (count === AGENT_NAME_MAX) break;
+    name += char;
+    count += 1;
+  }
+  name = name.trim();
+  return name.length > 0 ? name : null;
+}
+
 /** Maps a raw detector signal to the phase it drives, `"exited"` to drop the
  * pty, or `null` to ignore. Pure so the mapping stays unit-testable. */
 export function phaseForSignal(
@@ -97,7 +134,7 @@ const signalHandlers = new Set<AgentSignalHandler>();
 
 /**
  * Subscribes to every raw detector signal through the single shared native
- * `terax:agent-signal` listener (the activity store has already applied the
+ * `oarlock:agent-signal` listener (the activity store has already applied the
  * signal when handlers run). One listener serves the tab icons and the
  * notification bridge instead of one IPC subscription each.
  */
@@ -138,13 +175,14 @@ function applySignal(payload: AgentSignal): void {
 // reports per-pty lifecycle: started, working, attention, finished, exited.
 export function ensureAgentActivityListener(): Promise<void> {
   if (listenerReady) return listenerReady;
-  listenerReady = listen<AgentSignal>("terax:agent-signal", (e) => {
-    applySignal(e.payload);
+  listenerReady = listen<AgentSignal>("oarlock:agent-signal", (e) => {
+    const signal = { ...e.payload, agent: sanitizeAgentName(e.payload.agent) };
+    applySignal(signal);
     for (const handler of signalHandlers) {
       try {
-        handler(e.payload);
+        handler(signal);
       } catch (error) {
-        console.error("[terax] agent signal handler failed:", error);
+        console.error("[oarlock] agent signal handler failed:", error);
       }
     }
   }).then(

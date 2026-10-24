@@ -1,23 +1,26 @@
 import type { Chat, UIMessage } from "@ai-sdk/react";
 import { toast } from "sonner";
 import { create } from "zustand";
-import {
-  DEFAULT_MODEL_ID,
-  endpointIdFromCompatModel,
-  getModel,
-  isCompatModelId,
-  type ModelId,
-  type ProviderId,
-} from "../config";
+import { DEFAULT_MODEL_ID, type ProviderId } from "../config";
 import { useTodosStore } from "./todoStore";
-import type { AgentUsage } from "../lib/agent";
-import { EMPTY_PROVIDER_KEYS, type ProviderKeys, type CustomEndpointKeys } from "../lib/keyring";
+import {
+  addUsage,
+  type TokenUsage,
+  type UsageMeter,
+  ZERO_USAGE,
+} from "../lib/usage";
+import {
+  EMPTY_PROVIDER_KEYS,
+  type ProviderKeys,
+  type CustomEndpointKeys,
+} from "../lib/keyring";
 import {
   deleteSessionData,
   deriveTitle,
   loadAll,
   loadMessages,
   newSessionId,
+  onSessionsChanged,
   saveActiveId,
   saveMessages,
   saveSessionsList,
@@ -25,6 +28,8 @@ import {
 } from "../lib/sessions";
 import { pushRecentModel } from "../lib/modelPrefs";
 import { persistDelay } from "../lib/persistSchedule";
+import { type ApprovalMode, normalizeApprovalMode } from "../lib/approvalMode";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 
 export type Live = {
   getCwd: () => string | null;
@@ -53,17 +58,13 @@ export type AgentMeta = {
   step: string | null;
   approvalsPending: number;
   error: string | null;
-  tokens: AgentUsage;
+  tokens: TokenUsage;
+  /** The same tokens by the model that used them, for the cost. */
+  tokensByModel: UsageMeter["tokensByModel"];
   lastInputTokens: number;
   lastCachedTokens: number;
   hitStepCap: boolean;
   compactionNotice: { droppedCount: number; at: number } | null;
-};
-
-const ZERO_USAGE: AgentUsage = {
-  inputTokens: 0,
-  outputTokens: 0,
-  cachedInputTokens: 0,
 };
 
 const IDLE_META: AgentMeta = {
@@ -72,6 +73,7 @@ const IDLE_META: AgentMeta = {
   approvalsPending: 0,
   error: null,
   tokens: ZERO_USAGE,
+  tokensByModel: new Map(),
   lastInputTokens: 0,
   lastCachedTokens: 0,
   hitStepCap: false,
@@ -88,10 +90,7 @@ type PendingSelection = {
   source: "terminal" | "editor";
 };
 
-type ApprovalResponder = (
-  approvalId: string,
-  approved: boolean,
-) => void;
+type ApprovalResponder = (approvalId: string, approved: boolean) => void;
 
 type StoreState = {
   live: Live;
@@ -144,10 +143,14 @@ type StoreState = {
   sessions: SessionMeta[];
   activeSessionId: string | null;
   hydrateSessions: () => Promise<void>;
+  /** The shared history list as another window changed it. */
+  adoptSessionsList: (list: SessionMeta[]) => void;
   newSession: () => string;
   switchSession: (id: string) => void;
   deleteSession: (id: string) => void;
   renameSession: (id: string, title: string) => void;
+  /** Chooses whether this conversation's gated tools ask or run unasked. */
+  setSessionApprovalMode: (id: string, mode: ApprovalMode) => void;
   /** Persist messages of a session and bump its updatedAt + auto-title. */
   persistMessages: (id: string, messages: UIMessage[]) => void;
 };
@@ -164,20 +167,53 @@ const NOOP_LIVE: Live = {
   readLeafBuffer: () => null,
 };
 
+/** New conversations start in the Settings default (Ask unless changed). */
+function defaultApprovalMode(): ApprovalMode {
+  return normalizeApprovalMode(usePreferencesStore.getState().aiApprovalMode);
+}
+
+function newSessionMeta(id: string): SessionMeta {
+  const now = Date.now();
+  return {
+    id,
+    title: "New chat",
+    createdAt: now,
+    updatedAt: now,
+    approvalMode: defaultApprovalMode(),
+  };
+}
+
+/** A conversation's approval mode; Ask for an unknown conversation. */
+export function sessionApprovalMode(
+  sessions: readonly SessionMeta[],
+  id: string | null,
+): ApprovalMode {
+  if (id === null) return "ask";
+  return normalizeApprovalMode(sessions.find((s) => s.id === id)?.approvalMode);
+}
+
 const CHATS_LRU_CAP = 8;
 export const chats = new Map<string, Chat<UIMessage>>();
 
 export function touchChat(id: string, c: Chat<UIMessage>) {
   if (chats.has(id)) chats.delete(id);
   chats.set(id, c);
-  while (chats.size > CHATS_LRU_CAP) {
-    const oldest = chats.keys().next().value;
-    if (!oldest || oldest === id) break;
-    if (useChatStore.getState().activeSessionId === oldest) break;
-    flushPersistEntry(oldest);
-    void chats.get(oldest)?.stop();
-    chats.delete(oldest);
+  if (chats.size <= CHATS_LRU_CAP) return;
+  // The touched and the active chat are kept even when they are the oldest,
+  // and so is a background chat still answering (stopping it would cut its
+  // reply off); eviction moves on to the next oldest instead of stopping.
+  const activeId = useChatStore.getState().activeSessionId;
+  for (const [key, chat] of chats) {
+    if (chats.size <= CHATS_LRU_CAP) break;
+    if (key === id || key === activeId || isRunning(chat)) continue;
+    flushPersistEntry(key);
+    void chat.stop();
+    chats.delete(key);
   }
+}
+
+function isRunning(chat: Chat<UIMessage>): boolean {
+  return chat.status === "submitted" || chat.status === "streaming";
 }
 // Initial messages for a session, populated at hydration time and consumed
 // when the matching Chat is constructed.
@@ -283,7 +319,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
     set((s) => ({
       panelOpen: true,
       focusSignal: s.focusSignal + 1,
-      pendingSelections: [...s.pendingSelections, { id, text: trimmed, source }],
+      pendingSelections: [
+        ...s.pendingSelections,
+        { id, text: trimmed, source },
+      ],
     }));
   },
   consumeSelections: () => {
@@ -303,27 +342,52 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   hydrateSessions: async () => {
     if (get().sessionsHydrated) return;
-    const { sessions } = await loadAll();
+    // The new conversation below starts in the Settings default, so wait for
+    // the preferences (loading in parallel at startup) rather than race them.
+    const [{ sessions, activeElsewhere }] = await Promise.all([
+      loadAll(),
+      usePreferencesStore
+        .getState()
+        .init()
+        .catch(() => {}),
+    ]);
     if (get().sessionsHydrated) return;
 
     // Reuse the most recent untitled "New chat" session if one exists from
     // the previous run — no point stacking empty placeholder sessions every
-    // launch. Otherwise prepend a fresh one.
-    const reusable = sessions[0]?.title === "New chat" ? sessions[0] : null;
+    // launch — unless another window has it open. Otherwise prepend a fresh one.
+    let reusable =
+      sessions[0]?.title === "New chat" && !activeElsewhere?.has(sessions[0].id)
+        ? sessions[0]
+        : null;
+    if (reusable) {
+      try {
+        const messages = await loadMessages(reusable.id);
+        if (messages?.length) seedMessages.set(reusable.id, messages);
+      } catch (error) {
+        toast.error("Could not reopen conversation", {
+          description: String(error),
+        });
+        reusable = null;
+      }
+      if (get().sessionsHydrated) return;
+    }
     let nextSessions: SessionMeta[];
     let freshId: string;
     if (reusable) {
-      nextSessions = sessions;
+      // It is this launch's new conversation, so it takes today's default.
+      const mode = defaultApprovalMode();
+      nextSessions =
+        normalizeApprovalMode(reusable.approvalMode) === mode
+          ? sessions
+          : sessions.map((s) =>
+              s.id === reusable.id ? { ...s, approvalMode: mode } : s,
+            );
       freshId = reusable.id;
+      if (nextSessions !== sessions) void saveSessionsList(nextSessions);
     } else {
       freshId = newSessionId();
-      const fresh: SessionMeta = {
-        id: freshId,
-        title: "New chat",
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      nextSessions = [fresh, ...sessions];
+      nextSessions = [newSessionMeta(freshId), ...sessions];
       void saveSessionsList(nextSessions);
     }
     void saveActiveId(freshId);
@@ -333,17 +397,29 @@ export const useChatStore = create<StoreState>((set, get) => ({
       activeSessionId: freshId,
       sessionsHydrated: true,
     });
+    // Other windows add, rename and delete chats in the shared list.
+    void onSessionsChanged((list) => get().adoptSessionsList(list)).catch(
+      () => {},
+    );
+  },
+
+  adoptSessionsList: (list) => {
+    const state = get();
+    if (JSON.stringify(list) === JSON.stringify(state.sessions)) return;
+    const active = state.activeSessionId;
+    if (active === null || list.some((s) => s.id === active)) {
+      set({ sessions: list });
+      return;
+    }
+    // Another window deleted the chat open here.
+    set({ sessions: list });
+    if (list.length > 0) get().switchSession(list[0].id);
+    else get().newSession();
   },
 
   newSession: () => {
     const id = newSessionId();
-    const meta: SessionMeta = {
-      id,
-      title: "New chat",
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    const next = [meta, ...get().sessions];
+    const next = [newSessionMeta(id), ...get().sessions];
     set({ sessions: next, activeSessionId: id, agentMeta: IDLE_META });
     void saveSessionsList(next);
     void saveActiveId(id);
@@ -394,12 +470,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     void useTodosStore.getState().clearSession(id);
 
     if (remaining.length === 0) {
-      const fresh: SessionMeta = {
-        id: newSessionId(),
-        title: "New chat",
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
+      const fresh = newSessionMeta(newSessionId());
       set({ sessions: [fresh], activeSessionId: fresh.id });
       void saveSessionsList([fresh]);
       void saveActiveId(fresh.id);
@@ -421,6 +492,18 @@ export const useChatStore = create<StoreState>((set, get) => ({
     void saveSessionsList(next);
   },
 
+  setSessionApprovalMode: (id, mode) => {
+    const sessions = get().sessions;
+    const meta = sessions.find((s) => s.id === id);
+    if (!meta || normalizeApprovalMode(meta.approvalMode) === mode) return;
+    // Not a change to the conversation itself: its place in history stays.
+    const next = sessions.map((s) =>
+      s.id === id ? { ...s, approvalMode: mode } : s,
+    );
+    set({ sessions: next });
+    void saveSessionsList(next);
+  },
+
   persistMessages: (id, messages) => {
     // Streaming fires this per token; the write itself is scheduled.
     schedulePersist(id, messages);
@@ -431,25 +514,63 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const sessions = get().sessions;
     const meta = sessions.find((s) => s.id === id);
     if (!meta) return;
-    const isUntitled = !meta.title || meta.title === "New chat";
+    // Earlier versions took a command's marker for the title of a
+    // conversation started with one: it gets a real title once it is open,
+    // keeping its place in the history.
+    const markerTitle = meta.title?.startsWith("<oarlock-command ") ?? false;
+    const isUntitled = !meta.title || meta.title === "New chat" || markerTitle;
     if (!isUntitled) return;
     const nextTitle = deriveTitle(messages);
     if (nextTitle === meta.title) return;
+    if (markerTitle && nextTitle === "New chat") return;
+    const updatedAt = markerTitle ? meta.updatedAt : Date.now();
     const next = sessions.map((s) =>
-      s.id === id ? { ...s, title: nextTitle, updatedAt: Date.now() } : s,
+      s.id === id ? { ...s, title: nextTitle, updatedAt } : s,
     );
     set({ sessions: next });
     void saveSessionsList(next);
   },
 }));
 
-export function getActiveProviderKey(): string | null {
-  const { selectedModelId, apiKeys, customEndpointKeys } = useChatStore.getState();
-  if (isCompatModelId(selectedModelId)) {
-    const eid = endpointIdFromCompatModel(selectedModelId);
-    return customEndpointKeys[eid] ?? null;
-  }
-  return apiKeys[getModel(selectedModelId as ModelId).provider] ?? null;
+/** The open conversation's approval mode. */
+export function useActiveApprovalMode(): ApprovalMode {
+  return useChatStore((s) =>
+    sessionApprovalMode(s.sessions, s.activeSessionId),
+  );
+}
+
+/**
+ * Applies what a run of conversation `sessionId` reports (its step label,
+ * compaction notice, step cap, error) to `agentMeta`, which is the open
+ * conversation's. The store keeps no such state per conversation (a switch
+ * starts `agentMeta` again), so a run of any other conversation, one still
+ * answering after a switch, changes nothing. True when it applied.
+ */
+export function patchConversationMeta(
+  sessionId: string,
+  patch: Partial<AgentMeta>,
+): boolean {
+  const state = useChatStore.getState();
+  if (state.activeSessionId !== sessionId) return false;
+  state.patchAgentMeta(patch);
+  return true;
+}
+
+/**
+ * Counts what `modelId` used for a conversation in its meter. The meter is
+ * the open conversation's and starts again when another opens, so usage for
+ * any other (a run still answering after a switch) is not counted. True when
+ * it was counted.
+ */
+export function countConversationUsage(
+  sessionId: string,
+  modelId: string,
+  usage: TokenUsage,
+): boolean {
+  const state = useChatStore.getState();
+  if (state.activeSessionId !== sessionId) return false;
+  state.patchAgentMeta(addUsage(state.agentMeta, modelId, usage));
+  return true;
 }
 
 export function getChat(sessionId?: string): Chat<UIMessage> | undefined {

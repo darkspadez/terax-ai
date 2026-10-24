@@ -3,6 +3,8 @@ use serde::Serialize;
 pub(crate) const DEFAULT_TIMEOUT_SECS: u64 = 30;
 pub(crate) const NETWORK_TIMEOUT_SECS: u64 = 120;
 pub(crate) const MAX_TIMEOUT_SECS: u64 = 180;
+// Commit hooks (pre-commit, commit-msg) run inside this budget.
+pub(crate) const COMMIT_TIMEOUT_SECS: u64 = MAX_TIMEOUT_SECS;
 pub(crate) const MAX_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
 pub(crate) const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 pub(crate) const MIN_GIT_VERSION: &str = "2.23";
@@ -14,6 +16,18 @@ pub struct GitRepoInfo {
     pub branch: String,
     pub upstream: Option<String>,
     pub is_detached: bool,
+    /// Set when the work tree is a linked worktree (`git worktree add`), not the main one.
+    pub linked_worktree: Option<GitLinkedWorktree>,
+}
+
+#[derive(Serialize, Debug, PartialEq, Eq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct GitLinkedWorktree {
+    /// The worktree's folder name.
+    pub name: String,
+    /// The repository it belongs to: its main worktree's folder name, or the bare
+    /// repository's without `.git`.
+    pub repository_name: String,
 }
 
 #[derive(Serialize)]
@@ -92,6 +106,28 @@ pub struct GitCommitFileChange {
     pub is_binary: bool,
 }
 
+#[derive(Serialize, Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
+#[serde(rename_all = "lowercase")]
+pub enum GitRefKind {
+    /// HEAD itself, detached.
+    Head,
+    Branch,
+    Tag,
+    Remote,
+}
+
+/// A ref pointing at a commit, classified by its namespace (`refs/heads`, `refs/tags`,
+/// `refs/remotes`), never by its name: a local branch may well be called `origin/x`.
+#[derive(Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GitLogRef {
+    pub kind: GitRefKind,
+    /// Without its namespace: `main`, `v1.0`, `origin/main`.
+    pub name: String,
+    /// HEAD is here: the branch it is on, or HEAD itself when detached.
+    pub head: bool,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitLogEntry {
@@ -101,6 +137,7 @@ pub struct GitLogEntry {
     pub author_email: String,
     pub timestamp_secs: i64,
     pub parents: Vec<String>,
+    pub refs: Vec<GitLogRef>,
     pub subject: String,
     pub files_changed: u32,
     pub insertions: u32,
@@ -115,20 +152,77 @@ pub struct GitPushResult {
     pub pushed: bool,
 }
 
+/// A local branch.
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct GitBranchEntry {
     pub name: String,
-    pub kind: String, // "local" | "worktree"
+    /// Another worktree that has the branch checked out, which no other one can.
     pub worktree_path: Option<String>,
     pub is_head: bool,
     pub is_detached: bool,
+}
+
+/// One entry of `git worktree list`.
+#[derive(Serialize, Debug, PartialEq, Eq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct GitWorktreeEntry {
+    /// As git spells it.
+    pub path: String,
+    /// The branch checked out, without `refs/heads/`; None when detached or bare.
+    pub branch: Option<String>,
+    /// The commit checked out; None for a bare repository.
+    pub head: Option<String>,
+    /// The main worktree (or the bare repository), always listed first.
+    pub is_main: bool,
+    pub is_bare: bool,
+    /// The worktree the listing was made in.
+    pub is_current: bool,
+    /// The lock reason (possibly empty) when the worktree is locked.
+    pub locked: Option<String>,
+    /// Its folder is gone; `git worktree prune` drops the entry.
+    pub prunable: bool,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitBranchListResult {
     pub branches: Vec<GitBranchEntry>,
+    pub worktrees: Vec<GitWorktreeEntry>,
+}
+
+/// The branch a new worktree checks out.
+#[derive(serde::Deserialize, Debug, Clone)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum GitWorktreeBranch {
+    /// A new branch from `base` (a commit-ish), HEAD when None.
+    New { name: String, base: Option<String> },
+    /// A local branch no worktree has checked out.
+    Existing { name: String },
+}
+
+impl GitWorktreeBranch {
+    pub fn name(&self) -> &str {
+        match self {
+            GitWorktreeBranch::New { name, .. } | GitWorktreeBranch::Existing { name } => name,
+        }
+    }
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct GitWorktreeAddResult {
+    /// The new worktree's folder, spelled as other paths of the workspace are.
+    pub path: String,
+    pub branch: String,
+}
+
+#[derive(Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GitWorktreeRemoveResult {
+    pub removed: bool,
+    /// Uncommitted and untracked entries that kept an unforced removal from running.
+    pub changes: u32,
 }
 
 pub(crate) struct GitOutput {
@@ -165,6 +259,7 @@ mod serde_shape_tests {
             branch: "main".into(),
             upstream: Some("origin/main".into()),
             is_detached: false,
+            linked_worktree: None,
         };
         let json = serde_json::to_value(&info).unwrap();
         assert_eq!(
@@ -174,7 +269,19 @@ mod serde_shape_tests {
                 "branch": "main",
                 "upstream": "origin/main",
                 "isDetached": false,
+                "linkedWorktree": null,
             })
+        );
+        let linked = GitRepoInfo {
+            linked_worktree: Some(GitLinkedWorktree {
+                name: "repo-feat".into(),
+                repository_name: "repo".into(),
+            }),
+            ..info
+        };
+        assert_eq!(
+            serde_json::to_value(&linked).unwrap()["linkedWorktree"],
+            serde_json::json!({ "name": "repo-feat", "repositoryName": "repo" })
         );
     }
 
@@ -308,6 +415,11 @@ mod serde_shape_tests {
             author_email: "a@example.com".into(),
             timestamp_secs: 1_700_000_000,
             parents: vec!["p0".into()],
+            refs: vec![GitLogRef {
+                kind: GitRefKind::Branch,
+                name: "main".into(),
+                head: true,
+            }],
             subject: "s".into(),
             files_changed: 2,
             insertions: 10,
@@ -325,6 +437,10 @@ mod serde_shape_tests {
             assert!(json.get(key).is_some(), "missing key {key}");
         }
         assert_eq!(json["parents"], serde_json::json!(["p0"]));
+        assert_eq!(
+            json["refs"],
+            serde_json::json!([{ "kind": "branch", "name": "main", "head": true }])
+        );
     }
 
     #[test]
@@ -341,25 +457,81 @@ mod serde_shape_tests {
 
         let branch = GitBranchEntry {
             name: "feature".into(),
-            kind: "local".into(),
             worktree_path: None,
             is_head: false,
             is_detached: false,
         };
+        let worktree = GitWorktreeEntry {
+            path: "/repo-feature".into(),
+            branch: Some("feature".into()),
+            head: Some("abc".into()),
+            is_main: false,
+            is_bare: false,
+            is_current: false,
+            locked: None,
+            prunable: false,
+        };
         let list = GitBranchListResult {
             branches: vec![branch],
+            worktrees: vec![worktree],
         };
         assert_eq!(
             serde_json::to_value(&list).unwrap(),
             serde_json::json!({
                 "branches": [{
                     "name": "feature",
-                    "kind": "local",
                     "worktreePath": null,
                     "isHead": false,
                     "isDetached": false,
                 }],
+                "worktrees": [{
+                    "path": "/repo-feature",
+                    "branch": "feature",
+                    "head": "abc",
+                    "isMain": false,
+                    "isBare": false,
+                    "isCurrent": false,
+                    "locked": null,
+                    "prunable": false,
+                }],
             })
+        );
+    }
+
+    #[test]
+    fn worktree_requests_and_results_keep_their_contract() {
+        let new: GitWorktreeBranch =
+            serde_json::from_str(r#"{ "kind": "new", "name": "feat", "base": "main" }"#).unwrap();
+        assert!(matches!(
+            &new,
+            GitWorktreeBranch::New { name, base: Some(base) } if name == "feat" && base == "main"
+        ));
+        let from_head: GitWorktreeBranch =
+            serde_json::from_str(r#"{ "kind": "new", "name": "feat", "base": null }"#).unwrap();
+        assert!(matches!(
+            from_head,
+            GitWorktreeBranch::New { base: None, .. }
+        ));
+        let existing: GitWorktreeBranch =
+            serde_json::from_str(r#"{ "kind": "existing", "name": "fix" }"#).unwrap();
+        assert_eq!(existing.name(), "fix");
+        assert!(serde_json::from_str::<GitWorktreeBranch>(r#"{ "kind": "other" }"#).is_err());
+
+        assert_eq!(
+            serde_json::to_value(GitWorktreeAddResult {
+                path: "/w".into(),
+                branch: "feat".into(),
+            })
+            .unwrap(),
+            serde_json::json!({ "path": "/w", "branch": "feat" })
+        );
+        assert_eq!(
+            serde_json::to_value(GitWorktreeRemoveResult {
+                removed: false,
+                changes: 2,
+            })
+            .unwrap(),
+            serde_json::json!({ "removed": false, "changes": 2 })
         );
     }
 

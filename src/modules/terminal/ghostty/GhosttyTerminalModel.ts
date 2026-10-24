@@ -4,24 +4,43 @@ import type {
   TerminalModel,
   TerminalRowRange,
 } from "@/modules/terminal/backend/contracts";
-import type { TeraxGhosttyGpuGlyph } from "@terax/ghostty-core/adapted";
+import type { TerminalCellReader } from "@/modules/terminal/ghostty/core/packedCells";
 import type {
+  OarlockGhosttyDragPosition,
+  OarlockGhosttyGpuGlyph,
+  OarlockGhosttyKittyClipboardAnswer,
+  OarlockGhosttyKittyPlacement,
+  OarlockGhosttyMimeData,
+  OarlockGhosttyMouseEvent,
+  OarlockGhosttyTextFormat,
+} from "@oarlock/ghostty-core/adapted";
+import type {
+  GhosttyDragOperation,
   GhosttyTerminalConfig,
   GhosttyTerminalEvent,
   KeyEvent,
-} from "@terax/ghostty-core/protocol";
-import type { TerminalCellReader } from "@/modules/terminal/ghostty/core/packedCells";
+} from "@oarlock/ghostty-core/protocol";
 
 export type GhosttyTerminalModelOptions = {
   readonly backend: Extract<TerminalBackendKind, `ghostty-${string}`>;
   readonly cols: number;
   readonly rows: number;
   readonly config?: GhosttyTerminalConfig;
+  /** Kitty keyboard flags programs may turn on (default all). */
+  readonly kittyKeyboardFlags?: number;
   readonly deviceAttributeFallback?: boolean;
   readonly onReply?: (bytes: Uint8Array) => void;
   readonly onEvent?: (event: GhosttyTerminalEvent) => void;
   readonly onDispose?: () => void;
 };
+
+export type GhosttyClipboardPolicy = {
+  readonly readsToHost: boolean;
+  readonly writesAllowed: boolean;
+};
+
+/** Where a drag is, in cells and in the terminal pixels mouse reports use. */
+export type GhosttyDragPosition = OarlockGhosttyDragPosition;
 
 export type TerminalBufferPoint = {
   readonly line: number;
@@ -53,7 +72,28 @@ export type GhosttySearchViewportSpan = {
 /** Per-cell representation the model is currently producing. */
 export type GhosttyRenderFormat = "soa" | "gpu";
 
-export type GhosttyGpuGlyph = TeraxGhosttyGpuGlyph;
+export type GhosttyGpuGlyph = OarlockGhosttyGpuGlyph;
+
+/** A Kitty graphics placement; see `OarlockGhosttyKittyPlacement`. */
+export type GhosttyImagePlacement = OarlockGhosttyKittyPlacement;
+
+/** A mouse event for `encodeMouse`; see `OarlockGhosttyMouseEvent`. */
+export type GhosttyMouseEvent = OarlockGhosttyMouseEvent;
+
+export type GhosttyTextFormat = OarlockGhosttyTextFormat;
+
+/**
+ * A link under a viewport cell (an OSC 8 hyperlink or a detected URL or
+ * path) and the cells it covers, per viewport row, columns inclusive.
+ */
+export type GhosttyViewportLink = {
+  readonly uri: string;
+  readonly spans: readonly {
+    readonly row: number;
+    readonly startColumn: number;
+    readonly endColumn: number;
+  }[];
+};
 
 export type GhosttyGpuFrameOptions = {
   /**
@@ -67,7 +107,7 @@ export type GhosttyGpuFrameOptions = {
 /**
  * Everything a GPU renderer needs for one frame, produced by
  * `GhosttyTerminalModelApi.consumeGpuFrame()`. Cell records are 16 bytes per
- * cell; see `@terax/ghostty-core/adapted` (`GPU_CELL_*`, `decodeGpuCell`) for
+ * cell; see `@oarlock/ghostty-core/adapted` (`GPU_CELL_*`, `decodeGpuCell`) for
  * the exact word layout. `cells` and `memory.buffer` are borrowed: use them
  * synchronously (for example `queue.writeBuffer`) before the next call into
  * the model, because any WASM allocation can replace `memory.buffer`.
@@ -157,10 +197,14 @@ export interface GhosttyTerminalModelApi extends TerminalModel {
   ): void;
   grapheme(row: number, column: number): string;
   hyperlinkAtViewportCell(row: number, column: number): string | null;
+  /** The link under a viewport cell with the cells it covers (hover underline). */
+  linkAtViewportCell?(row: number, column: number): GhosttyViewportLink | null;
   scrollPosition(): { readonly offset: number; readonly history: number };
   scrollBy(lines: number): boolean;
   scrollTo(offset: number): boolean;
   scrollToBottom(): boolean;
+  /** Scrolls by shell prompts (OSC 133): -1 earlier, +1 later. */
+  scrollToPrompt?(delta: number): boolean;
   clear(): void;
   revision(): number;
   viewportOriginLine(): number;
@@ -174,6 +218,11 @@ export interface GhosttyTerminalModelApi extends TerminalModel {
   setSelection?(selection: TerminalBufferSelection | null): void;
   trackedSelection?(): TerminalBufferSelection | null;
   encodeKey(event: KeyEvent): Uint8Array;
+  /**
+   * The program asked for keys legacy encoding cannot tell apart: Kitty
+   * keyboard flags, or xterm's modifyOtherKeys at level 2.
+   */
+  enhancedKeyboard?(): boolean;
   mode(mode: number, isAnsi?: boolean): boolean;
   setReplySink(sink: ((bytes: Uint8Array) => void) | null): void;
   enableSemanticMarkers?(enabled: boolean): void;
@@ -187,8 +236,101 @@ export interface GhosttyTerminalModelApi extends TerminalModel {
   ): string;
   bufferCursorLine?(): number;
   readCellLine?(line: number): readonly string[];
+  /** Cells of buffer lines `firstLine..lastLine` in one read (search scans). */
+  readCellLines?(
+    firstLine: number,
+    lastLine: number,
+  ): readonly (readonly string[])[];
   blockSearchActive?(): boolean;
   setBlockSearchMatch?(
     match: { line: number; col: number; len: number } | null,
   ): void;
+  /**
+   * Kitty image placements of the last render update (`consumeGpuFrame`,
+   * `consumeDamage`), sorted by z. Pixel views are borrowed like `cells`:
+   * upload them before the next call into the model.
+   */
+  imagePlacements?(): readonly GhosttyImagePlacement[];
+  /** Placements with a z below this are drawn under cell backgrounds too. */
+  imageBackgroundZLimit?(): number;
+  /**
+   * Advances Kitty animations to `nowMs` (any monotonic clock); returns the
+   * delay until the next frame change, or null when nothing animates.
+   */
+  advanceImageAnimations?(nowMs: number): number | null;
+  /**
+   * Encodes a mouse event for the program's tracking mode and format, or an
+   * empty array when the program does not want it.
+   */
+  encodeMouse?(event: GhosttyMouseEvent): Uint8Array;
+  /** Reports the next motion even within the cell last reported. */
+  resetMouseMotion?(): void;
+  /**
+   * Size of one cell in the terminal pixels of `setPixelSize` (the units of
+   * `encodeMouse` positions); 1x1 until a pixel size is set.
+   */
+  cellPixelSize?(): { readonly width: number; readonly height: number };
+  /** Light or dark, answered to DSR 996 and reported under mode 2031. */
+  setColorScheme?(scheme: "dark" | "light"): void;
+  /** Whether the terminal can be seen (DSR 998, mode 2033). */
+  setVisible?(visible: boolean): void;
+  /** The XTVERSION reply, e.g. "oarlock 0.6.3". */
+  setTerminalVersion?(version: string): void;
+  /** Kitty image bytes per screen; 0 disables the protocol. */
+  setImageStorageLimit?(bytes: number): void;
+  /**
+   * Whether runs of punctuation are drawn as one sequence so a font's
+   * ligatures join across cells (`gpu/ligatureRuns.ts`). On by default; the
+   * GPU format interns the runs natively, SoA renderers apply the rule.
+   */
+  setLigatures?(enabled: boolean): void;
+  ligatures?(): boolean;
+  /**
+   * Whether the wheel sends cursor keys to a full-screen program that does
+   * not track the mouse (alternate scroll, mode 1007) unless the program
+   * sets the mode itself: the mode's reset value. On by default.
+   */
+  setAlternateScroll?(enabled: boolean): void;
+  /**
+   * Kitty clipboard (OSC 5522) access, refused by default. Reads the host
+   * takes are held and reported (`kitty-clipboard-read`) for
+   * `answerClipboardRead`; allowed writes are reported
+   * (`kitty-clipboard-write`). OSC 52 is unaffected.
+   */
+  setClipboardPolicy?(policy: GhosttyClipboardPolicy): void;
+  /**
+   * Whether a paste would go to the program as a Kitty paste event: it set
+   * mode 5522 and its reads come to the host.
+   */
+  pasteEventsWanted?(): boolean;
+  /**
+   * A paste the user made from a clipboard holding `mimes`: true when the
+   * program set mode 5522 and was sent a Kitty paste event instead of the
+   * text (it reads the clipboard itself, with a grant that skips the prompt).
+   */
+  sendPasteEvent?(primary: boolean, mimes: readonly string[]): boolean;
+  /** Answers a held Kitty clipboard read; false when none is held by `id`. */
+  answerClipboardRead?(
+    id: number,
+    answer: OarlockGhosttyKittyClipboardAnswer,
+  ): boolean;
+  /** The program registered for drops (Kitty OSC 72). */
+  dropTargetActive?(): boolean;
+  /** The program's answer to the current drag; null before it answers. */
+  dragAccepted?(): GhosttyDragOperation | null;
+  /** A native drag over the terminal carrying `mimes`, for the program. */
+  dragMove?(position: GhosttyDragPosition, mimes: readonly string[]): void;
+  /** A native drop with its data (at most 16 representations). */
+  drop?(
+    position: GhosttyDragPosition,
+    items: readonly OarlockGhosttyMimeData[],
+  ): void;
+  /** The native drag left without dropping. */
+  dragLeave?(): void;
+  /** A buffer range as plain text, VT sequences or HTML, soft wraps joined. */
+  formatTextRange?(
+    startLine: number,
+    endLine: number,
+    format: GhosttyTextFormat,
+  ): string;
 }

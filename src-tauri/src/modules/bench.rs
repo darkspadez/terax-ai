@@ -1,12 +1,12 @@
 //! Real-application benchmark support ("app lab"). Compiled only with `--features bench`.
 //!
-//! The scenario driver (`src/bench`, compiled into the frontend only when `TERAX_BENCH=1`) runs
+//! The scenario driver (`src/bench`, compiled into the frontend only when `OARLOCK_BENCH=1`) runs
 //! inside the real UI and asks this module for what a page cannot know: the exact WebKit
 //! helper process ids that belong to this webview, window state, and native window actions
 //! (stepped live resizes, order out/front, miniaturize). Nothing here exists in a normal build.
 //!
 //! Safety: a bench binary refuses to start under the product identifier, so it can never run
-//! against the profile of an installed Terax. The orchestrator (`scripts/app-lab/run.py`)
+//! against the profile of an installed Oarlock. The orchestrator (`scripts/app-lab/run.ts`)
 //! gives every run its own identifier and `HOME`.
 
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, WebviewWindow};
 
 /// Identifier of the shipped application; a bench build must not run under it.
-const PRODUCT_IDENTIFIER: &str = "app.crynta.terax";
+const PRODUCT_IDENTIFIER: &str = "consulting.quantumops.oarlock";
 
 /// Called from `setup` and by every bench command. A bench build must not run under the
 /// product identifier (it would share the installed app's profile), and only starts when the
@@ -23,7 +23,7 @@ const PRODUCT_IDENTIFIER: &str = "app.crynta.terax";
 pub fn guard(app: &AppHandle) -> Result<(), String> {
     guard_environment(
         &app.config().identifier,
-        std::env::var("TERAX_BENCH_ISOLATED").ok().as_deref(),
+        std::env::var("OARLOCK_BENCH_ISOLATED").ok().as_deref(),
     )
 }
 
@@ -31,12 +31,12 @@ fn guard_environment(identifier: &str, isolated: Option<&str>) -> Result<(), Str
     if identifier == PRODUCT_IDENTIFIER {
         return Err(format!(
             "bench build refuses to run under the product identifier {PRODUCT_IDENTIFIER}; \
-             launch it through scripts/app-lab/run.py (isolated identifier and HOME)"
+             launch it through scripts/app-lab/run.ts (isolated identifier and HOME)"
         ));
     }
     if isolated != Some("1") {
         return Err(
-            "bench build requires TERAX_BENCH_ISOLATED=1 (set by scripts/app-lab/run.py together \
+            "bench build requires OARLOCK_BENCH_ISOLATED=1 (set by scripts/app-lab/run.ts together \
              with an isolated HOME)"
                 .to_string(),
         );
@@ -58,7 +58,7 @@ fn parse_scenario(raw: Option<&str>) -> Result<Option<Value>, String> {
         None => Ok(None),
         Some(text) => serde_json::from_str(text)
             .map(Some)
-            .map_err(|error| format!("TERAX_BENCH_SCENARIO is not valid JSON: {error}")),
+            .map_err(|error| format!("OARLOCK_BENCH_SCENARIO is not valid JSON: {error}")),
     }
 }
 
@@ -66,8 +66,8 @@ fn parse_scenario(raw: Option<&str>) -> Result<Option<Value>, String> {
 pub fn bench_config(app: AppHandle) -> Result<BenchConfig, String> {
     guard(&app)?;
     Ok(BenchConfig {
-        scenario: parse_scenario(std::env::var("TERAX_BENCH_SCENARIO").ok().as_deref())?,
-        report_url: std::env::var("TERAX_BENCH_REPORT_URL").ok(),
+        scenario: parse_scenario(std::env::var("OARLOCK_BENCH_SCENARIO").ok().as_deref())?,
+        report_url: std::env::var("OARLOCK_BENCH_REPORT_URL").ok(),
         identifier: app.config().identifier.clone(),
     })
 }
@@ -729,14 +729,14 @@ mod tests {
 
     #[test]
     fn product_identifier_is_refused() {
-        assert!(guard_environment("app.crynta.terax", Some("1")).is_err());
-        assert!(guard_environment("app.crynta.terax.app-lab", Some("1")).is_ok());
+        assert!(guard_environment("consulting.quantumops.oarlock", Some("1")).is_err());
+        assert!(guard_environment("consulting.quantumops.oarlock.app-lab", Some("1")).is_ok());
     }
 
     #[test]
     fn isolation_must_be_declared() {
-        assert!(guard_environment("app.crynta.terax.app-lab", None).is_err());
-        assert!(guard_environment("app.crynta.terax.app-lab", Some("0")).is_err());
+        assert!(guard_environment("consulting.quantumops.oarlock.app-lab", None).is_err());
+        assert!(guard_environment("consulting.quantumops.oarlock.app-lab", Some("0")).is_err());
     }
 
     #[test]

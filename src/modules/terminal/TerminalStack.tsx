@@ -2,7 +2,7 @@ import type { Tab } from "@/modules/tabs";
 import type { TerminalSearchController } from "@/modules/terminal/search/TerminalSearchController";
 import { useEffect, useMemo, useRef } from "react";
 import { selectLiveTerminals } from "./lib/liveTerminals";
-import { leafIds } from "./lib/panes";
+import { findLeafNode, leafIds } from "./lib/panes";
 import { PaneTreeView } from "./PaneTreeView";
 import type { TerminalPaneHandle } from "./TerminalPane";
 
@@ -102,7 +102,11 @@ export function TerminalStack({
             aria-hidden={!tabVisible}
           >
             <PaneTreeView
-              node={t.paneTree}
+              node={
+                (t.zoomedLeafId !== undefined &&
+                  findLeafNode(t.paneTree, t.zoomedLeafId)) ||
+                t.paneTree
+              }
               tabVisible={tabVisible}
               activeLeafId={t.activeLeafId}
               blocks={t.blocks ?? false}

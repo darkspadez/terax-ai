@@ -61,13 +61,13 @@ describe("native AI fetch transport", () => {
     const [, body, options] = calls("ai_http_stream")[0];
     expect(body).toBeInstanceOf(Uint8Array);
     expect(new TextDecoder().decode(body)).toBe("hello 日本語");
-    expect(JSON.parse(options.headers["x-terax-ai-request"])).toMatchObject({
+    expect(JSON.parse(options.headers["x-oarlock-ai-request"])).toMatchObject({
       method: "POST",
       headers: { "x-test": "yes" },
       allowPrivateNetwork: true,
       onEvent: "__CHANNEL__:1",
     });
-    expect(options.headers["x-terax-ai-request"]).not.toMatch(/[^\x20-\x7e]/);
+    expect(options.headers["x-oarlock-ai-request"]).not.toMatch(/[^\x20-\x7e]/);
     headers();
     const response = await pending;
     packet(1, "a");
@@ -210,5 +210,37 @@ describe("native AI fetch transport", () => {
     const count = calls("ai_http_cancel").length;
     abort.abort();
     expect(calls("ai_http_cancel")).toHaveLength(count);
+  });
+});
+
+describe("MCP sessions", () => {
+  it("goes through the MCP commands with the session, not the AI proxy's", async () => {
+    const { createMcpFetch } = await import("@/modules/ai/lib/proxyFetch");
+    const pending = createMcpFetch(7)("https://mcp.example.com/mcp", {
+      method: "POST",
+      body: '{"jsonrpc":"2.0"}',
+    });
+    await vi.waitFor(() =>
+      expect(
+        bridge.invoke.mock.calls.some(([c]) => c === "mcp_http_stream"),
+      ).toBe(true),
+    );
+    const [, , options] = calls("mcp_http_stream")[0] as [
+      string,
+      unknown,
+      { headers: Record<string, string> },
+    ];
+    const metadata = JSON.parse(options.headers["x-oarlock-mcp-request"]);
+    expect(metadata).toMatchObject({
+      session: 7,
+      url: "https://mcp.example.com/mcp",
+      method: "POST",
+    });
+    expect(metadata).not.toHaveProperty("allowPrivateNetwork");
+    expect(calls("ai_http_stream")).toEqual([]);
+    headers();
+    packet(2);
+    const response = await pending;
+    expect(await response.text()).toBe("");
   });
 });

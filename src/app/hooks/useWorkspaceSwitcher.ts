@@ -1,8 +1,10 @@
-import { type RefObject, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { homeDir } from "@tauri-apps/api/path";
 import { native } from "@/modules/ai/lib/native";
-import type { Tab } from "@/modules/tabs";
+import { useSpaces } from "@/modules/spaces";
+import { planEnvSwitch } from "@/modules/spaces/lib/activeSpace";
 import {
+  authorizeRoot,
   getWslHome,
   LOCAL_WORKSPACE,
   type WorkspaceEnv,
@@ -15,25 +17,21 @@ async function resolveEnvHome(env: WorkspaceEnv): Promise<string> {
 }
 
 type Params = {
-  tabsRef: RefObject<Tab[]>;
-  workspaceEnv: WorkspaceEnv;
   setWorkspaceEnv: (env: WorkspaceEnv) => void;
-  resetWorkspace: (home?: string) => void;
-  /** Dispose live sessions and clear App-owned pane/handle ref maps. */
-  clearWorkspaceState: () => void;
+  newTab: (cwd?: string) => number;
+  setActiveSpaceForNewTabs: (id: string) => void;
 };
 
 /**
- * Owns the resolved home / launch cwd. switchWorkspace runs an interactive
- * local⇄WSL switch (tears down sessions, re-authorizes home, resets tabs);
- * adoptWorkspaceEnv applies a space's env + home on restore, without teardown.
+ * Owns the resolved home / launch cwd. switchWorkspace answers the status-bar
+ * environment picker (Windows): it moves to a space with that environment, or
+ * opens one at its home, so no shell or tab of any space is closed;
+ * adoptWorkspaceEnv applies a space's env + home when it becomes active.
  */
 export function useWorkspaceSwitcher({
-  tabsRef,
-  workspaceEnv,
   setWorkspaceEnv,
-  resetWorkspace,
-  clearWorkspaceState,
+  newTab,
+  setActiveSpaceForNewTabs,
 }: Params) {
   const [home, setHome] = useState<string | null>(null);
   const [launchCwd, setLaunchCwd] = useState<string | null>(null);
@@ -41,14 +39,10 @@ export function useWorkspaceSwitcher({
 
   useEffect(() => {
     homeDir()
-      .then(async (p) => {
+      .then((p) => {
         const normalized = p.replace(/\\/g, "/");
+        void authorizeRoot(normalized);
         setHome(normalized);
-        try {
-          await native.workspaceAuthorize(normalized);
-        } catch {
-          // Bootstrap already authorizes home from Rust; ignore.
-        }
       })
       .catch(() => setHome(null));
   }, []);
@@ -62,54 +56,39 @@ export function useWorkspaceSwitcher({
   }, []);
 
   const authorizeHome = useCallback(async (nextHome: string) => {
+    // Before the explorer can list it: its listing waits for this.
+    const authorized = authorizeRoot(nextHome);
     setHome(nextHome);
     setLaunchCwd(nextHome);
-    try {
-      await native.workspaceAuthorize(nextHome);
-    } catch {
-      // Non-fatal — git panel will surface "not authorized" if needed.
-    }
+    await authorized;
   }, []);
 
   const switchWorkspace = useCallback(
-    async (env: WorkspaceEnv): Promise<boolean> => {
-      if (
-        env.kind === workspaceEnv.kind &&
-        (env.kind === "local" ||
-          (workspaceEnv.kind === "wsl" && env.distro === workspaceEnv.distro))
-      ) {
-        return false;
+    async (env: WorkspaceEnv): Promise<void> => {
+      const spaces = useSpaces.getState();
+      const plan = planEnvSwitch(spaces.spaces, spaces.activeId, env);
+      if (plan.kind === "stay") return;
+      if (plan.kind === "activate") {
+        spaces.setActive(plan.spaceId);
+        return;
       }
-      const dirty = tabsRef.current.some((t) => t.kind === "editor" && t.dirty);
-      if (dirty) {
-        window.alert(
-          "Save or close unsaved editor tabs before switching workspace.",
-        );
-        return false;
-      }
-
       let nextHome: string;
       try {
         nextHome = await resolveEnvHome(env);
       } catch (e) {
         window.alert(String(e));
-        return false;
+        return;
       }
-
-      clearWorkspaceState();
+      // Before the tab mounts: its shell starts in the window's environment.
       setWorkspaceEnv(env.kind === "local" ? LOCAL_WORKSPACE : env);
-      await authorizeHome(nextHome);
-      resetWorkspace(nextHome);
-      return true;
+      const meta = useSpaces
+        .getState()
+        .create({ name: plan.name, root: nextHome, env });
+      setActiveSpaceForNewTabs(meta.id);
+      newTab(nextHome);
+      useSpaces.getState().setActive(meta.id);
     },
-    [
-      workspaceEnv,
-      setWorkspaceEnv,
-      resetWorkspace,
-      tabsRef,
-      clearWorkspaceState,
-      authorizeHome,
-    ],
+    [setWorkspaceEnv, newTab, setActiveSpaceForNewTabs],
   );
 
   const adoptWorkspaceEnv = useCallback(

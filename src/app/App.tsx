@@ -5,16 +5,23 @@ import {
 } from "@/components/ui/resizable";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { consumeLaunchFiles, getLaunchDir } from "@/lib/launchDir";
+import { openNewWindow, quitApp } from "@/lib/appWindow";
+import {
+  consumeLaunchFiles,
+  getExplicitLaunchDir,
+  getLaunchDir,
+} from "@/lib/launchDir";
+import { toast } from "sonner";
 import { IS_MAC } from "@/lib/platform";
-import { quoteShellArg } from "@/lib/shellQuote";
+import { cdCommandLine } from "@/lib/shellQuote";
 import { usePresence } from "@/lib/usePresence";
 import { useZoom } from "@/lib/useZoom";
-import { isMarkdownPath } from "@/lib/utils";
+import { cn, isMarkdownPath } from "@/lib/utils";
 import {
   type AgentLaunchRequest,
   AgentNotificationsBridge,
   findAgentLauncher,
+  moveAgentLeafToTab,
   nextAttentionTarget,
   validateAgentLaunchCommand,
 } from "@/modules/agents";
@@ -29,12 +36,14 @@ import {
   useSelectionAskAi,
 } from "@/modules/ai";
 import { AiComposerProvider } from "@/modules/ai/lib/composer";
-import { native } from "@/modules/ai/lib/native";
+import { isAiSurfaceTarget } from "@/modules/ai/lib/aiSurface";
+import { withComposerDrop } from "@/modules/ai/lib/composerDrop";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
 import { useControlBridge } from "@/modules/control";
 import {
   type EditorPaneHandle,
   NewEditorDialog,
+  noteRetarget,
   useApplyEditorFontSize,
   useEditorFileSync,
 } from "@/modules/editor";
@@ -46,19 +55,26 @@ import {
   type SearchTarget,
 } from "@/modules/header";
 import { setLspNavigator } from "@/modules/lsp";
-import type { PreviewPaneHandle } from "@/modules/preview";
+import { useFullDiskAccessSuggestion } from "@/modules/mac-privacy";
+import {
+  type PreviewPaneHandle,
+  terminalLinkPreviewTarget,
+} from "@/modules/preview";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { setShowHidden } from "@/modules/settings/store";
 import {
   type ShortcutHandlers,
   type ShortcutId,
+  shouldDeferShortcutToTerminal,
   shouldDisablePaneSwapShortcut,
   useGlobalShortcuts,
+  useMenuShortcuts,
 } from "@/modules/shortcuts";
 import {
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
+  ContentSearchView,
   SidebarRail,
   useSidebarPanel,
 } from "@/modules/sidebar";
@@ -68,15 +84,17 @@ import {
   useSourceControlContext,
 } from "@/modules/source-control";
 import {
+  grantDeferredSpace,
   SpaceSwitcher,
   useSpacePersistence,
   useSpaces,
   useSpacesBoot,
 } from "@/modules/spaces";
+import { SkillsBridge } from "@/modules/skills";
 import { StatusBar } from "@/modules/statusbar";
 import {
-  TabSwitcherHud,
   type CloseTabsPlan,
+  TabSwitcherHud,
   useTabSwitcher,
   useTabs,
   useWindowTitle,
@@ -84,24 +102,36 @@ import {
 } from "@/modules/tabs";
 import { DEFAULT_SPACE_ID } from "@/modules/tabs/lib/useTabs";
 import {
+  adjustFocusedTerminalFont,
   clearFocusedTerminal,
   disposeSession,
+  equalizePanes,
   findLeafCwd,
+  focusedTerminalInAlternateScreen,
   hasLeaf,
   isTerminalSurfaceTarget,
   leafIds,
+  leafShellAtPrompt,
   navigateFocusedBlocks,
   type PaneBounds,
+  type SplitPosition,
   ptyIdForLeaf,
+  resizeActivePane,
+  scrollFocusedTerminal,
+  setTerminalFileOpener,
+  setTerminalPreviewOpener,
+  startWindowProgress,
   type TerminalPaneHandle,
+  TerminalPromptDialog,
   useAgentActivityStore,
   useTerminalFileDrop,
   whenSessionReady,
   writeToSession,
 } from "@/modules/terminal";
-import type { TerminalSearchController } from "@/modules/terminal/search/TerminalSearchController";
 import { bindTerminalWindowFocus } from "@/modules/terminal/ghostty/renderScheduling";
 import { subscribeWindowPresentation } from "@/modules/terminal/ghostty/windowPresentation";
+import { useQuickTerminalHotkey } from "@/modules/terminal/quick/quickTerminalHotkey";
+import type { TerminalSearchController } from "@/modules/terminal/search/TerminalSearchController";
 import {
   LivePageResizeBridge,
   ThemeProvider,
@@ -111,43 +141,63 @@ import {
 } from "@/modules/theme";
 import { UpdaterDialog } from "@/modules/updater";
 import {
+  authorizeFileFolder,
+  currentWorkspaceEnv,
   useWorkspaceEnvStore,
-  type WorkspaceEnv,
   workspaceScopeKey,
 } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   lazy,
   Suspense,
   useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 import { CloseDialogs } from "./components/CloseDialogs";
+import { detectShell } from "./components/useSystemInfo";
 import {
   TOGGLE_BLOCK_INPUT_EVENT,
   WorkspaceInputBar,
 } from "./components/WorkspaceInputBar";
 import { WorkspaceSurface } from "./components/WorkspaceSurface";
-import { useAppCloseGuard } from "./hooks/useAppCloseGuard";
 import {
   hasOpenPathTab,
   renamedPath,
   spacesEmptiedByTabs,
 } from "./hooks/tabCloseGuards";
+import { aiToggleAction } from "./hooks/aiToggle";
+import { useAppCloseGuard } from "./hooks/useAppCloseGuard";
+import { useOpenFolder } from "./hooks/useOpenFolder";
 import { useTabCloseGuards } from "./hooks/useTabCloseGuards";
+import { restartTarget } from "./hooks/terminalRestart";
+import { useTerminalRestart } from "./hooks/useTerminalRestart";
 import { useWorkspaceSwitcher } from "./hooks/useWorkspaceSwitcher";
 
-// Real-application benchmark driver (scripts/app-lab). `__TERAX_BENCH__` is the literal `false`
+// Real-application benchmark driver (scripts/app-lab). `__OARLOCK_BENCH__` is the literal `false`
 // in a normal build, so this is `null` and neither the import nor its chunk is emitted.
-const BenchBridge = __TERAX_BENCH__
+const BenchBridge = __OARLOCK_BENCH__
   ? lazy(() => import("@/bench/BenchBridge"))
   : null;
+
+/** Shortcuts that act between split terminal panes. */
+const SPLIT_PANE_SHORTCUTS: ReadonlySet<ShortcutId> = new Set<ShortcutId>([
+  "pane.focusLeft",
+  "pane.focusRight",
+  "pane.focusUp",
+  "pane.focusDown",
+  "pane.zoom",
+  "pane.resizeLeft",
+  "pane.resizeRight",
+  "pane.resizeUp",
+  "pane.resizeDown",
+  "pane.equalize",
+]);
 
 export default function App() {
   const {
@@ -187,17 +237,21 @@ export default function App() {
     setLeafCwd,
     focusPane,
     focusNextPaneInTab,
+    focusPaneInDirection,
+    togglePaneZoom,
     swapActivePaneInDirection,
     splitActivePane,
+    moveTabIntoSplit,
+    movePaneToNewTab,
     closeActivePane,
     closePaneByLeaf,
-    resetWorkspace,
   } = useTabs(getLaunchDir() ? { cwd: getLaunchDir() } : undefined);
 
   // Mirror `tabs` into a ref so callbacks scheduled with `setTimeout`
   // (e.g. cdInNewTab) read the latest pane state instead of a stale closure.
   const tabsRef = useRef(tabs);
   const activeIdRef = useRef(activeId);
+  const openFolder = useOpenFolder({ tabsRef, newTabInSpace, setActiveId });
 
   const activeTerminalTab = useMemo(() => {
     const t = tabs.find((x) => x.id === activeId);
@@ -219,21 +273,16 @@ export default function App() {
   const { zoomIn, zoomOut, zoomReset } = useZoom();
   useApplyEditorFontSize();
   const terminalPathDropTarget = useTerminalFileDrop();
+  // Explorer drags reach the AI composer first; OS drops stay the terminals'.
+  const explorerPathDropTarget = useMemo(
+    () => withComposerDrop(terminalPathDropTarget),
+    [terminalPathDropTarget],
+  );
   const explorerRef = useRef<FileExplorerHandle>(null);
 
   // Drives session disposal off the pane tree, not React lifecycles —
   // split/unsplit re-mount components but the leaf is still live.
   const liveLeavesRef = useRef<Set<number>>(new Set());
-
-  const clearWorkspaceState = useCallback(() => {
-    for (const id of liveLeavesRef.current) disposeSession(id);
-    searchAddons.current.clear();
-    terminalRefs.current.clear();
-    editorRefs.current.clear();
-    previewRefs.current.clear();
-    setActiveSearchAddon(null);
-    setActiveEditorHandle(null);
-  }, []);
 
   const workspaceEnv = useWorkspaceEnvStore((s) => s.env);
   const setWorkspaceEnv = useWorkspaceEnvStore((s) => s.setEnv);
@@ -244,11 +293,9 @@ export default function App() {
     switchWorkspace,
     adoptWorkspaceEnv,
   } = useWorkspaceSwitcher({
-    tabsRef,
-    workspaceEnv,
     setWorkspaceEnv,
-    resetWorkspace,
-    clearWorkspaceState,
+    newTab,
+    setActiveSpaceForNewTabs,
   });
 
   const activeSpaceId = useSpaces((s) => s.activeId);
@@ -261,19 +308,10 @@ export default function App() {
   }, [tabs, activeId, activeSpaceId]);
   const sourceControlSpaceId = activeSpaceId ?? DEFAULT_SPACE_ID;
 
-  const handleWorkspaceChange = useCallback(
-    async (env: WorkspaceEnv) => {
-      const switched = await switchWorkspace(env);
-      if (switched && activeSpaceId) {
-        useSpaces.getState().setEnv(activeSpaceId, env);
-      }
-    },
-    [switchWorkspace, activeSpaceId],
-  );
-
   useSpacesBoot({
     ready: launchCwdResolved,
     launchCwd,
+    explicitLaunchDir: getExplicitLaunchDir() ?? null,
     home,
     allocId,
     replaceTabs,
@@ -300,6 +338,7 @@ export default function App() {
       .getState()
       .spaces.find((s) => s.id === activeSpaceId);
     if (meta) void adoptWorkspaceEnv(meta.env);
+    grantDeferredSpace(activeSpaceId);
     const inSpace = tabsRef.current.filter((t) => t.spaceId === activeSpaceId);
     if (inSpace.length === 0) return;
     // Keep the active tab if it already belongs to the newly active space (a
@@ -325,7 +364,10 @@ export default function App() {
   const {
     sidebarRef,
     sidebarWidthRef,
+    sidebarPosition,
+    sidebarPanelId,
     sidebarView,
+    sidebarViewChosen,
     sidebarCollapsed,
     initialSidebarCollapsed,
     persistSidebarView,
@@ -360,6 +402,7 @@ export default function App() {
   const respondToApproval = useChatStore((s) => s.respondToApproval);
 
   const { hasComposer, keysLoaded } = useAiBootstrap();
+  useFullDiskAccessSuggestion();
 
   const activeTab = tabs.find((t) => t.id === activeId);
   const isTerminalTab = activeTab?.kind === "terminal";
@@ -461,6 +504,9 @@ export default function App() {
   const { pendingAppClose, confirmAppClose, cancelAppClose } =
     useAppCloseGuard(tabsRef);
 
+  const { pendingRestartLeaf, requestRestart, confirmRestart, cancelRestart } =
+    useTerminalRestart();
+
   useEffect(() => {
     const live = new Set<number>();
     for (const t of tabs) {
@@ -513,7 +559,11 @@ export default function App() {
     return [activeId, ...ordered.filter((id) => id !== activeId)];
   }, [activeId, activeSpaceId]);
 
-  const { state: switcherState, step: stepSwitcher } = useTabSwitcher({
+  const {
+    state: switcherState,
+    step: stepSwitcher,
+    jump: jumpSwitcher,
+  } = useTabSwitcher({
     getOrder: getSwitcherOrder,
     onCommit: (id) => {
       if (tabsRef.current.some((t) => t.id === id)) setActiveId(id);
@@ -542,17 +592,25 @@ export default function App() {
   }, [tabs, activeId]);
 
   const togglePanelAndFocus = useCallback(() => {
-    if (!hasComposer) {
-      void openSettingsWindow("models");
-      return;
-    }
-    if (panelOpen) {
+    const action = aiToggleAction(panelOpen, hasComposer);
+    if (action === "close") {
       useChatStore.getState().closePanel();
+    } else if (action === "connect") {
+      void openSettingsWindow("models");
     } else {
       openPanel();
       focusInput(null);
     }
   }, [hasComposer, panelOpen, openPanel, focusInput]);
+
+  const startNewConversation = useCallback(() => {
+    if (!hasComposer) {
+      void openSettingsWindow("models");
+      return;
+    }
+    useChatStore.getState().newSession();
+    focusInput(null);
+  }, [hasComposer, focusInput]);
 
   const attachSelection = useChatStore((s) => s.attachSelection);
 
@@ -565,7 +623,7 @@ export default function App() {
       // Dispatch a window event the composer listens for. Same pattern as
       // selections — keeps file-explorer decoupled from the AI module.
       window.dispatchEvent(
-        new CustomEvent<string>("terax:ai-attach-file", { detail: path }),
+        new CustomEvent<string>("oarlock:ai-attach-file", { detail: path }),
       );
       openPanel();
       focusInput(null);
@@ -594,9 +652,11 @@ export default function App() {
     activeTab,
   ]);
 
+  const selectionAskAi = usePreferencesStore((s) => s.selectionAskAi);
   const { askPopup, setAskPopup, onAskFromSelection } = useSelectionAskAi({
     captureActiveSelection,
     askFromSelection,
+    enabled: selectionAskAi,
   });
   const askPresence = usePresence(Boolean(askPopup), 120);
 
@@ -607,6 +667,29 @@ export default function App() {
   const openNewPrivateTab = useCallback(() => {
     newPrivateTab(inheritedCwdForNewTab());
   }, [newPrivateTab, inheritedCwdForNewTab]);
+
+  // A new window starts where this window's terminal is.
+  const openWindow = useCallback(() => {
+    openNewWindow(inheritedCwdForNewTab()).catch((error: unknown) =>
+      toast.error("Could not open a window", { description: String(error) }),
+    );
+  }, [inheritedCwdForNewTab]);
+
+  // The macOS menu's New Window lands on the window in front.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void getCurrentWindow()
+      .listen("oarlock:new-window-requested", openWindow)
+      .then((stop) => {
+        if (disposed) stop();
+        else unlisten = stop;
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [openWindow]);
 
   const openNewBlockTab = useCallback(() => {
     newBlockTab(inheritedCwdForNewTab());
@@ -631,7 +714,7 @@ export default function App() {
             agent: request.agent,
           }).catch((error) => {
             console.warn(
-              `[terax] could not enable ${request.agent} notifications:`,
+              `[oarlock] could not enable ${request.agent} notifications:`,
               error,
             );
           })
@@ -642,7 +725,7 @@ export default function App() {
           await Promise.all([whenSessionReady(leafId), hooksReady]);
           if (!writeToSession(leafId, `${command.command}\r`)) {
             console.error(
-              `[terax] agent terminal ${leafId} closed before launch`,
+              `[oarlock] agent terminal ${leafId} closed before launch`,
             );
           }
         })();
@@ -651,30 +734,44 @@ export default function App() {
     [inheritedCwdForNewTab, newAgentGroupTab],
   );
 
+  // The new tab's shell starts there; typing a `cd` as well raced its prompt.
+  const cdInNewTab = useCallback((path: string) => void newTab(path), [newTab]);
+
+  // Typed only while the shell is at its prompt: a running program (an agent,
+  // vim) would take the `cd` as its own input.
+  const cdRequest = useRef(0);
   const sendCd = useCallback(
-    (path: string) => {
+    async (path: string) => {
       if (activeLeafId === null) return;
-      const term = terminalRefs.current.get(activeLeafId);
+      const leafId = activeLeafId;
+      const request = ++cdRequest.current;
+      const atPrompt = await leafShellAtPrompt(leafId);
+      if (request !== cdRequest.current) return;
+      const term = terminalRefs.current.get(leafId);
       if (!term) return;
-      term.write(`cd ${quoteShellArg(path)}\r`);
+      if (atPrompt !== true) {
+        toast(
+          atPrompt === false
+            ? "A program is running in this terminal"
+            : "Could not tell whether this terminal is at its prompt",
+          {
+            description: "Its directory was left as it is.",
+            action: {
+              label: "Open in new tab",
+              onClick: () => cdInNewTab(path),
+            },
+          },
+        );
+        return;
+      }
+      const shell =
+        usePreferencesStore.getState().terminalShell || (await detectShell());
+      if (request !== cdRequest.current) return;
+      const wsl = currentWorkspaceEnv().kind === "wsl";
+      term.write(`${cdCommandLine(path, shell, wsl)}\r`);
       term.focus();
     },
-    [activeLeafId],
-  );
-
-  const cdInNewTab = useCallback(
-    (path: string) => {
-      const tabId = newTab(path);
-      setTimeout(() => {
-        const tab = tabsRef.current.find((x) => x.id === tabId);
-        if (!tab || tab.kind !== "terminal") return;
-        const t = terminalRefs.current.get(tab.activeLeafId);
-        if (!t) return;
-        t.write(`cd ${quoteShellArg(path)}\r`);
-        t.focus();
-      }, 80);
-    },
-    [newTab],
+    [activeLeafId, cdInNewTab],
   );
 
   const handleOpenFile = useCallback(
@@ -682,6 +779,8 @@ export default function App() {
       // Markdown opens in its rendered view by default; a per-tab toggle flips
       // it to the raw editor. Other files default to preview (pin=false);
       // explicit actions like context-menu "Open" pass pin=true to persist.
+      // The tab's reads wait for its folder's authorization.
+      void authorizeFileFolder(path);
       if (isMarkdownPath(path)) newMarkdownTab(path);
       else openFileTab(path, pin ?? false);
     },
@@ -695,37 +794,36 @@ export default function App() {
     [handleOpenFile],
   );
 
-  // Warm start: the backend emits once the window already exists. Attach on
-  // mount so an "Open With" that lands mid-restore isn't dropped — the backend
-  // also seeds the drain-once state, so the boot drain below is the safety net.
+  // Files the OS asks this window to open (Open With at launch or later, a
+  // second launch) wait in the backend until taken, each once, and every
+  // arrival is announced. Take them only once `booted`: the spaces restore
+  // ends in replaceTabs(), which overwrites the tab list and would discard a
+  // tab opened before it. Booting first also lands the tab in the restored
+  // active space and lets openFileTab dedupe against an already open file.
+  // Listen first, then take what already waits, so no arrival is missed.
+  const takeLaunchFiles = useEffectEvent(async () => {
+    openLaunchFiles(await consumeLaunchFiles());
+  });
   useEffect(() => {
+    if (!booted) return;
     let unlisten: (() => void) | undefined;
     let disposed = false;
-    (async () => {
-      const off = await listen<string[]>("terax:open-file", (e) => {
-        openLaunchFiles(e.payload);
+    void getCurrentWindow()
+      .listen("oarlock:open-file", () => void takeLaunchFiles())
+      .catch(() => undefined)
+      .then((stop) => {
+        if (disposed) {
+          stop?.();
+          return;
+        }
+        unlisten = stop;
+        void takeLaunchFiles();
       });
-      if (disposed) off();
-      else unlisten = off;
-    })();
     return () => {
       disposed = true;
       unlisten?.();
     };
-  }, [openLaunchFiles]);
-
-  // Cold start: files arrive as CLI args (Linux/Windows) or the macOS open-files
-  // event, and get_launch_files drains them once. Wait for `booted` — the spaces
-  // restore ends in replaceTabs(), which overwrites the whole tab list and would
-  // discard a launch tab opened before it, making the file flash open and vanish.
-  // Booting first also lands the tab in the restored active space, and lets
-  // openFileTab dedupe against a session that already had the file open.
-  useEffect(() => {
-    if (!booted) return;
-    void (async () => {
-      openLaunchFiles(await consumeLaunchFiles());
-    })();
-  }, [booted, openLaunchFiles]);
+  }, [booted]);
 
   const handleExplorerPathRenamed = useCallback(
     (from: string, to: string) => {
@@ -733,6 +831,7 @@ export default function App() {
         if (tab.kind !== "editor" && tab.kind !== "markdown") continue;
         const path = renamedPath(tab.path, from, to);
         if (path === null) continue;
+        if (tab.kind === "editor" && !tab.cold) noteRetarget(tab.path, path);
         const i = path.lastIndexOf("/");
         updateTab(tab.id, {
           path,
@@ -866,6 +965,22 @@ export default function App() {
     [activeId, livePaneBounds, swapActivePaneInDirection],
   );
 
+  const focusActivePaneToward = useCallback(
+    (direction: "left" | "right" | "up" | "down") => {
+      focusPaneInDirection(activeId, direction, livePaneBounds(activeId));
+    },
+    [activeId, livePaneBounds, focusPaneInDirection],
+  );
+
+  const resizeActiveTerminalPane = useCallback(
+    (direction: "left" | "right" | "up" | "down") => {
+      const tab = tabsRef.current.find((t) => t.id === activeId);
+      if (tab?.kind !== "terminal" || tab.zoomedLeafId !== undefined) return;
+      resizeActivePane(tab.paneTree, tab.activeLeafId, direction);
+    },
+    [activeId],
+  );
+
   const handleCloseTabOrPane = useCallback(() => {
     const t = tabsRef.current.find((x) => x.id === activeId);
     if (t?.kind === "terminal" && leafIds(t.paneTree).length > 1) {
@@ -874,6 +989,29 @@ export default function App() {
     }
     void handleClose(activeId);
   }, [activeId, closeActivePane, handleClose]);
+
+  const restartActiveTerminal = useCallback(() => {
+    const leafId = restartTarget(tabsRef.current, activeId);
+    if (leafId !== null) void requestRestart(leafId);
+  }, [activeId, requestRestart]);
+
+  // The macOS menu's Close Tab (Cmd+W) lands here too, also while a preview
+  // frame has the keyboard and the tab.close shortcut never sees the key.
+  const closeTabFromMenu = useEffectEvent(handleCloseTabOrPane);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void getCurrentWindow()
+      .listen("oarlock:close-tab-requested", () => closeTabFromMenu())
+      .then((stop) => {
+        if (disposed) stop();
+        else unlisten = stop;
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   const [zenMode, setZenMode] = useState(false);
 
@@ -895,6 +1033,7 @@ export default function App() {
     () => ({
       "commandPalette.open": () => openCommandPalette("commands"),
       "commandPalette.content": () => openCommandPalette("content"),
+      "window.new": openWindow,
       "tab.new": openNewTab,
       "tab.newBlock": openNewBlockTab,
       "tab.newPrivate": openNewPrivateTab,
@@ -919,20 +1058,45 @@ export default function App() {
       "pane.swapRight": () => swapActivePane("right"),
       "pane.swapUp": () => swapActivePane("up"),
       "pane.swapDown": () => swapActivePane("down"),
+      "pane.focusLeft": () => focusActivePaneToward("left"),
+      "pane.focusRight": () => focusActivePaneToward("right"),
+      "pane.focusUp": () => focusActivePaneToward("up"),
+      "pane.focusDown": () => focusActivePaneToward("down"),
+      "pane.zoom": () => togglePaneZoom(activeId),
+      "pane.resizeLeft": () => resizeActiveTerminalPane("left"),
+      "pane.resizeRight": () => resizeActiveTerminalPane("right"),
+      "pane.resizeUp": () => resizeActiveTerminalPane("up"),
+      "pane.resizeDown": () => resizeActiveTerminalPane("down"),
+      "pane.equalize": () => {
+        const tab = tabsRef.current.find((t) => t.id === activeId);
+        if (tab?.kind === "terminal") equalizePanes(tab.paneTree);
+      },
       "pane.source": toggleSourceControl,
       "terminal.clear": () => {
         clearFocusedTerminal();
       },
+      "terminal.restart": restartActiveTerminal,
       "terminal.toggleInput": () =>
         window.dispatchEvent(new CustomEvent(TOGGLE_BLOCK_INPUT_EVENT)),
       "blocks.prev": () => navigateFocusedBlocks(-1),
       "blocks.next": () => navigateFocusedBlocks(1),
+      "terminal.scrollPageUp": () => scrollFocusedTerminal("page-up"),
+      "terminal.scrollPageDown": () => scrollFocusedTerminal("page-down"),
+      "terminal.scrollTop": () => scrollFocusedTerminal("top"),
+      "terminal.scrollBottom": () => scrollFocusedTerminal("bottom"),
+      "terminal.fontSizeUp": () => adjustFocusedTerminalFont(1),
+      "terminal.fontSizeDown": () => adjustFocusedTerminalFont(-1),
+      "terminal.fontSizeReset": () => adjustFocusedTerminalFont("reset"),
       "search.focus": () => {
         const editor = editorRefs.current.get(activeId);
         if (editor) editor.openSearch();
         else searchInlineRef.current?.focus();
       },
-      "ai.toggle": togglePanelAndFocus,
+      // Without a provider the open panel is only the connect bar: close it.
+      "ai.toggle": () =>
+        panelOpen && !hasComposer
+          ? useChatStore.getState().closePanel()
+          : togglePanelAndFocus(),
       "ai.toggleMini": () => {
         if (!hasComposer) {
           void openSettingsWindow("models");
@@ -940,6 +1104,7 @@ export default function App() {
         }
         toggleMini();
       },
+      "ai.newConversation": startNewConversation,
       "ai.askSelection": onAskFromSelection,
       "agent.focusAttention": () => {
         const t = nextAttentionTarget();
@@ -964,11 +1129,13 @@ export default function App() {
         editorRefs.current.get(activeId)?.triggerCodeComplete(),
     }),
     [
+      openWindow,
       activeId,
       openCommandPalette,
       stepSwitcher,
       cycleSpace,
       handleCloseTabOrPane,
+      restartActiveTerminal,
       openNewTab,
       openNewBlockTab,
       openNewPrivateTab,
@@ -978,10 +1145,15 @@ export default function App() {
       splitActivePaneInActiveTab,
       focusNextPaneInTab,
       swapActivePane,
+      focusActivePaneToward,
+      togglePaneZoom,
+      resizeActiveTerminalPane,
       toggleSourceControl,
       hasComposer,
+      panelOpen,
       togglePanelAndFocus,
       toggleMini,
+      startNewConversation,
       onAskFromSelection,
       toggleSidebar,
       toggleExplorerFocus,
@@ -1001,6 +1173,15 @@ export default function App() {
           : null;
       if (shouldDisablePaneSwapShortcut(id, terminalPaneCount)) return true;
       if (
+        shouldDeferShortcutToTerminal(e, {
+          isMac: IS_MAC,
+          inTerminal: isTerminalSurfaceTarget(
+            (e.target as HTMLElement | null) ?? document.activeElement,
+          ),
+        })
+      )
+        return true;
+      if (
         id === "editor.undo" ||
         id === "editor.redo" ||
         id === "editor.save" ||
@@ -1008,6 +1189,13 @@ export default function App() {
         id === "editor.codeComplete"
       ) {
         return activeTab?.kind !== "editor";
+      }
+      if (id === "ai.newConversation") {
+        // Only where the AI composer or chat window has focus; anywhere else
+        // (a terminal's Ctrl+N) the key passes through.
+        return !isAiSurfaceTarget(
+          (e.target as HTMLElement | null) ?? document.activeElement,
+        );
       }
       if (id === "ai.askSelection") {
         const target =
@@ -1024,17 +1212,38 @@ export default function App() {
           (e.target as HTMLElement | null) ?? document.activeElement;
         return !isTerminalSurfaceTarget(target);
       }
-      if (
-        id === "terminal.toggleInput" ||
-        id === "blocks.prev" ||
-        id === "blocks.next"
-      ) {
+      if (id === "terminal.toggleInput") {
         return !(activeTab?.kind === "terminal" && activeTab.blocks === true);
+      }
+      if (id === "terminal.restart") return activeTab?.kind !== "terminal";
+      if (id === "blocks.prev" || id === "blocks.next") {
+        if (activeTab?.kind !== "terminal") return true;
+        // Block tabs navigate blocks; plain terminals jump between prompts,
+        // except while a full-screen program owns the keys.
+        return activeTab.blocks !== true && focusedTerminalInAlternateScreen();
+      }
+      if (
+        id.startsWith("terminal.scroll") ||
+        id.startsWith("terminal.fontSize")
+      ) {
+        const target =
+          (e.target as HTMLElement | null) ?? document.activeElement;
+        if (!isTerminalSurfaceTarget(target)) return true;
+        return (
+          id.startsWith("terminal.scroll") && focusedTerminalInAlternateScreen()
+        );
+      }
+      if (SPLIT_PANE_SHORTCUTS.has(id)) {
+        // Pane keys mean nothing without split terminal panes; let them through.
+        return (
+          activeTab?.kind !== "terminal" ||
+          leafIds(activeTab.paneTree).length < 2
+        );
       }
       if (id === "sidebar.toggle") {
         // Ctrl+B is also Claude Code's "run in background" key. While a terminal
-        // is focused, let Ctrl+B reach the shell/Claude instead of toggling the
-        // sidebar. Ctrl+Shift+B (second binding) still toggles it from anywhere.
+        // is focused, let Cmd/Ctrl+B reach the shell/Claude instead of toggling
+        // the sidebar. Cmd/Ctrl+Shift+B still toggles it from anywhere.
         const target =
           (e.target as HTMLElement | null) ?? document.activeElement;
         const inTerminal = isTerminalSurfaceTarget(target);
@@ -1048,6 +1257,15 @@ export default function App() {
   );
 
   useGlobalShortcuts(shortcutHandlers, { isDisabled: shortcutsDisabled });
+  // The macOS menu bar runs these too, also while a preview frame has the
+  // keyboard. It has no key release to wait for, so tab switching commits.
+  useMenuShortcuts(shortcutHandlers, {
+    isDisabled: shortcutsDisabled,
+    instead: {
+      "tab.next": () => jumpSwitcher(1),
+      "tab.prev": () => jumpSwitcher(-1),
+    },
+  });
 
   const registerTerminalHandle = useCallback(
     (leafId: number, h: TerminalPaneHandle | null) => {
@@ -1088,17 +1306,10 @@ export default function App() {
     [updateTab],
   );
 
-  const authorizedCwds = useRef(new Set<string>());
+  // Only folders the backend has checked and authorized arrive here
+  // (`TerminalCwdReports`), so the explorer can list them at once.
   const handleTerminalCwd = useCallback(
-    (leafId: number, cwd: string) => {
-      setLeafCwd(leafId, cwd);
-      if (cwd && !authorizedCwds.current.has(cwd)) {
-        authorizedCwds.current.add(cwd);
-        native.workspaceAuthorize(cwd).catch(() => {
-          authorizedCwds.current.delete(cwd);
-        });
-      }
-    },
+    (leafId: number, cwd: string) => setLeafCwd(leafId, cwd),
     [setLeafCwd],
   );
 
@@ -1121,7 +1332,8 @@ export default function App() {
         (t) => t.kind === "terminal" && hasLeaf(t.paneTree, leafId),
       );
       if (!tab || tab.kind !== "terminal") return;
-      // Last pane of the last tab: quit instead of respawning a shell.
+      // Last pane of the last tab: close the window (quitting when it is the
+      // last one) instead of respawning a shell.
       if (leafIds(tab.paneTree).length === 1 && all.length === 1) {
         void getCurrentWindow().close();
       } else {
@@ -1198,6 +1410,23 @@ export default function App() {
     [removeTabsForSpace],
   );
 
+  // The pane keeps its shell; its agent records follow it to its new tab.
+  const handleMoveTabIntoSplit = useCallback(
+    (sourceId: number, destinationId: number, position: SplitPosition) => {
+      const leafId = moveTabIntoSplit(sourceId, destinationId, position);
+      if (leafId !== null) moveAgentLeafToTab(leafId, destinationId);
+    },
+    [moveTabIntoSplit],
+  );
+
+  const handleMovePaneToNewTab = useCallback(
+    (tabId?: number, leafId?: number) => {
+      const moved = movePaneToNewTab(tabId, leafId);
+      if (moved) moveAgentLeafToTab(moved.leafId, moved.tabId);
+    },
+    [movePaneToNewTab],
+  );
+
   const handleMoveTab = useCallback(
     (tabId: number, targetSpaceId: string) => {
       if (moveTabToSpace(tabId, targetSpaceId)) {
@@ -1244,6 +1473,7 @@ export default function App() {
       onOpenChange={setSwitcherOpen}
       tabs={tabs}
       onNewSpace={() => void handleNewSpace()}
+      onOpenFolder={openFolder}
       onDeleteSpace={handleDeleteSpace}
       onNewTabInSpace={handleNewTabInSpace}
       onJumpTab={jumpToTab}
@@ -1264,6 +1494,9 @@ export default function App() {
             explorerRoot,
             home,
             openNewTab,
+            openNewWindow: openWindow,
+            openFolder,
+            quit: () => void quitApp(),
             openNewBlock: openNewBlockTab,
             openNewPrivate: openNewPrivateTab,
             openNewEditor: () => setNewEditorOpen(true),
@@ -1273,15 +1506,19 @@ export default function App() {
             closeActiveTabOrPane: handleCloseTabOrPane,
             splitPaneRight: () => splitActivePaneInActiveTab("row"),
             splitPaneDown: () => splitActivePaneInActiveTab("col"),
+            movePaneToNewTab: () => handleMovePaneToNewTab(),
+            restartTerminal: restartActiveTerminal,
             focusSearch: () => searchInlineRef.current?.focus(),
             focusExplorerSearch: () => explorerRef.current?.focusSearch(),
             toggleSidebar,
             toggleHiddenFiles,
             toggleAi: togglePanelAndFocus,
+            newAiConversation: startNewConversation,
             askAiSelection: askFromSelection,
             openSettings: () => void openSettingsWindow(),
             openKeyboardShortcuts: () => void openSettingsWindow("shortcuts"),
             spaces: useSpaces.getState().spaces,
+            paneLimit: usePreferencesStore.getState().terminalPaneLimit,
             activeSpaceId,
             openSpacesOverview: () => setSwitcherOpen(true),
             newSpace: () => void handleNewSpace(),
@@ -1289,6 +1526,8 @@ export default function App() {
           })
         : [],
     [
+      openWindow,
+      openFolder,
       commandPaletteOpen,
       tabs,
       activeId,
@@ -1303,9 +1542,12 @@ export default function App() {
       toggleSourceControl,
       handleCloseTabOrPane,
       splitActivePaneInActiveTab,
+      handleMovePaneToNewTab,
+      restartActiveTerminal,
       toggleSidebar,
       toggleHiddenFiles,
       togglePanelAndFocus,
+      startNewConversation,
       askFromSelection,
       activeSpaceId,
       handleNewSpace,
@@ -1317,6 +1559,7 @@ export default function App() {
   >(new Map());
   const openContentHit = useCallback(
     (path: string, line: number) => {
+      void authorizeFileFolder(path);
       const id = openFileTab(path, true);
       if (id == null) return;
       const h = editorRefs.current.get(id);
@@ -1325,6 +1568,36 @@ export default function App() {
     },
     [openFileTab],
   );
+
+  // Terminal links to files (paths printed by tools, file:// hyperlinks)
+  // open in the editor, at the line when the link names one.
+  useEffect(() => {
+    setTerminalFileOpener((path, line) => {
+      if (line !== null) openContentHit(path, line);
+      else openFileTab(path, true);
+    });
+    return () => setTerminalFileOpener(null);
+  }, [openContentHit, openFileTab]);
+
+  useEffect(() => {
+    setTerminalPreviewOpener((url) => {
+      const target = terminalLinkPreviewTarget(
+        url,
+        usePreferencesStore.getState().terminalLinksInPreview,
+        tabsRef.current,
+        activeSpaceIdRef.current ?? null,
+      );
+      if (target === null) return false;
+      if (target > 0) setActiveId(target);
+      else openPreviewTab(url);
+      return true;
+    });
+    return () => setTerminalPreviewOpener(null);
+  }, [openPreviewTab, setActiveId]);
+
+  // OSC 9;4 progress from every terminal drives the taskbar or dock bar.
+  useEffect(() => startWindowProgress(), []);
+  useQuickTerminalHotkey();
 
   const openControlFile = useCallback(
     ({
@@ -1434,7 +1707,10 @@ export default function App() {
               onPin={pinTab}
               onRename={handleRenameTab}
               onReorder={reorderTabByGap}
+              onMoveToSplit={handleMoveTabIntoSplit}
+              onMovePaneToNewTab={handleMovePaneToNewTab}
               onToggleSidebar={toggleSidebar}
+              sidebarPosition={sidebarPosition}
               onOpenCommandPalette={() => openCommandPalette("commands")}
               onActivateAgent={onActivateAgent}
               onActivateLocalAgent={onActivateLocalAgent}
@@ -1449,14 +1725,20 @@ export default function App() {
           <main className="zoom-content flex min-h-0 flex-1 flex-col">
             <ResizablePanelGroup
               orientation="horizontal"
-              className="min-h-0 flex-1"
+              className={cn(
+                "min-h-0 flex-1",
+                // Swapped visually, not in the DOM: nothing moves or remounts.
+                sidebarPosition === "right" &&
+                  "[&>[data-separator]]:order-1 [&>[data-sidebar-panel]]:order-2",
+              )}
               onLayoutChanged={(_, { isUserInteraction }) => {
                 const width = sidebarRef.current?.getSize().inPixels ?? 0;
                 persistSidebarWidth(width, isUserInteraction);
               }}
             >
               <ResizablePanel
-                id="sidebar"
+                id={sidebarPanelId}
+                data-sidebar-panel=""
                 panelRef={sidebarRef}
                 defaultSize={
                   initialSidebarCollapsed
@@ -1471,11 +1753,16 @@ export default function App() {
                   persistSidebarCollapsed(size.inPixels <= 0);
                 }}
               >
-                <div className="h-full min-h-0 pl-2 pr-0.5">
-                  <div className="terax-pane flex h-full min-h-0 flex-col">
+                <div
+                  className={cn(
+                    "h-full min-h-0",
+                    sidebarPosition === "right" ? "pl-0.5 pr-2" : "pl-2 pr-0.5",
+                  )}
+                >
+                  <div className="oarlock-pane flex h-full min-h-0 flex-col">
                     <div
                       key={sidebarView}
-                      className="min-h-0 flex-1 terax-panel-in"
+                      className="min-h-0 flex-1 oarlock-panel-in"
                     >
                       {sidebarView === "explorer" ? (
                         <FileExplorer
@@ -1495,8 +1782,15 @@ export default function App() {
                           }
                           onOpenGitHistory={handleOpenGitHistoryForPath}
                           onAttachToAgent={handleAttachFileToAgent}
-                          pathDropTarget={terminalPathDropTarget}
+                          onOpenFolder={openFolder}
+                          pathDropTarget={explorerPathDropTarget}
                           visible={!sidebarCollapsed}
+                        />
+                      ) : sidebarView === "search" ? (
+                        <ContentSearchView
+                          root={explorerRoot}
+                          onOpenHit={openContentHit}
+                          autoFocus={sidebarViewChosen}
                         />
                       ) : (
                         <SourceControlPanel
@@ -1510,6 +1804,7 @@ export default function App() {
                           onFollowRepositoryContext={
                             handleFollowRepositoryContext
                           }
+                          onOpenRepository={handleOpenRepositoryInSourceControl}
                         />
                       )}
                     </div>
@@ -1523,8 +1818,16 @@ export default function App() {
               </ResizablePanel>
               <ResizableHandle className="w-1 rounded-full bg-transparent transition-colors duration-[var(--dur-fast)] after:w-4 hover:bg-border" />
               <ResizablePanel id="workspace" defaultSize="78%" minSize="30%">
-                <div className="h-full min-h-0 pl-0.5 pr-2">
-                  <div className="terax-pane flex h-full min-h-0 flex-col">
+                <div
+                  className={cn(
+                    "h-full min-h-0",
+                    sidebarPosition === "right" ? "pl-2 pr-0.5" : "pl-0.5 pr-2",
+                  )}
+                >
+                  <div
+                    className="oarlock-pane flex h-full min-h-0 flex-col"
+                    data-terminal-surface={isTerminalTab ? "" : undefined}
+                  >
                     <div className="relative min-h-0 flex-1">
                       <WorkspaceSurface
                         tabs={tabs}
@@ -1558,6 +1861,7 @@ export default function App() {
                       panelOpen={panelOpen}
                       keysLoaded={keysLoaded}
                       onConnect={() => void openSettingsWindow("models")}
+                      onClose={() => useChatStore.getState().closePanel()}
                     />
                   </div>
                 </div>
@@ -1570,8 +1874,10 @@ export default function App() {
               cwd={activeCwd}
               filePath={activeFilePath}
               home={home}
+              root={explorerRoot}
               onCd={sendCd}
-              onWorkspaceChange={handleWorkspaceChange}
+              onOpenTerminal={cdInNewTab}
+              onWorkspaceChange={switchWorkspace}
               onOpenMini={openMini}
               onOpenAi={togglePanelAndFocus}
               hasComposer={hasComposer}
@@ -1594,6 +1900,10 @@ export default function App() {
             onActivate={onActivateAgent}
           />
           <Toaster position="bottom-right" />
+          <SkillsBridge
+            root={explorerRoot ?? launchCwd ?? home}
+            openFileTab={openFileTab}
+          />
 
           {hasComposer ? (
             <>
@@ -1649,6 +1959,9 @@ export default function App() {
             pendingTerminalCloseTab={pendingTerminalCloseTab}
             onCancelTerminalClose={cancelTerminalClose}
             onConfirmTerminalClose={confirmTerminalClose}
+            pendingTerminalRestart={pendingRestartLeaf}
+            onCancelTerminalRestart={cancelRestart}
+            onConfirmTerminalRestart={confirmRestart}
             pendingDeleteTabs={pendingDeleteTabs}
             onCancelDeleteClose={cancelDeleteClose}
             onConfirmDeleteClose={confirmDeleteClose}
@@ -1660,6 +1973,7 @@ export default function App() {
             onCancelAppClose={cancelAppClose}
             onConfirmAppClose={confirmAppClose}
           />
+          <TerminalPromptDialog />
         </div>
       </TooltipProvider>
     </ThemeProvider>

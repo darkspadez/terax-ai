@@ -1,5 +1,6 @@
 import "@/modules/terminal/block/block.css";
 
+import { IS_MAC } from "@/lib/platform";
 import { buildTerminalTheme } from "@/styles/terminalTheme";
 import {
   acceptCompletion,
@@ -7,9 +8,7 @@ import {
   type Completion,
   type CompletionContext,
   type CompletionResult,
-  closeCompletion,
   completionStatus,
-  moveCompletionSelection,
   startCompletion,
 } from "@codemirror/autocomplete";
 import {
@@ -36,9 +35,15 @@ import {
 } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
 import { completionIcon } from "./completionIcons";
+import { completionListClaims, completionListKeys } from "./completionKeys";
 import { historyOpen, historyPopover } from "./historyPopover";
 import { inlineSuggestion } from "./inlineSuggest";
-import { pathCompletions } from "./pathComplete";
+import {
+  completionWord,
+  currentPathStyle,
+  pathCompletions,
+  pathValidFor,
+} from "./pathComplete";
 
 const shellLanguage = StreamLanguage.define(shell);
 
@@ -199,7 +204,6 @@ const SHELL_COMMANDS = [
   "open",
 ];
 
-const WORD_RE = /[\w./+-]*/;
 const DOC_WORD_RE = /[A-Za-z_][\w./-]+/g;
 const VALID_FOR = /^[\w./+-]*$/;
 // Command position = start of a command segment: line start, or right after a
@@ -238,15 +242,14 @@ function docWordOptions(ctx: CompletionContext, current: string): Completion[] {
   return out;
 }
 
-const PATH_VALID_FOR = /^[^/]*$/;
-
 function makeCompletionSource(
   getCommands: () => string[],
   getCwd: () => string | null,
 ) {
   return async (ctx: CompletionContext): Promise<CompletionResult | null> => {
     if (historyOpen(ctx.state)) return null;
-    const word = ctx.matchBefore(WORD_RE);
+    const style = currentPathStyle();
+    const word = ctx.matchBefore(completionWord(style));
     if (!word || (word.from === word.to && !ctx.explicit)) return null;
     const line = ctx.state.doc.lineAt(word.from);
     const before = ctx.state.doc.sliceString(line.from, word.from);
@@ -259,12 +262,12 @@ function makeCompletionSource(
     }
     const cwd = getCwd();
     if (cwd) {
-      const res = await pathCompletions(word.text, cwd);
+      const res = await pathCompletions(word.text, cwd, style);
       if (res?.options.length) {
         return {
           from: word.from + res.fromOffset,
           options: res.options,
-          validFor: PATH_VALID_FOR,
+          validFor: pathValidFor(style),
         };
       }
     }
@@ -343,17 +346,6 @@ function baseTheme(fontFamily: string, fontSize: number, fontWeight: string) {
   });
 }
 
-// Arrow keys drive the completion popup when it is open; each command returns
-// false when no completion is active, so the keys fall through (e.g. to the
-// history popover / cursor movement).
-const completionNav = Prec.highest(
-  keymap.of([
-    { key: "ArrowDown", run: moveCompletionSelection(true) },
-    { key: "ArrowUp", run: moveCompletionSelection(false) },
-    { key: "Escape", run: closeCompletion },
-  ]),
-);
-
 export function createShellEditor(opts: ShellEditorOptions): ShellEditorHandle {
   const themeComp = new Compartment();
   const highlightComp = new Compartment();
@@ -421,7 +413,8 @@ export function createShellEditor(opts: ShellEditorOptions): ShellEditorHandle {
         defaultKeymap: false,
         addToOptions: [{ render: (c) => completionIcon(c.type), position: 20 }],
       }),
-      completionNav,
+      completionListKeys,
+      completionListClaims(IS_MAC),
       ...(opts.suggest ? inlineSuggestion(opts.suggest) : []),
       ...(opts.historyList ? historyPopover(opts.historyList) : []),
       placeholder(opts.placeholderText ?? "Run a command"),

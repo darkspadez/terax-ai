@@ -42,6 +42,9 @@ pub struct BackgroundProc {
     pub exited: AtomicBool,
     pub exit_code: AtomicI32,
     pub exit_unknown: AtomicBool,
+    /// Holds the process tree: closing it kills everything still inside.
+    #[cfg(windows)]
+    job: Mutex<Option<crate::modules::proc::job::ProcessJob>>,
 }
 
 #[derive(Serialize)]
@@ -81,7 +84,32 @@ impl BackgroundProc {
         }
     }
 
+    /// Stops the process with everything it started: a dev server's shell
+    /// alone would leave the server running and holding its port. On Unix the
+    /// process leads its own group, which gets SIGTERM and, after
+    /// `TERM_GRACE`, SIGKILL; on Windows its job is closed.
     pub fn kill(&self) {
+        // Once reaped, the leader's id may name another process's group.
+        #[cfg(unix)]
+        if !self.exited.load(Ordering::Acquire) {
+            use crate::modules::proc::capture::TERM_GRACE;
+            let group = self.child.id() as libc::pid_t;
+            // SAFETY: plain syscalls on the group this process leads; the
+            // leader is not reaped before the wait below returns, and a group
+            // id is not reused while any member lives.
+            unsafe { libc::killpg(group, libc::SIGTERM) };
+            let child = self.child.clone();
+            let escalate = move || {
+                let _ = child.wait_timeout(TERM_GRACE);
+                unsafe { libc::killpg(group, libc::SIGKILL) };
+            };
+            if spawn_thread("oarlock-bg-kill", escalate).is_err() {
+                unsafe { libc::killpg(group, libc::SIGKILL) };
+            }
+            return;
+        }
+        #[cfg(windows)]
+        drop(self.job.lock().unwrap().take());
         let _ = self.child.kill();
     }
 
@@ -132,8 +160,21 @@ pub fn spawn(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     crate::modules::proc::hide_console(&mut cmd);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
 
     let shared = Arc::new(SharedChild::spawn(&mut cmd).map_err(|e| e.to_string())?);
+    #[cfg(windows)]
+    let job = match crate::modules::proc::job::ProcessJob::create_for(shared.id()) {
+        Ok(job) => Some(job),
+        Err(e) => {
+            log::warn!("background job-object setup failed: {e}");
+            None
+        }
+    };
     let kill_on_fail = || {
         let _ = shared.kill();
     };
@@ -161,6 +202,8 @@ pub fn spawn(
         exited: AtomicBool::new(false),
         exit_code: AtomicI32::new(0),
         exit_unknown: AtomicBool::new(false),
+        #[cfg(windows)]
+        job: Mutex::new(job),
     });
 
     let fail = |error: String| {
@@ -169,11 +212,11 @@ pub fn spawn(
     };
     for (name, pipe) in [
         (
-            "terax-bg-out",
+            "oarlock-bg-out",
             Box::new(stdout_pipe) as Box<dyn Read + Send>,
         ),
         (
-            "terax-bg-err",
+            "oarlock-bg-err",
             Box::new(stderr_pipe) as Box<dyn Read + Send>,
         ),
     ] {
@@ -183,7 +226,7 @@ pub fn spawn(
     {
         let proc_ref = proc.clone();
         let child_for_wait = proc.child.clone();
-        spawn_thread("terax-bg-wait", move || {
+        spawn_thread("oarlock-bg-wait", move || {
             match child_for_wait.wait() {
                 Ok(status) => match status.code() {
                     Some(code) => proc_ref.exit_code.store(code, Ordering::Release),
@@ -197,4 +240,60 @@ pub fn spawn(
     }
 
     Ok(proc)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    fn wait_for_exit(proc: &BackgroundProc) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !proc.exited.load(Ordering::Acquire) {
+            assert!(Instant::now() < deadline, "the process outlived kill");
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn kill_takes_what_the_process_started_with_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("survived");
+        let script = format!(
+            "(trap '' TERM; sleep 1; touch '{}') & wait",
+            marker.display()
+        );
+        let proc = spawn(script, None, WorkspaceEnv::Local).unwrap();
+        thread::sleep(Duration::from_millis(200));
+        proc.kill();
+        wait_for_exit(&proc);
+        thread::sleep(Duration::from_millis(1500));
+        assert!(!marker.exists(), "a grandchild outlived kill");
+    }
+
+    #[test]
+    fn kill_gives_the_process_a_chance_to_clean_up() {
+        let proc = spawn(
+            "trap 'printf cleaned; exit 1' TERM; sleep 30 & wait".into(),
+            None,
+            WorkspaceEnv::Local,
+        )
+        .unwrap();
+        thread::sleep(Duration::from_millis(200));
+        proc.kill();
+        wait_for_exit(&proc);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !proc.read_logs(0).bytes.contains("cleaned") {
+            assert!(Instant::now() < deadline, "no output from the TERM trap");
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn kill_after_exit_is_harmless() {
+        let proc = spawn("exit 0".into(), None, WorkspaceEnv::Local).unwrap();
+        wait_for_exit(&proc);
+        proc.kill();
+        assert_eq!(proc.read_logs(0).exit_code, Some(0));
+    }
 }

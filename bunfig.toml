@@ -1,0 +1,13 @@
+[install]
+# Supply-chain cooldown: only install versions published at least three days
+# ago, the same window Dependabot waits (.github/dependabot.yml).
+minimumReleaseAge = 259200
+# One store, symlinked per package (like pnpm): a package only sees the
+# dependencies it declares, so a missing entry in package.json fails here
+# instead of working by accident.
+linker = "isolated"
+
+[run]
+# Run package scripts, and the node-shebang tools they call (vite, vitest,
+# tsc, biome, tauri), on Bun's runtime even where a system Node exists.
+bun = true

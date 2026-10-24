@@ -12,7 +12,7 @@ fn configure_sidecar() {
     } else {
         ""
     };
-    let path = std::path::PathBuf::from("binaries").join(format!("terax-cli-{target}{extension}"));
+    let path = std::path::PathBuf::from("binaries").join(format!("oarlock-cli-{target}{extension}"));
     let valid =
         std::fs::metadata(&path).is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0);
     if valid {
@@ -20,7 +20,7 @@ fn configure_sidecar() {
     }
     if std::env::var("PROFILE").as_deref() == Ok("release") {
         panic!(
-            "release sidecar {} is missing or empty; run pnpm build:cli before packaging",
+            "release sidecar {} is missing or empty; run bun run build:cli before packaging",
             path.display()
         );
     }

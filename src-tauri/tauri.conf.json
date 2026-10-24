@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Terax",
-  "version": "0.9.0",
-  "identifier": "app.crynta.terax",
+  "productName": "Oarlock",
+  "version": "0.1.0",
+  "identifier": "consulting.quantumops.oarlock",
   "build": {
-    "beforeDevCommand": "pnpm build:cli:dev && pnpm dev",
+    "beforeDevCommand": "bun run build:cli:dev && bun run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build:cli && pnpm build",
+    "beforeBuildCommand": "bun run build:cli && bun run build",
     "frontendDist": "../dist",
     "removeUnusedCommands": true
   },
@@ -14,41 +14,51 @@
     "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "Terax",
+        "title": "Oarlock",
         "width": 800,
         "height": 600,
         "minWidth": 420,
         "minHeight": 280,
         "titleBarStyle": "Overlay",
+        "trafficLightPosition": { "x": 14, "y": 22 },
         "hiddenTitle": true,
         "visible": false,
         "dragDropEnabled": true
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: https://asset.localhost blob:; media-src 'self' asset: https://asset.localhost blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost terax-pty: http://terax-pty.localhost https: http://localhost:* http://127.0.0.1:*; frame-src 'self' http: https: asset: https://asset.localhost; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'",
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: http://asset.localhost https://asset.localhost oarlock-asset: http://oarlock-asset.localhost https://oarlock-asset.localhost blob:; media-src 'self' asset: http://asset.localhost https://asset.localhost oarlock-asset: http://oarlock-asset.localhost https://oarlock-asset.localhost blob:; font-src 'self' data: asset: http://asset.localhost https://asset.localhost; connect-src 'self' ipc: http://ipc.localhost oarlock-pty: http://oarlock-pty.localhost https: http://localhost:* http://127.0.0.1:*; frame-src 'self' http: https: asset: https://asset.localhost oarlock-asset: https://oarlock-asset.localhost; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'",
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": {
+          "allow": [],
+          "requireLiteralLeadingDot": true
+        }
       }
     }
   },
   "bundle": {
     "active": true,
     "externalBin": [
-      "binaries/terax-cli"
+      "binaries/oarlock-cli"
     ],
     "resources": {
+      "../LICENSE": "LICENSE",
+      "../NOTICE": "NOTICE",
       "../packages/ghostty-core/LICENSE": "licenses/terminal/ghostty-web.txt",
       "../packages/ghostty-core/adapted/LICENSE.ghostty": "licenses/terminal/ghostty.txt",
       "../packages/ghostty-core/adapted/LICENSE.restty": "licenses/terminal/restty.txt",
-      "../src/modules/terminal/ghostty/webgl/LICENSE.xterm-js": "licenses/terminal/xterm-js.txt"
+      "../src/modules/terminal/ghostty/webgl/LICENSE.xterm-js": "licenses/terminal/xterm-js.txt",
+      "../src/assets/fonts/symbols/NOTICE.txt": "licenses/fonts/oarlock-symbols.txt",
+      "../src/assets/fonts/jetbrains-mono/OFL.txt": "licenses/fonts/jetbrains-mono.txt",
+      "../src/modules/theme/themes/NOTICE.txt": "licenses/themes/terminal-themes.txt"
     },
     "targets": "all",
-    "createUpdaterArtifacts": true,
-    "copyright": "Copyright 2026 Crynta",
+    "createUpdaterArtifacts": false,
+    "copyright": "Copyright 2026 Quantum Ops Consulting, LLC",
     "license": "Apache-2.0",
-    "publisher": "Crynta",
+    "licenseFile": "../LICENSE",
+    "publisher": "Quantum Ops Consulting, LLC",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -57,18 +67,20 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "minimumSystemVersion": "13.0",
+      "minimumSystemVersion": "13.3",
       "entitlements": "./entitlements.plist"
     },
     "linux": {
       "deb": {
         "section": "utils",
+        "desktopTemplate": "./linux/oarlock.desktop",
         "depends": [
           "libwebkit2gtk-4.1-0",
           "libgtk-3-0"
         ]
       },
       "rpm": {
+        "desktopTemplate": "./linux/oarlock.desktop",
         "depends": [
           "webkit2gtk4.1",
           "gtk3"
@@ -94,32 +106,12 @@
     },
     "category": "DeveloperTool",
     "shortDescription": "AI-native terminal emulator",
-    "longDescription": "Terax — an open-source AI-native terminal emulator with multi-tab, file explorer, code editor, web preview, voice input, and AI agents.",
-    "fileAssociations": [
-      {
-        "name": "Terax Document",
-        "role": "Editor",
-        "mimeType": "text/plain",
-        "ext": [
-          "json", "jsonc", "txt", "log", "csv", "tsv",
-          "md", "markdown", "mdx",
-          "js", "mjs", "cjs", "jsx", "ts", "tsx", "mts", "cts",
-          "java", "kt", "kts", "gradle",
-          "py", "rb", "php", "go", "rs", "swift", "dart", "lua",
-          "c", "h", "cpp", "cc", "hpp", "hh", "cs",
-          "html", "htm", "css", "scss", "sass", "less", "vue", "svelte",
-          "xml", "yaml", "yml", "toml", "ini", "cfg", "conf", "properties",
-          "sh", "bash", "zsh", "sql", "graphql", "proto"
-        ]
-      }
-    ]
+    "longDescription": "Oarlock, an open-source AI-native terminal emulator with multi-tab, file explorer, code editor, web preview, voice input, and AI agents."
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNCQUJGRDhBQjYwRTM0NjkKUldScE5BNjJpdjJyT3dIN0dqbUpHaDA4QW1GaDVmTTllRXdZVk96dFNTRUZ3Y2hiVGszYjFqRloK",
-      "endpoints": [
-        "https://github.com/crynta/terax-ai/releases/latest/download/latest.json"
-      ]
+      "pubkey": "",
+      "endpoints": []
     }
   }
 }

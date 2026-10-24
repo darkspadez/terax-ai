@@ -4,7 +4,7 @@
 #
 #   export-tree.sh DEST [REV]        REV defaults to HEAD
 #
-# The overlay is only the app-lab files: the bench feature in src-tauri, the TERAX_BENCH define,
+# The overlay is only the app-lab files: the bench feature in src-tauri, the OARLOCK_BENCH define,
 # the three bench hooks in App.tsx / main.tsx and src/bench + scripts/app-lab. Everything is
 # read-only on the repository (git archive / git diff); DEST must not exist yet.
 set -eu
@@ -23,10 +23,10 @@ tracked=(
 git -C "$repo" diff HEAD -- "${tracked[@]}" | (cd "$dest" && patch -p1 --quiet)
 # The CLI sidecar is git-ignored but release builds require it.
 mkdir -p "$dest/src-tauri/binaries"
-cp "$repo"/src-tauri/binaries/terax-cli-* "$dest/src-tauri/binaries/"
+cp "$repo"/src-tauri/binaries/oarlock-cli-* "$dest/src-tauri/binaries/"
 # Untracked app-lab files.
 mkdir -p "$dest/src/bench" "$dest/scripts/app-lab"
 cp "$repo"/src/bench/* "$dest/src/bench/"
 cp "$repo"/src-tauri/src/modules/bench.rs "$dest/src-tauri/src/modules/bench.rs"
-rsync -a --exclude __pycache__ "$repo"/scripts/app-lab/ "$dest/scripts/app-lab/"
+rsync -a "$repo"/scripts/app-lab/ "$dest/scripts/app-lab/"
 echo "exported $rev + app-lab overlay to $dest"

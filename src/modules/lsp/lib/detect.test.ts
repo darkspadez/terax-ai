@@ -15,20 +15,26 @@ const runtime = vi.hoisted(() => {
     clearDetected: vi.fn((command: string) => {
       delete state.detected[command];
     }),
+    resetDetections: vi.fn((_enabled: readonly string[]) => {
+      state.detected = {};
+    }),
   };
   return { state, useLspRuntimeStore: { getState: () => state } };
 });
 
 vi.mock("./runtimeStore", () => ({ useLspRuntimeStore: runtime.useLspRuntimeStore }));
 
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import { detectBinary, redetectBinary } from "./detect";
 
 describe("LSP binary detection", () => {
   beforeEach(() => {
+    usePreferencesStore.setState({ terminalShell: "", lspActivation: {} });
     core.invoke.mockReset();
     runtime.state.detected = {};
     runtime.state.setDetected.mockClear();
     runtime.state.clearDetected.mockClear();
+    runtime.state.resetDetections.mockClear();
   });
 
   it("coalesces concurrent detections of the same command into one probe", async () => {
@@ -92,6 +98,57 @@ describe("LSP binary detection", () => {
 
     expect(runtime.state.clearDetected).toHaveBeenCalledWith("rust-analyzer");
     expect(core.invoke).toHaveBeenCalledTimes(2);
+  });
+
+  // crynta/terax-ai#1039: servers are looked up through the shell set in Oarlock.
+  it("looks binaries up through the configured terminal shell", async () => {
+    core.invoke.mockResolvedValue("/usr/bin/gopls");
+    usePreferencesStore.setState({ terminalShell: "/usr/bin/fish" });
+
+    await detectBinary("gopls");
+
+    expect(core.invoke).toHaveBeenCalledWith("lsp_detect", {
+      command: "gopls",
+      shell: "/usr/bin/fish",
+    });
+  });
+
+  it("asks for the login shell when none is configured", async () => {
+    core.invoke.mockResolvedValue(null);
+
+    await detectBinary("gopls");
+
+    expect(core.invoke).toHaveBeenCalledWith("lsp_detect", {
+      command: "gopls",
+      shell: null,
+    });
+  });
+
+  it("forgets lookups when the shell changes, dropping one still in flight", async () => {
+    let releaseOld: ((v: string | null) => void) | undefined;
+    core.invoke.mockReturnValueOnce(
+      new Promise<string | null>((r) => {
+        releaseOld = r;
+      }),
+    );
+    usePreferencesStore.setState({
+      lspActivation: { gopls: "enabled", ruff: "dismissed" },
+    });
+    const old = detectBinary("gopls");
+
+    usePreferencesStore.setState({ terminalShell: "/usr/bin/fish" });
+    expect(runtime.state.resetDetections).toHaveBeenCalledWith(["gopls"]);
+
+    releaseOld?.(null);
+    await expect(old).resolves.toBeNull();
+    expect(runtime.state.detected.gopls).toBeUndefined();
+
+    core.invoke.mockResolvedValueOnce("/home/me/go/bin/gopls");
+    await expect(detectBinary("gopls")).resolves.toBe("/home/me/go/bin/gopls");
+    expect(core.invoke).toHaveBeenLastCalledWith("lsp_detect", {
+      command: "gopls",
+      shell: "/usr/bin/fish",
+    });
   });
 
   it("redetect re-probes while the previous probe is still pending", async () => {

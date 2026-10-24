@@ -1,3 +1,4 @@
+import { notifyTerminalAreaMoved } from "@/modules/terminal/lib/terminalAreaMoved";
 import {
   type RefObject,
   useCallback,
@@ -6,14 +7,15 @@ import {
   useState,
 } from "react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
+import { sidebarPanelId, useSidebarPosition } from "./sidebarPosition";
 import type { SidebarViewId } from "./types";
 
 const SIDEBAR_DEFAULT_WIDTH = 260;
 export const SIDEBAR_MIN_WIDTH = 220;
 export const SIDEBAR_MAX_WIDTH = 480;
-const SIDEBAR_WIDTH_STORAGE_KEY = "terax.sidebar.width";
-const SIDEBAR_VIEW_STORAGE_KEY = "terax.sidebar.view";
-const SIDEBAR_COLLAPSED_STORAGE_KEY = "terax.sidebar.collapsed";
+const SIDEBAR_WIDTH_STORAGE_KEY = "oarlock.sidebar.width";
+const SIDEBAR_VIEW_STORAGE_KEY = "oarlock.sidebar.view";
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "oarlock.sidebar.collapsed";
 
 export function shouldPersistSidebarWidth(
   width: number,
@@ -44,7 +46,13 @@ function readSidebarWidth(): number {
 function readSidebarView(): SidebarViewId {
   try {
     const stored = window.localStorage.getItem(SIDEBAR_VIEW_STORAGE_KEY);
-    if (stored === "explorer" || stored === "source-control") return stored;
+    if (
+      stored === "explorer" ||
+      stored === "source-control" ||
+      stored === "search"
+    ) {
+      return stored;
+    }
   } catch {
     // ignore
   }
@@ -73,6 +81,9 @@ export function useSidebarPanel(
   const explorerReturnFocusRef = useRef<HTMLElement | null>(null);
   const [sidebarView, setSidebarViewState] =
     useState<SidebarViewId>(readSidebarView);
+  // A view the user picked takes focus when it opens; the one restored at
+  // launch leaves it where it is.
+  const [sidebarViewChosen, setSidebarViewChosen] = useState(false);
   const [initialSidebarCollapsed] = useState(readSidebarCollapsed);
   const collapsedRef = useRef(initialSidebarCollapsed);
   // Mirrors the panel's collapsed state for rendering: what is hidden at 0 px
@@ -83,6 +94,7 @@ export function useSidebarPanel(
 
   const persistSidebarView = useCallback((view: SidebarViewId) => {
     setSidebarViewState(view);
+    setSidebarViewChosen(true);
     try {
       window.localStorage.setItem(SIDEBAR_VIEW_STORAGE_KEY, view);
     } catch {
@@ -167,6 +179,25 @@ export function useSidebarPanel(
     };
   }, []);
 
+  const sidebarPosition = useSidebarPosition();
+  const laidOutPositionRef = useRef(sidebarPosition);
+  useEffect(() => {
+    if (laidOutPositionRef.current === sidebarPosition) return;
+    laidOutPositionRef.current = sidebarPosition;
+    // The panel registered again on the other side and took whatever size the
+    // library last had for that order; put back the width and collapsed state
+    // the sidebar had, before the frame paints.
+    const frame = requestAnimationFrame(() => {
+      const panel = sidebarRef.current;
+      if (panel) {
+        if (collapsedRef.current) panel.collapse();
+        else panel.resize(`${sidebarWidthRef.current}px`);
+      }
+      notifyTerminalAreaMoved();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [sidebarPosition]);
+
   const toggleExplorerFocus = useCallback(() => {
     const explorer = explorerRef.current;
     const panel = sidebarRef.current;
@@ -202,7 +233,10 @@ export function useSidebarPanel(
   return {
     sidebarRef,
     sidebarWidthRef,
+    sidebarPosition,
+    sidebarPanelId: sidebarPanelId(sidebarPosition),
     sidebarView,
+    sidebarViewChosen,
     sidebarCollapsed,
     initialSidebarCollapsed,
     persistSidebarView,

@@ -66,6 +66,17 @@ impl AiStreamState {
         window: &str,
         id: &str,
     ) -> Result<(StreamLease, AbortRegistration), String> {
+        self.start_bounded(window, id, MAX_REQUESTS)
+    }
+
+    /// `start` with a budget of its own: MCP sessions hold an event stream
+    /// each for as long as they live.
+    pub fn start_bounded(
+        &self,
+        window: &str,
+        id: &str,
+        limit: usize,
+    ) -> Result<(StreamLease, AbortRegistration), String> {
         if id.is_empty()
             || id.len() > 64
             || !id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
@@ -77,8 +88,8 @@ impl AiStreamState {
         if requests.contains_key(&key) {
             return Err("AI request id is already active".into());
         }
-        if requests.len() >= MAX_REQUESTS {
-            return Err("too many active AI requests".into());
+        if requests.len() >= limit {
+            return Err("too many active requests".into());
         }
         let (abort, registration) = AbortHandle::new_pair();
         let control = Arc::new(StreamControl {
@@ -400,6 +411,16 @@ mod tests {
         drop(leases);
         assert!(state.start("main", "new").is_ok());
         assert!(state.start("main", "../invalid").is_err());
+
+        let bounded = AiStreamState::default();
+        let leases: Vec<_> = (0..MAX_REQUESTS * 2)
+            .map(|i| bounded.start_bounded("main", &i.to_string(), MAX_REQUESTS * 2))
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(bounded
+            .start_bounded("main", "overflow", MAX_REQUESTS * 2)
+            .is_err());
+        drop(leases);
     }
 
     #[test]

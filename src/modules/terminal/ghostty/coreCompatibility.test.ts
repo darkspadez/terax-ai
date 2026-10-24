@@ -5,9 +5,9 @@ import {
   Key,
   KeyAction,
   Mods,
-} from "@terax/ghostty-core";
+} from "@oarlock/ghostty-core";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import type { GhosttyTerminalEvent } from "@terax/ghostty-core/protocol";
+import type { GhosttyTerminalEvent } from "@oarlock/ghostty-core/protocol";
 
 let ghostty: Ghostty;
 
@@ -187,8 +187,8 @@ describe("vendored libghostty-vt compatibility", () => {
     const terminal = ghostty.createTerminal(80, 24);
     try {
       terminal.write(
-        "\x1b]2;Terax title\x07" +
-          "\x1b]7;file://localhost/Users/terax\x1b\\" +
+        "\x1b]2;Oarlock title\x07" +
+          "\x1b]7;file://localhost/Users/oarlock\x1b\\" +
           "\x1b]133;A\x07" +
           "\x1b]133;B\x07" +
           "\x1b]133;C\x07" +
@@ -198,8 +198,8 @@ describe("vendored libghostty-vt compatibility", () => {
       );
 
       expect(terminal.drainEvents()).toEqual([
-        { type: "title", title: "Terax title" },
-        { type: "pwd", uri: "file://localhost/Users/terax" },
+        { type: "title", title: "Oarlock title" },
+        { type: "pwd", uri: "file://localhost/Users/oarlock" },
         { type: "prompt-start" },
         { type: "prompt-end" },
         { type: "end-of-input" },
@@ -216,8 +216,8 @@ describe("vendored libghostty-vt compatibility", () => {
   it("resolves OSC 8 links with a reusable WASM buffer", () => {
     const terminal = ghostty.createTerminal(80, 24);
     try {
-      const uri = "https://terax.dev/docs";
-      terminal.write(`\x1b]8;;${uri}\x1b\\Terax\x1b]8;;\x1b\\`);
+      const uri = "https://oarlock.dev/docs";
+      terminal.write(`\x1b]8;;${uri}\x1b\\Oarlock\x1b]8;;\x1b\\`);
       terminal.update();
       expect(terminal.getHyperlinkUri(0, 0)).toBe(uri);
       const warmBytes = ghostty.getMemoryBytes();

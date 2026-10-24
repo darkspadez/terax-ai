@@ -34,7 +34,7 @@ describe("agent signal fan-out", () => {
 
     expect(native.listen).toHaveBeenCalledTimes(1);
     expect(native.listen).toHaveBeenCalledWith(
-      "terax:agent-signal",
+      "oarlock:agent-signal",
       expect.any(Function),
     );
 
@@ -73,5 +73,62 @@ describe("agent signal fan-out", () => {
     native.emit?.({ payload: { id: 1, kind: "finished" } });
     expect(good).toHaveBeenCalledTimes(1);
     spy.mockRestore();
+  });
+});
+
+describe("agent names from the terminal", () => {
+  it("shows any name the terminal reports, known or not", async () => {
+    const mod = await load();
+    const seen = vi.fn();
+    mod.subscribeAgentSignals(seen);
+    await mod.ensureAgentActivityListener();
+
+    native.emit?.({ payload: { id: 4, kind: "started", agent: "My Agent 9" } });
+    expect(mod.useAgentActivityStore.getState().agents[4]).toBe("My Agent 9");
+    expect(seen).toHaveBeenCalledWith({
+      id: 4,
+      kind: "started",
+      agent: "My Agent 9",
+    });
+  });
+
+  it("strips control and bidi characters before anything sees the name", async () => {
+    const mod = await load();
+    const seen = vi.fn();
+    mod.subscribeAgentSignals(seen);
+    await mod.ensureAgentActivityListener();
+
+    native.emit?.({
+      payload: { id: 5, kind: "started", agent: "\u202eev\u0007il\u2066" },
+    });
+    expect(mod.useAgentActivityStore.getState().agents[5]).toBe("evil");
+    expect(seen.mock.calls[0][0].agent).toBe("evil");
+  });
+
+  it("sanitizes names into short plain text", async () => {
+    const { sanitizeAgentName } = await load();
+    expect(sanitizeAgentName("claude")).toBe("claude");
+    expect(sanitizeAgentName("\u0000a\u001fb\u007fc\u0085d\u009be")).toBe(
+      "abcde",
+    );
+    expect(
+      sanitizeAgentName("a\u061cb\u200ec\u200fd\u202ae\u202bf\u202cg"),
+    ).toBe("abcdefg");
+    expect(sanitizeAgentName("x\u202dy\u2067z\u2068w\u2069")).toBe("xyzw");
+    expect(sanitizeAgentName("line\u2028break\u2029")).toBe("linebreak");
+    expect(sanitizeAgentName("  spaced  ")).toBe("spaced");
+    expect(sanitizeAgentName("x".repeat(40))).toBe("x".repeat(32));
+    // Capped by characters, so astral characters are never split.
+    expect(
+      Array.from(sanitizeAgentName("\u{1f600}".repeat(40)) ?? ""),
+    ).toHaveLength(32);
+  });
+
+  it("drops names with nothing visible left", async () => {
+    const { sanitizeAgentName } = await load();
+    expect(sanitizeAgentName("")).toBeNull();
+    expect(sanitizeAgentName(" \u202e\u0001 ")).toBeNull();
+    expect(sanitizeAgentName(null)).toBeNull();
+    expect(sanitizeAgentName(42)).toBeNull();
   });
 });

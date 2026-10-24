@@ -7,10 +7,10 @@ below do.
 ## Verified on macOS (M4, macOS 26)
 
 - Frontend: lint (no new warnings), types, all vitest suites, production build,
-  size budgets, startup-graph check (`pnpm check:dist`), React Compiler health.
+  size budgets, startup-graph check (`bun run check:dist`), React Compiler health.
 - Rust: clippy `-D warnings`, nextest (incl. live FSEvents and PTY tests),
   Windows cross-check (`--target x86_64-pc-windows-gnu`).
-- Real-app benchmarks (`pnpm profile:app`): tab switching, window and divider
+- Real-app benchmarks (`bun run profile:app`): tab switching, window and divider
   drags, occlusion, steady agents, idle, file churn, keyboard/IME input injection.
 - Real transport (`scripts/pty-smoke`): echo, exit ordering, 16 MiB floods,
   keepalive, reload, origin/token admission.
@@ -21,16 +21,18 @@ below do.
 
 | Gate | Needed |
 | --- | --- |
-| Windows (WebView2, ConPTY) | Installer, text crispness at 125/150 %, contrast defaults, `terax-pty` long-poll, IME, AltGr, pwsh/cmd/WSL, resize behaviour (burst heuristic, no native live-resize signal). |
-| Linux (WebKitGTK 4.1) | Package install, WebGPU or WebGL path, `terax-pty` POST bodies, IME, resize. |
+| Windows (WebView2, ConPTY) | Installer, text crispness at 125/150 %, contrast defaults, `oarlock-pty` long-poll, IME, AltGr, pwsh/cmd/WSL, resize behaviour (burst heuristic, no native live-resize signal). |
+| Linux (WebKitGTK 4.1) | Package install, WebGPU or WebGL path, `oarlock-pty` POST bodies, IME, resize. |
 | Long sessions | A multi-hour daily-use run with agents on the release build; memory must return to its floor after tab switches, drags and occlusion. |
 | Accessibility | VoiceOver smoke test (the terminal input holds a selected placeholder character). |
 | Updater | Signed release artifacts and update from the previous beta. |
 
 ## Platform configuration
 
-- macOS minimum is 13.0 (Tauri config); the scalar WASM artifact covers webviews
-  without SIMD. A packaged run on macOS 13 is still worth doing.
+- macOS minimum is 13.3 (Tauri config): earlier 13.x WebKit (Safari 16.1 to
+  16.3) cannot parse the bundle's class static blocks and regex lookbehind. The
+  scalar WASM artifact covers webviews without SIMD. A packaged run on macOS 13.3
+  is still worth doing.
 - Windows uses a per-user NSIS installer with `downloadBootstrapper` (no bundled
   WebView2 runtime); offline installs need the runtime provisioned beforehand. No
   `minimumWebview2Version` is set.

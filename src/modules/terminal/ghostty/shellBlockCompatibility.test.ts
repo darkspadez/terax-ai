@@ -19,18 +19,18 @@ it.skipIf(process.platform === "win32")(
         "-c",
         `
 source() { :; }
-export TERAX_BLOCKS=1
+export OARLOCK_BLOCKS=1
 PS1='test> '
 . "$1" >/dev/null
 if (( BASH_VERSINFO[0] > 4 || BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4 )); then
-  test "$TERAX_BLOCKS" = 1 || exit 10
+  test "$OARLOCK_BLOCKS" = 1 || exit 10
   case "$PS0" in *'133;C'*) ;; *) exit 11 ;; esac
 else
-  test -z "$TERAX_BLOCKS" || exit 12
-  case "$PS1" in *'terax_blocks=0'*'test> '*) ;; *) exit 13 ;; esac
+  test -z "$OARLOCK_BLOCKS" || exit 12
+  case "$PS1" in *'oarlock_blocks=0'*'test> '*) ;; *) exit 13 ;; esac
 fi
 `,
-        "terax-test",
+        "oarlock-test",
         script,
       ],
       {

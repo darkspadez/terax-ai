@@ -22,8 +22,11 @@ import {
   setBackgroundKind,
   setBackgroundOpacity,
   setEditorTheme,
+  setTerminalOpacity,
   setWindowVibrancy,
+  TERMINAL_OPACITY_MIN,
 } from "@/modules/settings/store";
+import { currentPlatform } from "@/modules/settings/terminalBehavior";
 import { useTheme } from "@/modules/theme";
 import {
   deleteBgImage,
@@ -31,7 +34,7 @@ import {
 } from "@/modules/theme/bgImageStore";
 import {
   deleteCustomTheme,
-  saveCustomTheme,
+  saveCustomThemes,
 } from "@/modules/theme/customThemes";
 import {
   deleteThemeFile,
@@ -39,8 +42,7 @@ import {
   type ThemeEditRequest,
 } from "@/modules/theme/themeFiles";
 import { listBuiltinThemes } from "@/modules/theme/themes";
-import { DEFAULT_THEME_ID } from "@/modules/theme/types";
-import { validateTheme } from "@/modules/theme/validateTheme";
+import { DEFAULT_THEME_ID, type Theme } from "@/modules/theme/types";
 import {
   type Backdrop,
   getBackdropKind,
@@ -51,6 +53,10 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
+import { ThemePastePanel } from "../components/ThemePastePanel";
+
+// The parsers load on first use, so Settings opens without them.
+const loadThemeImporter = () => import("@/modules/theme/schemes/importTheme");
 
 export function ThemesSection() {
   const { themeId, setThemeId, resolvedMode, customThemes } = useTheme();
@@ -65,6 +71,7 @@ export function ThemesSection() {
   );
 
   const [importError, setImportError] = useState<string | null>(null);
+  const [pasteOpen, setPasteOpen] = useState(false);
   const [bgError, setBgError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const bgInputRef = useRef<HTMLInputElement | null>(null);
@@ -82,6 +89,7 @@ export function ThemesSection() {
   const backgroundOpacity = usePreferencesStore((s) => s.backgroundOpacity);
   const backgroundBlur = usePreferencesStore((s) => s.backgroundBlur);
   const windowVibrancy = usePreferencesStore((s) => s.windowVibrancy);
+  const terminalOpacity = usePreferencesStore((s) => s.terminalOpacity);
 
   const [backdrop, setBackdrop] = useState<Backdrop>("none");
   useEffect(() => {
@@ -94,26 +102,54 @@ export function ThemesSection() {
     };
   }, []);
 
+  const commitImported = async (imported: Theme[], errors: string[]) => {
+    const problems = [...errors];
+    if (imported.length > 0) {
+      try {
+        await saveCustomThemes(imported);
+        setThemeId(imported[0].id);
+      } catch (e) {
+        console.error("[oarlock] saving imported themes failed:", e);
+        problems.push("Could not save the imported theme.");
+      }
+    }
+    setImportError(problems.length > 0 ? problems.join("\n") : null);
+    return imported.length > 0 && problems.length === 0;
+  };
+
   const handleThemeFiles = async (files: FileList | null) => {
     setImportError(null);
     if (!files || files.length === 0) return;
-    for (const file of Array.from(files)) {
-      try {
-        const text = await file.text();
-        const parsed = JSON.parse(text);
-        const result = validateTheme(parsed);
-        if (!result.ok) {
-          setImportError(`${file.name}: ${result.error}`);
-          return;
-        }
-        await saveCustomTheme(result.theme);
-        setThemeId(result.theme.id);
-      } catch (e) {
-        setImportError(
-          `${file.name}: ${e instanceof Error ? e.message : "failed to read"}`,
-        );
-        return;
+    const selected = Array.from(files);
+    try {
+      const { importThemeFiles } = await loadThemeImporter();
+      const { themes: imported, errors } = await importThemeFiles(
+        selected,
+        themes.map((t) => t.id),
+      );
+      await commitImported(imported, errors);
+    } catch (e) {
+      console.error("[oarlock] theme import failed:", e);
+      setImportError("Could not import the theme.");
+    }
+  };
+
+  const importText = async (text: string) => {
+    setImportError(null);
+    try {
+      const { importThemeText } = await loadThemeImporter();
+      const result = importThemeText(text, {
+        takenIds: themes.map((t) => t.id),
+      });
+      if (!result.ok) {
+        setImportError(result.error);
+        return false;
       }
+      return await commitImported(result.themes, []);
+    } catch (e) {
+      console.error("[oarlock] theme import failed:", e);
+      setImportError("Could not import the theme.");
+      return false;
     }
   };
 
@@ -177,6 +213,25 @@ export function ThemesSection() {
         </SettingRow>
       )}
 
+      <SettingRow
+        title="Terminal opacity"
+        description={terminalOpacityDescription(backdrop)}
+      >
+        <div className="flex w-40 items-center gap-2.5">
+          <Slider
+            value={[terminalOpacity]}
+            min={TERMINAL_OPACITY_MIN}
+            max={1}
+            step={0.05}
+            aria-label="Terminal opacity"
+            onValueChange={(v) => void setTerminalOpacity(v[0] ?? 1)}
+          />
+          <span className="w-9 shrink-0 text-right tabular-nums text-[11px] text-muted-foreground">
+            {Math.round(terminalOpacity * 100)}%
+          </span>
+        </div>
+      </SettingRow>
+
       <div
         role="presentation"
         className="flex flex-col gap-2"
@@ -186,7 +241,12 @@ export function ThemesSection() {
         }}
         onDrop={(e) => {
           e.preventDefault();
-          void handleThemeFiles(e.dataTransfer.files);
+          if (e.dataTransfer.files.length > 0) {
+            void handleThemeFiles(e.dataTransfer.files);
+            return;
+          }
+          const text = e.dataTransfer.getData("text/plain");
+          if (text.trim() !== "") void importText(text);
         }}
       >
         <div className="flex items-center justify-between">
@@ -205,15 +265,28 @@ export function ThemesSection() {
               variant="outline"
               size="sm"
               className="h-7 px-2 text-[11px]"
+              title="Import a .oarlock-theme, or a Ghostty, iTerm2, Alacritty or Windows Terminal colour scheme"
               onClick={onPickThemeFile}
             >
-              Import .terax-theme
+              Import…
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-[11px]"
+              aria-expanded={pasteOpen}
+              onClick={() => {
+                setImportError(null);
+                setPasteOpen((open) => !open);
+              }}
+            >
+              Paste
             </Button>
           </div>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".terax-theme,.json,application/json"
+            multiple
             className="hidden"
             onChange={(e) => {
               void handleThemeFiles(e.target.files);
@@ -221,8 +294,21 @@ export function ThemesSection() {
             }}
           />
         </div>
+        <p className="text-[11px] text-muted-foreground">
+          Import, paste or drop a .oarlock-theme, or a Ghostty, iTerm2, Alacritty
+          or Windows Terminal colour scheme.
+        </p>
+        {pasteOpen ? (
+          <ThemePastePanel
+            onImport={importText}
+            onClose={() => setPasteOpen(false)}
+          />
+        ) : null}
         {importError ? (
-          <div className="rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-[11.5px] text-destructive">
+          <div
+            role="alert"
+            className="whitespace-pre-line wrap-break-word rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-[11.5px] text-destructive"
+          >
             {importError}
           </div>
         ) : null}
@@ -443,6 +529,15 @@ export function ThemesSection() {
       </div>
     </div>
   );
+}
+
+/** What lowering the terminal opacity shows, on this platform. */
+function terminalOpacityDescription(backdrop: Backdrop): string {
+  const base =
+    "Let what is behind the window show through terminal backgrounds and the frame around them. Text and coloured cells stay solid; a theme's own transparency adds to this.";
+  if (backdrop === "vibrancy") return `${base} Frosted while vibrancy is on.`;
+  if (backdrop === "mica") return `${base} Mica shows through while it is on.`;
+  return currentPlatform() === "linux" ? `${base} Needs a compositor.` : base;
 }
 
 function Label({ children }: { children: React.ReactNode }) {

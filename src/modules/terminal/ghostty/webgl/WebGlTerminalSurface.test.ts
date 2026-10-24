@@ -3,6 +3,7 @@ import {
   endTerminalResizeInteraction,
 } from "@/modules/terminal/lib/terminalResizeInteraction";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { TERMINAL_SCROLLBAR_WIDTH } from "@/modules/terminal/ghostty/gpu/TerminalFit";
 import type { GhosttyTerminalModelApi } from "@/modules/terminal/ghostty/GhosttyTerminalModel";
 import type { WindowPresentation } from "@/modules/terminal/ghostty/WindowPresentationPolicy";
 import type { WebGlCellRenderer } from "@/modules/terminal/ghostty/webgl/WebGlCellRenderer";
@@ -58,6 +59,20 @@ describe("WebGL surface renderer ownership", () => {
     },
   );
 
+  // crynta/terax-ai#556: a translucent terminal needs a renderer with alpha.
+  it("sizes the renderer a translucency change brings and stops painting the root", () => {
+    const h = harness();
+    const translucent = renderer();
+    h.acquire.mockReturnValue(translucent);
+    h.surface.setTheme({ ...THEME, translucent: true });
+    expect(translucent.resize).toHaveBeenCalledOnce();
+    expect(translucent.resetModel).not.toHaveBeenCalled();
+    expect(h.surface.eventTarget().style.backgroundColor).toBe("transparent");
+    h.surface.setTheme({ ...THEME, translucent: true, background: [1, 2, 3] });
+    expect(translucent.resize).toHaveBeenCalledOnce();
+    expect(translucent.resetModel).toHaveBeenCalledOnce();
+  });
+
   it("replaces a failed renderer once while retaining model and selection", () => {
     const h = harness();
     const replacement = renderer();
@@ -103,7 +118,7 @@ describe("WebGL surface resizing", () => {
     endTerminalResizeInteraction(token);
     h.surface.renderFrame(h.renderer as unknown as WebGlCellRenderer);
 
-    const cols = Math.floor((960 - 62 * 8) / 8);
+    const cols = Math.floor((960 - 62 * 8 - TERMINAL_SCROLLBAR_WIDTH) / 8);
     expect(h.onResize).toHaveBeenCalledOnce();
     expect(h.onResize).toHaveBeenCalledWith(cols, expect.any(Number));
     expect(h.surface.diagnostics().cols).toBe(cols);
@@ -115,12 +130,103 @@ describe("WebGL surface resizing", () => {
     vi.advanceTimersByTime(500);
     h.onResize.mockClear();
 
-    h.setHost(800);
+    // 100 columns of 8 px beside the scrollbar strip.
+    h.setHost(800 + TERMINAL_SCROLLBAR_WIDTH);
     h.resize();
     h.surface.renderFrame(h.renderer as unknown as WebGlCellRenderer);
 
     expect(h.onResize).toHaveBeenCalledOnce();
     expect(h.surface.diagnostics().cols).toBe(100);
+  });
+});
+
+describe("WebGL surface Kitty animations", () => {
+  it("advances animations before the frame reads the model, wakes for the next one, and sleeps while hidden", () => {
+    const h = harness();
+    const render = () =>
+      h.surface.renderFrame(h.renderer as unknown as WebGlCellRenderer);
+    render();
+    expect(h.model.advanceImageAnimations).not.toHaveBeenCalled();
+    // Images appear: one more frame starts their clock.
+    h.renderer.imagesShown = true;
+    h.schedule.mockClear();
+    render();
+    expect(h.schedule).toHaveBeenCalledOnce();
+    h.animationDelays.push(50, 50);
+    h.calls.length = 0;
+    h.schedule.mockClear();
+    render();
+    expect(h.calls).toEqual(["advanceImageAnimations", "consumeDamage"]);
+    vi.advanceTimersByTime(49);
+    expect(h.schedule).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(h.schedule).toHaveBeenCalledOnce();
+    render();
+    expect(h.model.advanceImageAnimations).toHaveBeenCalledTimes(2);
+    h.schedule.mockClear();
+    h.visibility(false);
+    vi.advanceTimersByTime(5_000);
+    expect(h.schedule).not.toHaveBeenCalled();
+  });
+});
+
+describe("WebGL surface hovered link underline", () => {
+  it("hands the hovered link's cells to the renderer and drops them on leave or new content", () => {
+    const h = harness();
+    const root = h.surface.eventTarget() as unknown as {
+      getBoundingClientRect: () => object;
+    };
+    root.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      width: 960,
+      height: 640,
+    });
+    const render = () =>
+      h.surface.renderFrame(h.renderer as unknown as WebGlCellRenderer);
+    const lastLink = () => {
+      const calls = h.renderer.render.mock.calls as unknown as Array<
+        [{ link?: unknown }]
+      >;
+      return calls[calls.length - 1]?.[0].link;
+    };
+    render();
+    const link = {
+      uri: "https://example.com",
+      spans: [{ row: 1, startColumn: 4, endColumn: 9 }],
+    };
+    Object.assign(h.model, {
+      linkAtViewportCell: (row: number, column: number) =>
+        row === 1 && column >= 4 && column <= 9 ? link : null,
+    });
+    const cols = h.surface.diagnostics().cols;
+    h.schedule.mockClear();
+    h.surface.eventTarget().dispatchEvent(
+      Object.assign(new Event("mousemove"), {
+        clientX: 5 * 8 + 2,
+        clientY: 20,
+      }),
+    );
+    expect(h.schedule).toHaveBeenCalledOnce();
+    render();
+    expect(lastLink()).toEqual({ start: cols + 4, end: cols + 9 });
+
+    h.surface.eventTarget().dispatchEvent(new Event("mouseleave"));
+    expect(h.schedule).toHaveBeenCalledTimes(2);
+    render();
+    expect(lastLink()).toBeNull();
+
+    h.surface.eventTarget().dispatchEvent(
+      Object.assign(new Event("mousemove"), {
+        clientX: 5 * 8 + 2,
+        clientY: 20,
+      }),
+    );
+    render();
+    expect(lastLink()).not.toBeNull();
+    Object.assign(h.model, { revision: () => 7 });
+    render();
+    expect(lastLink()).toBeNull();
   });
 });
 
@@ -156,6 +262,7 @@ function renderer() {
     diagnostics: vi.fn(() => ({})),
     requestPresentation: vi.fn(),
     hasBlinkingCells: false,
+    imagesShown: false,
   };
 }
 
@@ -187,6 +294,7 @@ function harness() {
       append: vi.fn(),
       appendChild: vi.fn(),
       remove: vi.fn(),
+      contains: () => false,
       getBoundingClientRect: () => ({ width: 960, height: 640 }),
       getContext: () => measuringContext(),
     });
@@ -211,11 +319,14 @@ function harness() {
   );
   const current = renderer();
   const acquire = vi.fn(() => current);
+  const schedule = vi.fn();
+  const calls: string[] = [];
+  const animationDelays: Array<number | null> = [];
   bridge.runtime = {
     acquire,
     release: vi.fn(),
     discard: vi.fn(),
-    schedule: vi.fn(),
+    schedule,
     interact: vi.fn(),
     trimForHiddenDocument: vi.fn(),
   };
@@ -242,7 +353,14 @@ function harness() {
     },
     cursor: () => ({ x: 0, y: 0, visible: true, blinking: false }),
     deferPresentation: () => false,
-    consumeDamage: () => ({ kind: "none" }),
+    consumeDamage: () => {
+      calls.push("consumeDamage");
+      return { kind: "none" };
+    },
+    advanceImageAnimations: vi.fn((_now: number) => {
+      calls.push("advanceImageAnimations");
+      return animationDelays.shift() ?? null;
+    }),
   };
   const onError = vi.fn();
   const onResize = vi.fn();
@@ -262,6 +380,12 @@ function harness() {
   surface.attach(hostElement as unknown as HTMLElement);
   return {
     surface,
+    model,
+    schedule,
+    calls,
+    animationDelays,
+    visibility: (visible: boolean) =>
+      bridge.visibility({ visible, reclaim: false }),
     onResize,
     setHost(width: number, height = 640) {
       hostSize.width = width;

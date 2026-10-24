@@ -3,6 +3,7 @@ import type { ToolUIPart, UIMessagePart } from "ai";
 import { useEffect, useMemo, useRef } from "react";
 import { native } from "../lib/native";
 import { checkReadable } from "../lib/security";
+import { pendingApprovalIds } from "../lib/toolApprovals";
 import { resolvePath } from "../tools/tools";
 import {
   flushPersist,
@@ -10,6 +11,7 @@ import {
   type AgentRunStatus,
 } from "../store/chatStore";
 import { getOrCreateChat } from "../store/chatRuntime";
+import { McpRequestsHost } from "@/modules/mcp/components/McpRequestsHost";
 
 /**
  * Headless bridge that mirrors chat lifecycle into the store, so the status
@@ -39,8 +41,13 @@ export type AgentRunBridgeProps = {
 
 export function AgentRunBridge(props: AgentRunBridgeProps) {
   const sessionId = useChatStore((s) => s.activeSessionId);
-  if (!sessionId) return null;
-  return <Bridge sessionId={sessionId} {...props} />;
+  const openMini = useChatStore((s) => s.openMini);
+  return (
+    <>
+      <McpRequestsHost onShowChat={openMini} />
+      {sessionId ? <Bridge sessionId={sessionId} {...props} /> : null}
+    </>
+  );
 }
 
 type BridgeProps = { sessionId: string } & AgentRunBridgeProps;
@@ -70,12 +77,15 @@ function Bridge({
 
   // Expose the approval responder so the diff tab can resolve approvals.
   // We keep it in a ref-stable closure so identity is stable per render.
+  // A superseded approval is never answered: its call would stay without a
+  // result and fail every later request.
   useEffect(() => {
-    setApprovalResponder((id, approved) =>
-      addToolApprovalResponse({ id, approved }),
-    );
+    setApprovalResponder((id, approved) => {
+      if (!pendingApprovalIds(chat.messages).includes(id)) return;
+      void addToolApprovalResponse({ id, approved });
+    });
     return () => setApprovalResponder(null);
-  }, [setApprovalResponder, addToolApprovalResponse]);
+  }, [chat, setApprovalResponder, addToolApprovalResponse]);
 
   useEffect(() => {
     persistMessages(sessionId, messages);
@@ -92,16 +102,8 @@ function Bridge({
     return () => flushPersist(sessionId);
   }, [sessionId]);
 
-  const approvalsPending = useMemo(() => {
-    let n = 0;
-    for (const m of messages) {
-      if (m.role !== "assistant") continue;
-      for (const p of m.parts) {
-        if ((p as { state?: string }).state === "approval-requested") n++;
-      }
-    }
-    return n;
-  }, [messages]);
+  const liveApprovals = useMemo(() => pendingApprovalIds(messages), [messages]);
+  const approvalsPending = liveApprovals.length;
 
   useEffect(() => {
     let runStatus: AgentRunStatus;
@@ -151,12 +153,12 @@ function Bridge({
           const state = (p as { state?: string }).state ?? "";
           const id =
             (p as { approval?: { id?: string } }).approval?.id ?? "";
-          fp += `${id}:${state}|`;
+          fp += `${id}:${state}:${liveApprovals.includes(id) ? 1 : 0}|`;
         }
       }
     }
     return fp;
-  }, [messages]);
+  }, [messages, liveApprovals]);
 
   useEffect(() => {
     type Pending = {
@@ -185,16 +187,15 @@ function Bridge({
         if (!info) continue;
         const { state, approvalId, path, derive } = info;
         if (!approvalId) continue;
-        if (state === "approval-requested") {
+        if (
+          state === "approval-requested" &&
+          liveApprovals.includes(approvalId)
+        ) {
           if (!openedRef.current.has(approvalId)) {
             pending.push({ approvalId, path, derive });
           }
-        } else if (
-          state === "approval-responded" ||
-          state === "output-available" ||
-          state === "output-error"
-        ) {
-          if (openedRef.current.has(approvalId)) toClose.add(approvalId);
+        } else if (openedRef.current.has(approvalId)) {
+          toClose.add(approvalId);
         }
       }
     }
@@ -246,7 +247,13 @@ function Bridge({
     return () => {
       cancelled = true;
     };
-  }, [messages, fileMutationFingerprint, openAiDiffTab, closeAiDiffTab]);
+  }, [
+    messages,
+    liveApprovals,
+    fileMutationFingerprint,
+    openAiDiffTab,
+    closeAiDiffTab,
+  ]);
 
   return null;
 }

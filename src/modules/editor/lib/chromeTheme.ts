@@ -303,6 +303,13 @@ const chrome = EditorView.theme({
     },
   },
   ".cm-panel.cm-search .cm-textfield": { minWidth: "180px" },
+  ".cm-panel.cm-search .cm-search-count": {
+    fontSize: "11px",
+    color: "var(--muted-foreground)",
+    fontVariantNumeric: "tabular-nums",
+    whiteSpace: "nowrap",
+    "&:empty": { display: "none" },
+  },
   ".cm-panel .cm-button": {
     backgroundImage: "none",
     backgroundColor: "color-mix(in srgb, var(--muted) 60%, transparent)",

@@ -1,6 +1,6 @@
 # Terminal model ownership and renderer pools
 
-This guide elaborates on `TERAX.md`, which takes precedence.
+This guide elaborates on `AGENTS.md`, which takes precedence.
 
 Every terminal leaf owns one libghostty model and one PTY. Renderer leases never
 own terminal state. Switching tabs, changing graphics APIs, or losing a GPU
@@ -17,7 +17,10 @@ drag. Each frame uses one encoder/submission and one render pass for all panes.
 Per-pane deadlines bound focused, background-pane, and unfocused-window
 cadences to 60, 30, and 15 fps. At most two submissions await GPU completion.
 
-`ghostty/webgl/WebGlTerminalRuntime.ts` pools at most five WebGL2 renderer slots.
+`ghostty/webgl/WebGlTerminalRuntime.ts` pools at most nine WebGL2 renderer slots:
+one for each pane a tab can hold (`MAX_PANES_PER_TAB`, eight, in `lib/panes.ts`)
+and one more, so a pane being shown never waits for another to give its slot back.
+Slots are created on demand, so fewer panes cost fewer contexts.
 Each slot owns a `WebGlCellRenderer`, which consumes the same Ghostty model and
 dirty-row information as WebGPU. One idle slot stays warm for up to 30 seconds.
 The adapted renderer retains its upstream MIT attribution; no xterm runtime or

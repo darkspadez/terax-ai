@@ -2,16 +2,24 @@ import type { BlockMode } from "@/modules/terminal/block/lib/modeMachine";
 import {
   clearGhosttySession,
   disposeGhosttySession,
+  dropOnGhosttySession,
   focusGhosttySession,
   ghosttyFocusedLeaf,
+  ghosttyLeafHasForegroundJob,
   ghosttyLeafHasForegroundProcess,
   ghosttyLeafIdForPty,
   ghosttyCwdForLeaf,
   ghosttyPtyIdForLeaf,
   ghosttySelectionForLeaf,
+  ghosttySessionInAlternateScreen,
+  type GhosttyScrollAction,
   hasGhosttySession,
   interruptGhosttySession,
+  leaveGhosttySessionDrag,
+  offerDragToGhosttySession,
   pasteIntoGhosttySession,
+  restartGhosttySession,
+  scrollGhosttySession,
   submitToGhosttySession,
   whenGhosttySessionReady,
   writeToGhosttySession,
@@ -23,6 +31,8 @@ import {
 } from "@/modules/terminal/ghostty/ghosttyBlockSessions";
 export type { WatermarkState } from "@/modules/terminal/ghostty/ghosttyBlockSessions";
 import { forgetLeafPresentation } from "@/modules/terminal/lib/ptyPresentation";
+import { useTerminalFontOffsets } from "@/modules/terminal/lib/terminalFontOffsets";
+import { useTerminalStatusStore } from "@/modules/terminal/lib/terminalStatus";
 import type { WatermarkState } from "@/modules/terminal/ghostty/ghosttyBlockSessions";
 
 export async function whenSessionReady(
@@ -56,16 +66,67 @@ export function pasteIntoSession(leafId: number, text: string): boolean {
   return pasteIntoGhosttySession(leafId, text);
 }
 
+/**
+ * Offers a drag of files over the leaf to the program running there; false
+ * when it did not register for drops (Kitty OSC 72), so the drop pastes.
+ */
+export function offerDragToSession(
+  leafId: number,
+  clientX: number,
+  clientY: number,
+): boolean {
+  return offerDragToGhosttySession(leafId, clientX, clientY);
+}
+
+/** Drops files on the leaf's program; false when it takes no drops. */
+export function dropOnSession(
+  leafId: number,
+  clientX: number,
+  clientY: number,
+  paths: readonly string[],
+): boolean {
+  return dropOnGhosttySession(leafId, clientX, clientY, paths);
+}
+
+/** A drag offered to the leaf's program left without dropping. */
+export function leaveSessionDrag(leafId: number): void {
+  leaveGhosttySessionDrag(leafId);
+}
+
 export function leafCwd(leafId: number): string | null {
   return ghosttyCwdForLeaf(leafId);
 }
 
 export function navigateFocusedBlocks(direction: -1 | 1): boolean {
   const leaf = ghosttyFocusedLeaf();
-  return (
-    leaf !== null &&
-    (ghosttyBlocks(leaf)?.controller?.navigate(direction) ?? false)
+  if (leaf === null) return false;
+  const controller = ghosttyBlocks(leaf)?.controller;
+  if (controller) return controller.navigate(direction);
+  // Plain terminals jump between the prompts shell integration marks.
+  return scrollGhosttySession(
+    leaf,
+    direction < 0 ? "prompt-previous" : "prompt-next",
   );
+}
+
+/** Scrolls the focused pane (page, top, bottom). */
+export function scrollFocusedTerminal(action: GhosttyScrollAction): boolean {
+  const leaf = ghosttyFocusedLeaf();
+  return leaf !== null && scrollGhosttySession(leaf, action);
+}
+
+/** The focused pane runs a full-screen program, which keeps its keys. */
+export function focusedTerminalInAlternateScreen(): boolean {
+  const leaf = ghosttyFocusedLeaf();
+  return leaf !== null && ghosttySessionInAlternateScreen(leaf);
+}
+
+/** Grows, shrinks or resets the focused pane's text size. */
+export function adjustFocusedTerminalFont(delta: number | "reset"): boolean {
+  const leaf = ghosttyFocusedLeaf();
+  if (leaf === null) return false;
+  useTerminalFontOffsets.getState().adjust(leaf, delta);
+  return true;
 }
 
 export function clearLeafBlockSelection(leafId: number): boolean {
@@ -155,6 +216,27 @@ export async function leafHasForegroundProcess(
   leafId: number,
 ): Promise<boolean> {
   return ghosttyLeafHasForegroundProcess(leafId);
+}
+
+/**
+ * Whether text typed into the pane reaches its shell at the prompt rather
+ * than a running program: no command running (shell integration) and no job
+ * owning the terminal. Null when that cannot be told (no shell, check failed).
+ */
+export async function leafShellAtPrompt(
+  leafId: number,
+): Promise<boolean | null> {
+  if (useTerminalStatusStore.getState().leaves[leafId]?.running) return false;
+  const job = await ghosttyLeafHasForegroundJob(leafId);
+  return job === null ? null : !job;
+}
+
+/**
+ * Ends the pane's shell, and any program running in it, and starts a new one
+ * in the folder the shell was in.
+ */
+export function restartSession(leafId: number): Promise<boolean> {
+  return restartGhosttySession(leafId);
 }
 
 export function disposeSession(leafId: number): void {

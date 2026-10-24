@@ -1,13 +1,13 @@
 # Ghostty WebGL renderer
 
-This document defines Terax's production candidate terminal path:
+This document defines Oarlock's production candidate terminal path:
 
 ```text
 portable-pty bytes
   -> libghostty-vt WASM model
   -> borrowed typed render views and row damage
-  -> Terax renderer lease
-  -> Terax-owned, xterm-inspired WebGL renderer
+  -> Oarlock renderer lease
+  -> Oarlock-owned, xterm-inspired WebGL renderer
 ```
 
 WebGPU is selected first on supported webviews. This WebGL renderer is the
@@ -22,7 +22,7 @@ decoration, link, and browser services. Keeping an xterm.js `Terminal` behind
 the addon would parse every PTY byte twice and retain two screen and scrollback
 models. That would invalidate the main RAM and CPU goal.
 
-Terax therefore adapts the renderer boundary instead of emulating xterm.js
+Oarlock therefore adapts the renderer boundary instead of emulating xterm.js
 internals. The fork keeps the proven parts of the xterm.js renderer design:
 
 - instanced rectangle and glyph rendering;
@@ -32,7 +32,7 @@ internals. The fork keeps the proven parts of the xterm.js renderer design:
 - device-pixel rendering and texture-atlas invalidation;
 - frame-driven rendering with no idle animation loop.
 
-Terax replaces xterm.js buffer and service dependencies with direct reads from
+Oarlock replaces xterm.js buffer and service dependencies with direct reads from
 `GhosttyTerminalModelApi`, implemented by `AdaptedGhosttyTerminalModel`. Upstream provenance, commit, package version, and the
 MIT license are retained beside the adapted source in
 `src/modules/terminal/ghostty/webgl`.
@@ -45,7 +45,7 @@ only while a pane is visible.
 
 The first implementation uses these bounds:
 
-- at most five simultaneous renderer slots, matching the existing Terax pool;
+- at most nine simultaneous renderer slots, the pane limit of a tab plus one;
 - one warm idle renderer slot;
 - surplus idle WebGL contexts reclaimed after 30 seconds;
 - one requestAnimationFrame scheduler shared by all Ghostty WebGL surfaces;
@@ -106,7 +106,7 @@ this renderer for new terminals. Retired xterm overrides are ignored.
 WebGL2 creation permits software contexts where the webview supports them.
 Graphics failure stays visible and retryable without changing terminal models.
 
-Terax ships no xterm model, addon, CSS, snapshot, or legacy renderer-pool code.
+Oarlock ships no xterm model, addon, CSS, snapshot, or legacy renderer-pool code.
 The WebGL source retains its MIT license and upstream provenance.
 
 ## Maintained libghostty adaptation
@@ -115,7 +115,7 @@ The active model is built from Ghostty commit
 `349f026087d948f8f898dca3231ff91438f83ab8` in `ReleaseFast` mode. The bridge
 started from the useful low-level Restty work at commit
 `7700b14a7643ba9240818209ef1e0aa90d83ad77`, but the Restty application,
-component model, renderer lifecycle, and package runtime are not used. Terax
+component model, renderer lifecycle, and package runtime are not used. Oarlock
 owns the bridge, build, JavaScript boundary, renderers, and product integration.
 
 SIMD and scalar artifacts share the pinned source and bridge. The loader fetches
@@ -156,7 +156,7 @@ marks, search, rerun, and shared input. Accessibility also loads on demand.
 Regression tests reject xterm dependencies in the manifest and lockfile.
 
 Ghostty's incremental search API owns query matching and scrollback traversal.
-Terax keeps only a viewport-sized byte mask for renderer highlights and advances
+Oarlock keeps only a viewport-sized byte mask for renderer highlights and advances
 long searches in bounded animation-frame steps. Search does not copy the full
 scrollback into JavaScript.
 
@@ -222,7 +222,7 @@ and energy impact still require the release benchmark matrix below.
 
 Ghostty WebGPU is the branch's capability-gated default and Ghostty WebGL is
 its first fallback so both paths receive integration coverage. That is not a
-production certification. Shipping either path as Terax's stable default still
+production certification. Shipping either path as Oarlock's stable default still
 requires the compatibility matrix in `ghostty-webgpu-migration.md` and repeated
 release-build benchmarks against the other backends.
 

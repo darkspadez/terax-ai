@@ -20,6 +20,7 @@ import { highlight, isHighlightable, type HighlightedNode } from "./chat-code-le
 // work and a flashing skeleton is calmer UI than text that grows char-by-char.
 const StreamingCtx = createContext(false);
 export const ChatStreamingProvider = StreamingCtx.Provider;
+export const useChatStreaming = () => useContext(StreamingCtx);
 
 const POSIX_SHELL = new Set([
   "bash",
@@ -58,6 +59,10 @@ export type ChatCodeBlockProps = {
   lang: string | null;
 };
 
+/**
+ * A fenced block of an AI chat reply: shell blocks are command cards with
+ * Run in terminal, the rest highlighted code.
+ */
 export function ChatCodeBlock({ code, lang }: ChatCodeBlockProps) {
   const streaming = useContext(StreamingCtx);
   const label = normalizeLangLabel(lang ?? "");
@@ -84,7 +89,8 @@ function GeneratingPlaceholder({ label }: { label: string }) {
   );
 }
 
-function BlockChrome({
+/** Code block frame: language label and copy button over the content. */
+export function BlockChrome({
   label,
   code,
   children,
@@ -123,7 +129,7 @@ function FinalizedCodeBlock({ code, lang }: { code: string; lang: string }) {
   );
 }
 
-const HighlightedPre = memo(function HighlightedPre({
+export const HighlightedPre = memo(function HighlightedPre({
   code,
   lang,
 }: {
@@ -212,6 +218,8 @@ function CommandCard({ code, lang }: { code: string; lang: string }) {
   );
 }
 
+// Types the command into the active terminal. AI chat replies only: a
+// Markdown file from disk never offers this (the preview's PreviewCode).
 function RunInTerminalButton({ command }: { command: string }) {
   const [sent, setSent] = useState(false);
   const tRef = useRef<number>(0);
@@ -242,7 +250,7 @@ function RunInTerminalButton({ command }: { command: string }) {
   );
 }
 
-function CopyButton({ text }: { text: string }) {
+export function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const tRef = useRef<number>(0);
 

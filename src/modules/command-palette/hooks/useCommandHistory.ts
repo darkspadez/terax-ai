@@ -4,11 +4,12 @@ import { type AsyncQueryState, useAsyncQuery } from "./useAsyncQuery";
 
 const LIMIT = 60;
 const DEBOUNCE_MS = 80;
+const NO_HISTORY: string[] = [];
 
 export function useCommandHistory(
   term: string,
   enabled: boolean,
-): AsyncQueryState<string> {
+): AsyncQueryState<string[]> {
   const run = useCallback(
     async (q: string) => Array.from(new Set(await historyList(q, LIMIT))),
     [],
@@ -20,5 +21,6 @@ export function useCommandHistory(
     minLength: 0,
     debounceMs: DEBOUNCE_MS,
     run,
+    empty: NO_HISTORY,
   });
 }

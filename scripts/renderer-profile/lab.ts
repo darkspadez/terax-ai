@@ -12,10 +12,10 @@ declare global {
     };
   }
 }
-// `--native-signal`: stand in for the NSWindow live-resize notifications Terax forwards from
+// `--native-signal`: stand in for the NSWindow live-resize notifications Oarlock forwards from
 // window_presentation.rs (the lab has no Tauri host). Without it only the heuristic runs.
 if (new URLSearchParams(location.search).get("nativeSignal") === "1") {
-  (window as unknown as { __teraxLiveResize: (active: boolean) => void }).__teraxLiveResize =
+  (window as unknown as { __oarlockLiveResize: (active: boolean) => void }).__oarlockLiveResize =
     setNativeLiveResize;
 }
 const core = getGhosttyCoreRuntime();

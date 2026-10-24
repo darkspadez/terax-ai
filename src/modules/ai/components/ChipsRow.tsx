@@ -5,7 +5,13 @@ import type { FileAttachment } from "../lib/composer";
 import type { Snippet } from "../lib/snippets";
 import { Chip } from "./Chip";
 
-type CommandChip = { name: string; label: string; icon: typeof HashtagIcon };
+type CommandChip = {
+  name: string;
+  label: string;
+  icon: typeof HashtagIcon;
+  skill?: boolean;
+  prompt?: boolean;
+};
 
 type Props = {
   files: FileAttachment[];
@@ -39,9 +45,16 @@ export function ChipsRow({
           icon={cmd.icon}
           title={cmd.label}
           onRemove={() => onRemoveCommand(cmd.name)}
-          removeLabel="Remove command"
+          removeLabel={
+            cmd.skill
+              ? "Remove skill"
+              : cmd.prompt
+                ? "Remove prompt"
+                : "Remove command"
+          }
         >
-          #{cmd.name}
+          {cmd.skill || cmd.prompt ? "/" : "#"}
+          {cmd.name}
         </Chip>
       ))}
       {snippets.map((s) => (
@@ -60,6 +73,12 @@ export function ChipsRow({
         <Chip
           key={f.id}
           iconNode={fileIcon(f)}
+          label={f.mcp?.server}
+          title={
+            f.mcp
+              ? `From the MCP server ${f.mcp.server} (outside content): ${f.mcp.uri}`
+              : undefined
+          }
           onRemove={() => onRemoveFile(f.id)}
         >
           {f.name}

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Tab } from "@/modules/tabs";
 import {
   type CommandPaletteActionContext,
@@ -27,8 +27,12 @@ function baseContext(
     explorerRoot: "/workspace",
     home: "/home/me",
     spaces: [],
+    paneLimit: 8,
     activeSpaceId: null,
     openNewTab: noop,
+    openNewWindow: noop,
+    openFolder: noop,
+    quit: noop,
     openNewBlock: noop,
     openNewPrivate: noop,
     openNewEditor: noop,
@@ -38,11 +42,14 @@ function baseContext(
     closeActiveTabOrPane: noop,
     splitPaneRight: noop,
     splitPaneDown: noop,
+    movePaneToNewTab: noop,
+    restartTerminal: noop,
     focusSearch: noop,
     focusExplorerSearch: noop,
     toggleSidebar: noop,
     toggleHiddenFiles: noop,
     toggleAi: noop,
+    newAiConversation: noop,
     askAiSelection: noop,
     openSettings: noop,
     openKeyboardShortcuts: noop,
@@ -72,6 +79,87 @@ describe("createCommandItems", () => {
     );
   });
 
+  // crynta/terax-ai#1150: the pane limit is a setting.
+  it("disables split at the configured pane limit, also above it", () => {
+    const split = {
+      ...terminalTab(1),
+      paneTree: {
+        kind: "split",
+        id: 5,
+        dir: "row",
+        children: [
+          { kind: "leaf", id: 10 },
+          { kind: "leaf", id: 11 },
+          { kind: "leaf", id: 12 },
+        ],
+      },
+    } as unknown as Tab;
+    const reason = (paneLimit: number) =>
+      reasonById({ tabs: [split], paneLimit }, "pane.splitRight");
+    expect(reason(4)).toBeUndefined();
+    expect(reason(3)).toBe("Pane limit");
+    expect(reason(2)).toBe("Pane limit");
+    expect(reasonById({ paneLimit: 1 }, "pane.splitDown")).toBe("Pane limit");
+  });
+
+  it("disables move pane to new tab on a single-pane terminal", () => {
+    expect(reasonById({}, "pane.moveToNewTab")).toBe("Single pane");
+  });
+
+  it("enables move pane to new tab on a split terminal", () => {
+    const split = {
+      ...terminalTab(1),
+      paneTree: {
+        kind: "split",
+        id: 5,
+        dir: "row",
+        children: [
+          { kind: "leaf", id: 10 },
+          { kind: "leaf", id: 11 },
+        ],
+      },
+    } as unknown as Tab;
+    expect(reasonById({ tabs: [split] }, "pane.moveToNewTab")).toBeUndefined();
+  });
+
+  it("disables move pane to new tab without a terminal tab", () => {
+    const editorTab = { ...terminalTab(1), kind: "editor" } as unknown as Tab;
+    expect(reasonById({ tabs: [editorTab] }, "pane.moveToNewTab")).toBe(
+      "No terminal tab",
+    );
+  });
+
+  it("restarts the terminal through the palette and its own shortcut", () => {
+    const restartTerminal = vi.fn();
+    const item = createCommandItems(baseContext({ restartTerminal })).find(
+      (i) => i.id === "terminal.restart",
+    );
+    expect(item?.shortcutId).toBe("terminal.restart");
+    expect(item?.disabledReason).toBeUndefined();
+    item?.run();
+    expect(restartTerminal).toHaveBeenCalledOnce();
+  });
+
+  // crynta/terax-ai#444: a new conversation from the palette, under its shortcut.
+  it("starts a new AI conversation through the palette and its own shortcut", () => {
+    const newAiConversation = vi.fn();
+    const item = createCommandItems(baseContext({ newAiConversation })).find(
+      (i) => i.id === "ai.newConversation",
+    );
+    expect(item?.group).toBe("AI");
+    expect(item?.shortcutId).toBe("ai.newConversation");
+    expect(item?.disabledReason).toBeUndefined();
+    item?.run();
+    expect(newAiConversation).toHaveBeenCalledOnce();
+  });
+
+  it("disables restarting without a terminal tab", () => {
+    const editorTab = { ...terminalTab(1), kind: "editor" } as unknown as Tab;
+    expect(reasonById({ tabs: [editorTab] }, "terminal.restart")).toBe(
+      "No terminal tab",
+    );
+  });
+
   it("disables close on the last tab with a single pane", () => {
     expect(reasonById({}, "tab.close")).toBe("Last tab");
   });
@@ -92,6 +180,16 @@ describe("createCommandItems", () => {
     expect(reasonById({ explorerRoot: null }, "explorer.search")).toBe(
       "No workspace root",
     );
+  });
+
+  it("offers Open folder even without a workspace root", () => {
+    const openFolder = vi.fn();
+    const item = createCommandItems(
+      baseContext({ explorerRoot: null, home: null, openFolder }),
+    ).find((i) => i.id === "folder.open");
+    expect(item?.disabledReason).toBeUndefined();
+    item?.run();
+    expect(openFolder).toHaveBeenCalledOnce();
   });
 
   it("marks the active space as the current one", () => {

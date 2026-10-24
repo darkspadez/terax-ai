@@ -1,23 +1,30 @@
 import { DEFAULT_THEME_ID, type Theme } from "../types";
+import { ayu } from "./ayu";
+import { ayuMirage } from "./ayu-mirage";
 import { caffeine } from "./caffeine";
 import { catppuccin } from "./catppuccin";
 import { claude } from "./claude";
 import { dracula } from "./dracula";
 import { everforest } from "./everforest";
+import { flexoki } from "./flexoki";
+import { github } from "./github";
 import { gruvbox } from "./gruvbox";
 import { kanagawa } from "./kanagawa";
 import { kanagawaDragon } from "./kanagawa-dragon";
+import { nightOwl } from "./night-owl";
 import { nord } from "./nord";
+import { oneHalf } from "./one-half";
 import { rosePine } from "./rose-pine";
 import { sage } from "./sage";
 import { solarized } from "./solarized";
-import { teraxDefault } from "./terax-default";
+import { oarlockDefault } from "./oarlock-default";
 import { tide } from "./tide";
 import { tokyoNight } from "./tokyo-night";
+import { tomorrow } from "./tomorrow";
 import { xcode } from "./xcode";
 
 const BUILTIN: Theme[] = [
-  teraxDefault,
+  oarlockDefault,
   xcode,
   claude,
   kanagawa,
@@ -30,6 +37,13 @@ const BUILTIN: Theme[] = [
   gruvbox,
   dracula,
   solarized,
+  github,
+  oneHalf,
+  ayu,
+  ayuMirage,
+  nightOwl,
+  tomorrow,
+  flexoki,
   tide,
   sage,
   caffeine,

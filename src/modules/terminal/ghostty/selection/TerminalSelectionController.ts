@@ -173,6 +173,13 @@ export class TerminalSelectionController {
   private readonly handlePointerMove = (event: PointerEvent): void => {
     if (event.pointerId !== this.pointerId || !this.selection) return;
     event.preventDefault();
+    // The button is up but its release never arrived (the webview can lose
+    // it, as when it lands outside the window): the drag ended where the
+    // pointer last was, and moving on must not extend the selection.
+    if ((event.buttons & 1) === 0) {
+      this.endDrag(event.pointerId);
+      return;
+    }
     this.lastClientX = event.clientX;
     this.lastClientY = event.clientY;
     this.updateFocus(event);
@@ -183,18 +190,22 @@ export class TerminalSelectionController {
     if (event.pointerId !== this.pointerId) return;
     event.preventDefault();
     this.updateFocus(event);
+    this.endDrag(event.pointerId);
+  };
+
+  private endDrag(pointerId: number): void {
     if (!this.meaningful) {
       this.selection = null;
       this.anchorRange = null;
       this.options.model.setSelection?.(null);
       this.options.onChange();
     }
-    if (this.options.target.hasPointerCapture(event.pointerId)) {
-      this.options.target.releasePointerCapture(event.pointerId);
+    if (this.options.target.hasPointerCapture(pointerId)) {
+      this.options.target.releasePointerCapture(pointerId);
     }
     this.pointerId = null;
     this.stopAutoScroll();
-  };
+  }
 
   private updateFocus(
     event: Pick<PointerEvent, "clientX" | "clientY" | "altKey">,

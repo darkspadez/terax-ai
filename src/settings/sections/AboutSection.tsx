@@ -1,15 +1,13 @@
 import { Button } from "@/components/ui/button";
-import { useUpdater } from "@/modules/updater";
-import { GithubIcon, Globe02Icon } from "@hugeicons/core-free-icons";
+import { UPDATES_ENABLED, useUpdater } from "@/modules/updater";
+import { GithubIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getName, getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { arch, platform } from "@tauri-apps/plugin-os";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
-
-const REPO_URL = "https://github.com/crynta/terax-ai";
-const WEBSITE = "https://terax.app";
+import { ISSUES_URL, REPO_SLUG, REPO_URL } from "./aboutLinks";
 
 const PLATFORM_LABEL: Record<string, string> = {
   macos: "macOS",
@@ -22,34 +20,8 @@ const PLATFORM_LABEL: Record<string, string> = {
 
 export function AboutSection() {
   const [version, setVersion] = useState("");
-  const [name, setName] = useState("Terax");
+  const [name, setName] = useState("Oarlock");
   const [build, setBuild] = useState("");
-  const { status, check, install } = useUpdater({ autoCheck: false });
-  const checking = status.kind === "checking";
-  const downloading = status.kind === "downloading";
-  const available = status.kind === "available";
-  const manualAvailable = status.kind === "manual-available";
-  const ready = status.kind === "ready";
-  const checkLabel =
-    status.kind === "uptodate"
-      ? "You're up to date"
-      : status.kind === "error"
-        ? "Check failed — retry"
-        : checking
-          ? "Checking…"
-          : downloading
-            ? "Downloading…"
-            : ready
-              ? "Restart to install"
-              : available
-                ? `Install v${status.update.version}`
-                : manualAvailable
-                  ? `Update to v${status.info.version}`
-                  : "Check for updates";
-  const onUpdateClick = () => {
-    if (available) void install();
-    else void check({ manual: true });
-  };
 
   useEffect(() => {
     void getVersion().then(setVersion);
@@ -90,7 +62,7 @@ export function AboutSection() {
         </dd>
 
         <dt className="text-muted-foreground">Bundle ID</dt>
-        <dd className="font-mono text-[11.5px]">app.crynta.terax</dd>
+        <dd className="font-mono text-[11.5px]">consulting.quantumops.oarlock</dd>
 
         <dt className="text-muted-foreground">License</dt>
         <dd>Apache 2.0</dd>
@@ -103,63 +75,104 @@ export function AboutSection() {
             className="inline-flex items-center gap-1.5 rounded-md text-[12px] underline-offset-2 hover:text-foreground hover:underline"
           >
             <HugeiconsIcon icon={GithubIcon} size={12} strokeWidth={1.75} />
-            crynta/terax-ai
-          </button>
-        </dd>
-        <dt className="text-muted-foreground">Website</dt>
-        <dd>
-          <button
-            type="button"
-            onClick={() => void openUrl(WEBSITE)}
-            className="inline-flex items-center gap-1.5 rounded-md text-[12px] underline-offset-2 hover:text-foreground hover:underline"
-          >
-            <HugeiconsIcon icon={Globe02Icon} size={12} strokeWidth={1.75} />
-            terax.app
+            {REPO_SLUG}
           </button>
         </dd>
       </dl>
 
-      <div className="flex flex-col gap-1.5">
-        <div className="flex gap-2">
-          <Button
-            size="sm"
-            onClick={onUpdateClick}
-            disabled={checking || downloading || ready}
-          >
-            {checkLabel}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void openUrl(REPO_URL)}
-            className="gap-1.5"
-          >
-            <HugeiconsIcon icon={GithubIcon} size={12} strokeWidth={1.75} />
-            View on GitHub
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => void openUrl(`${REPO_URL}/issues/new`)}
-          >
-            Report an issue
-          </Button>
-        </div>
-        {status.kind === "error" && (
-          <p className="font-mono text-[10.5px] break-all text-destructive/80">
-            {status.message}
-          </p>
-        )}
-        {downloading && status.contentLength ? (
+      {UPDATES_ENABLED ? (
+        <UpdateControls />
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          <LinkButtons />
           <p className="text-[11px] text-muted-foreground">
-            {Math.min(
-              100,
-              Math.round((status.downloaded / status.contentLength) * 100),
-            )}
-            %
+            Updates are not set up for this build.
           </p>
-        ) : null}
-      </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LinkButtons({ children }: { children?: ReactNode }) {
+  return (
+    <div className="flex gap-2">
+      {children}
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => void openUrl(REPO_URL)}
+        className="gap-1.5"
+      >
+        <HugeiconsIcon icon={GithubIcon} size={12} strokeWidth={1.75} />
+        View on GitHub
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => void openUrl(ISSUES_URL)}
+      >
+        Report an issue
+      </Button>
+    </div>
+  );
+}
+
+function UpdateControls() {
+  const { status, check, install } = useUpdater({ autoCheck: false });
+  const checking = status.kind === "checking";
+  const downloading = status.kind === "downloading";
+  const available = status.kind === "available";
+  const manualAvailable = status.kind === "manual-available";
+  const ready = status.kind === "ready";
+  const checkLabel =
+    status.kind === "uptodate"
+      ? "You're up to date"
+      : status.kind === "error"
+        ? "Check failed — retry"
+        : checking
+          ? "Checking…"
+          : downloading
+            ? "Downloading…"
+            : ready
+              ? "Restart to install"
+              : available
+                ? `Install v${status.update.version}`
+                : manualAvailable
+                  ? `Update to v${status.info.version}`
+                  : "Check for updates";
+  const onUpdateClick = () => {
+    if (available) void install();
+    // A Linux package is installed by hand: the button opens its release.
+    else if (manualAvailable) void openUrl(status.info.releaseUrl);
+    else void check({ manual: true });
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <LinkButtons>
+        <Button
+          size="sm"
+          onClick={onUpdateClick}
+          disabled={checking || downloading || ready}
+        >
+          {checkLabel}
+        </Button>
+      </LinkButtons>
+      {status.kind === "error" && (
+        <p className="font-mono text-[10.5px] break-all text-destructive/80">
+          {status.message}
+        </p>
+      )}
+      {downloading && status.contentLength ? (
+        <p className="text-[11px] text-muted-foreground">
+          {Math.min(
+            100,
+            Math.round((status.downloaded / status.contentLength) * 100),
+          )}
+          %
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { segmentsFromCwd } from "./pathUtils";
+import { inSeparatorsOf, pathInside, segmentsFromCwd } from "./pathUtils";
 
 function shape(cwd: string, home: string | null) {
   return segmentsFromCwd(cwd, home).map((s) => ({
@@ -11,10 +11,10 @@ function shape(cwd: string, home: string | null) {
 
 describe("segmentsFromCwd", () => {
   it("renders a path under home with a ~ root and accumulated paths", () => {
-    expect(shape("/Users/me/projects/terax", "/Users/me")).toEqual([
+    expect(shape("/Users/me/projects/oarlock", "/Users/me")).toEqual([
       { label: "~", fullPath: "/Users/me", isHome: true },
       { label: "projects", fullPath: "/Users/me/projects", isHome: false },
-      { label: "terax", fullPath: "/Users/me/projects/terax", isHome: false },
+      { label: "oarlock", fullPath: "/Users/me/projects/oarlock", isHome: false },
     ]);
   });
 
@@ -64,5 +64,36 @@ describe("segmentsFromCwd", () => {
     expect(shape("/", null)).toEqual([
       { label: "/", fullPath: "/", isHome: false },
     ]);
+  });
+});
+
+describe("inSeparatorsOf", () => {
+  it("gives a segment back the backslashes of a Windows path", () => {
+    expect(inSeparatorsOf("C:/Users/me", "C:\\Users\\me\\proj")).toBe(
+      "C:\\Users\\me",
+    );
+    expect(inSeparatorsOf("C:/", "C:\\Users")).toBe("C:\\");
+  });
+
+  it("keeps forward slashes for POSIX and mixed paths", () => {
+    expect(inSeparatorsOf("/home/me", "/home/me/proj")).toBe("/home/me");
+    expect(inSeparatorsOf("C:/a", "C:/a\\b")).toBe("C:/a");
+  });
+});
+
+describe("pathInside", () => {
+  it("is the path below the root", () => {
+    expect(pathInside("/repo", "/repo/src/main.ts")).toBe("src/main.ts");
+    expect(pathInside("/repo/", "/repo/src/")).toBe("src");
+    expect(pathInside("C:\\repo", "C:\\repo\\src\\a.ts")).toBe("src/a.ts");
+    expect(pathInside("/", "/etc/hosts")).toBe("etc/hosts");
+  });
+
+  it("is null for the root itself, a path outside it or no root", () => {
+    expect(pathInside("/repo", "/repo")).toBeNull();
+    expect(pathInside("/repo", "/repository/a")).toBeNull();
+    expect(pathInside("/repo/src", "/repo")).toBeNull();
+    expect(pathInside(null, "/repo/a")).toBeNull();
+    expect(pathInside("", "/repo/a")).toBeNull();
   });
 });

@@ -16,28 +16,44 @@ import {
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { ThemePref } from "@/modules/settings/store";
 import {
+  parseSidebarPosition,
   setAgentNotificationSound,
   setAgentNotifications,
   setAutostart,
   setConfirmCloseRunningTerminal,
   setDefaultWorkspaceEnv,
   setExplorerGitDecorations,
+  setNewTabPosition,
+  setTerminalLinksInPreview,
   setRestoreWindowState,
   setShowHidden,
+  setSidebarPosition,
   setTerminalCursorBlink,
   setTerminalCursorStyle,
+  setTerminalCustomShader,
   setTerminalFontFamily,
+  setTerminalFontFeatures,
   setTerminalFontSize,
   setTerminalFontWeight,
   setTerminalLetterSpacing,
-  setTerminalScrollback,
-  setTerminalShell,
+  setTerminalLigatures,
+  setTerminalLineHeight,
+  setTerminalMinimumContrast,
+  setTerminalPaneLimit,
   setTerminalRenderer,
   setTerminalScreenReader,
+  setTerminalScrollback,
+  setTerminalShell,
   setZoomLevel,
+  parseNewTabPosition,
+  TERMINAL_CUSTOM_SHADER_MAX_BYTES,
   TERMINAL_FONT_SIZES,
+  TERMINAL_LINE_HEIGHTS,
+  TERMINAL_MINIMUM_CONTRASTS,
   TERMINAL_SCROLLBACK_PRESETS,
 } from "@/modules/settings/store";
+import { parseFontFeatures } from "@/modules/terminal/lib/fontFeatures";
+import { MAX_PANES_PER_TAB } from "@/modules/terminal/lib/panes";
 import { useTheme } from "@/modules/theme";
 import {
   ComputerIcon,
@@ -47,9 +63,12 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
+import { FolderAccessSettings } from "./FolderAccessSettings";
+import { MacPrivacySettings } from "./MacPrivacySettings";
+import { TerminalBehaviorSettings } from "./TerminalBehaviorSettings";
 
 const APPEARANCE: {
   id: ThemePref;
@@ -96,13 +115,47 @@ export function GeneralSection() {
   const explorerGitDecorations = usePreferencesStore(
     (s) => s.explorerGitDecorations,
   );
+  const sidebarPosition = usePreferencesStore((s) => s.sidebarPosition);
+  const terminalLinksInPreview = usePreferencesStore(
+    (s) => s.terminalLinksInPreview,
+  );
   const terminalRenderer = usePreferencesStore((s) => s.terminalRenderer);
+  const terminalCustomShader = usePreferencesStore(
+    (s) => s.terminalCustomShader,
+  );
+  const shaderInput = useRef<HTMLInputElement | null>(null);
+  const [shaderError, setShaderError] = useState<string | null>(null);
+
+  // Compiled here first, so a shader that does not build never reaches the
+  // terminals and its errors show with their line numbers.
+  const chooseShader = async (file: File | undefined) => {
+    setShaderError(null);
+    if (!file) return;
+    if (file.size > TERMINAL_CUSTOM_SHADER_MAX_BYTES) {
+      setShaderError(`${file.name}: larger than 256 KiB`);
+      return;
+    }
+    try {
+      const source = await file.text();
+      const { validateCustomShader } = await import(
+        "@/modules/terminal/ghostty/webgl/customShader"
+      );
+      const error = validateCustomShader(source);
+      if (error) setShaderError(`${file.name}:\n${error}`);
+      else await setTerminalCustomShader({ name: file.name, source });
+    } catch (error) {
+      setShaderError(`${file.name}: ${String(error)}`);
+    }
+  };
   const terminalScreenReader = usePreferencesStore(
     (s) => s.terminalScreenReader,
   );
   const terminalCursorBlink = usePreferencesStore((s) => s.terminalCursorBlink);
   const terminalCursorStyle = usePreferencesStore((s) => s.terminalCursorStyle);
   const terminalFontFamily = usePreferencesStore((s) => s.terminalFontFamily);
+  const terminalFontFeatures = usePreferencesStore(
+    (s) => s.terminalFontFeatures,
+  );
   const terminalFontWeight = usePreferencesStore((s) => s.terminalFontWeight);
   const terminalShell = usePreferencesStore((s) => s.terminalShell);
   const [shells, setShells] = useState<ShellInfo[]>([]);
@@ -112,7 +165,14 @@ export function GeneralSection() {
     (s) => s.terminalLetterSpacing,
   );
   const terminalFontSize = usePreferencesStore((s) => s.terminalFontSize);
+  const terminalLineHeight = usePreferencesStore((s) => s.terminalLineHeight);
+  const terminalMinimumContrast = usePreferencesStore(
+    (s) => s.terminalMinimumContrast,
+  );
+  const terminalLigatures = usePreferencesStore((s) => s.terminalLigatures);
   const terminalScrollback = usePreferencesStore((s) => s.terminalScrollback);
+  const terminalPaneLimit = usePreferencesStore((s) => s.terminalPaneLimit);
+  const newTabPosition = usePreferencesStore((s) => s.newTabPosition);
   const confirmCloseRunningTerminal = usePreferencesStore(
     (s) => s.confirmCloseRunningTerminal,
   );
@@ -224,6 +284,60 @@ export function GeneralSection() {
       </div>
 
       <div className="flex flex-col gap-2">
+        <Label>Layout</Label>
+        <SettingRow
+          title="Sidebar position"
+          description="The side of the window the sidebar docks to."
+        >
+          <Select
+            value={parseSidebarPosition(sidebarPosition)}
+            onValueChange={(v) =>
+              void setSidebarPosition(parseSidebarPosition(v))
+            }
+          >
+            <SelectTrigger className="h-8 w-28 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="left" className="text-[12px]">
+                Left
+              </SelectItem>
+              <SelectItem value="right" className="text-[12px]">
+                Right
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingRow>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label>Tabs</Label>
+        <SettingRow
+          title="Open new tabs"
+          description="Where a tab you open goes: terminals, files, previews and diffs. Tabs opened in the background or in another space go to the end."
+        >
+          <Select
+            value={newTabPosition}
+            onValueChange={(v) =>
+              void setNewTabPosition(parseNewTabPosition(v))
+            }
+          >
+            <SelectTrigger size="sm" className="h-8 w-44 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="end" className="text-[12px]">
+                At the end
+              </SelectItem>
+              <SelectItem value="afterCurrent" className="text-[12px]">
+                After the current tab
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingRow>
+      </div>
+
+      <div className="flex flex-col gap-2">
         <Label>Explorer</Label>
         <SettingRow
           title="Show hidden files"
@@ -241,6 +355,21 @@ export function GeneralSection() {
           <Switch
             checked={explorerGitDecorations}
             onCheckedChange={(v) => void setExplorerGitDecorations(v)}
+          />
+        </SettingRow>
+      </div>
+
+      <FolderAccessSettings />
+
+      <div className="flex flex-col gap-2">
+        <Label>Web preview</Label>
+        <SettingRow
+          title="Open localhost links in the preview"
+          description="Clicking a localhost or 127.0.0.1 link in a terminal opens it in a preview tab instead of the system browser."
+        >
+          <Switch
+            checked={terminalLinksInPreview}
+            onCheckedChange={(v) => void setTerminalLinksInPreview(v)}
           />
         </SettingRow>
       </div>
@@ -266,6 +395,55 @@ export function GeneralSection() {
             </SelectContent>
           </Select>
         </SettingRow>
+        <SettingRow
+          title="Custom shader"
+          description="A Ghostty or Shadertoy shader (mainImage) drawn over every terminal frame, animated while the window has focus. Runs on the WebGL renderer; terminals already open on WebGPU pick it up when reopened."
+        >
+          <div className="flex items-center gap-2">
+            <span className="max-w-36 truncate text-[12px] text-muted-foreground">
+              {terminalCustomShader?.name ?? "None"}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-[11px]"
+              onClick={() => shaderInput.current?.click()}
+            >
+              Choose…
+            </Button>
+            {terminalCustomShader ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-[11px]"
+                onClick={() => {
+                  setShaderError(null);
+                  void setTerminalCustomShader(null);
+                }}
+              >
+                Remove
+              </Button>
+            ) : null}
+            <input
+              ref={shaderInput}
+              type="file"
+              accept=".glsl,.frag,.fs,.txt,text/plain"
+              className="hidden"
+              onChange={(event) => {
+                void chooseShader(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+          </div>
+        </SettingRow>
+        {shaderError ? (
+          <div
+            role="alert"
+            className="whitespace-pre-wrap rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 font-mono text-[11px] text-destructive"
+          >
+            {shaderError}
+          </div>
+        ) : null}
         <SettingRow
           title="Screen reader support"
           description="Expose terminal output as accessible text. Page Up and Page Down browse history when the output region is focused."
@@ -315,6 +493,10 @@ export function GeneralSection() {
           value={terminalFontFamily}
           onCommit={(v) => void setTerminalFontFamily(v)}
         />
+        <FontFeaturesInput
+          value={terminalFontFeatures}
+          onCommit={(v) => void setTerminalFontFeatures(v)}
+        />
         <SettingRow
           title="Font weight"
           description="Thickness of terminal characters"
@@ -341,6 +523,19 @@ export function GeneralSection() {
               ))}
             </SelectContent>
           </Select>
+        </SettingRow>
+        <SettingRow
+          title="Font ligatures"
+          description={
+            terminalLigatures && terminalLetterSpacing !== 0
+              ? "Not drawn while letter spacing is set."
+              : "Draw sequences such as -> and != as one shape when the font has ligatures, as JetBrains Mono does."
+          }
+        >
+          <Switch
+            checked={terminalLigatures}
+            onCheckedChange={(v) => void setTerminalLigatures(v)}
+          />
         </SettingRow>
         <SettingRow
           title="Integrated terminal shell"
@@ -439,6 +634,46 @@ export function GeneralSection() {
             </SelectContent>
           </Select>
         </SettingRow>
+        <SettingRow
+          title="Line height"
+          description="Row height as a multiple of the font size."
+        >
+          <Select
+            value={String(terminalLineHeight)}
+            onValueChange={(v) => void setTerminalLineHeight(Number(v))}
+          >
+            <SelectTrigger size="sm" className="h-8 w-28 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TERMINAL_LINE_HEIGHTS.map((v) => (
+                <SelectItem key={v} value={String(v)} className="text-[12px]">
+                  {v.toFixed(2)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingRow>
+        <SettingRow
+          title="Minimum contrast"
+          description="Draw text that is hard to read against its background in white or black instead (WCAG contrast ratio)."
+        >
+          <Select
+            value={String(terminalMinimumContrast)}
+            onValueChange={(v) => void setTerminalMinimumContrast(Number(v))}
+          >
+            <SelectTrigger size="sm" className="h-8 w-28 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TERMINAL_MINIMUM_CONTRASTS.map((v) => (
+                <SelectItem key={v} value={String(v)} className="text-[12px]">
+                  {v === 1 ? "Off" : `${v}:1`}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingRow>
         <SettingRow title="Font size" description="Terminal text size.">
           <Select
             value={String(terminalFontSize)}
@@ -462,7 +697,7 @@ export function GeneralSection() {
         </SettingRow>
         <SettingRow
           title="Scrollback"
-          description="Lines of history kept per terminal. Higher uses more RAM (~3 KB / line)."
+          description="Lines of history kept per terminal (about 1 KB per line at 120 columns). All terminals together stay within a shared memory budget."
         >
           <Select
             value={String(terminalScrollback)}
@@ -485,6 +720,32 @@ export function GeneralSection() {
           </Select>
         </SettingRow>
         <SettingRow
+          title="Panes per tab"
+          description="How many panes a terminal tab can be split into. Tabs that already have more keep them."
+        >
+          <Select
+            value={String(terminalPaneLimit)}
+            onValueChange={(v) => void setTerminalPaneLimit(Number(v))}
+          >
+            <SelectTrigger size="sm" className="h-8 w-36 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Array.from({ length: MAX_PANES_PER_TAB }, (_, i) => i + 1).map(
+                (count) => (
+                  <SelectItem
+                    key={count}
+                    value={String(count)}
+                    className="text-[12px]"
+                  >
+                    {count === 1 ? "1 (no splits)" : `Up to ${count}`}
+                  </SelectItem>
+                ),
+              )}
+            </SelectContent>
+          </Select>
+        </SettingRow>
+        <SettingRow
           title="Confirm before killing a running process"
           description="Ask before closing a terminal tab or quitting while a command is still running. Unsaved editor changes are always confirmed."
         >
@@ -493,13 +754,14 @@ export function GeneralSection() {
             onCheckedChange={(v) => void setConfirmCloseRunningTerminal(v)}
           />
         </SettingRow>
+        <TerminalBehaviorSettings />
       </div>
 
       <div className="flex flex-col gap-2">
         <Label>Agents</Label>
         <SettingRow
           title="Coding agent notifications"
-          description="Alert when a coding agent needs your input or finishes. Native notification when Terax is unfocused, in-app otherwise."
+          description="Alert when a coding agent needs your input or finishes. Native notification when Oarlock is unfocused, in-app otherwise."
         >
           <div className="flex items-center gap-2">
             <Button
@@ -539,7 +801,7 @@ export function GeneralSection() {
         <div className="flex flex-col gap-2">
           <SettingRow
             title="Launch at login"
-            description="Open Terax automatically when you sign in."
+            description="Open Oarlock automatically when you sign in."
           >
             <Switch
               checked={autostart}
@@ -557,6 +819,8 @@ export function GeneralSection() {
           </SettingRow>
         </div>
       </div>
+
+      <MacPrivacySettings />
     </div>
   );
 }
@@ -595,10 +859,57 @@ function notificationTestTitle(status: NotificationTestState): string {
     case "denied":
       return "Notifications are disabled by the system";
     case "failed":
-      return "Terax could not request a native notification";
+      return "Oarlock could not request a native notification";
     default:
       return "Send a native test notification after two seconds";
   }
+}
+
+function FontFeaturesInput({
+  value,
+  onCommit,
+}: {
+  value: string;
+  onCommit: (v: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(value);
+    setError(null);
+  }, [value]);
+
+  // A list that does not parse stays in the field with its error, unsaved.
+  const commit = () => {
+    const next = draft.trim();
+    const parsed = parseFontFeatures(next);
+    setError(parsed.error);
+    if (parsed.error === null && next !== value) onCommit(next);
+  };
+
+  return (
+    <SettingRow
+      title="Font features"
+      description={
+        error ??
+        "OpenType features as Ghostty's font-feature takes them, e.g. zero, ss01, -calt. Applies to the bundled JetBrains Mono and to installed fonts such as Nerd Fonts."
+      }
+    >
+      <input
+        type="text"
+        value={draft}
+        placeholder="Font defaults"
+        aria-invalid={error !== null}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+        }}
+        className="h-8 w-48 rounded-md border border-border bg-background px-2.5 text-[12px] outline-none focus:border-foreground/40 aria-invalid:border-destructive"
+      />
+    </SettingRow>
+  );
 }
 
 function FontFamilyInput({

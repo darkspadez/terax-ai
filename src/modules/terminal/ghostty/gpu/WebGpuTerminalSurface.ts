@@ -1,6 +1,9 @@
 import { terminalWindowFocused } from "@/modules/terminal/ghostty/renderScheduling";
 import { bindTerminalInteraction } from "@/modules/terminal/ghostty/input/terminalInteraction";
-import { isClampedScrollEcho, TerminalScrollbarSync } from "@/modules/terminal/ghostty/gpu/terminalScrollbar";
+import {
+  isClampedScrollEcho,
+  TerminalScrollbarSync,
+} from "@/modules/terminal/ghostty/gpu/terminalScrollbar";
 import { terminalWindowPresentation } from "@/modules/terminal/ghostty/windowPresentation";
 import type { TerminalSurface } from "@/modules/terminal/backend/contracts";
 import { smoothHooks } from "@/bench/smoothHooks";
@@ -18,11 +21,18 @@ import type {
 import { GhosttySearchController } from "../search/GhosttySearchController";
 import { TerminalSelectionController } from "../selection/TerminalSelectionController";
 import { DevicePixelRatioMonitor } from "./DevicePixelRatioMonitor";
+import { documentGlyphFontGate } from "./GlyphFontGate";
 import { TerminalGlyphMap, type RasterBudget } from "./GlyphMap";
+import { ImageAnimationClock } from "./imageAnimation";
+import {
+  type LinkCellRange,
+  linkCellRange,
+  linkRangesEqual,
+} from "./linkUnderline";
 import { type DeviceRect, deviceRectsEqual } from "./PaneRects";
 import { ScreenUniform, type ScreenUniformState } from "./ScreenUniform";
 import { SCREEN_UNIFORM_BYTES } from "./shaders";
-import { fitTerminalViewport } from "./TerminalFit";
+import { fitTerminalViewport, TERMINAL_SCROLLBAR_WIDTH } from "./TerminalFit";
 import {
   TerminalFitQueue,
   type TerminalFitBounds,
@@ -55,6 +65,7 @@ import {
   nextWebGpuCellCapacity,
   packSearchMask,
 } from "./WebGpuCellBuffer";
+import type { WebGpuImageLayer } from "./WebGpuImageLayer";
 import {
   createRasterBudget,
   FIRST_FRAME_RASTER_BUDGET_MS,
@@ -69,7 +80,7 @@ import type { PaneBinding } from "./WebGpuWindowCanvas";
 
 const CURSOR_BLINK_MS = 600;
 const TEXT_BLINK_MS = 600;
-const TEXT_CONTRAST_STORAGE_KEY = "terax:terminal-text-contrast";
+const TEXT_CONTRAST_STORAGE_KEY = "oarlock:terminal-text-contrast";
 
 export type WebGpuTerminalSurfaceOptions = {
   readonly model: GhosttyTerminalModelApi;
@@ -110,6 +121,9 @@ export type WebGpuTerminalSurfaceStats = {
   readonly uploads: number;
   readonly uploadedBytes: number;
   readonly pendingGlyphs: number;
+  /** Kitty image textures and their bytes (included in `gpuBufferBytes`). */
+  readonly imageTextures: number;
+  readonly imageBytes: number;
   readonly fit: TerminalFitQueueDiagnostics;
 };
 
@@ -130,6 +144,7 @@ export class WebGpuTerminalSurface
   private readonly scrollbarContent = document.createElement("div");
   private readonly resizeObserver: ResizeObserver;
   private readonly unsubscribeDamage: () => void;
+  private readonly unsubscribeGlyphFonts: () => void;
   private readonly unsubscribeResizeInteraction: () => void;
   private readonly unsubscribeInteraction: () => void;
   private readonly selection: TerminalSelectionController;
@@ -186,6 +201,9 @@ export class WebGpuTerminalSurface
   private contentRevision: number;
   private hoveredCell = -1;
   private hoveredLink: string | null = null;
+  /** Cells of the hovered link, underlined through the uniform; valid for `hoveredLinkOrigin`. */
+  private hoveredLinkCells: LinkCellRange | null = null;
+  private hoveredLinkOrigin = 0;
   private mouseDownLink: string | null = null;
   private applyingFit = false;
   private disposed = false;
@@ -197,6 +215,18 @@ export class WebGpuTerminalSurface
   private drawCells = 0;
   /** What the uniform last held, kept to repack it when only the pane's rectangle moves. */
   private lastScreenState: ScreenUniformState | null = null;
+  /** Kitty images; created when the pane first shows one, released with its other resources. */
+  private imageLayer: WebGpuImageLayer | null = null;
+  /** Placements must be read again without damage: the image layer just became available. */
+  private imagesStale = false;
+  /** Kitty z below which images go under the cell backgrounds; constant for a model. */
+  private readonly imageBackgroundLimit: number | undefined;
+  private readonly imageAnimation = new ImageAnimationClock(() =>
+    this.runtime.schedule(this),
+  );
+  /** Terminal pixel size last given to the model (Kitty placement sizes and mode 2048 use it). */
+  private reportedPixelWidth = 0;
+  private reportedPixelHeight = 0;
 
   private constructor(
     private readonly runtime: WebGpuTerminalRuntime,
@@ -228,13 +258,14 @@ export class WebGpuTerminalSurface
     });
     this.cursorBlinking = options.cursorBlink;
     this.theme = options.theme;
+    this.imageBackgroundLimit = options.model.imageBackgroundZLimit?.();
     options.model.setCursorOptions(options.cursorStyle, options.cursorBlink);
     this.contentRevision = options.model.revision();
     this.root.className = "absolute inset-0 overflow-hidden";
     this.root.style.userSelect = "none";
     this.updateRootBackground();
-    this.root.setAttribute("data-terax-ghostty-surface", "webgpu");
-    this.root.setAttribute("data-terax-terminal-surface", "");
+    this.root.setAttribute("data-oarlock-ghostty-surface", "webgpu");
+    this.root.setAttribute("data-oarlock-terminal-surface", "");
     this.input.setAttribute("aria-label", "Terminal input");
     this.input.setAttribute("autocapitalize", "off");
     this.input.setAttribute("autocomplete", "off");
@@ -243,8 +274,7 @@ export class WebGpuTerminalSurface
       "position:absolute;left:0;top:0;width:1px;height:1px;opacity:0;resize:none;pointer-events:none;";
     this.scrollbar.setAttribute("aria-label", "Terminal scrollback");
     this.scrollbar.setAttribute("role", "scrollbar");
-    this.scrollbar.style.cssText =
-      "position:absolute;inset:0 0 0 auto;z-index:10;width:11px;overflow-x:hidden;overflow-y:scroll;overscroll-behavior:contain;visibility:hidden;";
+    this.scrollbar.style.cssText = `position:absolute;inset:0 0 0 auto;z-index:10;width:${TERMINAL_SCROLLBAR_WIDTH}px;overflow-x:hidden;overflow-y:scroll;overscroll-behavior:contain;visibility:hidden;`;
     this.scrollbarContent.style.cssText = "width:1px;height:1px;";
     this.scrollbar.append(this.scrollbarContent);
     this.root.append(this.input, this.scrollbar);
@@ -275,7 +305,7 @@ export class WebGpuTerminalSurface
       if (!entry) return;
       noteTerminalHostResize(this);
       const bounds = this.boundsFromEntry(entry);
-      if (__TERAX_BENCH__) this.benchWant(bounds);
+      if (__OARLOCK_BENCH__) this.benchWant(bounds);
       this.queueFit(bounds);
     });
     this.unsubscribeDamage = options.model.subscribeDamage(() => {
@@ -285,6 +315,12 @@ export class WebGpuTerminalSurface
       this.search.invalidate();
       if (!this.applyingFit) this.runtime.schedule(this);
       this.armCursorBlink();
+    });
+    // Icons parked while their font loaded rasterize on the next frame.
+    this.unsubscribeGlyphFonts = documentGlyphFontGate().subscribe(() => {
+      if (this.glyphMap.retryDeferred() === 0) return;
+      if (!this.visible || this.documentSuspended || !this.host) return;
+      this.runtime.schedule(this);
     });
     this.unsubscribeResizeInteraction = subscribeTerminalResizeInteraction(
       (active) => {
@@ -335,6 +371,7 @@ export class WebGpuTerminalSurface
 
   detach(): void {
     if (!this.host) return;
+    this.clearHoveredLink(false);
     this.resizeObserver.disconnect();
     window.removeEventListener?.("resize", this.handleWindowResize);
     this.fitQueue.clear();
@@ -394,6 +431,7 @@ export class WebGpuTerminalSurface
     } else {
       this.clearCursorTimer();
       this.clearTextBlinkTimer();
+      this.clearHoveredLink(false);
       this.textBlinkVisible = true;
       this.search.suspend();
       this.selection.suspend();
@@ -463,6 +501,10 @@ export class WebGpuTerminalSurface
     return this.selection.text();
   }
 
+  clearSelection(): void {
+    this.selection.clear();
+  }
+
   searchController(): GhosttySearchController {
     return this.search;
   }
@@ -527,14 +569,22 @@ export class WebGpuTerminalSurface
     return this.theme.background;
   }
 
+  /** As the uniform on the GPU says, which may trail the theme until the pane prepares. */
+  translucent(): boolean {
+    return this.lastScreenState?.translucent === true;
+  }
+
   /** Called inside the window pass; viewport and scissor already cover the pane's rectangle. */
   encode(pass: GPURenderPassEncoder, resources: WebGpuSharedResources): void {
     if (!this.bindGroup) return;
+    const images = this.imageLayer?.hasDraws ? this.imageLayer : null;
     pass.setBindGroup(0, this.bindGroup);
     pass.setPipeline(resources.backgroundPipeline);
     pass.draw(3);
+    images?.encodeBelowText(pass, this.bindGroup);
     pass.setPipeline(resources.glyphPipeline);
     pass.draw(6, this.drawCells);
+    images?.encodeAboveText(pass);
   }
 
   handleCanvasRevealed(): void {
@@ -578,7 +628,7 @@ export class WebGpuTerminalSurface
     const revision = model.revision();
     if (revision !== this.contentRevision) {
       this.contentRevision = revision;
-      if (this.hoveredCell >= 0) this.clearHoveredLink();
+      if (this.hoveredCell >= 0) this.clearHoveredLink(false);
       this.mouseDownLink = null;
     }
     this.selection.reconcile();
@@ -591,6 +641,8 @@ export class WebGpuTerminalSurface
     // any other call into the model.
     const atlasStale = lease.atlas.epoch !== this.glyphMap.atlasEpoch;
     const resync = this.needsResync || atlasStale;
+    // Animations advance before the frame reads the model, so it shows the frame due now.
+    this.imageAnimation.beforeFrame(model, performance.now(), true);
     const frame = model.consumeGpuFrame({ resync });
     this.needsResync = false;
     const expectedCells = frame.rows * frame.cols;
@@ -613,6 +665,10 @@ export class WebGpuTerminalSurface
       budget,
       device,
     );
+    // Placement pixels are borrowed like the cells: uploaded before any other model call.
+    const imagesChanged = this.updateImages(
+      resync || frame.damage.kind !== "none",
+    );
 
     const cursor = model.cursor();
     const viewportOrigin = model.viewportOriginLine();
@@ -630,6 +686,7 @@ export class WebGpuTerminalSurface
       frame.damage.kind !== "none" ||
       cellsUploaded ||
       glyphsChanged ||
+      imagesChanged ||
       searchChanged ||
       uniformChanged ||
       bindingsChanged ||
@@ -640,7 +697,7 @@ export class WebGpuTerminalSurface
       return false;
     }
 
-    if (__TERAX_BENCH__) {
+    if (__OARLOCK_BENCH__) {
       const now = performance.now();
       if (model.promptErased?.()) smoothHooks()?.blank(this.benchId, now);
       smoothHooks()?.shown(this.benchId, now, frame.cols, frame.rows);
@@ -702,6 +759,7 @@ export class WebGpuTerminalSurface
       this.documentSuspended = true;
       this.clearCursorTimer();
       this.clearTextBlinkTimer();
+      this.imageAnimation.suspend();
       this.search.suspend();
       this.selection.suspend();
       return;
@@ -753,6 +811,8 @@ export class WebGpuTerminalSurface
       (this.uniformBuffer?.size ?? 0) +
       (this.glyphMapBuffer?.size ?? 0) +
       (this.searchBuffer?.size ?? 0);
+    const images = this.imageLayer?.stats();
+    const imageBytes = images ? images.textureBytes + images.bufferBytes : 0;
     return {
       frames: this.frameCount,
       viewport: this.binding?.rect() ?? null,
@@ -765,7 +825,7 @@ export class WebGpuTerminalSurface
         this.screen.data.byteLength +
         this.glyphMap.byteSize +
         this.searchScratch.byteLength,
-      gpuBufferBytes: retainedBufferBytes,
+      gpuBufferBytes: retainedBufferBytes + imageBytes,
       // The swapchain belongs to the window canvas; see the runtime's `canvases`.
       canvasColorBytes: 0,
       estimatedSwapchainBytes: 0,
@@ -780,6 +840,8 @@ export class WebGpuTerminalSurface
       uploads: this.uploadCount,
       uploadedBytes: this.uploadedBytes,
       pendingGlyphs: this.glyphMap.pending,
+      imageTextures: images?.textures ?? 0,
+      imageBytes,
       fit: this.fitQueue.diagnostics(),
     };
   }
@@ -789,6 +851,7 @@ export class WebGpuTerminalSurface
     this.detach();
     this.disposed = true;
     this.unsubscribeDamage();
+    this.unsubscribeGlyphFonts();
     this.unsubscribeResizeInteraction();
     this.search.dispose();
     this.selection.dispose();
@@ -899,14 +962,35 @@ export class WebGpuTerminalSurface
     const cell = row * this.options.model.cols + column;
     if (cell === this.hoveredCell) return;
     this.hoveredCell = cell;
-    this.hoveredLink = this.options.model.hyperlinkAtViewportCell(row, column);
+    const model = this.options.model;
+    if (model.linkAtViewportCell) {
+      const link = model.linkAtViewportCell(row, column);
+      this.hoveredLink = link?.uri ?? null;
+      this.setHoveredLinkCells(
+        link
+          ? linkCellRange(link.spans, model.cols, model.rows, row, column)
+          : null,
+      );
+    } else {
+      this.hoveredLink = model.hyperlinkAtViewportCell(row, column);
+    }
     this.root.style.cursor = this.hoveredLink ? "pointer" : "text";
   }
 
-  private clearHoveredLink(): void {
+  private clearHoveredLink(redraw = true): void {
     this.hoveredCell = -1;
     this.hoveredLink = null;
     this.root.style.cursor = "text";
+    if (this.hoveredLinkCells === null) return;
+    this.hoveredLinkCells = null;
+    if (redraw) this.runtime.schedule(this);
+  }
+
+  private setHoveredLinkCells(cells: LinkCellRange | null): void {
+    if (linkRangesEqual(cells, this.hoveredLinkCells)) return;
+    this.hoveredLinkCells = cells;
+    this.hoveredLinkOrigin = this.options.model.viewportOriginLine();
+    this.runtime.schedule(this);
   }
 
   private initializeGpuResources(resources: WebGpuSharedResources): void {
@@ -921,7 +1005,7 @@ export class WebGpuTerminalSurface
       this.forceFullRedraw = true;
       this.screen.invalidate();
       this.uniformBuffer = resources.device.createBuffer({
-        label: "Terax terminal surface uniform",
+        label: "Oarlock terminal surface uniform",
         size: SCREEN_UNIFORM_BYTES,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
@@ -975,6 +1059,10 @@ export class WebGpuTerminalSurface
   }
 
   private releaseGpuResources(): void {
+    this.imageLayer?.release();
+    this.imageLayer = null;
+    this.imagesStale = false;
+    this.imageAnimation.reset();
     this.cellsBuffer?.destroy();
     this.uniformBuffer?.destroy();
     this.glyphMapBuffer?.destroy();
@@ -1021,7 +1109,7 @@ export class WebGpuTerminalSurface
 
   /** App lab only: the grid this host size asks for, for the smoothness probe. */
   private benchWant(bounds: TerminalFitBounds): void {
-    if (!__TERAX_BENCH__) return;
+    if (!__OARLOCK_BENCH__) return;
     const fit = fitTerminalViewport(
       bounds.width,
       bounds.height,
@@ -1136,9 +1224,9 @@ export class WebGpuTerminalSurface
       this.deferredGridResizeCount += 1;
       return;
     }
-    const benchStart = __TERAX_BENCH__ ? performance.now() : 0;
+    const benchStart = __OARLOCK_BENCH__ ? performance.now() : 0;
     const outcome = this.resizeSync.request(cols, rows);
-    if (__TERAX_BENCH__) {
+    if (__OARLOCK_BENCH__) {
       const now = performance.now();
       smoothHooks()?.have(
         this.benchId,
@@ -1155,9 +1243,16 @@ export class WebGpuTerminalSurface
       this.gridResizeCount += 1;
       this.selection.reconcile();
     }
-    if (changed) {
+    if (changed) this.forceFullRedraw = true;
+    // A new ratio can change the cell's device size without changing the grid.
+    if (
+      changed ||
+      pixelWidth !== this.reportedPixelWidth ||
+      pixelHeight !== this.reportedPixelHeight
+    ) {
+      this.reportedPixelWidth = pixelWidth;
+      this.reportedPixelHeight = pixelHeight;
       this.options.model.setPixelSize(pixelWidth, pixelHeight);
-      this.forceFullRedraw = true;
     }
     this.updateScrollbar();
     if (scheduleRender && changed) this.runtime.schedule(this);
@@ -1197,7 +1292,7 @@ export class WebGpuTerminalSurface
     this.cellsBuffer?.destroy();
     this.cellCapacity = capacity;
     this.cellsBuffer = device.createBuffer({
-      label: "Terax terminal cell records",
+      label: "Oarlock terminal cell records",
       size: capacity * CELL_RECORD_BYTES,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
@@ -1206,7 +1301,7 @@ export class WebGpuTerminalSurface
 
   private createGlyphMapBuffer(device: GPUDevice, entries: number): GPUBuffer {
     return device.createBuffer({
-      label: "Terax terminal glyph map",
+      label: "Oarlock terminal glyph map",
       size: entries * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
@@ -1297,6 +1392,43 @@ export class WebGpuTerminalSurface
     return dirty !== null || result.resolved > 0;
   }
 
+  /**
+   * Reads the frame's Kitty placements when the frame changed (placement changes come with full
+   * damage) or the image layer just became available, and uploads what they need. True when the
+   * pane must redraw for them.
+   */
+  private updateImages(damaged: boolean): boolean {
+    const model = this.options.model;
+    if (!model.imagePlacements || (!damaged && !this.imagesStale)) return false;
+    const placements = model.imagePlacements();
+    this.imagesStale = false;
+    const layer =
+      this.imageLayer ??
+      (placements.length > 0 ? this.createImageLayer() : null);
+    const changed =
+      layer?.update(
+        placements,
+        this.imageBackgroundLimit,
+        this.metrics.deviceCellWidth,
+        this.metrics.deviceCellHeight,
+      ) ?? false;
+    this.imageAnimation.afterFrame(placements.length > 0);
+    return changed;
+  }
+
+  private createImageLayer(): WebGpuImageLayer | null {
+    if (!this.uniformBuffer) return null;
+    const support = this.runtime.imageSupport(this);
+    if (support === "pending") {
+      // The runtime schedules this pane when the pipelines are ready; it reads them then.
+      this.imagesStale = true;
+      return null;
+    }
+    if (!support) return null;
+    this.imageLayer = support.createLayer(this.uniformBuffer);
+    return this.imageLayer;
+  }
+
   /** Uploads the highlight mask only when it changes; frees it when empty. */
   private updateSearchMask(device: GPUDevice): boolean {
     const revision = this.search.maskRevision;
@@ -1318,7 +1450,7 @@ export class WebGpuTerminalSurface
     if (!this.searchBuffer || this.searchBuffer.size !== packed.byteLength) {
       this.searchBuffer?.destroy();
       this.searchBuffer = device.createBuffer({
-        label: "Terax terminal search mask",
+        label: "Oarlock terminal search mask",
         size: packed.byteLength,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
       });
@@ -1347,7 +1479,7 @@ export class WebGpuTerminalSurface
     )
       return false;
     this.bindGroup = resources.device.createBindGroup({
-      label: "Terax terminal surface bindings",
+      label: "Oarlock terminal surface bindings",
       layout: resources.bindGroupLayout,
       entries: [
         { binding: 0, resource: { buffer: this.uniformBuffer } },
@@ -1391,6 +1523,9 @@ export class WebGpuTerminalSurface
       this.cursorEnabled && this.cursorVisible && this.nativeCursorVisible;
     const bounds = this.selection.normalizedBounds();
     const theme = this.theme;
+    // The view scrolled under the pointer: the link's cells are elsewhere now.
+    if (this.hoveredLinkCells && viewportOriginLine !== this.hoveredLinkOrigin)
+      this.clearHoveredLink(false);
     const state: ScreenUniformState = {
       cols: frame.cols,
       rows: frame.rows,
@@ -1410,6 +1545,7 @@ export class WebGpuTerminalSurface
         : null,
       cursorColor: theme.cursor,
       background: theme.background,
+      translucent: theme.translucent,
       selection: bounds
         ? selectionUniform(bounds, viewportOriginLine, frame.rows)
         : NO_SELECTION,
@@ -1421,9 +1557,11 @@ export class WebGpuTerminalSurface
         this.metrics.scale,
       ),
       contrast: this.contrast,
+      minimumContrast: theme.minimumContrast,
+      link: this.hoveredLinkCells,
     };
     const shiftY = this.gridShift(state, cursor);
-    if (__TERAX_BENCH__ && this.nativeCursorVisible) {
+    if (__OARLOCK_BENCH__ && this.nativeCursorVisible) {
       // The cursor the application asked for, whatever phase its blink is in.
       const rect = cursorRect(cursor, cursor.style, this.metrics);
       const bottom = rect.y + rect.height - shiftY;

@@ -30,6 +30,27 @@ export function leafIds(n: PaneNode): PaneId[] {
   return n.children.flatMap(leafIds);
 }
 
+/**
+ * Panes one terminal tab can hold at most, the top of the pane limit setting;
+ * the WebGL fallback sizes its pool from it.
+ */
+export const MAX_PANES_PER_TAB = 8;
+
+/** A stored pane limit as one a tab can use: 1 (no splits) to the maximum. */
+export function clampPaneLimit(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(MAX_PANES_PER_TAB, Math.max(1, Math.round(value)))
+    : MAX_PANES_PER_TAB;
+}
+
+/**
+ * Whether a tab may get another pane under `limit`. A tab that already holds
+ * more (the limit was lowered after it was split) keeps its panes, gets none.
+ */
+export function canSplitPane(tree: PaneNode, limit: number): boolean {
+  return leafIds(tree).length < clampPaneLimit(limit);
+}
+
 export function firstLeafSlotId(n: PaneNode): PaneId {
   if (isLeaf(n)) return n.slotId ?? n.id;
   return firstLeafSlotId(n.children[0]);
@@ -109,6 +130,56 @@ export function splitLeaf(
       splitLeaf(c, targetId, newSplitId, newLeafId, dir, newCwd),
     ),
   };
+}
+
+export type SplitPosition = "left" | "right" | "top" | "bottom";
+
+/**
+ * Inserts an existing leaf beside `targetId`, keeping the leaf node itself so
+ * its session survives the move. Flattens into an enclosing split of the same
+ * direction like `splitLeaf`. Returns `tree` unchanged when the target is
+ * missing or the leaf is already there.
+ */
+export function insertLeafAt(
+  tree: PaneNode,
+  targetId: PaneId,
+  leaf: Extract<PaneNode, { kind: "leaf" }>,
+  position: SplitPosition,
+  newSplitId: PaneId,
+): PaneNode {
+  if (!hasLeaf(tree, targetId) || hasLeaf(tree, leaf.id)) return tree;
+  const dir: SplitDir =
+    position === "left" || position === "right" ? "row" : "col";
+  const before = position === "left" || position === "top";
+  const insert = (node: PaneNode): PaneNode => {
+    if (isLeaf(node)) {
+      if (node.id !== targetId) return node;
+      return {
+        kind: "split",
+        id: newSplitId,
+        dir,
+        children: before ? [leaf, node] : [node, leaf],
+      };
+    }
+    if (node.dir === dir) {
+      const index = node.children.findIndex(
+        (c) => isLeaf(c) && c.id === targetId,
+      );
+      if (index >= 0) {
+        const at = before ? index : index + 1;
+        return {
+          ...node,
+          children: [
+            ...node.children.slice(0, at),
+            leaf,
+            ...node.children.slice(at),
+          ],
+        };
+      }
+    }
+    return { ...node, children: node.children.map(insert) };
+  };
+  return insert(tree);
 }
 
 /**
@@ -269,19 +340,91 @@ function rectsFromBounds(bounds: PaneBounds[]): PaneRect[] {
     }));
 }
 
+/**
+ * The pane next to the active one in `direction`, measured on the live layout
+ * when every pane has bounds (splits can be resized), else on equal shares.
+ */
+export function leafInDirection(
+  tree: PaneNode,
+  activeId: PaneId,
+  direction: PaneDirection,
+  liveBounds?: PaneBounds[],
+): PaneId | null {
+  const liveRects = liveBounds ? rectsFromBounds(liveBounds) : [];
+  const liveIds = new Set(liveRects.map((rect) => rect.id));
+  const hasCompleteLiveLayout = leafIds(tree).every((id) => liveIds.has(id));
+  const rects = hasCompleteLiveLayout ? liveRects : paneRects(tree);
+  const active = rects.find((rect) => rect.id === activeId);
+  if (!active || rects.length < 2) return null;
+  return directionalTarget(rects, active, direction);
+}
+
+/** The leaf node `id`, for rendering it alone (pane zoom). */
+export function findLeafNode(
+  tree: PaneNode,
+  id: PaneId,
+): Extract<PaneNode, { kind: "leaf" }> | null {
+  return findLeaf(tree, id);
+}
+
+/** Every split node id, outermost first. */
+export function splitIds(tree: PaneNode): PaneId[] {
+  if (isLeaf(tree)) return [];
+  return [tree.id, ...tree.children.flatMap(splitIds)];
+}
+
+/**
+ * Which divider a keyboard resize of the active pane moves: the nearest
+ * enclosing split along the direction's axis, the divider on the active
+ * pane's `direction` side when it has one (the pane grows), else the one on
+ * its other side (the pane shrinks). `divider` is the index of the child
+ * before it; `sign` is +1 when the divider moves right/down.
+ */
+export function splitResizeTarget(
+  tree: PaneNode,
+  activeId: PaneId,
+  direction: PaneDirection,
+): {
+  readonly split: Extract<PaneNode, { kind: "split" }>;
+  readonly divider: number;
+  readonly sign: 1 | -1;
+} | null {
+  const axis: SplitDir =
+    direction === "left" || direction === "right" ? "row" : "col";
+  const forward = direction === "right" || direction === "down";
+  const path = pathToLeaf(tree, activeId);
+  if (!path) return null;
+  for (let depth = path.length - 1; depth >= 0; depth--) {
+    const { split, index } = path[depth];
+    if (split.dir !== axis) continue;
+    const last = split.children.length - 1;
+    if (forward && index < last) return { split, divider: index, sign: 1 };
+    if (!forward && index > 0) return { split, divider: index - 1, sign: -1 };
+    if (forward && index > 0) return { split, divider: index - 1, sign: 1 };
+    if (!forward && index < last) return { split, divider: index, sign: -1 };
+  }
+  return null;
+}
+
+function pathToLeaf(
+  node: PaneNode,
+  id: PaneId,
+): { split: Extract<PaneNode, { kind: "split" }>; index: number }[] | null {
+  if (isLeaf(node)) return node.id === id ? [] : null;
+  for (let index = 0; index < node.children.length; index++) {
+    const rest = pathToLeaf(node.children[index], id);
+    if (rest) return [{ split: node, index }, ...rest];
+  }
+  return null;
+}
+
 export function swapLeafInDirection(
   tree: PaneNode,
   activeId: PaneId,
   direction: PaneDirection,
   liveBounds?: PaneBounds[],
 ): PaneNode {
-  const liveRects = liveBounds ? rectsFromBounds(liveBounds) : [];
-  const liveIds = new Set(liveRects.map((rect) => rect.id));
-  const hasCompleteLiveLayout = leafIds(tree).every((id) => liveIds.has(id));
-  const rects = hasCompleteLiveLayout ? liveRects : paneRects(tree);
-  const active = rects.find((rect) => rect.id === activeId);
-  if (!active || rects.length < 2) return tree;
-  const targetId = directionalTarget(rects, active, direction);
+  const targetId = leafInDirection(tree, activeId, direction, liveBounds);
   if (targetId === null) return tree;
   const first = findLeaf(tree, activeId);
   const second = findLeaf(tree, targetId);

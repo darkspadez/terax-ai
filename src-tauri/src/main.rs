@@ -14,5 +14,8 @@ fn main() {
         }
     }
 
-    terax_lib::run()
+    #[cfg(target_os = "linux")]
+    oarlock_lib::modules::workspace::disable_nv_explicit_sync_if_needed();
+
+    oarlock_lib::run()
 }

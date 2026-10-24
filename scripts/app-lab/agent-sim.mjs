@@ -1,5 +1,5 @@
-#!/usr/bin/env node
-// Synthetic coding-agent workload for the app lab (scripts/app-lab/run.py).
+#!/usr/bin/env bun
+// Synthetic coding-agent workload for the app lab (scripts/app-lab/run.ts).
 //
 // It runs inside a real PTY and writes what Ink applications such as Claude Code and Codex
 // write: a dynamic region of REGION_LINES lines that is erased (cursor-up + erase-line) and

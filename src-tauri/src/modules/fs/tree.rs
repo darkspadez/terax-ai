@@ -6,15 +6,28 @@ use std::time::UNIX_EPOCH;
 use ignore::WalkBuilder;
 use serde::Serialize;
 
-use super::blocking;
-use crate::modules::workspace::{resolve_path, WorkspaceEnv};
+use super::{authorized_root, blocking};
+use crate::modules::workspace::{resolve_path, Origin, WorkspaceEnv};
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum EntryKind {
     File,
     Dir,
     Symlink,
+}
+
+/// What an entry that cannot be followed is listed as: a link (dangling, or to somewhere
+/// unreadable) only when it is one. A folder access is denied to (`System Volume Information`
+/// on Windows) stays a folder, which reports the denial when it is opened.
+fn unfollowed_kind(own: std::fs::FileType) -> EntryKind {
+    if own.is_symlink() {
+        EntryKind::Symlink
+    } else if own.is_dir() {
+        EntryKind::Dir
+    } else {
+        EntryKind::File
+    }
 }
 
 #[derive(Serialize)]
@@ -133,12 +146,18 @@ fn natural_cmp(a: &str, b: &str) -> Ordering {
 /// callers pay nothing.
 #[tauri::command]
 pub async fn fs_read_dir(
+    app: tauri::AppHandle,
     path: String,
     show_hidden: bool,
     git_decorations: Option<bool>,
     workspace: Option<WorkspaceEnv>,
+    origin: Option<Origin>,
 ) -> Result<Vec<DirEntry>, String> {
-    blocking(move || read_dir_entries(path, show_hidden, git_decorations, workspace)).await
+    blocking(move || {
+        authorized_root(&app, &path, workspace.as_ref(), origin.unwrap_or_default())?;
+        read_dir_entries(path, show_hidden, git_decorations, workspace)
+    })
+    .await
 }
 
 pub fn read_dir_entries(
@@ -170,20 +189,23 @@ pub fn read_dir_entries(
 
             // `metadata()` follows symlinks → it returns the target's stat in
             // one syscall (file_type + size + mtime all derived from it). We
-            // fall back to `symlink_metadata` for broken symlinks so we don't
-            // silently drop them from the listing.
-            let (meta, was_symlink) = match std::fs::metadata(entry.path()) {
-                Ok(m) => (Some(m), false),
-                Err(_) => (entry.metadata().ok(), true),
-            };
-            let meta = meta?;
-
-            let kind = if was_symlink {
-                EntryKind::Symlink
-            } else if meta.is_dir() {
-                EntryKind::Dir
-            } else {
-                EntryKind::File
+            // fall back to the entry's own metadata for what cannot be followed
+            // (broken symlinks, denied folders) so we don't silently drop them
+            // from the listing.
+            let (meta, kind) = match std::fs::metadata(entry.path()) {
+                Ok(m) => {
+                    let kind = if m.is_dir() {
+                        EntryKind::Dir
+                    } else {
+                        EntryKind::File
+                    };
+                    (m, kind)
+                }
+                Err(_) => {
+                    let own = entry.metadata().ok()?;
+                    let kind = unfollowed_kind(own.file_type());
+                    (own, kind)
+                }
             };
 
             if name.starts_with('.') && !show_hidden {
@@ -229,11 +251,16 @@ pub fn read_dir_entries(
 /// Hidden entries are filtered by dot-prefix only.
 #[tauri::command]
 pub async fn list_subdirs(
+    app: tauri::AppHandle,
     path: String,
     show_hidden: bool,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<Vec<String>, String> {
-    blocking(move || subdirs(path, show_hidden, workspace)).await
+    blocking(move || {
+        authorized_root(&app, &path, workspace.as_ref(), Origin::App)?;
+        subdirs(path, show_hidden, workspace)
+    })
+    .await
 }
 
 pub fn subdirs(
@@ -267,8 +294,26 @@ pub fn subdirs(
 
 #[cfg(test)]
 mod tests {
-    use super::natural_cmp;
+    use super::{natural_cmp, unfollowed_kind, EntryKind};
     use std::cmp::Ordering;
+
+    #[test]
+    fn an_entry_that_cannot_be_followed_is_a_link_only_when_it_is_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("System Volume Information");
+        std::fs::create_dir(&folder).unwrap();
+        let file = dir.path().join("pagefile.sys");
+        std::fs::write(&file, "").unwrap();
+        let own = |path: &std::path::Path| std::fs::symlink_metadata(path).unwrap().file_type();
+        assert_eq!(unfollowed_kind(own(&folder)), EntryKind::Dir);
+        assert_eq!(unfollowed_kind(own(&file)), EntryKind::File);
+        #[cfg(unix)]
+        {
+            let link = dir.path().join("dangling");
+            std::os::unix::fs::symlink(dir.path().join("missing"), &link).unwrap();
+            assert_eq!(unfollowed_kind(own(&link)), EntryKind::Symlink);
+        }
+    }
 
     fn sorted(mut v: Vec<&str>) -> Vec<&str> {
         v.sort_by(|a, b| natural_cmp(a, b));

@@ -502,7 +502,113 @@ export type GhosttyTerminalEvent =
       readonly marker?: number;
     }
   | { readonly type: "screen-cleared" }
+  /** OSC 9;4. `progress` is a percentage, or null when none was sent. */
+  | {
+      readonly type: "progress";
+      readonly state: GhosttyProgressState;
+      readonly progress: number | null;
+    }
+  /** OSC 22 or a reset: the pointer shape the program asked for. */
+  | { readonly type: "pointer-shape"; readonly shape: GhosttyPointerShape }
+  /**
+   * OSC 52 read request. Answer, if at all, by writing
+   * `ESC ] 52 ; <selection> ; <base64> <terminator>` to the PTY.
+   */
+  | {
+      readonly type: "clipboard-read";
+      readonly selection: string;
+      readonly terminator: "st" | "bel";
+    }
+  /**
+   * Kitty clipboard (OSC 5522) read held for the host while reads go to it
+   * (`setClipboardPolicy`). Answer with `answerKittyClipboardRead(id, …)`;
+   * `list` asks for the MIME types available, `mimes` for those
+   * representations (empty for a listing alone). `granted` when a session
+   * grant (a paste event's password) covers it, so no prompt is due.
+   */
+  | {
+      readonly type: "kitty-clipboard-read";
+      readonly id: number;
+      readonly primary: boolean;
+      readonly list: boolean;
+      readonly granted: boolean;
+      readonly name: string;
+      readonly mimes: readonly string[];
+    }
+  /**
+   * Kitty clipboard write the policy allows, for the clipboard (or the
+   * primary selection): its first text and first image representation, or
+   * none when it clears the clipboard.
+   */
+  | {
+      readonly type: "kitty-clipboard-write";
+      readonly primary: boolean;
+      readonly clear: boolean;
+      readonly contents: readonly {
+        readonly mime: string;
+        readonly data: Uint8Array<ArrayBuffer>;
+      }[];
+    }
+  /**
+   * Kitty drag and drop (OSC 72): the program registered or unregistered
+   * for drops (`dndActive`), answered the current drag (`dndAccepted`), or
+   * finished a drop with the operation it performed.
+   */
+  | {
+      readonly type: "drag-and-drop";
+      readonly change: "registration" | "acceptance" | "concluded";
+      readonly operation?: GhosttyDragOperation;
+    }
   | { readonly type: "overflow"; readonly dropped: number };
+
+export type GhosttyDragOperation = "none" | "copy" | "move";
+
+export type GhosttyProgressState =
+  | "remove"
+  | "set"
+  | "error"
+  | "indeterminate"
+  | "pause";
+
+/** Ghostty's mouse shapes, in its enum order (OSC 22 names, as CSS cursors). */
+export const GHOSTTY_POINTER_SHAPES = [
+  "default",
+  "context-menu",
+  "help",
+  "pointer",
+  "progress",
+  "wait",
+  "cell",
+  "crosshair",
+  "text",
+  "vertical-text",
+  "alias",
+  "copy",
+  "move",
+  "no-drop",
+  "not-allowed",
+  "grab",
+  "grabbing",
+  "all-scroll",
+  "col-resize",
+  "row-resize",
+  "n-resize",
+  "e-resize",
+  "s-resize",
+  "w-resize",
+  "ne-resize",
+  "nw-resize",
+  "se-resize",
+  "sw-resize",
+  "ew-resize",
+  "ns-resize",
+  "nesw-resize",
+  "nwse-resize",
+  "zoom-in",
+  "zoom-out",
+] as const;
+
+export type GhosttyPointerShape = (typeof GHOSTTY_POINTER_SHAPES)[number];
 
 /**
  * Cell structure matching ghostty_cell_t in C (16 bytes)

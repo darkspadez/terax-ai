@@ -2,7 +2,7 @@
  * Standalone renderer harness: draws a fixed test pattern through the real
  * WebGPU surface and the real Ghostty model, and can read the presented canvas
  * back as exact RGBA. The same page runs against any source tree
- * (TERAX_VISUAL_SOURCE_ROOT), which is how two renderer versions are compared.
+ * (OARLOCK_VISUAL_SOURCE_ROOT), which is how two renderer versions are compared.
  * See README.md for the query parameters and workflow.
  */
 import "@/styles/fonts.css";
@@ -225,7 +225,7 @@ function pattern(): string {
   const lines: string[] = [];
   const colored = (code: string, text: string) => `${esc}${code}m${text}${esc}0m`;
   lines.push(
-    `${colored("1;38;5;81", "Terax renderer harness")}  dpr=${window.devicePixelRatio} font=${font.size}px`,
+    `${colored("1;38;5;81", "Oarlock renderer harness")}  dpr=${window.devicePixelRatio} font=${font.size}px`,
   );
   lines.push(" !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~");
   lines.push(`regular: The quick brown fox jumps over the lazy dog 0123456789 {}[]()<>`);

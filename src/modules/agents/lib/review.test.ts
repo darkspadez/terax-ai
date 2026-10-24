@@ -1,4 +1,4 @@
-﻿import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ManagedAgent } from "../store/managedAgentsStore";
 
 const managedAgents = vi.hoisted(() => {
@@ -31,7 +31,14 @@ vi.mock("@/modules/ai/store/chatStore", () => chatStore);
 
 const chatRuntime = vi.hoisted(() => {
   const sendMessage = vi.fn();
-  return { getOrCreateChat: vi.fn(() => ({ sendMessage })), sendMessage };
+  return {
+    getOrCreateChat: vi.fn(() => ({ sendMessage })),
+    sendUserMessage: (
+      chat: { sendMessage: (message: unknown) => void },
+      message: unknown,
+    ) => chat.sendMessage(message),
+    sendMessage,
+  };
 });
 
 vi.mock("@/modules/ai/store/chatRuntime", () => chatRuntime);

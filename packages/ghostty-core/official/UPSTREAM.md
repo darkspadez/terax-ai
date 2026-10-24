@@ -1,7 +1,7 @@
 # Official libghostty WASM artifact
 
 This directory contains the production-candidate official libghostty WASM
-artifact. It is kept beside, but not yet substituted for, Terax's older custom
+artifact. It is kept beside, but not yet substituted for, Oarlock's older custom
 compatibility core.
 
 - Upstream: `https://github.com/ghostty-org/ghostty`

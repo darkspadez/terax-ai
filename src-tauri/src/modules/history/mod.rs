@@ -3,6 +3,7 @@ mod parse;
 
 use index::HistoryIndex;
 use parse::{demetafy, parse_bash, parse_fish, parse_zsh};
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -32,7 +33,8 @@ fn read_histories() -> Vec<(String, i64)> {
     let mut all = Vec::new();
     let home = dirs::home_dir();
 
-    if let Some(path) = zsh_histfile(home.as_ref()) {
+    let dotdir = zsh_dotdir();
+    if let Some(path) = zsh_histfile(std::env::var_os("HISTFILE"), dotdir.as_ref(), home.as_ref()) {
         if let Ok(bytes) = std::fs::read(&path) {
             let content = String::from_utf8_lossy(&demetafy(&bytes)).into_owned();
             all.extend(parse_zsh(&content));
@@ -43,7 +45,7 @@ fn read_histories() -> Vec<(String, i64)> {
             all.extend(parse_bash(&content));
         }
     }
-    if let Some(path) = fish_histfile(home.as_ref()) {
+    if let Some(path) = fish_histfile(std::env::var_os("XDG_DATA_HOME"), home.as_ref()) {
         if let Ok(content) = std::fs::read_to_string(&path) {
             all.extend(parse_fish(&content));
         }
@@ -51,9 +53,21 @@ fn read_histories() -> Vec<(String, i64)> {
     all
 }
 
-fn zsh_histfile(home: Option<&PathBuf>) -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("HISTFILE") {
+/// `$HISTFILE` when it exists, then `.zsh_history` in zsh's dot directory
+/// (where macOS's /etc/zshrc and most configs that set a `ZDOTDIR` keep it),
+/// then in home.
+fn zsh_histfile(
+    histfile: Option<OsString>,
+    dotdir: Option<&PathBuf>,
+    home: Option<&PathBuf>,
+) -> Option<PathBuf> {
+    if let Some(p) = histfile {
         let pb = PathBuf::from(p);
+        if pb.exists() {
+            return Some(pb);
+        }
+    }
+    if let Some(pb) = dotdir.map(|d| d.join(".zsh_history")) {
         if pb.exists() {
             return Some(pb);
         }
@@ -61,8 +75,62 @@ fn zsh_histfile(home: Option<&PathBuf>) -> Option<PathBuf> {
     home.map(|h| h.join(".zsh_history"))
 }
 
-fn fish_histfile(home: Option<&PathBuf>) -> Option<PathBuf> {
-    if let Ok(data) = std::env::var("XDG_DATA_HOME") {
+#[cfg(unix)]
+const ZDOTDIR_MARKER: &str = "__OARLOCK_ZDOTDIR_3c9e__";
+
+/// zsh's `ZDOTDIR`: Oarlock's own, or the one the user's `.zshenv` sets (often
+/// `~/.config/zsh`), which a GUI app's environment lacks. zsh reads
+/// `.zshenv` for every shell, so a non-interactive one answers quickly.
+#[cfg(unix)]
+fn zsh_dotdir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("ZDOTDIR").filter(|d| !d.is_empty()) {
+        return Some(dir.into());
+    }
+    let shell = PathBuf::from(std::env::var_os("SHELL")?);
+    if shell.file_name()? != "zsh" {
+        return None;
+    }
+    read_zsh_dotdir(zsh_dotdir_query(&shell))
+}
+
+#[cfg(not(unix))]
+fn zsh_dotdir() -> Option<PathBuf> {
+    None
+}
+
+#[cfg(unix)]
+fn zsh_dotdir_query(zsh: &std::path::Path) -> std::process::Command {
+    use std::process::{Command, Stdio};
+    let mut cmd = Command::new(zsh);
+    cmd.arg("-c")
+        .arg(format!("print -rn -- \"{ZDOTDIR_MARKER}$ZDOTDIR\""))
+        .env("OARLOCK_RESOLVING_ENVIRONMENT", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    cmd
+}
+
+/// Runs the query; `.zshenv` may print before the marker.
+#[cfg(unix)]
+fn read_zsh_dotdir(mut cmd: std::process::Command) -> Option<PathBuf> {
+    use crate::modules::proc::capture::{self, Limits};
+    let limits = Limits {
+        stdout: 64 * 1024,
+        stderr: 4 * 1024,
+        stop_on_stdout_cap: true,
+    };
+    let out = capture::run(&mut cmd, std::time::Duration::from_secs(5), limits).ok()?;
+    if out.timed_out || out.exit_code != Some(0) {
+        return None;
+    }
+    let text = String::from_utf8(out.stdout).ok()?;
+    let (_, dir) = text.rsplit_once(ZDOTDIR_MARKER)?;
+    (!dir.is_empty()).then(|| PathBuf::from(dir))
+}
+
+fn fish_histfile(xdg_data_home: Option<OsString>, home: Option<&PathBuf>) -> Option<PathBuf> {
+    if let Some(data) = xdg_data_home {
         let pb = PathBuf::from(data).join("fish/fish_history");
         if pb.exists() {
             return Some(pb);
@@ -107,15 +175,18 @@ fn is_executable(entry: &std::fs::DirEntry) -> bool {
 
 #[cfg(windows)]
 fn is_executable(entry: &std::fs::DirEntry) -> bool {
-    match entry.file_name().to_str() {
-        Some(name) => {
-            let lower = name.to_ascii_lowercase();
-            [".exe", ".cmd", ".bat", ".com", ".ps1"]
-                .iter()
-                .any(|e| lower.ends_with(e))
-        }
-        None => false,
-    }
+    entry
+        .file_name()
+        .to_str()
+        .is_some_and(has_launcher_extension)
+}
+
+#[cfg(any(windows, test))]
+fn has_launcher_extension(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    [".exe", ".cmd", ".bat", ".com", ".ps1"]
+        .iter()
+        .any(|e| lower.ends_with(e))
 }
 
 impl HistoryState {
@@ -224,5 +295,128 @@ mod tests {
         );
         state.0.path_cmds.set(Vec::new()).unwrap();
         assert!(state.is_warm(true));
+    }
+
+    #[test]
+    fn zsh_histfile_prefers_an_existing_histfile() {
+        let tmp = tempfile::tempdir().unwrap();
+        let custom = tmp.path().join("custom_zhistory");
+        std::fs::write(&custom, b"").unwrap();
+        let home = tmp.path().join("home");
+
+        let got = zsh_histfile(Some(custom.clone().into()), None, Some(&home));
+
+        assert_eq!(got, Some(custom));
+    }
+
+    #[test]
+    fn zsh_histfile_looks_in_the_dot_directory_before_home() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let dotdir = home.join(".config/zsh");
+        std::fs::create_dir_all(&dotdir).unwrap();
+
+        assert_eq!(
+            zsh_histfile(None, Some(&dotdir), Some(&home)),
+            Some(home.join(".zsh_history")),
+            "no history in the dot directory"
+        );
+        std::fs::write(dotdir.join(".zsh_history"), b"").unwrap();
+        assert_eq!(
+            zsh_histfile(None, Some(&dotdir), Some(&home)),
+            Some(dotdir.join(".zsh_history"))
+        );
+    }
+
+    #[test]
+    fn zsh_histfile_falls_back_to_home_when_histfile_is_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+
+        let missing = Some(tmp.path().join("missing").into());
+        assert_eq!(
+            zsh_histfile(missing, None, Some(&home)),
+            Some(home.join(".zsh_history"))
+        );
+        assert_eq!(
+            zsh_histfile(None, None, Some(&home)),
+            Some(home.join(".zsh_history"))
+        );
+        assert_eq!(zsh_histfile(None, None, None), None);
+    }
+
+    #[cfg(unix)]
+    fn fake_zsh(dir: &std::path::Path, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("zsh");
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_dot_directory_query_reads_past_what_zshenv_prints() {
+        let tmp = tempfile::tempdir().unwrap();
+        let zsh = fake_zsh(
+            tmp.path(),
+            &format!("printf 'Welcome\\n'; printf '%s' '{ZDOTDIR_MARKER}/home/me/.config/zsh'"),
+        );
+        assert_eq!(
+            read_zsh_dotdir(zsh_dotdir_query(&zsh)),
+            Some(PathBuf::from("/home/me/.config/zsh"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_dot_directory_query_gives_up_without_an_answer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let unset = fake_zsh(tmp.path(), &format!("printf '%s' '{ZDOTDIR_MARKER}'"));
+        assert_eq!(read_zsh_dotdir(zsh_dotdir_query(&unset)), None);
+        let failing = fake_zsh(
+            tmp.path(),
+            &format!("printf '%s' '{ZDOTDIR_MARKER}/x'; exit 1"),
+        );
+        assert_eq!(read_zsh_dotdir(zsh_dotdir_query(&failing)), None);
+        let silent = fake_zsh(tmp.path(), "printf 'banner only'");
+        assert_eq!(read_zsh_dotdir(zsh_dotdir_query(&silent)), None);
+    }
+
+    #[test]
+    fn fish_histfile_prefers_xdg_then_falls_back_to_default_location() {
+        let tmp = tempfile::tempdir().unwrap();
+        let xdg = tmp.path().join("xdg-data");
+        std::fs::create_dir_all(xdg.join("fish")).unwrap();
+        let fish_file = xdg.join("fish").join("fish_history");
+        std::fs::write(&fish_file, b"").unwrap();
+        let home = tmp.path().join("home");
+        let default = Some(home.join(".local/share/fish/fish_history"));
+
+        assert_eq!(
+            fish_histfile(Some(xdg.into()), Some(&home)),
+            Some(fish_file)
+        );
+        assert_eq!(
+            fish_histfile(Some(tmp.path().join("empty-xdg").into()), Some(&home)),
+            default
+        );
+        assert_eq!(fish_histfile(None, Some(&home)), default);
+    }
+
+    #[test]
+    fn windows_executables_are_matched_by_launcher_extension() {
+        for name in [
+            "cargo.exe",
+            "RUN.CMD",
+            "tool.bat",
+            "legacy.com",
+            "script.ps1",
+        ] {
+            assert!(has_launcher_extension(name), "{name}");
+        }
+        for name in ["readme.txt", "noext", "exe", "archive.exe.zip"] {
+            assert!(!has_launcher_extension(name), "{name}");
+        }
     }
 }

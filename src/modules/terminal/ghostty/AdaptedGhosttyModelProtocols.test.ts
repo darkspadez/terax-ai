@@ -1,0 +1,231 @@
+import { readFile } from "node:fs/promises";
+import { OarlockGhostty } from "@oarlock/ghostty-core/adapted";
+import { beforeAll, describe, expect, it } from "vitest";
+import { AdaptedGhosttyTerminalModel } from "./AdaptedGhosttyTerminalModel";
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+const red = Buffer.from([255, 0, 0]).toString("base64");
+
+describe.each(["ghostty-vt", "ghostty-vt-scalar"])(
+  "adapted Ghostty model protocols (%s)",
+  (artifact) => {
+    let core: OarlockGhostty;
+
+    beforeAll(async () => {
+      const file = await readFile(
+        new URL(
+          `../../../../packages/ghostty-core/adapted/${artifact}.wasm`,
+          import.meta.url,
+        ),
+      );
+      core = await OarlockGhostty.loadBytes(Uint8Array.from(file).buffer);
+    });
+
+    function create(
+      backend: "ghostty-webgpu" | "ghostty-webgl" = "ghostty-webgpu",
+    ) {
+      const replies: string[] = [];
+      const model = new AdaptedGhosttyTerminalModel(core, {
+        backend,
+        cols: 80,
+        rows: 24,
+        onReply: (bytes) => replies.push(decoder.decode(bytes)),
+      });
+      model.setPixelSize(800, 480);
+      return {
+        model,
+        replies,
+        write: (text: string) => model.write(encoder.encode(text)),
+      };
+    }
+
+    it("delivers mode 2048 reports from resize and cell-size changes to the PTY", () => {
+      const { model, replies, write } = create();
+      try {
+        write("\x1b[?2048h");
+        model.resize(100, 30);
+        model.setPixelSize(1000, 600);
+        model.setPixelSize(2000, 1200);
+        expect(replies).toEqual([
+          "\x1b[48;24;80;480;800t",
+          "\x1b[48;30;100;600;1000t",
+          "\x1b[48;30;100;1200;2000t",
+        ]);
+      } finally {
+        model.dispose();
+      }
+    });
+
+    // crynta/terax-ai#781: the setting is mode 1007's default; programs win.
+    it("makes alternate scroll a default that programs still override", () => {
+      const { model, replies, write } = create();
+      const alternateScroll = () => model.mode(1007);
+      try {
+        expect(alternateScroll()).toBe(true);
+        model.setAlternateScroll(false);
+        expect(alternateScroll()).toBe(false);
+        write("\x1b[?1007$p");
+        expect(replies[replies.length - 1]).toBe("\x1b[?1007;2$y");
+
+        write("\x1b[?1007h");
+        model.setAlternateScroll(false);
+        expect(alternateScroll()).toBe(true);
+        model.setAlternateScroll(true);
+        write("\x1b[?1007l");
+        model.setAlternateScroll(false);
+        expect(alternateScroll()).toBe(false);
+
+        write("\x1bc");
+        expect(alternateScroll()).toBe(false);
+        model.setAlternateScroll(true);
+        expect(alternateScroll()).toBe(true);
+        write("\x1b[?1007l\x1bc");
+        expect(alternateScroll()).toBe(true);
+      } finally {
+        model.dispose();
+      }
+    });
+
+    it("delivers colour scheme and visibility changes to the PTY", () => {
+      const { model, replies, write } = create();
+      try {
+        write("\x1b[?2031h\x1b[?2033h");
+        replies.length = 0;
+        model.setColorScheme("light");
+        model.setVisible(false);
+        expect(replies).toEqual(["\x1b[?997;2n", "\x1b[?999;2n"]);
+        model.setTerminalVersion("oarlock 9.9.9");
+        write("\x1b[>q");
+        expect(replies[replies.length - 1]).toBe("\x1bP>|oarlock 9.9.9\x1b\\");
+      } finally {
+        model.dispose();
+      }
+    });
+
+    it("redraws everything when only image placements change (GPU frames)", () => {
+      const { model, write } = create();
+      try {
+        write("text");
+        model.consumeGpuFrame();
+        expect(model.consumeGpuFrame().damage.kind).toBe("none");
+
+        write(`\x1b[2;2H\x1b_Gi=1,a=T,f=24,s=1,v=1,q=2;${red}\x1b\\`);
+        const frame = model.consumeGpuFrame();
+        expect(frame.damage.kind).toBe("full");
+        expect(model.imagePlacements()).toMatchObject([
+          { imageId: 1, col: 1, row: 1, channels: 3 },
+        ]);
+
+        write("\x1b_Ga=d,d=A,q=2\x1b\\");
+        expect(model.consumeGpuFrame().damage.kind).toBe("full");
+        expect(model.imagePlacements()).toEqual([]);
+      } finally {
+        model.dispose();
+      }
+    });
+
+    it("resizes images with the cells, without waiting for output", () => {
+      const { model, write } = create();
+      try {
+        // Two columns by one row: the image follows the cell size.
+        write(`\x1b_Gi=3,a=T,f=24,s=1,v=1,c=2,r=1,q=2;${red}\x1b\\`);
+        model.consumeGpuFrame();
+        expect(model.imagePlacements()).toMatchObject([
+          { width: 20, height: 20 },
+        ]);
+        expect(model.consumeGpuFrame().damage.kind).toBe("none");
+
+        model.setPixelSize(1600, 960); // display scale doubled, same grid
+        expect(model.consumeGpuFrame().damage.kind).toBe("full");
+        expect(model.imagePlacements()).toMatchObject([
+          { width: 40, height: 40 },
+        ]);
+
+        model.setPixelSize(1600, 960); // unchanged: nothing to redraw
+        expect(model.consumeGpuFrame().damage.kind).toBe("none");
+      } finally {
+        model.dispose();
+      }
+    });
+
+    it("redraws everything when only image placements change (cell arrays)", () => {
+      const { model, write } = create("ghostty-webgl");
+      try {
+        write("text");
+        model.consumeDamage();
+        write(`\x1b_Gi=2,a=T,f=24,s=1,v=1,q=2;${red}\x1b\\`);
+        expect(model.consumeDamage().kind).toBe("full");
+        expect(model.imagePlacements().map((p) => p.imageId)).toEqual([2]);
+      } finally {
+        model.dispose();
+      }
+    });
+
+    it("encodes mouse events through the model and exports VT ranges", () => {
+      const { model, write } = create();
+      try {
+        write("\x1b[?1000h\x1b[?1006h\x1b[32mgreen\x1b[0m");
+        expect(
+          decoder.decode(
+            model.encodeMouse({
+              action: "press",
+              button: 1,
+              mods: 0,
+              x: 5,
+              y: 5,
+              anyButtonPressed: true,
+            }),
+          ),
+        ).toBe("\x1b[<0;1;1M");
+        expect(model.formatTextRange(0, 0, "vt")).toContain(
+          "\x1b[38;5;2mgreen",
+        );
+      } finally {
+        model.dispose();
+      }
+    });
+
+    it("reports the cells a hovered link covers, explicit or detected", () => {
+      const { model, write } = create();
+      try {
+        write(
+          "see \x1b]8;;https://oarlock.app\x1b\\oarlock\x1b]8;;\x1b\\ and src/main.rs:4",
+        );
+        expect(model.linkAtViewportCell(0, 6)).toEqual({
+          uri: "https://oarlock.app",
+          spans: [{ row: 0, startColumn: 4, endColumn: 10 }],
+        });
+        expect(model.linkAtViewportCell(0, 18)).toEqual({
+          uri: "src/main.rs:4",
+          spans: [{ row: 0, startColumn: 16, endColumn: 28 }],
+        });
+        expect(model.linkAtViewportCell(0, 1)).toBeNull();
+      } finally {
+        model.dispose();
+      }
+    });
+
+    it("jumps between shell prompts in history", () => {
+      const { model, write } = create();
+      try {
+        for (let command = 0; command < 3; command += 1) {
+          write(`\x1b]133;A\x07$ cmd${command}\r\n`);
+          write("output\r\n".repeat(30));
+        }
+        expect(model.scrollPosition().offset).toBe(0);
+        expect(model.scrollToPrompt(-1)).toBe(true);
+        const first = model.scrollPosition().offset;
+        expect(first).toBeGreaterThan(0);
+        expect(model.scrollToPrompt(-1)).toBe(true);
+        expect(model.scrollPosition().offset).toBeGreaterThan(first);
+        expect(model.scrollToPrompt(1)).toBe(true);
+        expect(model.scrollPosition().offset).toBe(first);
+        write("\x1b[?1049h");
+        expect(model.scrollToPrompt(-1)).toBe(false);
+      } finally {
+        model.dispose();
+      }
+    });
+  },
+);

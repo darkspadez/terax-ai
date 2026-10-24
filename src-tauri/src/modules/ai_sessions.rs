@@ -14,6 +14,7 @@
 //! giving a conversation up, so one bad write costs at most the last few
 //! seconds of a stream instead of the whole conversation.
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -30,13 +31,13 @@ use super::ipc_body;
 /// A conversation larger than this is refused rather than held in memory.
 const MAX_CONVERSATION_BYTES: usize = 128 * 1024 * 1024;
 const MAX_OPTIONS_BYTES: usize = 1024;
-const LEGACY_BACKUP: &str = "terax-ai-sessions.before-message-files.json";
-const LEGACY_STORE: &str = "terax-ai-sessions.json";
+const LEGACY_BACKUP: &str = "oarlock-ai-sessions.before-message-files.json";
+const LEGACY_STORE: &str = "oarlock-ai-sessions.json";
 const LEGACY_KEY_PREFIX: &str = "messages:";
 
 #[derive(Default)]
 pub struct SessionFilesState {
-    gate: Arc<tokio::sync::Mutex<()>>,
+    gate: Arc<tokio::sync::Mutex<HashMap<String, u32>>>,
 }
 
 fn valid_id(id: &str) -> bool {
@@ -324,6 +325,36 @@ struct SaveOptions {
     id: String,
     migrate: bool,
     durable: bool,
+    expected_revision: Option<u32>,
+}
+
+fn write_versioned(
+    root: &Path,
+    versions: &mut HashMap<String, u32>,
+    options: &SaveOptions,
+    bytes: &[u8],
+) -> Result<u32, String> {
+    let path = message_path(root, &options.id)?;
+    let current = versions.get(&options.id).copied().unwrap_or(0);
+    if !options.migrate {
+        let matches = match options.expected_revision {
+            Some(expected) => expected == current,
+            None => current == 0 && !path.exists(),
+        };
+        if !matches {
+            return Err("conflict: this conversation changed in another window; your messages have not overwritten it".into());
+        }
+    }
+    let next = current
+        .checked_add(1)
+        .ok_or("conversation revision exhausted")?;
+    let existed = path.exists();
+    write_messages(root, &options.id, bytes, options.migrate, options.durable)?;
+    if options.migrate && existed {
+        return Ok(current);
+    }
+    versions.insert(options.id.clone(), next);
+    Ok(next)
 }
 
 fn write_messages(
@@ -528,26 +559,31 @@ pub async fn ai_session_load(
     let root = data_dir(&app)?;
     let guard = state.gate.clone().lock_owned().await;
     let bytes = tauri::async_runtime::spawn_blocking(move || {
-        let _guard = guard;
-        read_messages(&root, &id)
+        let guard = guard;
+        let messages = read_messages(&root, &id)?.unwrap_or_default();
+        let revision = guard.get(&id).copied().unwrap_or(0);
+        let mut payload = Vec::with_capacity(4 + messages.len());
+        payload.extend_from_slice(&revision.to_le_bytes());
+        payload.extend_from_slice(&messages);
+        Ok::<_, String>(payload)
     })
     .await
     .map_err(|e| e.to_string())??;
-    // An empty body means "no such conversation".
-    Ok(Response::new(bytes.unwrap_or_default()))
+    // A u32 revision followed by raw JSON; no JSON means no such conversation.
+    Ok(Response::new(bytes))
 }
 
-/// Body: the conversation as raw JSON bytes. Header `x-terax-session`:
-/// `{ "id", "migrate"?, "durable"? }`.
+/// Body: the conversation as raw JSON bytes. Header `x-oarlock-session`:
+/// `{ "id", "expectedRevision"?, "migrate"?, "durable"? }`. Returns the new revision.
 #[tauri::command]
 pub async fn ai_session_save(
     app: tauri::AppHandle,
     state: State<'_, SessionFilesState>,
     request: Request<'_>,
-) -> Result<(), String> {
+) -> Result<u32, String> {
     let options: SaveOptions = request
         .headers()
-        .get("x-terax-session")
+        .get("x-oarlock-session")
         .and_then(|value| value.to_str().ok())
         .filter(|value| value.len() <= MAX_OPTIONS_BYTES)
         .ok_or("missing or oversized conversation options")
@@ -565,8 +601,8 @@ pub async fn ai_session_save(
     let root = data_dir(&app)?;
     let guard = state.gate.clone().lock_owned().await;
     tauri::async_runtime::spawn_blocking(move || {
-        let _guard = guard;
-        write_messages(&root, &options.id, &bytes, options.migrate, options.durable)
+        let mut guard = guard;
+        write_versioned(&root, &mut guard, &options, &bytes)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -581,8 +617,16 @@ pub async fn ai_session_delete(
     let root = data_dir(&app)?;
     let guard = state.gate.clone().lock_owned().await;
     tauri::async_runtime::spawn_blocking(move || {
-        let _guard = guard;
-        delete_messages(&root, &id)
+        let mut guard = guard;
+        let next = guard
+            .get(&id)
+            .copied()
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or("conversation revision exhausted")?;
+        delete_messages(&root, &id)?;
+        guard.insert(id, next);
+        Ok::<_, String>(())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -637,6 +681,30 @@ mod tests {
         read_messages(root, id)
             .unwrap()
             .map(|bytes| String::from_utf8(bytes).unwrap())
+    }
+
+    #[test]
+    fn stale_windows_cannot_overwrite_or_resurrect_conversations() {
+        let root = tempfile::tempdir().unwrap();
+        let mut versions = HashMap::new();
+        let options = |revision| SaveOptions {
+            id: "shared".into(),
+            expected_revision: revision,
+            ..Default::default()
+        };
+        let v1 = write_versioned(root.path(), &mut versions, &options(None), b"[1]").unwrap();
+        let v2 = write_versioned(root.path(), &mut versions, &options(Some(v1)), b"[1,2]").unwrap();
+        assert!(
+            write_versioned(root.path(), &mut versions, &options(Some(v1)), b"[1,3]")
+                .unwrap_err()
+                .contains("conflict:")
+        );
+        assert_eq!(read(root.path(), "shared").as_deref(), Some("[1,2]"));
+        assert!(write_versioned(root.path(), &mut versions, &options(None), b"[]").is_err());
+        delete_messages(root.path(), "shared").unwrap();
+        versions.insert("shared".into(), v2 + 1);
+        assert!(write_versioned(root.path(), &mut versions, &options(Some(v2)), b"[4]").is_err());
+        assert_eq!(read(root.path(), "shared"), None);
     }
 
     #[test]

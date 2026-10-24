@@ -7,10 +7,17 @@ import {
   useState,
 } from "react";
 import { excludeNestedSources } from "./batchMove";
+import { dirname } from "./treePaths";
 
 export type ExplorerPathDropTarget = {
   updateTarget: (clientX: number, clientY: number) => boolean;
-  dropPath: (paths: string[], clientX: number, clientY: number) => boolean;
+  /** `isDir` tells which dropped paths are folders (undefined: unknown). */
+  dropPath: (
+    paths: string[],
+    clientX: number,
+    clientY: number,
+    isDir?: (path: string) => boolean | undefined,
+  ) => boolean;
   clearTarget: () => void;
 };
 
@@ -25,11 +32,6 @@ type Options = {
 
 const THRESHOLD = 5;
 
-function parentDir(path: string): string {
-  const i = path.lastIndexOf("/");
-  return i > 0 ? path.slice(0, i) : path;
-}
-
 export function resolveExplorerMoveTarget(
   sources: string[],
   rootPath: string,
@@ -41,10 +43,10 @@ export function resolveExplorerMoveTarget(
   const target = hoveredPath
     ? isDir(hoveredPath)
       ? hoveredPath
-      : parentDir(hoveredPath)
+      : dirname(hoveredPath)
     : rootPath;
   const allAlreadyInTarget = sources.every(
-    (source) => parentDir(source) === target,
+    (source) => dirname(source) === target,
   );
   if (allAlreadyInTarget) return null;
   for (const source of sources) {
@@ -61,9 +63,11 @@ export function finishExplorerDrag(
   moveTarget: string | null,
   pathDropTarget: ExplorerPathDropTarget | undefined,
   onMove: (from: string[], toDir: string) => void,
+  isDir?: (path: string) => boolean | undefined,
 ): void {
   const handledByPathTarget =
-    commit && (pathDropTarget?.dropPath(sources, clientX, clientY) ?? false);
+    commit &&
+    (pathDropTarget?.dropPath(sources, clientX, clientY, isDir) ?? false);
   if (commit && !handledByPathTarget && moveTarget) {
     onMove(sources, moveTarget);
   }
@@ -202,6 +206,7 @@ export function useExplorerDnd({
         dropTargetRef.current,
         optsRef.current.pathDropTarget,
         optsRef.current.onMove,
+        optsRef.current.isDir,
       );
       suppressClickRef.current = true;
       setTimeout(() => {

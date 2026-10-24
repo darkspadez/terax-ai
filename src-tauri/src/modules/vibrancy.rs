@@ -50,14 +50,21 @@ pub fn parse_hex_rgb(value: &str) -> Option<[u8; 3]> {
     Some([channel(0)?, channel(2)?, channel(4)?])
 }
 
+/// Whether the window lets what is behind it show: always under a backdrop,
+/// and without one while the page asks for it (translucent terminals).
+pub fn window_see_through(backdrop: bool, see_through: Option<bool>) -> bool {
+    backdrop || see_through.unwrap_or(false)
+}
+
 /// Turns the backdrop on or off. Runs on the main thread (a plain command), as
 /// AppKit and DWM calls require.
 ///
-/// The window is created opaque. Only while a backdrop is on is it made
-/// see-through, because a non-opaque window makes the compositor blend every
-/// frame of the terminal with whatever is behind it, even when nothing shows
-/// through. With the backdrop off the window is opaque again and painted with
-/// `background` (the theme's window colour, `#rrggbb`).
+/// The window is created opaque. Only while a backdrop is on, or the page has
+/// translucent terminals (`see_through`), is it made see-through, because a
+/// non-opaque window makes the compositor blend every frame of the terminal
+/// with whatever is behind it, even when nothing shows through. Otherwise the
+/// window is opaque again and painted with `background` (the theme's window
+/// colour, `#rrggbb`). Windows and Linux windows are see-through from creation.
 ///
 /// `dark` only matters for Mica, which tints its own backdrop and cannot read
 /// the webview's theme.
@@ -67,12 +74,14 @@ pub fn window_set_backdrop(
     enabled: bool,
     dark: bool,
     background: Option<String>,
+    see_through: Option<bool>,
 ) -> Result<(), String> {
     let rgb = background
         .as_deref()
         .and_then(parse_hex_rgb)
         .unwrap_or_else(|| fallback_background(dark));
-    set_backdrop(&window, enabled, dark, rgb)
+    let see_through = window_see_through(enabled, see_through);
+    set_backdrop(&window, enabled, see_through, dark, rgb)
 }
 
 #[cfg(target_os = "windows")]
@@ -99,6 +108,7 @@ fn os_build() -> u32 {
 fn set_backdrop(
     window: &tauri::WebviewWindow,
     enabled: bool,
+    see_through: bool,
     _dark: bool,
     rgb: [u8; 3],
 ) -> Result<(), String> {
@@ -117,7 +127,7 @@ fn set_backdrop(
         .map_err(|e| e.to_string())
     } else {
         clear_vibrancy(window).map_err(|e| e.to_string())?;
-        set_window_see_through(window, false, rgb)
+        set_window_see_through(window, see_through, rgb)
     }
 }
 
@@ -196,6 +206,7 @@ fn set_window_see_through(
 fn set_backdrop(
     window: &tauri::WebviewWindow,
     enabled: bool,
+    _see_through: bool,
     dark: bool,
     _rgb: [u8; 3],
 ) -> Result<(), String> {
@@ -212,6 +223,7 @@ fn set_backdrop(
 fn set_backdrop(
     _window: &tauri::WebviewWindow,
     _enabled: bool,
+    _see_through: bool,
     _dark: bool,
     _rgb: [u8; 3],
 ) -> Result<(), String> {
@@ -220,7 +232,20 @@ fn set_backdrop(
 
 #[cfg(test)]
 mod tests {
-    use super::{backdrop_for, fallback_background, parse_hex_rgb, Backdrop, WIN11_BUILD};
+    use super::{
+        backdrop_for, fallback_background, parse_hex_rgb, window_see_through, Backdrop, WIN11_BUILD,
+    };
+
+    // crynta/terax-ai#556: translucent terminals need the window see-through
+    // without a backdrop; an older page that does not say so keeps it opaque.
+    #[test]
+    fn the_window_is_see_through_under_a_backdrop_or_when_asked() {
+        assert!(window_see_through(true, None));
+        assert!(window_see_through(true, Some(false)));
+        assert!(window_see_through(false, Some(true)));
+        assert!(!window_see_through(false, Some(false)));
+        assert!(!window_see_through(false, None));
+    }
 
     #[test]
     fn frontend_colours_parse_strictly() {

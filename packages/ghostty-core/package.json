@@ -1,5 +1,5 @@
 {
-  "name": "@terax/ghostty-core",
+  "name": "@oarlock/ghostty-core",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -22,7 +22,7 @@
     "adapted/LICENSE.restty",
     "adapted/wasm/build.zig",
     "adapted/wasm/build.zig.zon",
-    "adapted/wasm/src/terax.zig",
+    "adapted/wasm/src/oarlock.zig",
     "adapted/wasm/src/terminfo_gen.zig",
     "ghostty-vt.wasm",
     "official/ghostty-vt.wasm",

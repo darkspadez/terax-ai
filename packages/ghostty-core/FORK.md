@@ -1,4 +1,4 @@
-# Terax Ghostty core lineage
+# Oarlock Ghostty core lineage
 
 The production core is the maintained adaptation documented in
 `adapted/UPSTREAM.md`. It is built from current pinned Ghostty source and uses
@@ -40,10 +40,10 @@ To verify the source patch against a clean checkout:
 ```sh
 git -C /path/to/ghostty checkout 5714ed07a1012573261b7b7e3ed2add9c1504496
 git -C /path/to/ghostty apply --check \
-  /path/to/terax/packages/ghostty-core/patches/ghostty-wasm-api.patch
+  /path/to/oarlock/packages/ghostty-core/patches/ghostty-wasm-api.patch
 ```
 
-This fork retains the upstream MIT license. Terax imports only the low-level WASM bridge and input encoder. Rendering, scheduling, PTY transport, and GPU resource ownership live outside this package.
+This fork retains the upstream MIT license. Oarlock imports only the low-level WASM bridge and input encoder. Rendering, scheduling, PTY transport, and GPU resource ownership live outside this package.
 
 ## Unmodified official ABI evaluation
 
@@ -54,5 +54,5 @@ not a silent replacement for the active adapted core. See
 
 The official wrapper uses Ghostty's bulk raw-row RenderState API and one
 shared typed WASM callback dispatcher for PTY replies. Keeping both cores
-available behind tests lets Terax track upstream ABI progress without coupling
+available behind tests lets Oarlock track upstream ABI progress without coupling
 the renderer or product architecture to an incomplete integration path.

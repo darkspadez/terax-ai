@@ -1,5 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
-import { currentWorkspaceEnv } from "@/modules/workspace";
+import { authorizationSettled, currentWorkspaceEnv } from "@/modules/workspace";
+
+/** A project's AGENTS.md as the user allowed it: its size in bytes and its
+ *  whole text, or no text when it is larger than the run's model could take. */
+export type ProjectMemory = { size: number; text: string | null };
 
 export type ReadResult =
   | { kind: "text"; content: string; size: number }
@@ -43,6 +47,15 @@ export type GitRepoInfo = {
   branch: string;
   upstream: string | null;
   isDetached: boolean;
+  /** Set when the work tree is a linked worktree, not the main one. */
+  linkedWorktree: GitLinkedWorktree | null;
+};
+
+export type GitLinkedWorktree = {
+  /** The worktree's folder name. */
+  name: string;
+  /** Its main worktree's folder name (a bare repository's, without `.git`). */
+  repositoryName: string;
 };
 
 export type GitChangedFile = {
@@ -91,6 +104,15 @@ export type GitPushResult = {
   pushed: boolean;
 };
 
+/** A ref on a commit, classified by its namespace in Rust, never by its name. */
+export type GitLogRef = {
+  kind: "head" | "branch" | "tag" | "remote";
+  /** Without its namespace: `main`, `v1.0`, `origin/main`. */
+  name: string;
+  /** HEAD is here: the branch it is on, or HEAD itself when detached. */
+  head: boolean;
+};
+
 export type GitLogEntry = {
   sha: string;
   shortSha: string;
@@ -98,6 +120,8 @@ export type GitLogEntry = {
   authorEmail: string;
   timestampSecs: number;
   parents: string[];
+  /** HEAD and its branch first, then branches, tags and remote branches. */
+  refs: GitLogRef[];
   subject: string;
   filesChanged: number;
   insertions: number;
@@ -124,45 +148,98 @@ export type GitDiscardEntry = {
   untracked: boolean;
 };
 
+/** A local branch. */
 export type GitBranchEntry = {
   name: string;
-  kind: "local" | "worktree";
+  /** Another worktree that has the branch checked out, which no other one can. */
   worktreePath: string | null;
   isHead: boolean;
   isDetached: boolean;
 };
 
+/** One entry of `git worktree list`. */
+export type GitWorktreeEntry = {
+  path: string;
+  /** Without `refs/heads/`; null when detached or bare. */
+  branch: string | null;
+  head: string | null;
+  /** The main worktree (or the bare repository), always listed first. */
+  isMain: boolean;
+  isBare: boolean;
+  /** The worktree the listing was made in. */
+  isCurrent: boolean;
+  /** The lock reason (possibly empty) when locked. */
+  locked: string | null;
+  /** Its folder is gone. */
+  prunable: boolean;
+};
+
 export type GitBranchListResult = {
   branches: GitBranchEntry[];
+  worktrees: GitWorktreeEntry[];
 };
+
+/**
+ * A git command on a path the page names (the folder a terminal just moved
+ * to, an open file) waits for that path's authorization in flight, as reads
+ * and listings do, so right after a `cd` it never reaches the backend first
+ * and is refused. A repository root needs no wait: the backend authorizes a
+ * root when it finds one.
+ */
+function gitOnPath<T>(
+  command: string,
+  path: string,
+  args: Record<string, unknown>,
+): Promise<T> {
+  const workspace = currentWorkspaceEnv();
+  return authorizationSettled(path, workspace).then(() =>
+    invoke<T>(command, { ...args, workspace }),
+  );
+}
+
+/**
+ * Marks a file or shell call as the AI tools': the backend then applies their
+ * own "access all folders" setting, never the app's. Every file and shell
+ * call below carries it, and only the AI tools use them.
+ */
+const AI_ORIGIN = { origin: "ai" } as const;
 
 export const native = {
   workspaceCurrentDir: () => invoke<string>("workspace_current_dir"),
-  workspaceAuthorize: (path: string) =>
-    invoke<string>("workspace_authorize", {
-      path,
-      workspace: currentWorkspaceEnv(),
-    }),
   readFile: (path: string) =>
     invoke<ReadResult>("fs_read_file", {
       path,
       workspace: currentWorkspaceEnv(),
+      ...AI_ORIGIN,
+    }),
+  /** The window's project AGENTS.md for a run in `root`, only while the user
+   *  allows its current content (`project_memory_read`); null otherwise. Its
+   *  text is null when it is larger than `limit` bytes. */
+  readProjectMemory: (root: string, limit: number) =>
+    invoke<ProjectMemory | null>("project_memory_read", {
+      root,
+      workspace: currentWorkspaceEnv(),
+      limit: Math.floor(limit),
     }),
   writeFile: (path: string, content: string) =>
     invoke<void>("fs_write_file", {
       path,
       content,
       workspace: currentWorkspaceEnv(),
+      ...AI_ORIGIN,
     }),
   canonicalize: (path: string) =>
     invoke<string>("fs_canonicalize", {
       path,
       workspace: currentWorkspaceEnv(),
+      ...AI_ORIGIN,
     }),
-  createFile: (path: string) =>
-    invoke<void>("fs_create_file", { path, workspace: currentWorkspaceEnv() }),
   createDir: (path: string) =>
-    invoke<void>("fs_create_dir", { path, workspace: currentWorkspaceEnv() }),
+    invoke<void>("fs_create_dir", {
+      path,
+      workspace: currentWorkspaceEnv(),
+      ...AI_ORIGIN,
+    }),
   // AI tooling never sees dot-prefixed entries regardless of the user's
   // explorer preference — keeps .git / .env / .ssh out of agent context.
   readDir: (path: string) =>
@@ -170,6 +247,7 @@ export const native = {
       path,
       showHidden: false,
       workspace: currentWorkspaceEnv(),
+      ...AI_ORIGIN,
     }),
   grep: (params: {
     pattern: string;
@@ -185,6 +263,7 @@ export const native = {
       caseInsensitive: params.caseInsensitive ?? null,
       maxResults: params.maxResults ?? null,
       workspace: currentWorkspaceEnv(),
+      ...AI_ORIGIN,
     }),
   glob: (params: { pattern: string; root: string; maxResults?: number }) =>
     invoke<GlobResponse>("fs_glob", {
@@ -192,6 +271,7 @@ export const native = {
       root: params.root,
       maxResults: params.maxResults ?? null,
       workspace: currentWorkspaceEnv(),
+      ...AI_ORIGIN,
     }),
   runCommand: (
     command: string,
@@ -203,12 +283,14 @@ export const native = {
       cwd: cwd ?? null,
       timeoutSecs: timeoutSecs ?? null,
       workspace: currentWorkspaceEnv(),
+      ...AI_ORIGIN,
     }),
 
   shellSessionOpen: (cwd?: string | null) =>
     invoke<number>("shell_session_open", {
       cwd: cwd ?? null,
       workspace: currentWorkspaceEnv(),
+      ...AI_ORIGIN,
     }),
   shellSessionRun: (
     id: number,
@@ -229,6 +311,7 @@ export const native = {
       cwd: cwd ?? null,
       timeoutSecs: timeoutSecs ?? null,
       workspace: currentWorkspaceEnv(),
+      ...AI_ORIGIN,
     }),
   shellSessionClose: (id: number) =>
     invoke<void>("shell_session_close", { id }),
@@ -237,6 +320,7 @@ export const native = {
       command,
       cwd: cwd ?? null,
       workspace: currentWorkspaceEnv(),
+      ...AI_ORIGIN,
     }),
   shellBgLogs: (handle: number, sinceOffset?: number) =>
     invoke<{
@@ -259,15 +343,12 @@ export const native = {
       }[]
     >("shell_bg_list"),
   gitResolveRepo: (cwd: string) =>
-    invoke<GitRepoInfo | null>("git_resolve_repo", {
-      cwd,
-      workspace: currentWorkspaceEnv(),
-    }),
+    gitOnPath<GitRepoInfo | null>("git_resolve_repo", cwd, { cwd }),
+  /** Repositories inside a folder that is not one itself (children, grandchildren). */
+  gitDiscoverRepos: (path: string) =>
+    gitOnPath<string[]>("git_discover_repos", path, { path }),
   gitPanelSnapshot: (cwd: string) =>
-    invoke<GitPanelSnapshot>("git_panel_snapshot", {
-      cwd,
-      workspace: currentWorkspaceEnv(),
-    }),
+    gitOnPath<GitPanelSnapshot>("git_panel_snapshot", cwd, { cwd }),
   gitStatus: (repoRoot: string) =>
     invoke<GitStatusSnapshot>("git_status", {
       repoRoot,
@@ -280,6 +361,8 @@ export const native = {
       staged,
       workspace: currentWorkspaceEnv(),
     }),
+  gitFileBase: (path: string) =>
+    gitOnPath<string | null>("git_file_base", path, { path }),
   gitDiffContent: (
     repoRoot: string,
     path: string,
@@ -332,15 +415,33 @@ export const native = {
       repoRoot,
       workspace: currentWorkspaceEnv(),
     }),
-  gitLog: (repoRoot: string, options?: { limit?: number; beforeSha?: string }) =>
+  gitLog: (
+    repoRoot: string,
+    options?: { limit?: number; skip?: number; anchorSha?: string },
+  ) =>
     invoke<GitLogEntry[]>("git_log", {
       repoRoot,
       limit: options?.limit ?? null,
-      beforeSha: options?.beforeSha ?? null,
+      skip: options?.skip ?? null,
+      anchorSha: options?.anchorSha ?? null,
       workspace: currentWorkspaceEnv(),
     }),
   gitShowCommit: (repoRoot: string, sha: string) =>
     invoke<GitDiffResult>("git_show_commit", {
+      repoRoot,
+      sha,
+      workspace: currentWorkspaceEnv(),
+    }),
+  /** `git reset --soft` to the parent, only while HEAD is still `expectedHead`. */
+  gitUndoCommit: (repoRoot: string, expectedHead: string) =>
+    invoke<void>("git_undo_commit", {
+      repoRoot,
+      expectedHead,
+      workspace: currentWorkspaceEnv(),
+    }),
+  /** The first remote-tracking branch already containing `sha`, if any. */
+  gitCommitOnRemote: (repoRoot: string, sha: string) =>
+    invoke<string | null>("git_commit_on_remote", {
       repoRoot,
       sha,
       workspace: currentWorkspaceEnv(),

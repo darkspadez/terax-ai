@@ -113,6 +113,16 @@ const streamLoaders: Record<string, StreamLoader> = {
     import("@codemirror/legacy-modes/mode/diff").then(
       (m) => m.diff as unknown as StreamParser<unknown>,
     ),
+  // Shell blocks of the Markdown preview; chat replies show them as command
+  // cards instead.
+  shell: () =>
+    import("@codemirror/legacy-modes/mode/shell").then(
+      (m) => m.shell as unknown as StreamParser<unknown>,
+    ),
+  powershell: () =>
+    import("@codemirror/legacy-modes/mode/powershell").then(
+      (m) => m.powerShell as unknown as StreamParser<unknown>,
+    ),
 };
 
 const aliases: Record<string, string> = {
@@ -148,6 +158,12 @@ const aliases: Record<string, string> = {
   docker: "dockerfile",
   conf: "nginx",
   patch: "diff",
+  bash: "shell",
+  sh: "shell",
+  zsh: "shell",
+  shellscript: "shell",
+  pwsh: "powershell",
+  ps1: "powershell",
 };
 
 type ResolvedKey =

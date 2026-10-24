@@ -1,7 +1,3 @@
-import {
-  detectTerminalLinks,
-  type TerminalTextLink,
-} from "@/modules/terminal/ghostty/core/terminalLinks";
 import type {
   PackedTerminalViewport,
   TerminalCursor,
@@ -10,26 +6,33 @@ import type {
   TerminalModes,
   TerminalRowRange,
 } from "@/modules/terminal/backend/contracts";
+import {
+  detectTerminalLinks,
+  type TerminalTextLink,
+} from "@/modules/terminal/ghostty/core/terminalLinks";
 import type {
-  TeraxGhostty,
-  TeraxGhosttyGpuRenderState,
-  TeraxGhosttyRenderBase,
-  TeraxGhosttyRenderState,
-  TeraxGhosttyTerminal,
-} from "@terax/ghostty-core/adapted";
+  OarlockGhostty,
+  OarlockGhosttyGpuRenderState,
+  OarlockGhosttyKittyClipboardAnswer,
+  OarlockGhosttyMimeData,
+  OarlockGhosttyRenderBase,
+  OarlockGhosttyRenderState,
+  OarlockGhosttyTerminal,
+} from "@oarlock/ghostty-core/adapted";
 import type {
+  GhosttyDragOperation,
   GhosttyTerminalConfig,
   GhosttyTerminalEvent,
   KeyEvent,
-} from "@terax/ghostty-core/protocol";
-import { CellFlags } from "@terax/ghostty-core/protocol";
+} from "@oarlock/ghostty-core/protocol";
+import { CellFlags } from "@oarlock/ghostty-core/protocol";
 import { PromptPresentationGate } from "./core/PromptPresentationGate";
-import { ResizePromptHold } from "./core/ResizePromptHold";
 import {
   CELL_STRIDE,
   type Rgb,
   type TerminalCellReader,
 } from "./core/packedCells";
+import { ResizePromptHold } from "./core/ResizePromptHold";
 import { SynchronizedOutputPresentationGate } from "./core/SynchronizedOutputPresentationGate";
 import {
   MIN_SCROLLBACK_BYTES,
@@ -38,14 +41,20 @@ import {
 } from "./core/scrollbackBudget";
 import { clearTerminalBufferSequence } from "./core/terminalActions";
 import type {
+  GhosttyClipboardPolicy,
+  GhosttyDragPosition,
   GhosttyGpuFrame,
   GhosttyGpuFrameOptions,
   GhosttyGpuGlyph,
+  GhosttyImagePlacement,
+  GhosttyMouseEvent,
   GhosttyRenderFormat,
   GhosttySearchStatus,
   GhosttySearchViewportSpan,
   GhosttyTerminalModelApi,
   GhosttyTerminalModelOptions,
+  GhosttyTextFormat,
+  GhosttyViewportLink,
   TerminalBufferPoint,
   TerminalBufferSelection,
 } from "./GhosttyTerminalModel";
@@ -56,6 +65,34 @@ const NO_DAMAGE: TerminalDamage = { kind: "none" };
 const FULL_DAMAGE: TerminalDamage = { kind: "full" };
 const NO_GLYPHS: readonly GhosttyGpuGlyph[] = Object.freeze([]);
 const NO_RANGES: readonly TerminalRowRange[] = Object.freeze([]);
+const NO_PLACEMENTS: readonly GhosttyImagePlacement[] = Object.freeze([]);
+/** A link is followed across at most this many rows from the hovered cell. */
+const MAX_LINK_ROWS = 8;
+/** DEC private mode a program sets for Kitty clipboard paste events. */
+const KITTY_PASTE_EVENTS_MODE = 5522;
+/** xterm's alternate scroll: the wheel sends cursor keys in the alternate screen. */
+const ALTERNATE_SCROLL_MODE = 1007;
+
+/** Inclusive viewport cell range [start, end] as per-row spans. */
+function viewportSpans(
+  start: number,
+  end: number,
+  cols: number,
+): GhosttyViewportLink["spans"] {
+  const spans: { row: number; startColumn: number; endColumn: number }[] = [];
+  for (
+    let row = Math.floor(start / cols);
+    row <= Math.floor(end / cols);
+    row++
+  ) {
+    spans.push({
+      row,
+      startColumn: row === Math.floor(start / cols) ? start % cols : 0,
+      endColumn: row === Math.floor(end / cols) ? end % cols : cols - 1,
+    });
+  }
+  return spans;
+}
 
 type BufferLine = {
   readonly cells: string[];
@@ -81,7 +118,7 @@ type AdaptedGhosttyTerminalModelOptions = GhosttyTerminalModelOptions & {
 };
 
 /**
- * Terax-owned model adapter for the current Ghostty terminal and render-state
+ * Oarlock-owned model adapter for the current Ghostty terminal and render-state
  * implementation. The terminal model is independent from GPU surfaces so it
  * survives RendererPool lease release and keeps parsing hidden-tab output.
  *
@@ -94,7 +131,7 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
   /** Scrollback bytes the configuration asks for, before the global budget. */
   readonly requestedScrollbackBytes: number;
 
-  private readonly terminal: TeraxGhosttyTerminal;
+  private readonly terminal: OarlockGhosttyTerminal;
   private plainLinks: {
     revision: number;
     origin: number;
@@ -111,12 +148,13 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
   private eventSink: ((event: GhosttyTerminalEvent) => void) | null;
   private onDispose: (() => void) | null;
   private pendingDamage: TerminalDamage = FULL_DAMAGE;
-  private renderState: TeraxGhosttyRenderState | null = null;
-  private gpuState: TeraxGhosttyGpuRenderState | null = null;
+  private renderState: OarlockGhosttyRenderState | null = null;
+  private gpuState: OarlockGhosttyGpuRenderState | null = null;
   private renderFormatValue: GhosttyRenderFormat = "soa";
   /** Record changes (GPU format) accumulated across updates since the last frame. */
   private pendingCellDamage: TerminalDamage = FULL_DAMAGE;
   private renderStateCurrent = false;
+  private clipboardReadsToHost = false;
   private packedViewport = new Uint8Array(0);
   private packedRenderVersion = -1;
   private renderVersion = 0;
@@ -124,6 +162,10 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
   private writeCount = 0;
   private renderStateUpdateCount = 0;
   private presentationResourcesReleased = false;
+  /** The last render update moved, changed or removed image placements. */
+  private imagesChanged = false;
+  /** The core's cell size: set with the pixel size, kept across resizes. */
+  private cellPixels = { width: 1, height: 1 };
   private damageNotificationPending = false;
   private damageNeedsResolution = false;
   private modeBitsValue = 0;
@@ -137,10 +179,11 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
   private rowsValue: number;
   private scrollbackLines: number;
   private scrollbackBytesLimit: number;
+  private ligaturesValue = true;
   private disposed = false;
 
   constructor(
-    ghostty: TeraxGhostty,
+    ghostty: OarlockGhostty,
     options: AdaptedGhosttyTerminalModelOptions,
   ) {
     validateDimensions(options.cols, options.rows);
@@ -176,6 +219,9 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
     this.synchronizedOutputPresentation =
       new SynchronizedOutputPresentationGate(() => this.notifyDamage());
     try {
+      if (options.kittyKeyboardFlags !== undefined) {
+        this.terminal.setKittyKeyboardFlags(options.kittyKeyboardFlags);
+      }
       this.applyConfig(options.config);
     } catch (error) {
       this.terminal.dispose();
@@ -336,6 +382,8 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
     // Ghostty just cleared a redrawable prompt; keep the previous frame until the shell
     // prints it again (or the deadline), instead of presenting it blank.
     this.resizePromptHold.resized(this.modesValue.alternateScreen);
+    // Mode 2048 in-band size report.
+    this.drainReplies();
     this.notifyDamage();
   }
 
@@ -343,6 +391,172 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
     this.assertLive();
     if (widthPx <= 0 || heightPx <= 0) return;
     this.terminal.setPixelSize(widthPx, heightPx);
+    const cellPixels = {
+      width: Math.max(1, Math.floor(widthPx / this.colsValue)),
+      height: Math.max(1, Math.floor(heightPx / this.rowsValue)),
+    };
+    if (
+      cellPixels.width !== this.cellPixels.width ||
+      cellPixels.height !== this.cellPixels.height
+    ) {
+      // Image placements are sized in pixels when the core renders, so a new
+      // cell size (a display-scale or font change that keeps the grid) must
+      // reach the next frame even without new output.
+      this.invalidateRenderState();
+      this.damageNeedsResolution = true;
+    }
+    this.cellPixels = cellPixels;
+    // A new cell size is reported to programs using mode 2048.
+    this.drainReplies();
+  }
+
+  cellPixelSize(): { readonly width: number; readonly height: number } {
+    return this.cellPixels;
+  }
+
+  imagePlacements(): readonly GhosttyImagePlacement[] {
+    this.assertLive();
+    return this.renderStateCurrent
+      ? this.terminal.kittyPlacements()
+      : NO_PLACEMENTS;
+  }
+
+  imageBackgroundZLimit(): number {
+    this.assertLive();
+    return this.terminal.kittyBackgroundZLimit;
+  }
+
+  advanceImageAnimations(nowMs: number): number | null {
+    this.assertLive();
+    const delay = this.terminal.kittyAnimationTick(nowMs);
+    // A new frame bumps the image generation; the next update reports it.
+    this.invalidateRenderState();
+    this.damageNeedsResolution = true;
+    return delay;
+  }
+
+  encodeMouse(event: GhosttyMouseEvent): Uint8Array {
+    this.assertLive();
+    return this.terminal.encodeMouse(event);
+  }
+
+  resetMouseMotion(): void {
+    this.assertLive();
+    this.terminal.resetMouseMotion();
+  }
+
+  setColorScheme(scheme: "dark" | "light"): void {
+    this.assertLive();
+    this.terminal.setColorScheme(scheme);
+    this.drainReplies();
+  }
+
+  setVisible(visible: boolean): void {
+    this.assertLive();
+    this.terminal.setVisible(visible);
+    this.drainReplies();
+  }
+
+  setTerminalVersion(version: string): void {
+    this.assertLive();
+    this.terminal.setXtversion(version);
+  }
+
+  setImageStorageLimit(bytes: number): void {
+    this.assertLive();
+    this.terminal.setImageStorageLimit(bytes);
+    this.invalidateRenderState();
+    this.damageNeedsResolution = true;
+    this.requestPresentation();
+  }
+
+  setLigatures(enabled: boolean): void {
+    this.assertLive();
+    if (enabled === this.ligaturesValue) return;
+    this.ligaturesValue = enabled;
+    this.terminal.setLigatures(enabled);
+    this.invalidateRenderState();
+    this.pendingDamage = FULL_DAMAGE;
+    this.notifyDamage();
+  }
+
+  ligatures(): boolean {
+    return this.ligaturesValue;
+  }
+
+  setAlternateScroll(enabled: boolean): void {
+    this.assertLive();
+    this.terminal.setModeDefault(ALTERNATE_SCROLL_MODE, enabled);
+  }
+
+  setClipboardPolicy(policy: GhosttyClipboardPolicy): void {
+    this.assertLive();
+    this.terminal.setClipboardPolicy(policy);
+    this.clipboardReadsToHost = policy.readsToHost;
+    // Reads held when reads stop are refused now.
+    this.drainReplies();
+  }
+
+  pasteEventsWanted(): boolean {
+    this.assertLive();
+    return this.clipboardReadsToHost && this.terminal.mode(KITTY_PASTE_EVENTS_MODE);
+  }
+
+  sendPasteEvent(primary: boolean, mimes: readonly string[]): boolean {
+    this.assertLive();
+    const sent = this.terminal.kittyPasteEvent(primary, mimes);
+    this.drainReplies();
+    return sent;
+  }
+
+  answerClipboardRead(
+    id: number,
+    answer: OarlockGhosttyKittyClipboardAnswer,
+  ): boolean {
+    this.assertLive();
+    const answered = this.terminal.answerKittyClipboardRead(id, answer);
+    this.drainReplies();
+    return answered;
+  }
+
+  dropTargetActive(): boolean {
+    this.assertLive();
+    return this.terminal.dndActive();
+  }
+
+  dragAccepted(): GhosttyDragOperation | null {
+    this.assertLive();
+    return this.terminal.dndAccepted();
+  }
+
+  dragMove(position: GhosttyDragPosition, mimes: readonly string[]): void {
+    this.assertLive();
+    this.terminal.dndMove(position, mimes);
+    this.drainReplies();
+  }
+
+  drop(
+    position: GhosttyDragPosition,
+    items: readonly OarlockGhosttyMimeData[],
+  ): void {
+    this.assertLive();
+    this.terminal.dndDrop(position, items);
+    this.drainReplies();
+  }
+
+  dragLeave(): void {
+    this.assertLive();
+    this.terminal.dndLeave();
+    this.drainReplies();
+  }
+
+  formatTextRange(
+    startLine: number,
+    endLine: number,
+    format: GhosttyTextFormat,
+  ): string {
+    this.assertLive();
+    return this.terminal.formatTextRange(startLine, endLine, format);
   }
 
   setSearchQuery(query: string): GhosttySearchStatus {
@@ -398,6 +612,10 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
     } else if (damage.kind !== "none") {
       this.ensureRenderState();
     }
+    if (this.imagesChanged) {
+      damage = FULL_DAMAGE;
+      this.imagesChanged = false;
+    }
     this.pendingDamage = NO_DAMAGE;
     this.damageNeedsResolution = false;
     this.damageNotificationPending = false;
@@ -414,9 +632,13 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
     const state = this.ensureGpuState();
 
     const cellDamage = options.resync ? FULL_DAMAGE : this.pendingCellDamage;
-    const damage = options.resync
-      ? FULL_DAMAGE
-      : mergeDamage(this.pendingDamage, cellDamage);
+    // Images are drawn from placements, not cell records: a change redraws
+    // every row without re-uploading them.
+    const damage =
+      options.resync || this.imagesChanged
+        ? FULL_DAMAGE
+        : mergeDamage(this.pendingDamage, cellDamage);
+    this.imagesChanged = false;
     this.pendingDamage = NO_DAMAGE;
     this.pendingCellDamage = NO_DAMAGE;
     this.damageNeedsResolution = false;
@@ -514,6 +736,10 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
   }
 
   hyperlinkAtViewportCell(row: number, column: number): string | null {
+    return this.linkAtViewportCell(row, column)?.uri ?? null;
+  }
+
+  linkAtViewportCell(row: number, column: number): GhosttyViewportLink | null {
     this.assertLive();
     if (
       row < 0 ||
@@ -524,11 +750,28 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
       return null;
     }
     const state = this.ensureCurrentState();
-    const explicit = this.terminal.hyperlinkAt(
-      state,
-      row * state.cols + column,
-    );
-    if (explicit) return explicit;
+    const index = row * state.cols + column;
+    const explicit = this.terminal.hyperlinkAt(state, index);
+    if (explicit) {
+      // An OSC 8 link covers the contiguous cells carrying its URI.
+      const limit = MAX_LINK_ROWS * state.cols;
+      const cells = state.rows * state.cols;
+      let start = index;
+      while (
+        start > 0 &&
+        index - start < limit &&
+        this.terminal.hyperlinkAt(state, start - 1) === explicit
+      )
+        start--;
+      let end = index;
+      while (
+        end + 1 < cells &&
+        end - index < limit &&
+        this.terminal.hyperlinkAt(state, end + 1) === explicit
+      )
+        end++;
+      return { uri: explicit, spans: viewportSpans(start, end, state.cols) };
+    }
     const origin = this.viewportOriginLine();
     let cache = this.plainLinks;
     if (
@@ -572,10 +815,23 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
       this.plainLinks = cache;
     }
     const offset = cache.offsets[(row - cache.startRow) * state.cols + column];
-    return (
-      cache.links.find((link) => offset >= link.start && offset < link.end)
-        ?.uri ?? null
+    const link = cache.links.find(
+      (entry) => offset >= entry.start && offset < entry.end,
     );
+    if (!link) return null;
+    let first = -1;
+    let last = -1;
+    for (let cell = 0; cell < cache.offsets.length; cell++) {
+      const at = cache.offsets[cell];
+      if (at < link.start || at >= link.end) continue;
+      if (first < 0) first = cell;
+      last = cell;
+    }
+    const base = cache.startRow * state.cols;
+    return {
+      uri: link.uri,
+      spans: viewportSpans(base + first, base + last, state.cols),
+    };
   }
 
   scrollPosition(): ScrollPosition {
@@ -613,6 +869,20 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
 
   scrollToBottom(): boolean {
     return this.scrollTo(0);
+  }
+
+  scrollToPrompt(delta: number): boolean {
+    this.assertLive();
+    if (!Number.isInteger(delta) || delta === 0) return false;
+    if (this.modes().alternateScreen) return false;
+    const before = this.scrollPosition().offset;
+    this.terminal.scrollViewportToPrompt(delta);
+    this.scrollPositionCurrent = false;
+    if (this.scrollPosition().offset === before) return false;
+    this.invalidateRenderState();
+    this.pendingDamage = FULL_DAMAGE;
+    this.notifyDamage();
+    return true;
   }
 
   clear(): void {
@@ -678,6 +948,21 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
 
   readCellLine(line: number): readonly string[] {
     return this.readBufferLine(line).cells;
+  }
+
+  readCellLines(
+    firstLine: number,
+    lastLine: number,
+  ): readonly (readonly string[])[] {
+    this.assertLive();
+    const lines = this.readBufferLines(firstLine, lastLine);
+    const result: (readonly string[])[] = [];
+    for (let line = firstLine; line <= lastLine; line++) {
+      const read = lines.get(line);
+      if (!read) break;
+      result.push(read.cells);
+    }
+    return result;
   }
 
   bufferCursorLine(): number {
@@ -779,6 +1064,14 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
   encodeKey(event: KeyEvent): Uint8Array {
     this.assertLive();
     return this.terminal.encodeKey(event);
+  }
+
+  enhancedKeyboard(): boolean {
+    this.assertLive();
+    return (
+      this.terminal.kittyKeyboardFlags() !== 0 ||
+      this.terminal.modifyOtherKeys()
+    );
   }
 
   mode(mode: number, isAnsi = false): boolean {
@@ -890,13 +1183,13 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
   }
 
   /** Render state in whichever format the model currently produces. */
-  private ensureCurrentState(): TeraxGhosttyRenderBase {
+  private ensureCurrentState(): OarlockGhosttyRenderBase {
     return this.renderFormatValue === "gpu"
       ? this.ensureGpuState()
       : this.ensureRenderState();
   }
 
-  private ensureRenderState(): TeraxGhosttyRenderState {
+  private ensureRenderState(): OarlockGhosttyRenderState {
     if (this.renderFormatValue !== "soa") this.switchRenderFormat("soa");
     const state = this.renderState;
     if (
@@ -906,6 +1199,7 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
     ) {
       this.renderState = this.terminal.updateRenderState();
       this.renderStateCurrent = true;
+      if (this.terminal.kittyPlacementsChanged()) this.imagesChanged = true;
       this.renderVersion += 1;
       this.renderStateUpdateCount += 1;
       this.presentationResourcesReleased = false;
@@ -923,13 +1217,14 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
     return current;
   }
 
-  private ensureGpuState(): TeraxGhosttyGpuRenderState {
+  private ensureGpuState(): OarlockGhosttyGpuRenderState {
     if (this.renderFormatValue !== "gpu") this.switchRenderFormat("gpu");
     const state = this.gpuState;
     if (!this.renderStateCurrent || !state) {
       const next = this.terminal.updateGpuRenderState();
       this.gpuState = next;
       this.renderStateCurrent = true;
+      if (this.terminal.kittyPlacementsChanged()) this.imagesChanged = true;
       this.renderVersion += 1;
       this.renderStateUpdateCount += 1;
       this.presentationResourcesReleased = false;
@@ -967,7 +1262,7 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
     this.renderStateCurrent = false;
   }
 
-  private packRenderState(state: TeraxGhosttyRenderState): void {
+  private packRenderState(state: OarlockGhosttyRenderState): void {
     const byteLength = state.cellCount * CELL_STRIDE;
     if (this.packedViewport.byteLength !== byteLength) {
       this.packedViewport = new Uint8Array(byteLength);
@@ -1074,13 +1369,13 @@ export class AdaptedGhosttyTerminalModel implements GhosttyTerminalModelApi {
 }
 
 class GhosttyRenderCellView implements TerminalCellReader {
-  private state: TeraxGhosttyRenderState | null = null;
+  private state: OarlockGhosttyRenderState | null = null;
 
   get length(): number {
     return this.current().cellCount;
   }
 
-  update(state: TeraxGhosttyRenderState): void {
+  update(state: OarlockGhosttyRenderState): void {
     this.state = state;
   }
 
@@ -1145,7 +1440,7 @@ class GhosttyRenderCellView implements TerminalCellReader {
     return packedRgb(this.current().backgroundRgba, index * 4);
   }
 
-  private current(): TeraxGhosttyRenderState {
+  private current(): OarlockGhosttyRenderState {
     if (!this.state) throw new Error("Ghostty render cells are unavailable");
     return this.state;
   }
@@ -1191,7 +1486,7 @@ function encodePalette(palette: readonly number[]): Uint8Array {
   return colors;
 }
 
-function damageFromRenderState(state: TeraxGhosttyRenderBase): TerminalDamage {
+function damageFromRenderState(state: OarlockGhosttyRenderBase): TerminalDamage {
   if (state.fullDamage) return FULL_DAMAGE;
   const ranges: TerminalRowRange[] = [];
   let first = -1;

@@ -1,6 +1,9 @@
 use super::blocking;
 use super::index::FileIndexState;
-use crate::modules::workspace::{resolve_path, WorkspaceEnv, WorkspaceRegistry};
+use crate::modules::project_trust::{self, OwnChange};
+use crate::modules::workspace::{
+    is_plain_name, resolve_path, Origin, WorkspaceEnv, WorkspaceRegistry,
+};
 use serde::Serialize;
 use std::io;
 use std::path::Path;
@@ -50,6 +53,8 @@ fn is_conflict(error: &io::Error) -> bool {
     )
 }
 
+/// The explorer's root a move or batch delete stays under: authorized, or anywhere while the app
+/// may access all folders.
 fn resolve_authorized_root(
     root: &str,
     workspace: &WorkspaceEnv,
@@ -59,7 +64,7 @@ fn resolve_authorized_root(
     let canonical = registry
         .canonicalize_cached(resolved)
         .map_err(|error| format!("workspace root is not accessible: {error}"))?;
-    if registry.is_authorized(&canonical) {
+    if registry.gates(Origin::App).reaches(&canonical) {
         Ok(canonical)
     } else {
         Err(format!(
@@ -69,10 +74,14 @@ fn resolve_authorized_root(
     }
 }
 
+/// The entry itself (never `..`, never a root) must sit in a folder under `root`.
 fn authorize_mutation_entry(path: &Path, root: &Path) -> Result<(), String> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| format!("path has no parent: {}", path.display()))?;
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+        return Err(format!("not a file or folder: {}", path.display()));
+    };
+    if !is_plain_name(name) {
+        return Err(format!("not a file or folder: {}", path.display()));
+    }
     let canonical = std::fs::canonicalize(parent)
         .map_err(|error| format!("path parent is not accessible: {error}"))?;
     if canonical.starts_with(root) {
@@ -234,6 +243,7 @@ fn remove_path(path: &Path) -> io::Result<()> {
 /// Creates a new empty file. Fails if the file already exists.
 #[tauri::command]
 pub async fn fs_create_file(
+    app: AppHandle,
     index: State<'_, FileIndexState>,
     path: String,
     workspace: Option<WorkspaceEnv>,
@@ -241,8 +251,16 @@ pub async fn fs_create_file(
     let index = index.inner().clone();
     blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
-        let p = resolve_path(&path, &workspace);
-        create_file(&p)?;
+        let p = app
+            .state::<WorkspaceRegistry>()
+            .gates(Origin::App)
+            .authorized_new(&resolve_path(&path, &workspace))?;
+        // Oarlock's own new file in a project's trusted item keeps the user's trust in it.
+        let change = OwnChange::File {
+            target: &p,
+            content: &[],
+        };
+        project_trust::keeping_trust(&app, change, || create_file(&p))?;
         note_changed(&index, &p);
         Ok(())
     })
@@ -264,15 +282,22 @@ fn create_file(p: &Path) -> Result<(), String> {
 /// where typing "a/b/c" creates the full chain.
 #[tauri::command]
 pub async fn fs_create_dir(
+    app: AppHandle,
     index: State<'_, FileIndexState>,
     path: String,
     workspace: Option<WorkspaceEnv>,
+    origin: Option<Origin>,
 ) -> Result<(), String> {
     let index = index.inner().clone();
     blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
-        let p = resolve_path(&path, &workspace);
-        create_dir(&p)?;
+        let p = app
+            .state::<WorkspaceRegistry>()
+            .gates(origin.unwrap_or_default())
+            .authorized_new(&resolve_path(&path, &workspace))?;
+        // Oarlock's own new folder in a project's trusted item keeps the user's trust in it.
+        let change = OwnChange::Folder { target: &p };
+        project_trust::keeping_trust(&app, change, || create_dir(&p))?;
         note_changed(&index, &p);
         Ok(())
     })
@@ -292,6 +317,7 @@ fn create_dir(p: &Path) -> Result<(), String> {
 /// Renames (or moves) a path. Refuses to overwrite an existing target.
 #[tauri::command]
 pub async fn fs_rename(
+    app: AppHandle,
     index: State<'_, FileIndexState>,
     from: String,
     to: String,
@@ -300,8 +326,10 @@ pub async fn fs_rename(
     let index = index.inner().clone();
     blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
-        let from_p = resolve_path(&from, &workspace);
-        let to_p = resolve_path(&to, &workspace);
+        let registry = app.state::<WorkspaceRegistry>();
+        let gates = registry.gates(Origin::App);
+        let from_p = gates.authorized_entry(&resolve_path(&from, &workspace))?;
+        let to_p = gates.authorized_entry(&resolve_path(&to, &workspace))?;
         rename(&from_p, &to_p)?;
         note_changed(&index, &from_p);
         note_changed(&index, &to_p);
@@ -411,6 +439,7 @@ fn fs_move_impl(
 /// responsible for confirming destructive operations with the user.
 #[tauri::command]
 pub async fn fs_delete(
+    app: AppHandle,
     index: State<'_, FileIndexState>,
     path: String,
     workspace: Option<WorkspaceEnv>,
@@ -418,7 +447,10 @@ pub async fn fs_delete(
     let index = index.inner().clone();
     blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
-        let p = resolve_path(&path, &workspace);
+        let p = app
+            .state::<WorkspaceRegistry>()
+            .gates(Origin::App)
+            .authorized_entry(&resolve_path(&path, &workspace))?;
         delete_path(&p)?;
         note_changed(&index, &p);
         Ok(())
@@ -722,6 +754,21 @@ mod tests {
         assert_eq!(result.failed, 1);
         assert!(!first.exists());
         assert!(!second.exists());
+    }
+
+    #[test]
+    fn batch_delete_never_takes_a_folder_through_dot_dot() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir(root.join("sub")).unwrap();
+        std::fs::write(root.join("keep.txt"), b"keep").unwrap();
+        let sneaky = vec![s(root.join("sub").join("..")), s(root.clone())];
+
+        let result = fs_delete_batch_impl(sneaky, &root, &WorkspaceEnv::Local);
+
+        assert!(result.deleted.is_empty());
+        assert_eq!(result.failed, 2);
+        assert!(root.join("keep.txt").exists());
     }
 
     // Deleting a symlink that points at a directory must remove only the link,

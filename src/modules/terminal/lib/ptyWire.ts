@@ -1,4 +1,4 @@
-// Binary framing for the multiplexed `terax-pty` stream. Mirrors
+// Binary framing for the multiplexed `oarlock-pty` stream. Mirrors
 // src-tauri/src/modules/pty/wire.rs; all integers are little-endian.
 //
 // Request body (`POST poll` and `POST ack`):

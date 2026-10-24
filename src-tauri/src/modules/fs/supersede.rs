@@ -36,6 +36,10 @@ impl Ticket {
 }
 
 impl Supersede {
+    pub fn begin_window(&self, window: &str, key: &str) -> Ticket {
+        self.begin(&format!("{window}:{key}"))
+    }
+
     pub fn begin(&self, key: &str) -> Ticket {
         let end = (0..=key.len().min(MAX_KEY_LEN))
             .rev()
@@ -78,6 +82,17 @@ mod tests {
         let second = state.begin("palette");
         assert!(first.is_superseded());
         assert!(second.is_current());
+    }
+
+    #[test]
+    fn identical_channels_in_different_windows_are_independent() {
+        let state = Supersede::default();
+        let a = state.begin_window("main", "grep-sidebar");
+        let b = state.begin_window("w-1", "grep-sidebar");
+        assert!(a.is_current());
+        assert!(state.begin_window("main", "grep-sidebar").is_current());
+        assert!(a.is_superseded());
+        assert!(b.is_current());
     }
 
     #[test]

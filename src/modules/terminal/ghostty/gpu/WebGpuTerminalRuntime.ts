@@ -18,8 +18,9 @@ import {
   gcPressureOptionsFromStorage,
   type GcPressureStats,
 } from "./GcPressure";
-import { BACKGROUND_SHADER, GLYPH_SHADER } from "./shaders";
+import { BACKGROUND_SHADER, GLYPH_SHADER, SCREEN_STRUCT } from "./shaders";
 import type { TerminalFontMetrics } from "./terminalVisuals";
+import type { WebGpuImageSupport } from "./WebGpuImageLayer";
 import {
   findTerminalArea,
   type PaneBinding,
@@ -79,6 +80,15 @@ export interface WebGpuRuntimeSurface extends WindowCanvasPane {
   handleDeviceLoss(): void;
   isFocused(): boolean;
 }
+
+/** Kitty image support for one device generation; loaded on first use. */
+type ImageSupportEntry = {
+  readonly generation: number;
+  support: WebGpuImageSupport | null;
+  failed: boolean;
+  /** Panes that asked while it loaded; scheduled once it is ready. */
+  readonly waiting: Set<WebGpuRuntimeSurface>;
+};
 
 type AtlasEntry = {
   readonly key: string;
@@ -211,6 +221,7 @@ export class WebGpuTerminalRuntime {
   private glyphPipeline: GPURenderPipeline | null = null;
   private bindGroupLayout: GPUBindGroupLayout | null = null;
   private emptyStorage: GPUBuffer | null = null;
+  private imageSupportEntry: ImageSupportEntry | null = null;
   private animationFrame: number | null = null;
   private frameTimer: ReturnType<typeof setTimeout> | null = null;
   private frameTimerDueAt = 0;
@@ -290,6 +301,7 @@ export class WebGpuTerminalRuntime {
 
   unregister(surface: WebGpuRuntimeSurface): void {
     this.surfaces.delete(surface);
+    this.imageSupportEntry?.waiting.delete(surface);
     this.dirtySurfaces.delete(surface);
     this.renderSurfaces.delete(surface);
     const target = this.paneWindows.get(surface);
@@ -432,6 +444,53 @@ export class WebGpuTerminalRuntime {
         this.scheduleAtlasReap();
       },
     };
+  }
+
+  /**
+   * Kitty image pipelines for the current device. Nothing is loaded or compiled until a pane
+   * shows an image: the first call starts that and returns "pending", and the panes that asked
+   * are scheduled when it is ready. Null when it failed (images are then not drawn).
+   */
+  imageSupport(
+    surface: WebGpuRuntimeSurface,
+  ): WebGpuImageSupport | "pending" | null {
+    const resources = this.resources();
+    let entry = this.imageSupportEntry;
+    if (entry?.generation !== resources.generation) {
+      const loading: ImageSupportEntry = {
+        generation: resources.generation,
+        support: null,
+        failed: false,
+        waiting: new Set(),
+      };
+      entry = loading;
+      this.imageSupportEntry = loading;
+      void import("./WebGpuImageLayer")
+        .then((module) =>
+          module.createWebGpuImageSupport(
+            resources.device,
+            resources.format,
+            resources.bindGroupLayout,
+            { screenStruct: SCREEN_STRUCT, background: BACKGROUND_SHADER },
+          ),
+        )
+        .then(
+          (support) => {
+            if (this.disposed || this.imageSupportEntry !== loading) return;
+            loading.support = support;
+            for (const waiting of loading.waiting) this.schedule(waiting);
+            loading.waiting.clear();
+          },
+          () => {
+            loading.failed = true;
+            loading.waiting.clear();
+          },
+        );
+    }
+    if (entry.support) return entry.support;
+    if (entry.failed) return null;
+    entry.waiting.add(surface);
+    return "pending";
   }
 
   resources(): WebGpuSharedResources {
@@ -665,7 +724,7 @@ export class WebGpuTerminalRuntime {
   }
 
   private flushFrame(frameAt = performance.now()): void {
-    const benchStart = __TERAX_BENCH__ ? performance.now() : 0;
+    const benchStart = __OARLOCK_BENCH__ ? performance.now() : 0;
     this.animationFrame = null;
     this.pacer.frameStarted(frameAt);
     this.animationFrames += 1;
@@ -759,7 +818,7 @@ export class WebGpuTerminalRuntime {
           continue;
         target.consumeDirty();
         encoder ??= resources.device.createCommandEncoder({
-          label: "Terax terminal window frame",
+          label: "Oarlock terminal window frame",
         });
         const result = target.encode(encoder, resources);
         if (result.drawn > 0) rendered = true;
@@ -770,7 +829,7 @@ export class WebGpuTerminalRuntime {
       if (encoder && rendered) {
         resources.device.queue.submit([encoder.finish()]);
         this.submittedFrames += 1;
-        if (__TERAX_BENCH__) {
+        if (__OARLOCK_BENCH__) {
           const now = performance.now();
           smoothHooks()?.frame(now, now - benchStart);
         }
@@ -918,7 +977,7 @@ export class WebGpuTerminalRuntime {
     this.assertLive();
     if (!adapter) throw new Error("No compatible WebGPU adapter was found");
     const device = await adapter.requestDevice({
-      label: "Terax shared terminal renderer",
+      label: "Oarlock shared terminal renderer",
     });
     if (this.disposed || this.fatalError) {
       device.destroy();
@@ -981,7 +1040,7 @@ export class WebGpuTerminalRuntime {
       texture: { sampleType: "unfilterable-float" },
     });
     this.bindGroupLayout = device.createBindGroupLayout({
-      label: "Terax terminal bindings",
+      label: "Oarlock terminal bindings",
       entries: [
         { binding: 0, visibility, buffer: { type: "uniform" } },
         storage(1),
@@ -997,16 +1056,16 @@ export class WebGpuTerminalRuntime {
     });
 
     const backgroundModule = device.createShaderModule({
-      label: "Terax terminal background shader",
+      label: "Oarlock terminal background shader",
       code: BACKGROUND_SHADER,
     });
     const glyphModule = device.createShaderModule({
-      label: "Terax terminal glyph shader",
+      label: "Oarlock terminal glyph shader",
       code: GLYPH_SHADER,
     });
     const [backgroundPipeline, glyphPipeline] = await Promise.all([
       device.createRenderPipelineAsync({
-        label: "Terax terminal background pipeline",
+        label: "Oarlock terminal background pipeline",
         layout,
         vertex: { module: backgroundModule, entryPoint: "vertex_main" },
         fragment: {
@@ -1017,7 +1076,7 @@ export class WebGpuTerminalRuntime {
         primitive: { topology: "triangle-list" },
       }),
       device.createRenderPipelineAsync({
-        label: "Terax terminal glyph pipeline",
+        label: "Oarlock terminal glyph pipeline",
         layout,
         vertex: { module: glyphModule, entryPoint: "vertex_main" },
         fragment: {
@@ -1047,7 +1106,7 @@ export class WebGpuTerminalRuntime {
     this.backgroundPipeline = backgroundPipeline;
     this.glyphPipeline = glyphPipeline;
     this.emptyStorage = device.createBuffer({
-      label: "Terax terminal empty storage",
+      label: "Oarlock terminal empty storage",
       size: 16,
       usage: GPUBufferUsage.STORAGE,
     });
@@ -1184,6 +1243,7 @@ export class WebGpuTerminalRuntime {
     this.glyphPipeline = null;
     this.bindGroupLayout = null;
     this.emptyStorage = null;
+    this.imageSupportEntry = null;
   }
 
   private assertHealthy(): void {

@@ -1,1 +1,1 @@
-TERAX.md
+@AGENTS.md

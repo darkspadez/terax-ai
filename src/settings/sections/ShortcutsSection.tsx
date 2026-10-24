@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
+import { IS_MAC } from "@/lib/platform";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { setShortcuts } from "@/modules/settings/store";
 import {
@@ -27,7 +28,7 @@ import {
   Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 
 export function ShortcutsSection() {
@@ -75,7 +76,11 @@ export function ShortcutsSection() {
       <div className="flex items-center justify-between">
         <SectionHeader
           title="Shortcuts"
-          description="View and customize keyboard shortcuts."
+          description={
+            IS_MAC
+              ? "View and customize keyboard shortcuts."
+              : "View and customize keyboard shortcuts. Ctrl+Shift shortcuts work everywhere; their Ctrl versions are left to the program in a focused terminal."
+          }
         />
         <Button
           variant="outline"
@@ -201,16 +206,25 @@ function ShortcutRow({
               className="flex min-w-[100px] cursor-pointer items-center justify-end gap-1"
             >
               {hasBindings ? (
-                <KbdGroup>
-                  {getBindingTokens(bindings[0]).map((t, i) => (
-                    <Kbd
-                      key={i}
-                      className="group-hover:bg-accent group-hover:text-accent-foreground transition-colors"
-                    >
-                      {t}
-                    </Kbd>
-                  ))}
-                </KbdGroup>
+                bindings.map((binding, index) => (
+                  <Fragment key={getBindingTokens(binding).join("+")}>
+                    {index > 0 && (
+                      <span className="px-0.5 text-[11px] text-muted-foreground">
+                        or
+                      </span>
+                    )}
+                    <KbdGroup>
+                      {getBindingTokens(binding).map((t, i) => (
+                        <Kbd
+                          key={i}
+                          className="group-hover:bg-accent group-hover:text-accent-foreground transition-colors"
+                        >
+                          {t}
+                        </Kbd>
+                      ))}
+                    </KbdGroup>
+                  </Fragment>
+                ))
               ) : (
                 <span className="text-[11px] text-muted-foreground italic">
                   Unassigned

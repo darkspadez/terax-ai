@@ -8,16 +8,21 @@ import {
 } from "react";
 import { toast } from "sonner";
 import {
+  authorizationSettled,
+  authorizeFolder,
   currentWorkspaceEnv,
   useWorkspaceEnvStore,
   workspaceScopeKey,
 } from "@/modules/workspace";
+import { showPrivacyRefusal } from "@/modules/mac-privacy";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   executeBatchMove,
   excludeNestedSources,
   type FsMoveResult,
 } from "./batchMove";
+import { refreshTargets } from "./refreshTargets";
+import { dirname } from "./treePaths";
 import { listenFsChanged, watchAdd, watchRemove } from "./watch";
 import { createWatchRegistry, planVisibilityEdge } from "./watchRegistry";
 
@@ -47,12 +52,6 @@ export type PendingCreate = {
 export function joinPath(parent: string, name: string): string {
   if (parent.endsWith("/")) return `${parent}${name}`;
   return `${parent}/${name}`;
-}
-
-function dirname(path: string): string {
-  const i = path.lastIndexOf("/");
-  if (i <= 0) return "/";
-  return path.slice(0, i);
 }
 
 const EXPANSION_CACHE_LIMIT = 8;
@@ -198,6 +197,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
         setNodes((s) => ({ ...s, [path]: { status: "loading" } }));
       }
       try {
+        await authorizationSettled(path, workspace);
         const entries = await invoke<DirEntry[]>("fs_read_dir", {
           path,
           showHidden: showHiddenRef.current,
@@ -373,6 +373,9 @@ export function useFileTree(rootPath: string | null, options?: Options) {
         });
         removeWatch(path);
       } else {
+        // Opening a folder authorizes it: a link may lead out of every
+        // authorized folder. The watch and the listing wait for it.
+        void authorizeFolder(path, workspace);
         setExpanded((curr) => {
           const next = new Set(curr);
           next.add(path);
@@ -382,12 +385,13 @@ export function useFileTree(rootPath: string | null, options?: Options) {
         void fetchChildren(path);
       }
     },
-    [fetchChildren, addWatch, removeWatch],
+    [fetchChildren, addWatch, removeWatch, workspace],
   );
 
   const expand = useCallback(
     (path: string) => {
       if (expandedRef.current.has(path)) return;
+      void authorizeFolder(path, workspace);
       setExpanded((curr) => {
         const next = new Set(curr);
         next.add(path);
@@ -396,7 +400,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       addWatch(path);
       void fetchChildren(path);
     },
-    [fetchChildren, addWatch],
+    [fetchChildren, addWatch, workspace],
   );
 
   const refresh = useCallback(
@@ -411,10 +415,21 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     [fetchChildren, addWatch, rootPath, scopeKey],
   );
 
+  const refreshAll = useCallback(async () => {
+    if (scopeKeyRef.current !== scopeKey) return;
+    const targets = refreshTargets(
+      rootPath,
+      nodesRef.current,
+      expandedRef.current,
+    );
+    await Promise.all(targets.map((path) => fetchChildren(path)));
+  }, [fetchChildren, rootPath, scopeKey]);
+
   // --- mutations ---
 
   const beginCreate = useCallback(
     (parentPath: string, kind: "file" | "dir") => {
+      void authorizeFolder(parentPath, workspace);
       setRenaming(null);
       setPendingCreate({ parentPath, kind });
       // Ensure the parent is expanded so the input row is visible.
@@ -432,7 +447,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
         return curr;
       });
     },
-    [rootPath, fetchChildren, addWatch],
+    [rootPath, fetchChildren, addWatch, workspace],
   );
 
   const cancelCreate = useCallback(() => setPendingCreate(null), []);
@@ -453,6 +468,10 @@ export function useFileTree(rootPath: string | null, options?: Options) {
         await fetchChildren(pendingCreate.parentPath);
       } catch (e) {
         console.error(`${cmd} failed:`, e);
+        showPrivacyRefusal(`Could not create ${trimmed}`, {
+          path: pendingCreate.parentPath,
+          error: e,
+        });
       } finally {
         setPendingCreate(null);
       }
@@ -472,7 +491,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       if (!renaming) return;
       const trimmed = newName.trim();
       const parent = dirname(renaming);
-      const oldName = renaming.slice(parent === "/" ? 1 : parent.length + 1);
+      const oldName = renaming.slice(renaming.lastIndexOf("/") + 1);
       if (!trimmed || trimmed === oldName) {
         setRenaming(null);
         return;
@@ -488,6 +507,10 @@ export function useFileTree(rootPath: string | null, options?: Options) {
         if (scopeKeyRef.current === scopeKey) await fetchChildren(parent);
       } catch (e) {
         console.error("fs_rename failed:", e);
+        showPrivacyRefusal(`Could not rename ${oldName}`, {
+          path: renaming,
+          error: e,
+        });
       } finally {
         setRenaming(null);
       }
@@ -505,6 +528,10 @@ export function useFileTree(rootPath: string | null, options?: Options) {
         }
       } catch (e) {
         console.error("fs_delete failed:", e);
+        showPrivacyRefusal(`Could not delete ${path.slice(path.lastIndexOf("/") + 1)}`, {
+          path,
+          error: e,
+        });
       }
     },
     [workspace, scopeKey, fetchChildren],
@@ -610,6 +637,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     toggle,
     expand,
     refresh,
+    refreshAll,
     beginCreate,
     cancelCreate,
     commitCreate,

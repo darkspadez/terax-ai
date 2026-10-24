@@ -4,6 +4,7 @@ import { AiInputBarConnect } from "@/modules/ai";
 import { Chip } from "@/modules/ai/components/Chip";
 import { ChipsRow } from "@/modules/ai/components/ChipsRow";
 import { useComposer } from "@/modules/ai/lib/composer";
+import { useComposerDropStore } from "@/modules/ai/lib/composerDrop";
 import { useBlockController } from "@/modules/terminal/lib/blockController";
 import { focusLeafInput } from "@/modules/terminal/lib/terminalSessionApi";
 import {
@@ -26,7 +27,7 @@ const AiComposerInput = lazy(() =>
   })),
 );
 
-export const TOGGLE_BLOCK_INPUT_EVENT = "terax:toggle-block-input";
+export const TOGGLE_BLOCK_INPUT_EVENT = "oarlock:toggle-block-input";
 
 type Props = {
   isBlockTab: boolean;
@@ -38,6 +39,7 @@ type Props = {
   panelOpen: boolean;
   keysLoaded: boolean;
   onConnect: () => void;
+  onClose: () => void;
 };
 
 export function WorkspaceInputBar({
@@ -50,6 +52,7 @@ export function WorkspaceInputBar({
   panelOpen,
   keysLoaded,
   onConnect,
+  onClose,
 }: Props) {
   const c = useComposer();
   const { os, shell } = useSystemInfo();
@@ -80,6 +83,8 @@ export function WorkspaceInputBar({
     if (open && effectiveMode === "ai") setAiLoaded(true);
   }, [open, effectiveMode]);
   const renderAi = hasComposer && aiLoaded;
+  const aiComposerShown = open && renderAi && effectiveMode === "ai";
+  const dropOver = useComposerDropStore((s) => s.over);
 
   const switchMode = (next: "shell" | "ai") => {
     setMode(next);
@@ -126,9 +131,17 @@ export function WorkspaceInputBar({
 
   const content =
     !hasComposer && !isBlockTab ? (
-      <AiInputBarConnect onAdd={onConnect} />
+      <AiInputBarConnect onAdd={onConnect} onClose={onClose} />
     ) : (
-      <div className="shrink-0 border-t border-border/60 bg-foreground/[0.02] px-3 py-2">
+      <div
+        data-ai-composer={aiComposerShown ? "" : undefined}
+        className="relative shrink-0 border-t border-border/60 bg-foreground/[0.02] px-3 py-2"
+      >
+        {aiComposerShown && dropOver ? (
+          <div className="pointer-events-none absolute inset-1.5 z-10 grid place-items-center rounded-lg border border-primary/45 bg-card text-xs font-medium text-foreground shadow-lg">
+            Drop to add to the prompt
+          </div>
+        ) : null}
         <div className="flex flex-col gap-2 rounded-lg px-1 py-1">
           <ChipsRow
             leading={terminalChips}
@@ -194,7 +207,7 @@ export function WorkspaceInputBar({
     <div
       data-ai-input-bar
       data-state={open ? "open" : "closed"}
-      className="terax-reveal"
+      className="oarlock-reveal"
       aria-hidden={!open}
     >
       <div>{content}</div>

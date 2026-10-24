@@ -20,6 +20,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { onFocusIntoFrame } from "./lib/frameFocus";
 
 type PortPreset = {
   port: number;
@@ -83,6 +84,14 @@ export const PreviewAddressBar = forwardRef<PreviewAddressBarHandle, Props>(
 
     const [notice, setNotice] = useState<string | null>(null);
     const [checkingPort, setCheckingPort] = useState<number | null>(null);
+    const [portsOpen, setPortsOpen] = useState(false);
+
+    // A click into the previewed page never reaches the menu's outside-click
+    // handling, so the menu closes when focus moves into the frame.
+    useEffect(() => {
+      if (!portsOpen) return;
+      return onFocusIntoFrame(window, document, () => setPortsOpen(false));
+    }, [portsOpen]);
 
     const submit = () => {
       const next = normalizeUrl(draft);
@@ -105,6 +114,7 @@ export const PreviewAddressBar = forwardRef<PreviewAddressBarHandle, Props>(
         setNotice(`No server listening on :${port}.`);
         return;
       }
+      setPortsOpen(false);
       setDraft(url);
       onSubmit(url);
     };
@@ -126,7 +136,7 @@ export const PreviewAddressBar = forwardRef<PreviewAddressBarHandle, Props>(
             strokeWidth={1.75}
           />
         </Button>
-        <DropdownMenu>
+        <DropdownMenu open={portsOpen} onOpenChange={setPortsOpen}>
           <DropdownMenuTrigger asChild>
             <Button
               type="button"

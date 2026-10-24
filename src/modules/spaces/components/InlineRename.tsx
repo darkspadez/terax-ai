@@ -1,3 +1,4 @@
+import { textFieldKey } from "@/lib/ime";
 import { cn } from "@/lib/utils";
 import { useEffect, useRef } from "react";
 
@@ -42,8 +43,9 @@ export function InlineRename({
       )}
       onKeyDown={(e) => {
         e.stopPropagation();
-        if (e.key === "Enter") finish(() => onCommit(e.currentTarget.value));
-        else if (e.key === "Escape") finish(onCancel);
+        const action = textFieldKey(e.nativeEvent);
+        if (action === "commit") finish(() => onCommit(e.currentTarget.value));
+        else if (action === "cancel") finish(onCancel);
       }}
       onBlur={(e) => {
         if (!document.hasFocus()) return;

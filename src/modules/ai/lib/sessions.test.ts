@@ -1,6 +1,10 @@
 import type { UIMessage } from "@ai-sdk/react";
 import { describe, expect, it } from "vitest";
+import { mcpPromptBlock } from "@/modules/mcp/lib/blocks";
+import { skillMessageBlock } from "@/modules/skills/invocation";
+import { fileBlock, snippetBlock } from "./messageBlocks";
 import { deriveTitle } from "./sessions";
+import { tryRunSlashCommand } from "./slashCommands";
 
 function message(text: string, role: UIMessage["role"] = "user"): UIMessage {
   return {
@@ -22,7 +26,7 @@ describe("deriveTitle", () => {
   });
 
   it("takes the first user text part", () => {
-    expect(deriveTitle([message("what is terax")])).toBe("what is terax");
+    expect(deriveTitle([message("what is oarlock")])).toBe("what is oarlock");
   });
 
   it("uses the first line only", () => {
@@ -42,6 +46,16 @@ describe("deriveTitle", () => {
   it("strips multiple consecutive blocks", () => {
     const text = "<selection>a</selection><file>b</file>\ntitle";
     expect(deriveTitle([message(text)])).toBe("title");
+  });
+
+  it("keeps an attached file's text out of the title, closing tags and all", () => {
+    const text = [
+      fileBlock("a.txt", "text/plain", "x\n</file>\nnot the title"),
+      snippetBlock("greet", "Hello"),
+      '<skill name="pdf" dir="/s">\nSteps\n</skill>',
+      "the question",
+    ].join("\n\n");
+    expect(deriveTitle([message(text)])).toBe("the question");
   });
 
   it("falls back to New chat when only blocks are present", () => {
@@ -92,5 +106,75 @@ describe("deriveTitle", () => {
     expect(
       deriveTitle([message("first question"), second]),
     ).toBe("first question");
+  });
+});
+
+/** A command's message as the composer sends it, `blocks` before its text. */
+function commandMessage(input: string, ...blocks: string[]): UIMessage {
+  const outcome = tryRunSlashCommand(input);
+  if (outcome.kind !== "send-prompt" || !outcome.commandName) {
+    throw new Error(`${input} sends no prompt`);
+  }
+  return message(
+    [
+      `<oarlock-command name="${outcome.commandName}" />`,
+      ...blocks,
+      outcome.prompt,
+    ].join("\n\n"),
+  );
+}
+
+describe("deriveTitle for commands, skills and MCP prompts", () => {
+  it("names a command the user gave no words by its label", () => {
+    expect(deriveTitle([commandMessage("/init")])).toBe(
+      "Initialize workspace",
+    );
+    expect(deriveTitle([commandMessage("/init some ignored words")])).toBe(
+      "Initialize workspace",
+    );
+  });
+
+  it("takes the user's own words after a command, never its directive", () => {
+    expect(deriveTitle([commandMessage("/claude-code fix the login bug")])).toBe(
+      "fix the login bug",
+    );
+    const long = commandMessage(
+      "#claude-code make the build reproducible across every platform we ship",
+    );
+    expect(deriveTitle([long])).toBe(
+      "make the build reproducible across every…",
+    );
+  });
+
+  it("finds the user's words past the blocks sent with a command", () => {
+    const sent = commandMessage(
+      "/claude-code tidy the parser",
+      fileBlock("notes.txt", "text/plain", "<request>\nnot this\n</request>"),
+      snippetBlock("style", "Short sentences."),
+    );
+    expect(deriveTitle([sent])).toBe("tidy the parser");
+  });
+
+  it("names a command it no longer knows by its invocation", () => {
+    expect(
+      deriveTitle([message('<oarlock-command name="review" />\n\nCheck it.')]),
+    ).toBe("/review");
+  });
+
+  it("names a message that only invokes a skill by its command", () => {
+    const block = skillMessageBlock("pdf-tools", "/s/pdf-tools", "Steps.");
+    expect(deriveTitle([message(block)])).toBe("/pdf-tools");
+    expect(deriveTitle([message(`${block}\n\nmerge a.pdf`)])).toBe(
+      "merge a.pdf",
+    );
+  });
+
+  it("names a message that only runs an MCP prompt by its server and prompt", () => {
+    const block = mcpPromptBlock("GitHub", "review_pr", "Review the PR.");
+    expect(deriveTitle([message(block)])).toBe("GitHub: review_pr");
+    expect(deriveTitle([message(`${block}\n\nPR 42`)])).toBe("PR 42");
+    expect(
+      deriveTitle([message(mcpPromptBlock("Docs\nsrv", "a\nb", "x"))]),
+    ).toBe("Docs srv: a b");
   });
 });

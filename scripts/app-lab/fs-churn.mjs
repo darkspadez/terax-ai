@@ -1,5 +1,5 @@
-#!/usr/bin/env node
-// File-system churn for the app lab `fs-churn` scenario (scripts/app-lab/run.py).
+#!/usr/bin/env bun
+// File-system churn for the app lab `fs-churn` scenario (scripts/app-lab/run.ts).
 //
 // Stands in for coding agents working in a repository the app has open in its explorer:
 //   - agent edits: a source file is rewritten every 0.4 to 2.5 s, now and then a scratch file is

@@ -4,6 +4,7 @@ import {
   SparklesIcon,
 } from "@hugeicons/core-free-icons";
 import { usePlanStore } from "../store/planStore";
+import { COMMAND_LABELS, quoteRequest } from "./commandMessage";
 
 /**
  * Outcome of intercepting a slash command from the composer.
@@ -20,9 +21,7 @@ export type SlashOutcome =
 function claudeCodeDirective(request: string): string {
   return `The user wants to drive a Claude Code agent through you. Their request:
 
-<request>
-${request}
-</request>
+${quoteRequest(request)}
 
 You are the orchestrator, not the implementer. Do not write the code yourself.
 1. Call read_agent_output to see whether a Claude Code agent is already active in this session.
@@ -31,7 +30,7 @@ You are the orchestrator, not the implementer. Do not write the code yourself.
 Sharpen vague requests into precise engineering instructions; keep each agent prompt focused on one coherent unit of work.`;
 }
 
-const INIT_PROMPT = `Scan this workspace and produce TERAX.md at the workspace root with:
+const INIT_PROMPT = `Scan this workspace and produce AGENTS.md at the workspace root with:
 
 - One-paragraph project description.
 - Build / test / dev commands.
@@ -39,38 +38,39 @@ const INIT_PROMPT = `Scan this workspace and produce TERAX.md at the workspace r
 - Conventions worth knowing (naming, patterns, gotchas).
 - Paths to entry points.
 
-Use grep/glob/list_directory/read_file to explore. Cap TERAX.md under 200 lines. Use write_file to create it (will go through normal approval).`;
+Use grep/glob/list_directory/read_file to explore. Cap AGENTS.md under 200 lines. Use write_file to create it (will go through normal approval).`;
 
 export type SlashCommandMeta = {
   name: string;
   invocation: string;
   label: string;
   icon: typeof SparklesIcon;
+  /** A skill called with `/name`, not a built-in command. */
+  skill?: boolean;
+  /** An MCP server's prompt, `/server:prompt`. */
+  prompt?: boolean;
 };
 
 export const SLASH_COMMANDS: Record<string, SlashCommandMeta> = {
   init: {
     name: "init",
     invocation: "/init",
-    label: "Initialize workspace",
+    label: COMMAND_LABELS.init,
     icon: SparklesIcon,
   },
   plan: {
     name: "plan",
     invocation: "/plan",
-    label: "Plan mode",
+    label: COMMAND_LABELS.plan,
     icon: CheckListIcon,
   },
   "claude-code": {
     name: "claude-code",
     invocation: "/claude-code",
-    label: "Delegate to Claude Code",
+    label: COMMAND_LABELS["claude-code"],
     icon: ClaudeIcon,
   },
 };
-
-export const TERAX_CMD_RE =
-  /^<terax-command\s+name="([a-z0-9-]+)"(?:\s+state="([a-z]+)")?\s*\/>(?:\n+|$)/;
 
 export function tryRunSlashCommand(input: string): SlashOutcome {
   const trimmed = input.trim();

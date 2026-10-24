@@ -1,10 +1,11 @@
 use tauri::{AppHandle, Manager};
 
-use crate::modules::git::operations;
 use crate::modules::git::types::{
     DiscardEntry, GitBranchListResult, GitCommitFileChange, GitCommitResult, GitDiffContentResult,
     GitDiffResult, GitLogEntry, GitPanelSnapshot, GitPushResult, GitRepoInfo, GitStatusSnapshot,
+    GitWorktreeAddResult, GitWorktreeBranch, GitWorktreeRemoveResult,
 };
+use crate::modules::git::{operations, worktree};
 use crate::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
 
 async fn blocking<F, T>(app: AppHandle, f: F) -> Result<T, String>
@@ -29,6 +30,19 @@ pub async fn git_resolve_repo(
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
         operations::resolve_repo(r, &cwd, &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_discover_repos(
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<Vec<String>, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        operations::discover_repos(r, &path, &workspace).map_err(Into::into)
     })
     .await
 }
@@ -99,6 +113,19 @@ pub async fn git_diff_content(
 }
 
 #[tauri::command]
+pub async fn git_file_base(
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<Option<String>, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        operations::file_base(r, &path, &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn git_stage(
     repo_root: String,
     paths: Vec<String>,
@@ -155,6 +182,34 @@ pub async fn git_commit(
 }
 
 #[tauri::command]
+pub async fn git_undo_commit(
+    repo_root: String,
+    expected_head: String,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        operations::undo_last_commit(r, &repo_root, &expected_head, &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_commit_on_remote(
+    repo_root: String,
+    sha: String,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<Option<String>, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        operations::commit_on_remote(r, &repo_root, &sha, &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn git_fetch(
     repo_root: String,
     workspace: Option<WorkspaceEnv>,
@@ -197,7 +252,8 @@ pub async fn git_push(
 pub async fn git_log(
     repo_root: String,
     limit: Option<u32>,
-    before_sha: Option<String>,
+    skip: Option<u32>,
+    anchor_sha: Option<String>,
     workspace: Option<WorkspaceEnv>,
     app: AppHandle,
 ) -> Result<Vec<GitLogEntry>, String> {
@@ -207,7 +263,8 @@ pub async fn git_log(
             r,
             &repo_root,
             limit.unwrap_or(30),
-            before_sha.as_deref(),
+            skip.unwrap_or(0),
+            anchor_sha.as_deref(),
             &workspace,
         )
         .map_err(Into::into)
@@ -305,6 +362,39 @@ pub async fn git_checkout_branch(
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
         operations::checkout_branch(r, &repo_root, &branch, &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+/// Adds a worktree (`path` defaults to `<repository folder>-<branch>` beside the repository)
+/// and authorizes its folder.
+#[tauri::command]
+pub async fn git_worktree_add(
+    repo_root: String,
+    branch: GitWorktreeBranch,
+    path: Option<String>,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<GitWorktreeAddResult, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        worktree::add(r, &repo_root, &branch, path.as_deref(), &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+/// Removes a linked worktree; one with changes only when `force` is set.
+#[tauri::command]
+pub async fn git_worktree_remove(
+    repo_root: String,
+    path: String,
+    force: bool,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<GitWorktreeRemoveResult, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        worktree::remove(r, &repo_root, &path, force, &workspace).map_err(Into::into)
     })
     .await
 }

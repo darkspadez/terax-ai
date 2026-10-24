@@ -8,7 +8,7 @@
 import { flattenCubic, type SpriteMask } from "./SpriteMask";
 import type { SpriteSpec } from "./spriteSpec";
 
-const LINE_NONE = 0;
+export const LINE_NONE = 0;
 export const LINE_LIGHT = 1;
 export const LINE_HEAVY = 2;
 const LINE_DOUBLE = 3;
@@ -322,8 +322,11 @@ export function diagonalUpperLeftToLowerRight(
   );
 }
 
-/** Rounded corner: the straight arms of a light junction joined by a curve. */
-function drawArc(
+/**
+ * Rounded corner: the straight arms of a light junction joined by a curve.
+ * `corner` names the quadrant the curve bends through (`br` is ╭).
+ */
+export function drawArc(
   mask: SpriteMask,
   spec: SpriteSpec,
   corner: "tl" | "tr" | "bl" | "br",

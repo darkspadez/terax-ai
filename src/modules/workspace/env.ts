@@ -49,6 +49,23 @@ export function currentWorkspaceEnv(): WorkspaceEnv {
   return useWorkspaceEnvStore.getState().env;
 }
 
+// A Windows drive (`C:\`, `C:/`) or UNC (`\\server\share`, `\\?\C:\`) path.
+const WINDOWS_PATH = /^(?:[A-Za-z]:[\\/]|\\\\)/;
+
+/**
+ * The environment a file at `path` is read and written in. A Windows path
+ * names a host file whatever environment the window works in, since a path
+ * inside a WSL distro starts with `/`: the app's own config folder, for one,
+ * stays on the host in a WSL window. The backend would otherwise look for it
+ * inside the distro.
+ */
+export function workspaceEnvForPath(
+  path: string,
+  env: WorkspaceEnv = currentWorkspaceEnv(),
+): WorkspaceEnv {
+  return env.kind === "wsl" && WINDOWS_PATH.test(path) ? LOCAL_WORKSPACE : env;
+}
+
 export function workspaceScopeKey(env: WorkspaceEnv): string {
   return env.kind === "wsl" ? `wsl:${env.distro}` : "local";
 }

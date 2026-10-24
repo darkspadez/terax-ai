@@ -79,7 +79,39 @@ describe("custom theme store", () => {
     const stored = store.data.get("themes") as Theme[];
     expect(stored.map((t) => t.id)).toEqual(["b", "a"]);
     expect(store.save).toHaveBeenCalledTimes(3);
-    expect(events.emit).toHaveBeenCalledWith("terax://custom-themes-changed");
+    expect(events.emit).toHaveBeenCalledWith("oarlock://custom-themes-changed");
+  });
+
+  it("saves a batch in one write, the last duplicate id winning", async () => {
+    const mod = await loadModule();
+    await mod.saveCustomTheme(theme("a"));
+    await mod.saveCustomTheme(theme("b"));
+    const store = pluginStore.instances[0];
+    store.save.mockClear();
+    events.emit.mockClear();
+
+    await mod.saveCustomThemes([
+      { ...theme("b"), name: "first" },
+      theme("c"),
+      { ...theme("b"), name: "second" },
+    ]);
+
+    const stored = store.data.get("themes") as Theme[];
+    expect(stored.map((t) => [t.id, t.name])).toEqual([
+      ["a", "a"],
+      ["b", "second"],
+      ["c", "c"],
+    ]);
+    expect(store.save).toHaveBeenCalledTimes(1);
+    expect(events.emit).toHaveBeenCalledTimes(1);
+  });
+
+  it("an empty batch touches nothing", async () => {
+    const mod = await loadModule();
+    await mod.saveCustomThemes([]);
+    const store = pluginStore.instances[0];
+    expect(store.set).not.toHaveBeenCalled();
+    expect(events.emit).not.toHaveBeenCalled();
   });
 
   it("delete is a no-op when the id does not exist", async () => {
@@ -107,7 +139,7 @@ describe("custom theme store", () => {
     const store = pluginStore.instances[0];
     const stored = store.data.get("themes") as Theme[];
     expect(stored.map((t) => t.id)).toEqual(["b"]);
-    expect(events.emit).toHaveBeenCalledWith("terax://custom-themes-changed");
+    expect(events.emit).toHaveBeenCalledWith("oarlock://custom-themes-changed");
   });
 
   it("subscribes to store-key changes and cross-window events once", async () => {

@@ -1,14 +1,20 @@
 import { IS_WINDOWS } from "@/lib/platform";
 
-const MAX_OSC52_CLIPBOARD_BYTES = 1024 * 1024;
+/** What one OSC 52 write carries at most: Ghostty takes 8 MiB per OSC. */
+const MAX_OSC52_CLIPBOARD_BYTES = 6 * 1024 * 1024;
 
 export function parseOsc7(data: string): string | null {
   const m = data.match(/^file:\/\/[^/]*(\/.*)$/);
   if (!m) return null;
   let path = m[1];
-  try {
-    path = decodeURIComponent(path);
-  } catch {}
+  if (IS_WINDOWS && path.includes("\\")) {
+    // cmd.exe writes its cwd ($P) as is: backslashes, nothing percent-encoded.
+    path = path.replace(/\\/g, "/");
+  } else {
+    try {
+      path = decodeURIComponent(path);
+    } catch {}
+  }
   // /C:/Users/foo -> C:/Users/foo so it's a valid Windows path.
   if (/^\/[A-Za-z]:/.test(path)) {
     path = path.slice(1);

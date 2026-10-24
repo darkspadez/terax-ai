@@ -1,8 +1,8 @@
 // Offline pixel tools for harness captures (raw RGBA + JSON sidecar).
-//   node compare.mjs diff <dir> <a> <b> [out.png]     per-pixel diff of two captures
-//   node compare.mjs png <dir> <name> [scale] [x y w h] export one capture (optionally cropped, upscaled)
-//   node compare.mjs crisp <dir> <name>               edge sharpness / fractional-edge statistics
-//   node compare.mjs grid <dir> <split> <single>      split-pane capture (grid.html) against one pane of the same size
+//   bun compare.mjs diff <dir> <a> <b> [out.png]     per-pixel diff of two captures
+//   bun compare.mjs png <dir> <name> [scale] [x y w h] export one capture (optionally cropped, upscaled)
+//   bun compare.mjs crisp <dir> <name>               edge sharpness / fractional-edge statistics
+//   bun compare.mjs grid <dir> <split> <single>      split-pane capture (grid.html) against one pane of the same size
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";

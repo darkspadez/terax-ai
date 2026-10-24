@@ -8,14 +8,22 @@ vi.mock("@tauri-apps/api/core", () => core);
 
 type FakeRoot = {
   attrs: Map<string, string>;
-  style: { backgroundColor: string };
+  style: { backgroundColor: string; properties: Map<string, string> };
 };
 
-function fakeDocument(): FakeRoot {
+/** `terminal` is the computed `--terminal-background`; everything else reads the frame. */
+function fakeDocument(terminal = "rgb(20, 20, 20)"): FakeRoot {
   const attrs = new Map<string, string>();
+  const properties = new Map<string, string>();
   const root = {
     attrs,
-    style: { backgroundColor: "" },
+    style: {
+      backgroundColor: "",
+      properties,
+      setProperty(name: string, value: string) {
+        properties.set(name, value);
+      },
+    },
     setAttribute(k: string, v: string) {
       attrs.set(k, v);
     },
@@ -31,7 +39,14 @@ function fakeDocument(): FakeRoot {
     createElement: () => ({ style: { cssText: "" }, remove: vi.fn() }),
     body: { appendChild: vi.fn() },
   });
-  vi.stubGlobal("getComputedStyle", () => ({ backgroundColor: "rgb(20, 20, 20)" }));
+  vi.stubGlobal(
+    "getComputedStyle",
+    (probe: { style: { cssText: string } }) => ({
+      backgroundColor: probe.style.cssText.includes("--terminal-background")
+        ? terminal
+        : "rgb(20, 20, 20)",
+    }),
+  );
   vi.stubGlobal("requestAnimationFrame", (cb: () => void) => cb());
   return root as unknown as FakeRoot;
 }
@@ -81,6 +96,7 @@ describe("vibrancy application", () => {
       enabled: true,
       dark: true,
       background: undefined,
+      seeThrough: true,
     });
   });
 
@@ -107,7 +123,12 @@ describe("vibrancy application", () => {
       (c) => c[0] === "window_set_backdrop",
     );
     expect(backdrop).toHaveLength(2);
-    expect(backdrop[1][1]).toEqual({ enabled: true, dark: false, background: undefined });
+    expect(backdrop[1][1]).toEqual({
+      enabled: true,
+      dark: false,
+      background: undefined,
+      seeThrough: true,
+    });
   });
 
   it("keeps an existing NSVisualEffectView across a dark-mode flip", async () => {
@@ -137,7 +158,17 @@ describe("vibrancy application", () => {
     const backdrop = core.invoke.mock.calls.filter(
       (c) => c[0] === "window_set_backdrop",
     );
-    expect(backdrop).toEqual([["window_set_backdrop", { enabled: false, dark: true, background: "#141414" }]]);
+    expect(backdrop).toEqual([
+      [
+        "window_set_backdrop",
+        {
+          enabled: false,
+          dark: true,
+          background: "#141414",
+          seeThrough: false,
+        },
+      ],
+    ]);
   });
 
   it("repaints opaque when the native side fails so the webview is never see-through", async () => {
@@ -173,7 +204,67 @@ describe("vibrancy application", () => {
       enabled: false,
       dark: false,
       background: "#141414",
+      seeThrough: false,
     });
+  });
+
+  // crynta/terax-ai#556, #1308: translucent terminals show what is behind the window.
+  it("makes the window see-through for a terminal opacity below 1", async () => {
+    const root = fakeDocument();
+    root.style.backgroundColor = "#141414";
+    core.invoke.mockResolvedValue("none");
+    const vibrancy = await loadModule();
+    const translucency = await import("./terminalTranslucency");
+
+    await vibrancy.applyVibrancy(false, true, "theme", 0.8);
+
+    expect(root.attrs.has("data-terminal-translucent")).toBe(true);
+    expect(root.attrs.has("data-vibrancy")).toBe(false);
+    expect(root.style.properties.get("--terminal-opacity")).toBe("0.8");
+    expect(root.style.backgroundColor).toBe("");
+    expect(translucency.terminalTranslucent()).toBe(true);
+    expect(core.invoke).toHaveBeenCalledWith("window_set_backdrop", {
+      enabled: false,
+      dark: true,
+      background: undefined,
+      seeThrough: true,
+    });
+
+    await vibrancy.applyVibrancy(false, true, "theme", 1);
+    expect(root.attrs.has("data-terminal-translucent")).toBe(false);
+    expect(root.style.backgroundColor).toBe("#141414");
+    expect(translucency.terminalTranslucent()).toBe(false);
+  });
+
+  it("honours the alpha of the theme's terminal background", async () => {
+    const root = fakeDocument("rgba(20, 20, 20, 0.9)");
+    core.invoke.mockResolvedValue("vibrancy");
+    const vibrancy = await loadModule();
+    const translucency = await import("./terminalTranslucency");
+
+    await vibrancy.applyVibrancy(true, true);
+
+    expect(root.attrs.get("data-vibrancy")).toBe("on");
+    expect(root.attrs.has("data-terminal-translucent")).toBe(true);
+    expect(root.style.properties.get("--terminal-opacity")).toBe("1");
+    expect(translucency.terminalTranslucent()).toBe(true);
+  });
+
+  it("keeps the terminals opaque when the window cannot be made see-through", async () => {
+    const root = fakeDocument();
+    core.invoke.mockImplementation((cmd: string) =>
+      cmd === "window_backdrop_kind"
+        ? Promise.resolve("none")
+        : Promise.reject(new Error("boom")),
+    );
+    const vibrancy = await loadModule();
+    const translucency = await import("./terminalTranslucency");
+
+    await vibrancy.applyVibrancy(false, true, "theme", 0.5);
+
+    expect(root.attrs.has("data-terminal-translucent")).toBe(false);
+    expect(root.style.backgroundColor).toBe("#141414");
+    expect(translucency.terminalTranslucent()).toBe(false);
   });
 
   it("serializes concurrent toggles so they cannot land out of order", async () => {

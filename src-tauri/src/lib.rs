@@ -3,31 +3,97 @@ pub mod modules;
 #[cfg(target_os = "macos")]
 use modules::app_menu;
 use modules::{
-    agent, control, fs, git, history, lsp, net, pty, secrets, shell, vibrancy, workspace,
+    agent, control, fs, git, history, lsp, net, primary_selection, pty, secrets, shell, vibrancy,
+    windows, workspace,
 };
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 #[cfg(target_os = "macos")]
-use tauri::{PhysicalPosition, WindowEvent};
+use tauri::PhysicalPosition;
+use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_window_state::StateFlags;
 
-/// Drained on first read so HMR / re-mounts can't replay the launch dir.
-#[derive(Default)]
-struct LaunchDir(Mutex<Option<String>>);
+/// The folder Oarlock was launched with (not a launched file's parent), until
+/// the main window reads it: drained so HMR / re-mounts can't replay it.
+struct LaunchDir(Mutex<LaunchFolder>);
 
-/// Drained on first read so HMR / re-mounts can't replay the launch files.
-#[derive(Default)]
-struct LaunchFiles(Mutex<Vec<String>>);
+enum LaunchFolder {
+    Unread(Option<String>),
+    Read,
+}
 
-#[tauri::command]
-fn get_launch_dir(state: State<'_, LaunchDir>) -> Option<String> {
-    state.0.lock().expect("LaunchDir mutex poisoned").take()
+impl LaunchDir {
+    fn new(folder: Option<String>) -> Self {
+        Self(Mutex::new(LaunchFolder::Unread(folder)))
+    }
+
+    fn take(&self) -> Option<String> {
+        let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        match std::mem::replace(&mut *state, LaunchFolder::Read) {
+            LaunchFolder::Unread(folder) => folder,
+            LaunchFolder::Read => None,
+        }
+    }
+
+    /// A folder opened before the main window read its launch folder becomes
+    /// that folder; false once it was read (or one is already there).
+    #[cfg(any(target_os = "macos", test))]
+    fn seed(&self, folder: String) -> bool {
+        let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        match &mut *state {
+            LaunchFolder::Unread(slot @ None) => {
+                *slot = Some(folder);
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Files the OS asked Oarlock to open, per window, until that window's page
+/// takes them: queued as well as announced, so a file that arrives while the
+/// page boots still opens, and taken once so a reload cannot replay it.
+#[derive(Default)]
+struct LaunchFiles(Mutex<HashMap<String, Vec<String>>>);
+
+impl LaunchFiles {
+    fn new(label: &str, files: Vec<String>) -> Self {
+        let state = Self::default();
+        state.queue(label, files);
+        state
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Vec<String>>> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn queue(&self, label: &str, files: Vec<String>) {
+        if files.is_empty() {
+            return;
+        }
+        let mut queues = self.lock();
+        let queued = queues.entry(label.to_owned()).or_default();
+        for file in files {
+            if !queued.contains(&file) {
+                queued.push(file);
+            }
+        }
+    }
+
+    fn take(&self, label: &str) -> Vec<String> {
+        self.lock().remove(label).unwrap_or_default()
+    }
 }
 
 #[tauri::command]
-fn get_launch_files(state: State<'_, LaunchFiles>) -> Vec<String> {
-    std::mem::take(&mut *state.0.lock().expect("LaunchFiles mutex poisoned"))
+fn get_launch_dir(state: State<'_, LaunchDir>) -> Option<String> {
+    state.take()
+}
+
+#[tauri::command]
+fn get_launch_files(window: tauri::Window, state: State<'_, LaunchFiles>) -> Vec<String> {
+    state.take(window.label())
 }
 
 enum LaunchEntry {
@@ -38,6 +104,8 @@ enum LaunchEntry {
 #[derive(Default, Debug, PartialEq)]
 struct LaunchTarget {
     dir: Option<String>,
+    /// The first dir arg: a folder the user asked Oarlock to open.
+    folder: Option<String>,
     files: Vec<String>,
 }
 
@@ -45,12 +113,16 @@ struct LaunchTarget {
 /// file arg is opened. Kept free of fs/env access so it stays unit-testable.
 fn resolve_launch_target(entries: Vec<LaunchEntry>) -> LaunchTarget {
     let mut dir = None;
+    let mut folder = None;
     let mut files = Vec::new();
     for entry in entries {
         match entry {
             LaunchEntry::Dir(path) => {
+                if folder.is_none() {
+                    folder = Some(fs::to_canon(&path));
+                }
                 if dir.is_none() {
-                    dir = Some(fs::to_canon(&path));
+                    dir = folder.clone();
                 }
             }
             LaunchEntry::File(path) => {
@@ -61,28 +133,52 @@ fn resolve_launch_target(entries: Vec<LaunchEntry>) -> LaunchTarget {
             }
         }
     }
-    LaunchTarget { dir, files }
+    LaunchTarget { dir, folder, files }
 }
 
 fn parse_launch_target() -> LaunchTarget {
-    let entries = std::env::args()
-        .skip(1)
+    parse_launch_args(std::env::args().skip(1), None)
+}
+
+/// Paths among `args` (flags skipped), relative ones taken from `cwd` when
+/// given (a later launch's directory) else from this process's.
+fn parse_launch_args(args: impl IntoIterator<Item = String>, cwd: Option<&Path>) -> LaunchTarget {
+    let entries = args
+        .into_iter()
         .filter(|arg| !arg.starts_with('-'))
-        .filter_map(|arg| std::fs::canonicalize(arg).ok())
-        .filter_map(|path| {
-            let meta = std::fs::metadata(&path).ok()?;
-            Some(if meta.is_dir() {
-                LaunchEntry::Dir(path)
+        .map(|arg| {
+            if cfg!(windows) {
+                unescape_root_quote(arg)
             } else {
-                LaunchEntry::File(path)
-            })
+                arg
+            }
         })
+        .map(|arg| match cwd {
+            Some(cwd) => cwd.join(arg),
+            None => PathBuf::from(arg),
+        })
+        .filter_map(launch_entry)
         .collect();
     resolve_launch_target(entries)
 }
 
-const fn settings_always_on_top(is_macos: bool) -> bool {
-    !is_macos
+/// Explorer passes a drive root (Open in Oarlock on a drive or the background
+/// of one) as `"C:\"`, whose `\"` the argument parser reads as an escaped
+/// quote: `C:"`. No Windows path holds a quote, so a final one is that `\`.
+fn unescape_root_quote(arg: String) -> String {
+    match arg.strip_suffix('"') {
+        Some(path) => format!("{path}\\"),
+        None => arg,
+    }
+}
+
+fn launch_entry(path: PathBuf) -> Option<LaunchEntry> {
+    let path = std::fs::canonicalize(path).ok()?;
+    Some(if std::fs::metadata(&path).ok()?.is_dir() {
+        LaunchEntry::Dir(path)
+    } else {
+        LaunchEntry::File(path)
+    })
 }
 
 #[tauri::command]
@@ -93,14 +189,12 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
     };
 
     if let Some(window) = app.get_webview_window("settings") {
-        #[cfg(not(target_os = "macos"))]
-        let _ = window.set_always_on_top(true);
         let _ = window.show();
         let _ = window.set_focus();
         if let Some(t) = tab.as_deref().filter(|s| !s.is_empty()) {
             // emit() serializes via JSON — no string-escape footgun, unlike
             // eval() with format!(). Frontend listens via Tauri event API.
-            let _ = window.emit("terax:settings-tab", t);
+            let _ = window.emit("oarlock:settings-tab", t);
         }
         return Ok(());
     }
@@ -110,21 +204,30 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
         .inner_size(900.0, 700.0)
         .min_inner_size(820.0, 620.0)
         .resizable(true)
-        .visible(false)
-        .always_on_top(settings_always_on_top(cfg!(target_os = "macos")));
+        .visible(false);
 
-    // A normal-level child stays above Terax but recedes with the app on macOS.
-    // Never combine the macOS parent with always_on_top; that breaks WebView
-    // compositing and can hide Settings behind the main window (#33, #957).
-    let builder = if let Some(main) = app.get_webview_window("main") {
-        builder.parent(&main).map_err(|e| e.to_string())?
+    // A normal-level child (an owned window on Windows, a transient one on
+    // Linux) stays above the window it opens over and recedes with the app.
+    // Never always_on_top: that floats it over every other app (#957), and
+    // with the macOS parent it breaks WebView compositing (#33).
+    // It opens over the window in front, and closes with it.
+    let parent = windows::target_window(&app);
+    let builder = if let Some(parent) = &parent {
+        builder.parent(parent).map_err(|e| e.to_string())?
     } else {
         builder
     };
+    windows::set_settings_parent(&app, parent.as_ref().map(|w| w.label().to_owned()));
 
+    // The traffic lights sit centred on the Settings header, 4 px taller
+    // than an app window's.
     #[cfg(target_os = "macos")]
     let builder = builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .traffic_light_position(tauri::LogicalPosition::new(
+            windows::TRAFFIC_LIGHTS.0,
+            windows::TRAFFIC_LIGHTS.1 + 2.0,
+        ))
         .hidden_title(true);
 
     // On Linux/Windows we render our own titlebar, so drop native chrome
@@ -143,7 +246,7 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
     }
 
     #[cfg(target_os = "macos")]
-    if let Some(main) = app.get_webview_window("main") {
+    if let Some(main) = parent {
         if let (Ok(main_pos), Ok(main_size), Ok(settings_size)) = (
             main.outer_position(),
             main.outer_size(),
@@ -167,7 +270,7 @@ pub fn run() {
     #[cfg(windows)]
     {
         let args: Vec<String> = std::env::args().collect();
-        if args.get(1).map(String::as_str) == Some("__terax_notify") {
+        if args.get(1).map(String::as_str) == Some("__oarlock_notify") {
             if let (Some(agent), Some(event)) = (args.get(2), args.get(3)) {
                 agent::emit_conout_marker(agent, event);
             }
@@ -179,6 +282,7 @@ pub fn run() {
         }
     }
 
+    modules::panics::install_log_hook();
     modules::runtime::install();
 
     let launch = parse_launch_target();
@@ -188,6 +292,16 @@ pub fn run() {
     let control_for_setup = control_state.clone();
 
     let builder = tauri::Builder::default();
+    // First, so a later launch hands over before anything else starts. Debug
+    // builds skip it: a dev build would otherwise hand off to an installed
+    // Oarlock (same identifier) and exit.
+    let builder = if cfg!(debug_assertions) {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_single_instance::init(
+            modules::second_launch::on_second_launch,
+        ))
+    };
     let builder = builder.plugin(tauri_plugin_clipboard_manager::init());
     #[cfg(target_os = "macos")]
     let builder = builder
@@ -202,10 +316,14 @@ pub fn run() {
         .plugin(
             tauri_plugin_window_state::Builder::new()
                 .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
+                // Placed under the pointer on every show, never restored.
+                .with_denylist(&[modules::quick_terminal::LABEL])
                 .build(),
         )
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build())
-        .plugin(tauri_plugin_store::Builder::new().build())
+        // Stores open only by plain names in the app data folder.
+        .plugin(modules::store_scope::plugin())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(
@@ -214,62 +332,80 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
+        // Open Folder's picker; app windows may only open (capabilities/dialog.json).
+        .plugin(tauri_plugin_dialog::init())
         // One async scheme multiplexes every terminal's output; see pty/hub.rs.
-        .register_asynchronous_uri_scheme_protocol("terax-pty", pty::stream_protocol)
+        .register_asynchronous_uri_scheme_protocol("oarlock-pty", pty::stream_protocol)
+        // Previews outside the authorized folders while the app may access all of them.
+        .register_asynchronous_uri_scheme_protocol(
+            modules::asset_all_folders::SCHEME,
+            modules::asset_all_folders::protocol,
+        )
         .on_page_load(|webview, payload| {
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
                 if let Some(state) = webview.try_state::<net::AiStreamState>() {
                     state.cancel_window(webview.window().label());
                 }
+                if let Some(state) = webview.try_state::<modules::mcp::McpHttpStreams>() {
+                    state.cancel_window(webview.label());
+                }
+                if let Some(state) = webview.try_state::<modules::mcp::McpState>() {
+                    state.release_window(webview.app_handle(), webview.label());
+                }
                 if let Some(state) = webview.try_state::<pty::PtyState>() {
                     state.reset_webview(webview.label());
                 }
+                if let Some(state) = webview.try_state::<fs::watch::FsWatchState>() {
+                    state.release_window(webview.app_handle(), webview.label());
+                }
+                modules::project_trust::release_window(webview.app_handle(), webview.label());
+                windows::on_page_load(webview.app_handle(), webview.label());
             }
         })
         .setup(move |_app| {
             #[cfg(feature = "bench")]
             modules::bench::guard(_app.handle())?;
+            modules::asset_scope::install(_app.handle());
             #[cfg(target_os = "macos")]
             modules::window_presentation::macos::install(_app.handle());
+            #[cfg(target_os = "linux")]
+            modules::color_scheme::follow();
             if let Err(error) = control::start(_app.handle().clone(), control_for_setup.clone()) {
-                log::warn!("could not start Terax control server: {error}");
+                log::warn!("could not start Oarlock control server: {error}");
             }
-            #[cfg(target_os = "macos")]
-            if let Some(main) = _app.get_webview_window("main") {
-                let handle = _app.handle().clone();
-                main.on_window_event(move |event| {
-                    // CloseRequested can be cancelled by the frontend guard.
-                    if matches!(event, WindowEvent::Destroyed) {
-                        if let Some(settings) = handle.get_webview_window("settings") {
-                            let _ = settings.destroy();
-                        }
-                    }
-                });
-            }
+            // After `main` exists, before any page runs.
+            windows::restore(_app.handle());
             Ok(())
         })
         .manage(pty::PtyState::default())
         .manage(net::AiStreamState::default())
         .manage(modules::ai_sessions::SessionFilesState::default())
+        .manage(modules::terminal_scrollback::ScrollbackState::default())
         .manage(modules::window_presentation::WindowPresentationState::default())
         .manage(control_state)
         .manage(shell::ShellState::default())
         .manage(secrets::SecretsState::default())
+        .manage(primary_selection::PrimarySelection::default())
+        .manage(modules::quick_terminal::QuickTerminalState::default())
+        .manage(windows::WindowsState::default())
+        .manage(modules::system_fonts::SystemFontsState::default())
         .manage(fs::watch::FsWatchState::default())
         .manage(history::HistoryState::default())
         .manage(lsp::LspState::default())
+        .manage(modules::mcp::McpState::default())
+        .manage(modules::mcp::McpHttpStreams::default())
         .manage(fs::supersede::Supersede::default())
         .manage(fs::index::FileIndexState::default())
+        .manage(modules::project_trust::ProjectTrustState::default())
+        .manage(modules::skills::SkillsState::default())
         .manage({
             let registry = workspace::WorkspaceRegistry::default();
             workspace::bootstrap_registry(&registry);
-            if let Some(ref launch_dir) = cli_dir {
-                let _ = registry.authorize(launch_dir);
-            }
+            modules::second_launch::authorize_launch(&registry, cli_dir.as_deref(), &launch.files);
             registry
         })
-        .manage(LaunchDir(Mutex::new(cli_dir)))
-        .manage(LaunchFiles(Mutex::new(launch.files)))
+        .manage(LaunchDir::new(launch.folder))
+        .manage(LaunchFiles::new(windows::MAIN, launch.files))
         .invoke_handler(tauri::generate_handler![
             pty::pty_open,
             pty::pty_write,
@@ -281,6 +417,7 @@ pub fn run() {
             pty::pty_close_all,
             pty::pty_has_foreground_process,
             pty::pty_has_foreground_job,
+            pty::pty_authorize_cwd,
             pty::pty_shell_name,
             pty::pty_list_shells,
             fs::tree::list_subdirs,
@@ -288,7 +425,9 @@ pub fn run() {
             fs::file::fs_read_file,
             fs::file::fs_write_file,
             fs::file::fs_stat,
+            fs::file::fs_host_path,
             fs::file::fs_canonicalize,
+            fs::file::fs_open_default,
             fs::mutate::fs_create_file,
             fs::mutate::fs_create_dir,
             fs::mutate::fs_rename,
@@ -297,14 +436,48 @@ pub fn run() {
             fs::mutate::fs_delete_batch,
             fs::copy::fs_copy,
             fs::clipboard::fs_clipboard_paths,
+            modules::clipboard_image::clipboard_image_read,
+            modules::clipboard_image::clipboard_image_write,
+            primary_selection::terminal_primary_selection_write,
+            primary_selection::terminal_primary_selection_read,
+            modules::quick_terminal::quick_terminal_toggle,
+            modules::quick_terminal::quick_terminal_set_hotkey,
             fs::watch::fs_watch_add,
             fs::watch::fs_watch_remove,
+            fs::watch::git_watch_add,
+            fs::watch::git_watch_remove,
             lsp::lsp_detect,
             lsp::lsp_host_pid,
             lsp::lsp_resolve_root,
             lsp::lsp_spawn,
             lsp::lsp_send,
             lsp::lsp_kill,
+            modules::mcp::mcp_spawn,
+            modules::mcp::mcp_send,
+            modules::mcp::mcp_kill,
+            modules::mcp::mcp_logs,
+            modules::mcp::mcp_logs_clear,
+            modules::mcp::mcp_log_note,
+            modules::mcp::mcp_status_report,
+            modules::mcp::mcp_status_list,
+            modules::mcp::mcp_secret_set,
+            modules::mcp::mcp_secret_delete,
+            modules::mcp::mcp_secret_status,
+            modules::mcp::mcp_http_open,
+            modules::mcp::mcp_http_close,
+            modules::mcp::mcp_http_stream,
+            modules::mcp::mcp_http_cancel,
+            modules::mcp::mcp_http_ack,
+            modules::mcp::mcp_project_spawn,
+            modules::mcp::mcp_project_http_open,
+            modules::mcp::project::mcp_project_servers,
+            modules::mcp::import::mcp_import_scan,
+            modules::mcp::import::mcp_import_secrets,
+            modules::mcp::oauth::mcp_oauth_status,
+            modules::mcp::oauth::mcp_oauth_probe,
+            modules::mcp::oauth::mcp_oauth_sign_in,
+            modules::mcp::oauth::mcp_oauth_cancel,
+            modules::mcp::oauth::mcp_oauth_sign_out,
             fs::search::fs_search,
             fs::search::fs_list_files,
             fs::grep::fs_grep,
@@ -315,10 +488,13 @@ pub fn run() {
             git::commands::git_status,
             git::commands::git_diff,
             git::commands::git_diff_content,
+            git::commands::git_file_base,
             git::commands::git_stage,
             git::commands::git_unstage,
             git::commands::git_discard,
             git::commands::git_commit,
+            git::commands::git_undo_commit,
+            git::commands::git_commit_on_remote,
             git::commands::git_fetch,
             git::commands::git_pull_ff_only,
             git::commands::git_push,
@@ -328,7 +504,26 @@ pub fn run() {
             git::commands::git_commit_file_diff,
             git::commands::git_remote_url,
             git::commands::git_list_branches,
+            git::commands::git_discover_repos,
             git::commands::git_checkout_branch,
+            git::commands::git_worktree_add,
+            git::commands::git_worktree_remove,
+            modules::skills::skills_list,
+            modules::skills::skills_load,
+            modules::skills::skills_read_file,
+            modules::skills::skills_set_enabled,
+            modules::skills::skills_create,
+            modules::skills::skills_edit,
+            modules::skills::skills_delete,
+            modules::skills::skills_install_git,
+            modules::skills::skills_install_zip,
+            modules::skills::skills_install_commit,
+            modules::skills::skills_install_cancel,
+            modules::project_trust::project_trust_status,
+            modules::project_trust::project_trust_decide,
+            modules::project_trust::project_trust_list,
+            modules::project_trust::project_trust_revoke,
+            modules::project_memory::project_memory_read,
             shell::shell_run_command,
             shell::shell_session_open,
             shell::shell_session_run,
@@ -341,6 +536,7 @@ pub fn run() {
             workspace::wsl_default_distro,
             workspace::ipc::wsl_home,
             workspace::workspace_authorize,
+            workspace::workspace_set_all_folders,
             workspace::workspace_current_dir,
             control::control_frontend_ready,
             control::control_respond,
@@ -354,6 +550,7 @@ pub fn run() {
             secrets::secrets_delete,
             secrets::secrets_get_all,
             net::lm_ping,
+            net::image::markdown_remote_image,
             net::ai_http_stream,
             net::ai_http_cancel,
             net::ai_http_ack,
@@ -362,6 +559,9 @@ pub fn run() {
             modules::ai_sessions::ai_session_delete,
             modules::ai_sessions::ai_session_finish_migration,
             modules::ai_sessions::ai_session_prune_backup,
+            modules::terminal_scrollback::terminal_scrollback_save,
+            modules::terminal_scrollback::terminal_scrollback_load,
+            modules::terminal_scrollback::terminal_scrollback_retain,
             history::history_suggest,
             history::history_commands,
             history::history_record,
@@ -369,6 +569,18 @@ pub fn run() {
             vibrancy::window_backdrop_kind,
             vibrancy::window_set_backdrop,
             modules::window_presentation::window_presentation_state,
+            modules::system_fonts::system_font_faces,
+            windows::app_theme_edit,
+            windows::app_window_open,
+            windows::app_window_ready,
+            windows::app_quit,
+            windows::app_quit_ready,
+            #[cfg(target_os = "macos")]
+            app_menu::app_menu_set_shortcuts,
+            #[cfg(target_os = "macos")]
+            modules::mac_privacy::mac_privacy_status,
+            #[cfg(target_os = "macos")]
+            modules::mac_privacy::mac_privacy_open_settings,
             #[cfg(feature = "bench")]
             modules::bench::bench_config,
             #[cfg(feature = "bench")]
@@ -382,15 +594,34 @@ pub fn run() {
             match event {
                 tauri::RunEvent::WindowEvent {
                     label,
+                    event: tauri::WindowEvent::Focused(true),
+                    ..
+                } => windows::on_focus(app, &label),
+                tauri::RunEvent::WindowEvent {
+                    label,
                     event: tauri::WindowEvent::Destroyed,
                     ..
                 } => {
                     if let Some(state) = app.try_state::<net::AiStreamState>() {
                         state.cancel_window(&label);
                     }
+                    if let Some(state) = app.try_state::<modules::mcp::McpHttpStreams>() {
+                        state.cancel_window(&label);
+                    }
+                    if let Some(state) = app.try_state::<modules::mcp::McpState>() {
+                        state.release_window(app, &label);
+                    }
                     if let Some(state) = app.try_state::<pty::PtyState>() {
                         state.destroy_webview(&label);
                     }
+                    if let Some(state) = app.try_state::<fs::watch::FsWatchState>() {
+                        state.release_window(app, &label);
+                    }
+                    if let Some(state) = app.try_state::<LaunchFiles>() {
+                        state.take(&label);
+                    }
+                    modules::project_trust::release_window(app, &label);
+                    windows::on_destroyed(app, &label);
                 }
                 // Servers exit on stdin EOF, but destructors are not guaranteed
                 // on process exit; kill explicitly.
@@ -400,39 +631,48 @@ pub fn run() {
                     if let Some(state) = app.try_state::<lsp::LspState>() {
                         state.kill_all();
                     }
+                    if let Some(state) = app.try_state::<modules::mcp::McpState>() {
+                        state.shut_down();
+                    }
+                    if let Some(state) = app.try_state::<shell::ShellState>() {
+                        state.kill_all();
+                    }
                     if let Some(state) = app.try_state::<control::ControlState>() {
                         state.shutdown();
                     }
                 }
                 // macOS delivers "Open With" files here, not as argv (cold and
-                // warm start, several at once). Seed the drain-once state and
-                // emit; canonicalize so the /tmp -> /private/tmp symlink can't
-                // defeat openFileTab's path dedupe against a CLI launch.
+                // warm start, several at once). Canonicalize so the /tmp ->
+                // /private/tmp symlink can't defeat openFileTab's path dedupe
+                // against a CLI launch.
                 #[cfg(target_os = "macos")]
                 tauri::RunEvent::Opened { urls } => {
                     let entries = urls
                         .iter()
                         .filter_map(|u| u.to_file_path().ok())
-                        .filter_map(|p| std::fs::canonicalize(p).ok())
-                        .filter(|p| p.is_file())
-                        .map(LaunchEntry::File)
+                        .filter_map(launch_entry)
                         .collect();
                     let target = resolve_launch_target(entries);
-                    if target.files.is_empty() {
-                        return;
+                    if let Some(registry) = app.try_state::<workspace::WorkspaceRegistry>() {
+                        modules::second_launch::authorize_launch(
+                            &registry,
+                            target.dir.as_deref(),
+                            &target.files,
+                        );
                     }
-                    if let Some(dir) = &target.dir {
-                        if let Some(registry) = app.try_state::<workspace::WorkspaceRegistry>() {
-                            let _ = registry.authorize(dir);
+                    // A folder (Open With, dropped on the Dock icon) is a launch
+                    // folder while the main window has not started, later it
+                    // opens in a new window, as from the command line.
+                    if let Some(folder) = target.folder {
+                        let seeded = app
+                            .try_state::<LaunchDir>()
+                            .is_some_and(|state| state.seed(folder.clone()));
+                        if !seeded {
+                            modules::second_launch::open_folder(app, folder);
                         }
-                        if let Some(state) = app.try_state::<LaunchDir>() {
-                            *state.0.lock().expect("LaunchDir mutex poisoned") = Some(dir.clone());
-                        }
                     }
-                    if let Some(state) = app.try_state::<LaunchFiles>() {
-                        *state.0.lock().expect("LaunchFiles mutex poisoned") = target.files.clone();
-                    }
-                    let _ = app.emit("terax:open-file", target.files);
+                    // macOS brings the app forward itself.
+                    modules::second_launch::open_files(app, target.files);
                 }
                 _ => {}
             }
@@ -441,7 +681,10 @@ pub fn run() {
 
 #[cfg(test)]
 mod launch_target_tests {
-    use super::{resolve_launch_target, settings_always_on_top, LaunchEntry, LaunchTarget};
+    use super::{
+        launch_entry, parse_launch_args, resolve_launch_target, unescape_root_quote, LaunchDir,
+        LaunchEntry, LaunchFiles, LaunchTarget,
+    };
     use std::path::PathBuf;
 
     #[test]
@@ -453,6 +696,7 @@ mod launch_target_tests {
     fn dir_arg_sets_workspace_and_opens_nothing() {
         let out = resolve_launch_target(vec![LaunchEntry::Dir(PathBuf::from("/home/u/proj"))]);
         assert_eq!(out.dir.as_deref(), Some("/home/u/proj"));
+        assert_eq!(out.folder.as_deref(), Some("/home/u/proj"));
         assert!(out.files.is_empty());
     }
 
@@ -462,6 +706,7 @@ mod launch_target_tests {
             "/home/u/proj/main.rs",
         ))]);
         assert_eq!(out.dir.as_deref(), Some("/home/u/proj"));
+        assert_eq!(out.folder, None);
         assert_eq!(out.files, vec!["/home/u/proj/main.rs".to_string()]);
     }
 
@@ -489,8 +734,127 @@ mod launch_target_tests {
     }
 
     #[test]
-    fn settings_float_only_outside_macos() {
-        assert!(!settings_always_on_top(true));
-        assert!(settings_always_on_top(false));
+    fn a_later_launch_resolves_its_arguments_from_its_own_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let launch = tmp.path().join("launched-from");
+        std::fs::create_dir_all(launch.join("proj")).unwrap();
+        std::fs::write(launch.join("notes.md"), "").unwrap();
+        let canon = |rel: &str| super::fs::to_canon(launch.join(rel).canonicalize().unwrap());
+
+        let out = parse_launch_args(
+            ["--path", "proj", "notes.md", "missing"].map(String::from),
+            Some(&launch),
+        );
+
+        assert_eq!(out.dir, Some(canon("proj")));
+        assert_eq!(out.folder, Some(canon("proj")));
+        assert_eq!(out.files, vec![canon("notes.md")]);
+    }
+
+    #[test]
+    fn the_launch_folder_is_read_once_and_taken_before_that_only() {
+        let state = LaunchDir::new(None);
+        assert!(state.seed("/opened".into()));
+        assert!(!state.seed("/second".into()));
+        assert_eq!(state.take().as_deref(), Some("/opened"));
+        assert_eq!(state.take(), None);
+        // Read: a later folder opens a window instead.
+        assert!(!state.seed("/later".into()));
+
+        let launched = LaunchDir::new(Some("/cli".into()));
+        assert!(!launched.seed("/opened".into()));
+        assert_eq!(launched.take().as_deref(), Some("/cli"));
+    }
+
+    #[test]
+    fn a_launch_entry_is_the_canonical_folder_or_file_and_nothing_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("proj");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("main.rs");
+        std::fs::write(&file, "").unwrap();
+
+        match launch_entry(dir.join(".")) {
+            Some(LaunchEntry::Dir(path)) => assert_eq!(path, dir.canonicalize().unwrap()),
+            _ => panic!("a folder is a Dir entry"),
+        }
+        match launch_entry(dir.join("..").join("proj").join("main.rs")) {
+            Some(LaunchEntry::File(path)) => assert_eq!(path, file.canonicalize().unwrap()),
+            _ => panic!("a file is a File entry"),
+        }
+        assert!(launch_entry(dir.join("missing.rs")).is_none());
+    }
+
+    // What a file manager hands over for Open With: absolute paths, any
+    // directory of its own, possibly several files (`%F`, a Finder selection,
+    // one Explorer launch per file through single-instance).
+    #[test]
+    fn files_opened_from_the_os_open_in_editor_tabs_in_their_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let docs = tmp.path().join("My Notes \u{e9}t\u{e9}");
+        std::fs::create_dir_all(&docs).unwrap();
+        let one = docs.join("read me.md");
+        let two = tmp.path().join("config.yaml");
+        std::fs::write(&one, "").unwrap();
+        std::fs::write(&two, "").unwrap();
+        let canon = |p: &PathBuf| super::fs::to_canon(p.canonicalize().unwrap());
+        let elsewhere = tmp.path().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let arg = |p: &PathBuf| p.to_string_lossy().into_owned();
+
+        let single = parse_launch_args([arg(&one)], Some(&elsewhere));
+        assert_eq!(single.files, vec![canon(&one)]);
+        assert_eq!(single.dir, Some(canon(&docs)));
+        assert_eq!(single.folder, None);
+
+        let several = parse_launch_args([arg(&one), arg(&two)], None);
+        assert_eq!(several.files, vec![canon(&one), canon(&two)]);
+        assert_eq!(several.dir, Some(canon(&docs)));
+
+        let with_folder = parse_launch_args([arg(&two), arg(&docs)], None);
+        assert_eq!(with_folder.files, vec![canon(&two)]);
+        assert_eq!(with_folder.folder, Some(canon(&docs)));
+    }
+
+    #[test]
+    fn a_drive_root_from_explorer_gets_its_backslash_back() {
+        assert_eq!(unescape_root_quote(r#"C:""#.into()), r"C:\");
+        assert_eq!(
+            unescape_root_quote(r#"\\server\share""#.into()),
+            r"\\server\share\"
+        );
+        assert_eq!(unescape_root_quote(r"C:\Users\me".into()), r"C:\Users\me");
+        assert_eq!(unescape_root_quote("/home/me".into()), "/home/me");
+    }
+
+    #[test]
+    fn launch_files_wait_for_their_window_and_are_taken_once() {
+        let files = LaunchFiles::new("main", vec!["/a/x.rs".into()]);
+        files.queue("main", vec!["/a/y.rs".into(), "/a/x.rs".into()]);
+        files.queue("w-2", vec!["/b/z.md".into()]);
+        files.queue("w-3", vec![]);
+
+        assert_eq!(files.take("main"), vec!["/a/x.rs", "/a/y.rs"]);
+        // A reload asks again and gets nothing to replay.
+        assert!(files.take("main").is_empty());
+        assert!(files.take("w-3").is_empty());
+        assert_eq!(files.take("w-2"), vec!["/b/z.md"]);
+
+        files.queue("main", vec!["/a/x.rs".into()]);
+        assert_eq!(files.take("main"), vec!["/a/x.rs"]);
+    }
+
+    /// The updater plugin parses `plugins.updater` when the app starts, and a configuration it
+    /// cannot parse stops the start. Updates are off until this product publishes releases: no
+    /// signing key, no endpoint, and no updater artifacts to sign at bundle time.
+    #[test]
+    fn the_updater_starts_with_updates_off() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let updater: tauri_plugin_updater::Config =
+            serde_json::from_value(config["plugins"]["updater"].clone()).unwrap();
+        assert!(updater.pubkey.is_empty());
+        assert!(updater.endpoints.is_empty());
+        assert_eq!(config["bundle"]["createUpdaterArtifacts"], false);
     }
 }

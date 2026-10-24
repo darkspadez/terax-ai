@@ -33,7 +33,10 @@ export function AgentLauncherPanel({ onBack, onLaunch }: Props) {
   const storedCommands = usePreferencesStore((s) => s.agentLaunchCommands);
   const hydrated = usePreferencesStore((s) => s.hydrated);
   const [agentId, setAgentId] = useState<AgentLauncherId>("claude");
-  const [instances, setInstances] = useState<AgentInstanceCount>(2);
+  const [chosenInstances, setInstances] = useState<AgentInstanceCount>(2);
+  const paneLimit = usePreferencesStore((s) => s.terminalPaneLimit);
+  // One pane per instance: a lowered pane limit caps the choice.
+  const instances = Math.min(chosenInstances, paneLimit) as AgentInstanceCount;
   const [drafts, setDrafts] = useState<AgentLaunchCommands>(storedCommands);
   const hydratedRef = useRef(hydrated);
   const persistedRef = useRef(storedCommands);
@@ -57,7 +60,7 @@ export function AgentLauncherPanel({ onBack, onLaunch }: Props) {
     persistedRef.current = next;
     void setAgentLaunchCommands(next).catch((error) => {
       persistedRef.current = previous;
-      console.error("[terax] failed to save agent launch commands:", error);
+      console.error("[oarlock] failed to save agent launch commands:", error);
     });
   };
 
@@ -168,7 +171,7 @@ export function AgentLauncherPanel({ onBack, onLaunch }: Props) {
             <button
               key={count}
               type="button"
-              disabled={!hydrated}
+              disabled={!hydrated || count > paneLimit}
               aria-label={`${count} ${count === 1 ? "instance" : "instances"}`}
               aria-pressed={instances === count}
               onClick={() => setInstances(count)}

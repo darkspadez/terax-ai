@@ -1,4 +1,4 @@
-//! Binary framing for the multiplexed `terax-pty` stream. Pure and
+//! Binary framing for the multiplexed `oarlock-pty` stream. Pure and
 //! allocation-light so every boundary rule is unit-testable without a webview.
 //!
 //! All integers are little-endian.

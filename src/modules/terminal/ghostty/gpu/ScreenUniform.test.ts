@@ -113,6 +113,10 @@ describe("ScreenUniform", () => {
     ]).toEqual([16, 1, 10, 1]);
     expect(f[at(SCREEN_OFFSET.contrast)]).toBe(0.5);
     expect(f[at(SCREEN_OFFSET.contrast, 1)]).toBe(0.25);
+    // Minimum contrast: absent means off (1), which the text shader skips.
+    expect(f[at(SCREEN_OFFSET.contrast, 2)]).toBe(1);
+    uniform.pack({ ...STATE, minimumContrast: 4.5 });
+    expect(view(uniform).f[at(SCREEN_OFFSET.contrast, 2)]).toBe(4.5);
     expect([
       ...f.slice(at(SCREEN_OFFSET.gamma), at(SCREEN_OFFSET.gamma) + 4),
     ]).toEqual(DWRITE_GAMMA_RATIOS.map(Math.fround));
@@ -134,6 +138,19 @@ describe("ScreenUniform", () => {
       uniform.pack(STATE);
       expect(uniform.changed()).toBe(false);
     }
+  });
+
+  // crynta/terax-ai#556: the page paints a translucent terminal's background.
+  it("leaves the default background to the page while the terminal is translucent", () => {
+    const uniform = new ScreenUniform();
+    const at = (offset: number) => offset / 4 + 3;
+    uniform.pack(STATE);
+    expect(view(uniform).f[at(SCREEN_OFFSET.themeBackground)]).toBe(1);
+    uniform.markUploaded();
+    uniform.pack({ ...STATE, translucent: true });
+    expect(view(uniform).f[at(SCREEN_OFFSET.themeBackground)]).toBe(0);
+    expect(uniform.changed()).toBe(true);
+    expect(BACKGROUND_SHADER).toContain("screen.theme_background.a < 1.0");
   });
 
   it("hides the cursor by zeroing its rectangle", () => {
@@ -225,6 +242,7 @@ describe("shader uniform layout", () => {
         decoration: SCREEN_OFFSET.decoration,
         contrast: SCREEN_OFFSET.contrast,
         gamma: SCREEN_OFFSET.gamma,
+        link_cells: SCREEN_OFFSET.linkCells,
       });
     },
   );

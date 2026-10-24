@@ -3,8 +3,124 @@
 <plist version="1.0">
 <dict>
 	<key>NSCameraUsageDescription</key>
-	<string>A program running within Terax would like to use the camera.</string>
+	<string>A program running within Oarlock would like to use the camera.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>A program running within Terax would like to use your microphone.</string>
+	<string>A program running within Oarlock would like to use your microphone.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Oarlock, and the programs running in its terminals, read and change files in your Desktop folder when you work with them.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Oarlock, and the programs running in its terminals, read and change files in your Documents folder when you work with them.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Oarlock, and the programs running in its terminals, read and change files in your Downloads folder when you work with them.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Oarlock, and the programs running in its terminals, read and change files on removable volumes such as USB drives when you work with them.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>Oarlock, and the programs running in its terminals, read and change files on network volumes when you work with them.</string>
+	<key>NSFileProviderDomainUsageDescription</key>
+	<string>Oarlock, and the programs running in its terminals, read and change files in iCloud Drive and other cloud storage when you work with them.</string>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Folder</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.folder</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Text Document</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.plain-text</string>
+				<string>public.source-code</string>
+				<string>public.script</string>
+				<string>public.json</string>
+				<string>public.yaml</string>
+				<string>public.xml</string>
+				<string>public.html</string>
+				<string>public.delimited-values-text</string>
+				<string>net.daringfireball.markdown</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Source Code</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>json</string>
+				<string>jsonc</string>
+				<string>txt</string>
+				<string>log</string>
+				<string>csv</string>
+				<string>tsv</string>
+				<string>md</string>
+				<string>markdown</string>
+				<string>mdx</string>
+				<string>js</string>
+				<string>mjs</string>
+				<string>cjs</string>
+				<string>jsx</string>
+				<string>ts</string>
+				<string>tsx</string>
+				<string>mts</string>
+				<string>cts</string>
+				<string>java</string>
+				<string>kt</string>
+				<string>kts</string>
+				<string>gradle</string>
+				<string>py</string>
+				<string>rb</string>
+				<string>php</string>
+				<string>go</string>
+				<string>rs</string>
+				<string>swift</string>
+				<string>dart</string>
+				<string>lua</string>
+				<string>c</string>
+				<string>h</string>
+				<string>cpp</string>
+				<string>cc</string>
+				<string>hpp</string>
+				<string>hh</string>
+				<string>cs</string>
+				<string>html</string>
+				<string>htm</string>
+				<string>css</string>
+				<string>scss</string>
+				<string>sass</string>
+				<string>less</string>
+				<string>vue</string>
+				<string>svelte</string>
+				<string>xml</string>
+				<string>yaml</string>
+				<string>yml</string>
+				<string>toml</string>
+				<string>ini</string>
+				<string>cfg</string>
+				<string>conf</string>
+				<string>properties</string>
+				<string>sh</string>
+				<string>bash</string>
+				<string>zsh</string>
+				<string>sql</string>
+				<string>graphql</string>
+				<string>proto</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

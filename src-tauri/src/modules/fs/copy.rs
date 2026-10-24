@@ -3,7 +3,7 @@ use super::{
     mutate::{note_dir_changed, rename_no_replace},
     to_canon,
 };
-use crate::modules::workspace::{resolve_path, WorkspaceEnv, WorkspaceRegistry};
+use crate::modules::workspace::{resolve_path, Origin, WorkspaceEnv, WorkspaceRegistry};
 use serde::Serialize;
 use std::ffi::{OsStr, OsString};
 use std::io;
@@ -63,7 +63,7 @@ fn copy_destination(
     }
     let root = std::fs::canonicalize(root).map_err(|error| error.to_string())?;
     let dest = std::fs::canonicalize(dest).map_err(|error| error.to_string())?;
-    if !registry.is_authorized(&root) || !dest.starts_with(&root) {
+    if !registry.gates(Origin::App).reaches(&root) || !dest.starts_with(&root) {
         return Err("copy destination is outside the authorized workspace".into());
     }
     if !dest.is_dir() {
@@ -85,16 +85,18 @@ fn copy_batch(
         return Err(format!("copy at most {MAX_COPY_SOURCES} items at a time"));
     }
     let dest = copy_destination(dest_dir, root, workspace, registry)?;
+    let gates = registry.gates(Origin::App);
     let mut result = CopyResult::default();
     for source in sources {
-        match copy_item(Path::new(&source), &dest, rename_on_conflict) {
+        // Sources are host paths (dropped or on the clipboard), read only from folders in reach.
+        let copied = gates.authorized_entry(Path::new(&source)).and_then(|src| {
+            copy_item(&src, &dest, rename_on_conflict).map_err(|error| error.to_string())
+        });
+        match copied {
             Ok(name) => result
                 .created
                 .push(to_canon(Path::new(dest_dir).join(name))),
-            Err(error) => result.failed.push(CopyFailure {
-                source,
-                message: error.to_string(),
-            }),
+            Err(message) => result.failed.push(CopyFailure { source, message }),
         }
     }
     if !result.created.is_empty() {
@@ -129,7 +131,7 @@ fn copy_item(src: &Path, dest: &Path, rename_on_conflict: bool) -> io::Result<Os
 
     // Publish only complete items; the same-filesystem rename is no-replace.
     let staging = tempfile::Builder::new()
-        .prefix(".terax-copy-")
+        .prefix(".oarlock-copy-")
         .tempdir_in(dest)?;
     let staged = staging.path().join("item");
     copy_recursive(src, &staged, 0)?;
@@ -260,6 +262,9 @@ mod tests {
     fn copy(sources: &[PathBuf], dest: &Path, rename: bool) -> CopyResult {
         let registry = WorkspaceRegistry::default();
         registry.authorize(dest).unwrap();
+        for source in sources {
+            registry.authorize(source.parent().unwrap()).unwrap();
+        }
         copy_batch(
             sources.iter().map(s).collect(),
             &s(dest),
@@ -279,6 +284,7 @@ mod tests {
         std::fs::write(src.path().join("new.txt"), b"new").unwrap();
         let registry = WorkspaceRegistry::default();
         registry.authorize(dest.path()).unwrap();
+        registry.authorize(src.path()).unwrap();
         let index = FileIndexState::default();
         let key = super::super::index::IndexKey {
             root: std::fs::canonicalize(dest.path()).unwrap(),
@@ -306,6 +312,31 @@ mod tests {
             .entries
             .iter()
             .any(|(name, _)| name == "new.txt"));
+    }
+
+    #[test]
+    fn a_source_outside_every_authorized_folder_is_not_read() {
+        let outside = tempfile::tempdir().unwrap();
+        let dest = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.txt"), b"secret").unwrap();
+        let registry = WorkspaceRegistry::default();
+        registry.authorize(dest.path()).unwrap();
+        let result = copy_batch(
+            vec![s(outside.path().join("secret.txt"))],
+            &s(dest.path()),
+            &s(dest.path()),
+            &WorkspaceEnv::Local,
+            &registry,
+            &FileIndexState::default(),
+            true,
+        )
+        .unwrap();
+        assert!(result.created.is_empty());
+        assert_eq!(result.failed.len(), 1);
+        assert!(result.failed[0]
+            .message
+            .contains("outside the authorized folders"));
+        assert_eq!(std::fs::read_dir(dest.path()).unwrap().count(), 0);
     }
 
     #[test]
@@ -520,6 +551,7 @@ mod tests {
         let wsl = format!("/mnt/{}{}", host[..1].to_ascii_lowercase(), &host[2..]);
         let registry = WorkspaceRegistry::default();
         registry.authorize(dest.path()).unwrap();
+        registry.authorize(src.path()).unwrap();
         let result = copy_batch(
             vec![s(src.path().join("a"))],
             &wsl,

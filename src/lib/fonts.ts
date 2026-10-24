@@ -16,7 +16,12 @@ const NERD_FONT_CANDIDATES = [
   "Hasklug Nerd Font",
 ];
 
-const FALLBACK_CHAIN = '"JetBrains Mono", SFMono-Regular, Menlo, monospace';
+// "Oarlock Symbols" (src/styles/symbols.css) covers only the Private Use Area,
+// where engines never fall back to fonts the stack does not name: it draws
+// Nerd Font icons the fonts before it lack, and loads a segment only when one
+// of its icons is first drawn.
+const FALLBACK_CHAIN =
+  '"JetBrains Mono", "Oarlock Symbols", SFMono-Regular, Menlo, monospace';
 
 let detected: string | null = null;
 let monoReady: Promise<void> | null = null;
@@ -27,9 +32,11 @@ export function ensureMonoFontsLoaded(): Promise<void> {
     monoReady = Promise.resolve();
     return monoReady;
   }
+  // One variable file per style holds every weight; these load the Latin
+  // segments (the rest load on first use, see GlyphFontGate).
   monoReady = Promise.allSettled([
     document.fonts.load('400 14px "JetBrains Mono"'),
-    document.fonts.load('700 14px "JetBrains Mono"'),
+    document.fonts.load('italic 400 14px "JetBrains Mono"'),
   ]).then(() => undefined);
   return monoReady;
 }

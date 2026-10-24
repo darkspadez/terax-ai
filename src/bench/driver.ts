@@ -56,7 +56,7 @@ async function allocateGarbage(): Promise<{
 
 /**
  * Runs one scenario inside the real application, using the app's own tab actions and real PTYs,
- * and reports phase events to the orchestrator (scripts/app-lab/run.py).
+ * and reports phase events to the orchestrator (scripts/app-lab/run.ts).
  */
 class ScenarioRun {
   constructor(
@@ -841,8 +841,10 @@ type KeyStroke = {
   ignoring?: string;
 };
 
+// Raw mode, then one line of hex per read() (`dd count=1` is a single read of up to 256 bytes).
+// Plain POSIX tools, so the scenario needs no interpreter on the lab machine.
 const INPUT_READER =
-  'python3 -u -c \'import os,tty;tty.setraw(0);print("READY",end="\\r\\n");[print("RX:"+os.read(0,256).hex(),end="\\r\\n") for _ in iter(int,1)]\'';
+  "stty raw -echo; printf 'READY\\r\\n'; while :; do printf 'RX:%s\\r\\n' \"$(dd bs=256 count=1 2>/dev/null | od -An -tx1 | tr -d ' \\n')\"; done";
 
 const hex = (text: string) =>
   Array.from(new TextEncoder().encode(text), (b) =>
@@ -1033,8 +1035,8 @@ let started = false;
 /** Starts the configured scenario once the application has mounted; no-op without one. */
 export async function startBenchDriver(app: () => BenchAppApi): Promise<void> {
   if (started) return;
-  const config = (window as unknown as { __teraxBenchConfig?: BenchConfig })
-    .__teraxBenchConfig;
+  const config = (window as unknown as { __oarlockBenchConfig?: BenchConfig })
+    .__oarlockBenchConfig;
   if (!config?.scenario || !config.reportUrl) return;
   started = true;
   const run = new ScenarioRun(config.reportUrl, config.scenario, app);

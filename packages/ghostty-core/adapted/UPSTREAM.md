@@ -1,6 +1,6 @@
-# Terax Ghostty WASM adaptation
+# Oarlock Ghostty WASM adaptation
 
-This is the production-candidate terminal core for the pooled Terax renderer
+This is the production-candidate terminal core for the pooled Oarlock renderer
 architecture. It adapts the mature bulk render-state bridge from Restty
 without importing Restty's application runtime, PTY transport, perpetual
 per-terminal frame loop, or per-pane GPU lifecycle.
@@ -11,12 +11,12 @@ per-terminal frame loop, or per-pane GPU lifecycle.
 - Restty commit: `7700b14a7643ba9240818209ef1e0aa90d83ad77`
 - Zig: `0.16.0`
 - Optimization: `ReleaseFast`, WebAssembly SIMD and scalar variants
-- SIMD artifact size: `755388` bytes
-- Scalar artifact size: `753322` bytes
-- SIMD SHA-256: `302b7952e0f84d1701b64a4348f597bbe5ab2bc1f2b58c12d6cf775251a895f7`
-- Scalar SHA-256: `c9cffe386b771bd1a76b493bf064b30abb30fd5ef3d36d700226b318309c1cad`
+- SIMD artifact size: `1073295` bytes
+- Scalar artifact size: `1014270` bytes
+- SIMD SHA-256: `4ce072f77919d1372cfe60a97d5bb216ff7f07ef051a9d1a5633e3941d9339e1`
+- Scalar SHA-256: `548fca54db2d13a63b57b7e5dda72c2df55d96571d8ae477929604a2046d4d35`
 
-Terax-specific changes include:
+Oarlock-specific changes include:
 
 - rebasing the bridge onto the pinned current Ghostty API;
 - Ghostty `TinyIo`, avoiding the binary and runtime overhead of threaded I/O;
@@ -37,7 +37,7 @@ Terax-specific changes include:
 - native mode, size, color, visibility, and version query replies;
 - generated upstream Ghostty XTGETTCAP responses and native DECRQSS replies;
 - synchronized-output state for damage suppression with bounded recovery;
-- one WebAssembly instance (one linear memory) per Terax model, all created
+- one WebAssembly instance (one linear memory) per Oarlock model, all created
   from a single compiled module; disposing the model drops the instance, which
   is the only way WebAssembly memory is ever returned to the operating system;
 - Ghostty's module-global exact-page WASM pool, avoiding geometric page-pool
@@ -92,16 +92,105 @@ Terax-specific changes include:
   colors, text blink, graphemes, and wide-cell state;
 - a raw `.wasm` asset instead of a multi-megabyte JavaScript string literal.
 
-The bridge deliberately stays below Terax's model/surface boundary. Terax
+The bridge deliberately stays below Oarlock's model/surface boundary. Oarlock
 retains renderer pooling, hidden-tab renderer release, damage-driven frame
 scheduling, shell integration, semantic routing, and fallback selection.
+
+## October 22 protocols
+
+The bridge now lets Ghostty's own stream handler answer and report what it
+already implements, through its effects (reply queue, size, colour scheme,
+XTVERSION, OSC 9;4 progress), instead of answering only a hand-picked set:
+
+- Kitty graphics: Ghostty's build disables the protocol on every freestanding
+  target. `build.zig` turns the generated option back on, adds the wuffs
+  import Ghostty wires only with the feature, and builds ghostty-vt from a copy
+  of the pinned source whose image loader refuses the file, temporary-file and
+  shared-memory media on freestanding targets before compiling their POSIX
+  paths (only direct, in-band transmission is possible in a webview). PNG
+  payloads (`f=100`, the default of most clients) are decoded by wuffs, which
+  libghostty leaves to the embedder. Bulk APC payloads (`apc_put_slice`) reach
+  the protocol parser; the per-byte path alone dropped every image. Placements
+  follow Ghostty's renderer (pinned, relative and Unicode-placeholder virtual
+  placements) and carry each image's generation for texture caching. Image
+  storage is 64 MB per screen (`restty_set_image_storage_limit`).
+- Configurable mode defaults (`restty_set_mode_default`), Ghostty's
+  `mode_default` terminal option for the modes it marks configurable: the
+  value a mode returns to on RIS. A terminal still at the old default takes
+  the new one at once; one whose program changed the mode keeps it. Oarlock
+  sets mode 1007 (alternate scroll) from its scroll wheel setting.
+- Mode 2048 in-band size reports on enable, on every resize (one report, with
+  the current cell size) and on cell-size changes; mode 2027 grapheme
+  clustering on by default and across RIS, like Ghostty's
+  `grapheme-width-method = unicode`.
+- Host-set colour scheme (DSR 996, mode 2031 change reports), visibility
+  (DSR 998, mode 2033) and XTVERSION (`oarlock <version>`).
+- Ghostty's mouse encoder for every tracking mode and format (X10, normal,
+  button, any; X10, UTF-8, SGR, urxvt, SGR-pixels) with motion deduplication.
+- Events for OSC 9;4 progress, OSC 22 pointer shapes and OSC 52 clipboard
+  reads (answered by the host after asking the user; before, a read arrived as
+  a write of `?`). OSC 21 Kitty colour queries are answered; OSC 4/10/11/12
+  queries are answered once by Ghostty instead of by the bridge.
+- Formatted range export as plain text, VT or HTML with soft wraps joined
+  (`restty_text_range_format_prepare`), used to restore scrollback.
+- Glyph interning applies Ghostty's renderer `constraintWidth`: a wide cell, or
+  a symbol (`isSymbol`'s blocks and the Private Use Area) followed by an empty
+  cell, a space or an en space that neither ends the row nor follows another
+  symbol, gets glyph style bit 2 (`GPU_GLYPH_TWO_CELLS`). The renderer fits
+  icons, symbols and emoji to that many cells, so a Nerd Font icon before a
+  space is drawn at Ghostty's size.
+- Ligature runs (`restty_set_ligatures`, on by default): 2 to 16 adjacent
+  narrow cells of a row that each hold one ASCII punctuation or symbol code
+  point with the same foreground (faint included), bold, italic and blink.
+  Each cell is interned as the whole run with glyph style bit 3
+  (`GPU_GLYPH_LIGATURE`) and its index in bits 4..7, so the renderer draws the
+  font's contextual alternates (`->`, `!=`, `===`) across cells; longer runs
+  continue as new runs. A run's cells get consecutive ids from one lookup, and
+  a full table takes a run whole or not at all. Only punctuation is tested
+  (one table lookup), so letters, digits and spaces keep the ASCII table path
+  at its old cost (a 200x60 re-encode of plain text measured the same); a
+  screen dense with operators costs about 1.6 times as much. Changing the
+  switch re-encodes every row once, like a palette change. Runs break at the
+  visible cursor, as Ghostty's run iterator does (`cursor_x`): a run ends
+  before the cursor's cell, which is drawn alone. When the break moves, the
+  rows it leaves and enters are re-encoded if its cell and a neighbour are
+  candidates (Ghostty dirties a moving cursor's rows itself, not a cursor
+  shown or hidden).
+- Kitty clipboard (OSC 5522) through Ghostty's own protocol code, refused
+  until the host sets a policy (`restty_set_clipboard_policy`). Ghostty's
+  clipboard effects are synchronous and the host's clipboard is not, so the
+  bridge holds a read (at most four; more are answered busy), reports it
+  (`kitty_clipboard_read`: id, location, listing flag, the program's name and
+  MIME types) and, when the host answers (`restty_kitty_clipboard_answer`),
+  replays the packet through Ghostty with the answer, letting Ghostty encode
+  the response (the reply queue may hold 48 MiB while it does, the base64
+  framing of the 32 MiB the host serves). Turning reads off refuses those
+  still held. Writes run Ghostty's write state machine (up to its 64 MiB) and
+  reach the host as its first text and first `image/*` representation
+  (`kitty_clipboard_write`: location, clear flag, then each MIME type with its
+  data); one with neither is answered unsupported. Clipboard events (this and
+  OSC 52) may carry Ghostty's write limit; other events stay within 256 KiB.
+  OSC 52 stays the bridge's own, so Ghostty's handler never sees it.
+- Mode 5522 paste events (`restty_kitty_paste_event`): for a user's paste
+  from a clipboard the bridge mints Kitty's one-time password from host
+  entropy (Ghostty's alphabet and rejection sampling; a freestanding target
+  has no secure random source of its own), records the one-time read grant
+  in Ghostty's handler and queues Ghostty's `PasteEvent`. A held read reports
+  whether a grant covers it (peeked as Ghostty decides on replay: a named
+  request for data, never a listing), and the replay consumes it. Declined,
+  so the host pastes text, while reads do not go to the host.
+- Kitty drag and drop (OSC 72): Ghostty's registration and acceptance state
+  is reported (`drag_and_drop`) and queried (`restty_dnd_active`,
+  `restty_dnd_accepted`); the host feeds native drags in with
+  `restty_dnd_move`, `restty_dnd_drop` (up to 16 representations, served by
+  Ghostty when the program requests them) and `restty_dnd_leave`.
 
 ## October 15 instance-per-terminal memory
 
 A single shared instance can never give memory back: WebAssembly memory only
 grows, so twenty agent tabs left the app at their joint high-water mark until
 every model was gone. Each model now owns an instance of one cached
-`WebAssembly.Module`. Measured with `pnpm profile:ghostty` (Node 24) and in a
+`WebAssembly.Module`. Measured on Node 24 with the `profile:ghostty` script and in a
 real WKWebView on macOS 26 (footprint of the WebContent process):
 
 - blank instance: 1,310,720 bytes before, 327,680 after (stack 1 MiB to 96 KiB;
@@ -121,7 +210,7 @@ WebKit and V8 both collect when it is allocated (`reclaim` option). With the hin
 the footprint is back within about a second (212 MB after one second without it).
 `node scripts/ghostty-webkit-memory.mjs` repeats the WKWebView run.
 
-Stack safety: `pnpm soak:ghostty` writes about 33 MB of adversarial input per
+Stack safety: `bun run soak:ghostty` writes about 33 MB of adversarial input per
 artifact and render format (1 MiB OSC strings, 200,000-parameter SGR, nested
 string introducers, DCS/APC/kitty floods, 100,000 combining marks, malformed
 UTF-8, scroll-region extremes, reflow, search, selection, key encoding) with a
@@ -138,9 +227,9 @@ about 0.4 microseconds to a write plus render-state update.
 ## October 14 upstream update
 
 Both artifacts use the exact `main` revision above (141 commits after the
-previous `7ec9e26a` pin). Terax continues to use its adapted bulk bridge; it does
+previous `7ec9e26a` pin). Oarlock continues to use its adapted bulk bridge; it does
 not consume the mutable official nightly binary as a drop-in ABI. Upstream
-changes that matter to Terax:
+changes that matter to Oarlock:
 
 - use-after-free when scrollback pruning frees the page holding the cursor
   (ghostty-org/ghostty#14686), which long-running agent sessions that prune
@@ -150,7 +239,7 @@ changes that matter to Terax:
 - DECXCPR (`CSI ? 6 n`, answered `CSI ? row;col;1 R`) and `CSI 19 t`
   (`CSI 9;rows;cols t`) were added to upstream's device-status and size-report
   enums. The bridge's exhaustive switches required matching replies in
-  `terax.zig`; no other bridge behavior changed.
+  `oarlock.zig`; no other bridge behavior changed.
 
 Linear memory is unchanged from the previous pin: 20 blank 120x40 models use
 10.4375 MiB, and the block-enabled stress workload plateaus at 68.1875 MiB for
@@ -159,7 +248,7 @@ both variants with zero plateau growth. Artifacts grew by 4,099 (SIMD) and 4,172
 saving. Native canvas reuse and row-staging measurements are recorded separately
 in `docs/architecture/ghostty-resource-efficiency.md`.
 
-The GPU cell-record format (`TERAX_SOAK_FORMAT=gpu`, `TERAX_PROFILE_FORMAT=gpu`)
+The GPU cell-record format (`OARLOCK_SOAK_FORMAT=gpu`, `OARLOCK_PROFILE_FORMAT=gpu`)
 keeps the blank allocation and plateaus 786,432 bytes lower (67.4375 MiB) with
 zero plateau growth. The format added about 16 KiB to each artifact.
 
@@ -167,12 +256,12 @@ zero plateau growth. The format added about 16 KiB to each artifact.
 
 The September 7 pin includes upstream page allocation, default-palette sharing
 and fixed terminal allocation reductions. There is no tagged stable standalone
-libghostty WASM release in the inspected release list; Terax still builds its
+libghostty WASM release in the inspected release list; Oarlock still builds its
 adapted bridge from an exact source revision, rather than consuming the nightly
 artifact or treating Ghostty's application version as a stable library ABI.
 
 The update alone saved only one 64 KiB WASM page across 20 blank 120x40 models.
-With Terax's lazy presentation arrays, the identical workload uses 10,878,976
+With Oarlock's lazy presentation arrays, the identical workload uses 10,878,976
 bytes instead of 16,187,392 bytes at `0e3fae9`, a 5,308,416-byte reduction.
 Isolated per-artifact row-edit, scrolling and OSC microbenchmarks were within
 roughly 2% of baseline; this is not evidence of an application CPU speedup.
@@ -189,13 +278,13 @@ process RSS and GPU allocations are separate release gates.
 ## Rebuild
 
 From `packages/ghostty-core/adapted/wasm` (add `-Dwasm-stack-kib=N` to change the
-96 KiB shadow stack; `pnpm soak:ghostty` reports the deepest stack use):
+96 KiB shadow stack; `bun run soak:ghostty` reports the deepest stack use):
 
 ```sh
 zig build -Dtarget=wasm32-freestanding -Doptimize=ReleaseFast
-cp zig-out/bin/terax-ghostty-vt.wasm ../ghostty-vt.wasm
+cp zig-out/bin/oarlock-ghostty-vt.wasm ../ghostty-vt.wasm
 zig build -Dtarget=wasm32-freestanding -Doptimize=ReleaseFast -Dwasm-simd=false
-cp zig-out/bin/terax-ghostty-vt.wasm ../ghostty-vt-scalar.wasm
+cp zig-out/bin/oarlock-ghostty-vt.wasm ../ghostty-vt-scalar.wasm
 shasum -a 256 ../ghostty-vt.wasm ../ghostty-vt-scalar.wasm
 ```
 
@@ -206,5 +295,5 @@ terminal compatibility and resource gates.
 Both variants run the same adapted-core regression suite. The Rust integration
 test `ghostty_artifacts` additionally validates the scalar binary with SIMD and
 relaxed SIMD disabled and confirms that the primary binary requires SIMD.
-`pnpm bench:ghostty` compares both variants at the same source revision; those
+`bun run bench:ghostty` compares both variants at the same source revision; those
 measurements exclude IPC, webview presentation, process RSS, and energy.

@@ -1,3 +1,4 @@
+import { spacesStorePath } from "@/lib/appWindow";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import type { WorkspaceEnv } from "@/modules/workspace";
 import type { SerializedTab } from "./serialize";
@@ -18,7 +19,8 @@ export type SpaceState = {
   activeTabIndex: number;
 };
 
-const STORE_PATH = "terax-spaces.json";
+/** Each window keeps its own spaces (`appWindow.ts`). */
+const STORE_PATH = spacesStorePath();
 const KEY_SPACES = "spaces";
 const KEY_ACTIVE = "activeId";
 const STATE_PREFIX = "state:";

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { notifyTerminalAreaMoved } from "@/modules/terminal/lib/terminalAreaMoved";
 import { resetTerminalResizeGestureForTest } from "@/modules/terminal/lib/terminalResizeGesture";
 import type { CssRect } from "./PaneRects";
 import {
@@ -337,6 +338,81 @@ describe("WebGpuWindowCanvas", () => {
     expect(t.canvases[0].style.visibility).toBe("visible");
   });
 
+  // crynta/terax-ai#556: translucent terminals need a canvas with alpha.
+  it("is premultiplied and cleared transparent only while its panes are translucent", () => {
+    const t = setup();
+    let translucent = true;
+    const pane = { ...t.pane([10, 20, 30]), translucent: () => translucent };
+    t.canvas
+      .addPane(
+        pane,
+        t.host({ left: 0, top: 0, width: 800, height: 600 }) as never,
+      )
+      .setBounds({ left: 0, top: 0, width: 800, height: 600 });
+    const clearValue = () => {
+      const calls = (t.encoder.beginRenderPass as ReturnType<typeof vi.fn>).mock
+        .calls;
+      return calls[calls.length - 1][0].colorAttachments[0].clearValue;
+    };
+    const alphaModes = () =>
+      t.context.configure.mock.calls.map((call) => call[0].alphaMode);
+    t.canvas.beginFrame();
+
+    t.canvas.encode(t.encoder, t.resources);
+    expect(clearValue()).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    t.canvas.encode(t.encoder, t.resources);
+    expect(alphaModes()).toEqual(["opaque", "premultiplied"]);
+
+    translucent = false;
+    t.canvas.encode(t.encoder, t.resources);
+    expect(clearValue()).toEqual({
+      r: 10 / 255,
+      g: 20 / 255,
+      b: 30 / 255,
+      a: 1,
+    });
+    expect(alphaModes()).toEqual(["opaque", "premultiplied", "opaque"]);
+    expect(t.context.unconfigure).not.toHaveBeenCalled();
+
+    // A replacement device keeps the alpha mode in force.
+    translucent = true;
+    t.canvas.encode(t.encoder, t.resources);
+    t.canvas.reconfigure({
+      device: { limits: {} } as GPUDevice,
+      format: "bgra8unorm",
+      generation: 2,
+    });
+    expect(alphaModes().slice(-2)).toEqual(["premultiplied", "premultiplied"]);
+  });
+
+  it("stays premultiplied while any pane has not caught up with opaque terminals", () => {
+    const t = setup();
+    const opaque = t.pane([10, 20, 30]);
+    const lagging = { ...t.pane([10, 20, 30]), translucent: () => true };
+    for (const [p, left] of [
+      [opaque, 0],
+      [lagging, 400],
+    ] as const) {
+      t.canvas
+        .addPane(p, t.host({ left, top: 0, width: 400, height: 600 }) as never)
+        .setBounds({ left, top: 0, width: 400, height: 600 });
+    }
+    t.canvas.beginFrame();
+    t.canvas.encode(t.encoder, t.resources);
+    const calls = (t.encoder.beginRenderPass as ReturnType<typeof vi.fn>).mock
+      .calls;
+    expect(calls[0][0].colorAttachments[0].clearValue).toEqual({
+      r: 0,
+      g: 0,
+      b: 0,
+      a: 0,
+    });
+    const configured = t.context.configure.mock.calls;
+    expect(configured[configured.length - 1][0].alphaMode).toBe(
+      "premultiplied",
+    );
+  });
+
   it("acquires no texture when no pane can be drawn", () => {
     const t = setup();
     const p = t.pane();
@@ -539,6 +615,33 @@ describe("WebGpuWindowCanvas", () => {
     });
     t.canvas.beginFrame();
     expect(t.canvas.encode(t.encoder, t.resources).revealed).toEqual([a]);
+  });
+
+  it("checks its geometry at the next frame when the area moved without resizing", () => {
+    const t = setup({ scale: 1.25 });
+    t.area.rect = { left: 100.4, top: 20, width: 700, height: 500 };
+    t.resizeArea(700, 500);
+    expect(t.canvases[0].style.transform).toBe("translate(0.4px, 0px)");
+    t.canvas.verifyGeometry(0);
+    // The sidebar changed sides: same size, so no observer fires.
+    t.area.rect = { left: 8, top: 20, width: 700, height: 500 };
+    t.requestFrame.mockClear();
+    notifyTerminalAreaMoved();
+    expect(t.requestFrame).toHaveBeenCalled();
+    t.canvas.verifyGeometry(1);
+    expect(t.canvases[0].style.transform).toBe("");
+    // Only the frame right after the move skips the interval.
+    t.area.rect = { left: 100.4, top: 20, width: 700, height: 500 };
+    t.canvas.verifyGeometry(2);
+    expect(t.canvases[0].style.transform).toBe("");
+  });
+
+  it("stops listening for moves once disposed", () => {
+    const t = setup();
+    t.canvas.dispose();
+    t.requestFrame.mockClear();
+    notifyTerminalAreaMoved();
+    expect(t.requestFrame).not.toHaveBeenCalled();
   });
 
   it("asks for a frame when its area changes", () => {

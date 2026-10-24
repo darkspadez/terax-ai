@@ -8,7 +8,7 @@ import type { BenchConfig } from "./types";
 /**
  * Runs before the application renders (main.tsx): applies the scenario's localStorage entries
  * so every experiment toggle is in force when the terminal modules first read it, and clears
- * stale `terax:bench:*` entries left by an earlier run that shared this webview's storage.
+ * stale `oarlock:bench:*` entries left by an earlier run that shared this webview's storage.
  */
 export async function installBenchEarly(): Promise<BenchConfig | null> {
   let config: BenchConfig | null = null;
@@ -24,7 +24,7 @@ export async function installBenchEarly(): Promise<BenchConfig | null> {
         window.localStorage.removeItem(key);
     }
     if (config.scenario) {
-      window.localStorage.setItem("terax:terminal-diagnostics", "1");
+      window.localStorage.setItem("oarlock:terminal-diagnostics", "1");
       for (const [key, value] of Object.entries(
         config.scenario.localStorage ?? {},
       )) {
@@ -43,8 +43,8 @@ export async function installBenchEarly(): Promise<BenchConfig | null> {
   }
   if (config.scenario) installSmoothProbe();
   (
-    window as unknown as { __teraxBenchConfig?: BenchConfig }
-  ).__teraxBenchConfig = config;
+    window as unknown as { __oarlockBenchConfig?: BenchConfig }
+  ).__oarlockBenchConfig = config;
   return config;
 }
 

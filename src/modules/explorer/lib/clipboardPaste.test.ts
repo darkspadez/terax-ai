@@ -1,18 +1,40 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  authorizeSources,
   isPasteShortcut,
   pasteTargetDir,
   pasteClipboardFiles,
 } from "@/modules/explorer/lib/clipboardPaste";
 
-const { invoke, toast } = vi.hoisted(() => ({
+const { invoke, toast, authorizeFolder } = vi.hoisted(() => ({
   invoke: vi.fn(),
   toast: { message: vi.fn(), error: vi.fn() },
+  authorizeFolder: vi.fn(),
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("sonner", () => ({ toast }));
+vi.mock("@/modules/workspace/authorize", () => ({ authorizeFolder }));
 
-beforeEach(() => vi.resetAllMocks());
+beforeEach(() => {
+  vi.resetAllMocks();
+  authorizeFolder.mockResolvedValue(true);
+});
+
+describe("authorizeSources", () => {
+  it("authorizes each source's folder once, as a host path", async () => {
+    await authorizeSources([
+      "C:\\Users\\me\\Downloads\\a.txt",
+      "C:\\Users\\me\\Downloads\\b.txt",
+      "/home/me/pics/c.png",
+      "D:\\d.txt",
+    ]);
+    expect(authorizeFolder.mock.calls).toEqual([
+      ["C:\\Users\\me\\Downloads", { kind: "local" }],
+      ["/home/me/pics", { kind: "local" }],
+      ["D:\\", { kind: "local" }],
+    ]);
+  });
+});
 
 const dirs = new Set(["/r/src", "/r/src/lib"]);
 const isDir = (p: string) => dirs.has(p);
@@ -68,6 +90,7 @@ describe("pasteClipboardFiles", () => {
     opts.workspace = { kind: "wsl", distro: "Debian" };
     clipboard.resolve(["C:/a"]);
     expect(await paste).toEqual(["/repo/a"]);
+    expect(authorizeFolder).toHaveBeenCalledWith("C:/", { kind: "local" });
     expect(invoke).toHaveBeenLastCalledWith("fs_copy", {
       sources: ["C:/a"],
       destDir: "/repo",

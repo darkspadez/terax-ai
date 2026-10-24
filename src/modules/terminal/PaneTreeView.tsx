@@ -3,9 +3,11 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { TerminalSearchController } from "@/modules/terminal/search/TerminalSearchController";
 import { Fragment, useCallback, useEffect, useRef } from "react";
 import { useTerminalDropStore } from "./lib/dropStore";
+import { paneSlotPanelId, registerPaneGroup } from "./lib/paneLayout";
 import { firstLeafSlotId, type PaneNode } from "./lib/panes";
 import {
   beginTerminalResizeInteraction,
@@ -22,6 +24,8 @@ type LeafBundle = {
 
 type Props = {
   node: PaneNode;
+  /** The node is one pane of several (its tab is split). */
+  inSplit?: boolean;
   tabVisible: boolean;
   activeLeafId: number;
   blocks: boolean;
@@ -59,6 +63,7 @@ export function PaneTreeView(props: Props) {
           onCwd={b.onCwd}
           onExit={b.onExit}
         />
+        {props.inSplit && !focused && <UnfocusedSplitDim />}
         <DropOverlay leafId={node.id} />
       </div>
     );
@@ -67,14 +72,15 @@ export function PaneTreeView(props: Props) {
   return (
     <ResizablePanelGroup
       orientation={node.dir === "row" ? "horizontal" : "vertical"}
+      groupRef={(handle) => registerPaneGroup(node.id, handle)}
     >
       {node.children.map((child, i) => {
         const slotId = firstLeafSlotId(child);
         return (
           <Fragment key={slotId}>
             {i > 0 && <TerminalResizableHandle />}
-            <ResizablePanel id={`pane-slot-${slotId}`} minSize="10%">
-              <PaneTreeView {...props} node={child} />
+            <ResizablePanel id={paneSlotPanelId(child)} minSize="10%">
+              <PaneTreeView {...props} node={child} inSplit />
             </ResizablePanel>
           </Fragment>
         );
@@ -131,6 +137,24 @@ function TerminalResizableHandle() {
         if (RESIZE_KEYS.has(event.key)) finish();
       }}
       onBlur={finish}
+    />
+  );
+}
+
+/** Ghostty's unfocused-split-opacity: the pane fades into its background. */
+function UnfocusedSplitDim() {
+  const opacity = usePreferencesStore(
+    (s) => s.terminalBehavior.unfocusedSplitOpacity,
+  );
+  if (opacity >= 1) return null;
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute inset-0"
+      style={{
+        backgroundColor: "var(--terminal-background)",
+        opacity: 1 - opacity,
+      }}
     />
   );
 }

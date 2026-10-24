@@ -1,7 +1,7 @@
-import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
-import react, { reactCompilerPreset } from "@vitejs/plugin-react";
-import { readFileSync } from "node:fs";
+import react from "@vitejs/plugin-react";
+import { readFileSync, realpathSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { defineConfig, type PluginOption, type UserConfig } from "vite";
 import Inspect from "vite-plugin-inspect";
@@ -9,36 +9,89 @@ import Inspect from "vite-plugin-inspect";
 const host = process.env.TAURI_DEV_HOST;
 const rootDir = import.meta.dirname;
 
-// The app-lab driver (`TERAX_BENCH=1`) may only be built for the lab's own identifier
-// (scripts/app-lab/run.py sets TERAX_BENCH_IDENTIFIER): a stray `TERAX_BENCH=1 pnpm build` or
+// The app-lab driver (`OARLOCK_BENCH=1`) may only be built for the lab's own identifier
+// (scripts/app-lab/run.ts sets OARLOCK_BENCH_IDENTIFIER): a stray `OARLOCK_BENCH=1 bun run build` or
 // `tauri build` would otherwise ship the driver under the product identifier. The Rust side
 // refuses to start a bench binary under it too (modules/bench.rs); this fails the build early.
-if (process.env.TERAX_BENCH === "1") {
+if (process.env.OARLOCK_BENCH === "1") {
   const product = (
     JSON.parse(
       readFileSync(path.join(rootDir, "src-tauri/tauri.conf.json"), "utf8"),
     ) as { identifier: string }
   ).identifier;
-  const identifier = process.env.TERAX_BENCH_IDENTIFIER;
+  const identifier = process.env.OARLOCK_BENCH_IDENTIFIER;
   if (!identifier || identifier === product) {
     throw new Error(
-      `TERAX_BENCH=1 builds the app-lab driver and needs its own TERAX_BENCH_IDENTIFIER ` +
-        `(not the product identifier ${product}); run scripts/app-lab/run.py instead`,
+      `OARLOCK_BENCH=1 builds the app-lab driver and needs its own OARLOCK_BENCH_IDENTIFIER ` +
+        `(not the product identifier ${product}); run scripts/app-lab/run.ts instead`,
     );
   }
 }
 
-// Bundle/treemap analysis is opt-in: `ANALYZE=true pnpm build` emits stats.html.
+/**
+ * `virtual:katex.css`, the stylesheet of the KaTeX that @streamdown/math
+ * renders with. KaTeX is not a direct dependency (the isolated install has no
+ * top-level `katex`), so it resolves through that package. The stylesheet
+ * offers every font as woff2, woff and ttf; every webview Oarlock runs in reads
+ * woff2, so the fallbacks (0.9 MB that would never load) are dropped and only
+ * the woff2 files are emitted.
+ */
+function katexStylesheet(): PluginOption {
+  const streamdownMath = realpathSync(
+    path.join(rootDir, "node_modules/@streamdown/math/package.json"),
+  );
+  const stylesheet = createRequire(streamdownMath).resolve(
+    "katex/dist/katex.min.css",
+  );
+  return {
+    name: "oarlock:katex-stylesheet",
+    enforce: "pre",
+    resolveId: (source) =>
+      source === "virtual:katex.css" ? stylesheet : null,
+    transform(code, id) {
+      if (id.split("?")[0] !== stylesheet) return null;
+      return {
+        code: code.replace(
+          /,\s*url\([^)]*\.(?:woff|ttf)\)\s*format\(["'](?:woff|truetype)["']\)/g,
+          "",
+        ),
+        map: null,
+      };
+    },
+  };
+}
+
+/**
+ * The MCP SDK's client imports AJV for its default validator of structured
+ * tool output. AJV compiles schemas with `new Function`, which the CSP refuses
+ * (no `unsafe-eval`), so the SDK's AJV module resolves to a pass-through
+ * validator instead (`src/modules/mcp/runtime/ajvProvider.ts`) and AJV is
+ * not bundled. `dist-budget.test.ts` checks that it stays out.
+ */
+function mcpWithoutAjv(): PluginOption {
+  const shim = path.resolve(rootDir, "src/modules/mcp/runtime/ajvProvider.ts");
+  return {
+    name: "oarlock:mcp-without-ajv",
+    enforce: "pre",
+    resolveId: (source, importer) =>
+      importer?.includes("/@modelcontextprotocol/sdk/") &&
+      /(?:^|\/)validation\/ajv-provider\.js$/.test(source)
+        ? shim
+        : null,
+  };
+}
+
+// Bundle/treemap analysis is opt-in: `ANALYZE=true bun run build` emits stats.html.
 const analyze = process.env.ANALYZE === "true";
 
-// Module-graph inspector is opt-in via `pnpm dev:inspect`; keeps plain
-// `pnpm dev` from paying its transform-tracking overhead on every run.
+// Module-graph inspector is opt-in via `bun run dev:inspect`; keeps plain
+// `bun run dev` from paying its transform-tracking overhead on every run.
 const inspectGraph = process.env.INSPECT === "true";
 
 /**
  * npm package a module id belongs to (`@scope/name` or `name`), resolved from
- * the *last* `node_modules/` segment so pnpm's `.pnpm/<pkg>@<ver>/node_modules/`
- * indirection yields the real package. Substring tests such as `/react/` are
+ * the *last* `node_modules/` segment so the isolated install's
+ * `.bun/<pkg>@<ver>/node_modules/` indirection yields the real package. Substring tests such as `/react/` are
  * wrong here: `@ai-sdk/react/dist` and `@hugeicons/react/dist` both contain it.
  */
 function packageOf(id: string): string | null {
@@ -92,6 +145,14 @@ const AI_PROVIDER_CHUNKS: Record<string, string> = {
   "@ai-sdk/xai": "ai-xai",
 };
 
+const MCP_CLIENT_PACKAGES = new Set([
+  "@modelcontextprotocol/sdk",
+  "eventsource",
+  "eventsource-parser",
+  "pkce-challenge",
+  "zod-to-json-schema",
+]);
+
 /** Heavy features loaded on demand; each lands in its own named chunk. */
 function lazyChunk(id: string): string | null {
   const pkg = packageOf(id);
@@ -122,8 +183,16 @@ function lazyChunk(id: string): string | null {
     pkg.startsWith("@replit/codemirror")
   )
     return "codemirror";
-  if (pkg === "streamdown" || pkg.startsWith("@streamdown/"))
-    return "streamdown";
+  // Only Streamdown itself: its math and Mermaid plugins (KaTeX, Mermaid)
+  // stay in the chunks of their own dynamic imports, loaded when a formula
+  // or a diagram first appears.
+  if (pkg === "streamdown") return "streamdown";
+  // One marked serves Streamdown, Mermaid and the LSP client (see the
+  // overrides in package.json). Left to Rolldown it joins the streamdown
+  // chunk, and the LSP client would load all of Streamdown to get it.
+  if (pkg === "marked") return "marked";
+  // The MCP client and what only it uses: loaded once a server is enabled.
+  if (MCP_CLIENT_PACKAGES.has(pkg)) return "mcp-sdk";
 
   return null;
 }
@@ -131,13 +200,15 @@ function lazyChunk(id: string): string | null {
 // https://vite.dev/config/
 export default defineConfig(async ({ mode }): Promise<UserConfig> => ({
   plugins: [
-    babel({
-      presets: [reactCompilerPreset({ target: "19" })],
-    }),
-    react(),
+    // React Compiler runs natively (oxc-transform-react, a Rust port) inside
+    // the React plugin: no Babel pass, and it also compiles the components
+    // whose try/catch value blocks babel-plugin-react-compiler skips.
+    react({ compiler: { target: "19" } }),
     tailwindcss(),
+    katexStylesheet(),
+    mcpWithoutAjv(),
     // Module-graph inspector at /__inspect (who-imports-what, per-plugin
-    // transforms). Opt-in via `pnpm dev:inspect`, never in a production build.
+    // transforms). Opt-in via `bun run dev:inspect`, never in a production build.
     ...(mode === "development" && inspectGraph
       ? [Inspect() as PluginOption]
       : []),
@@ -171,6 +242,7 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => ({
       input: {
         main: path.resolve(rootDir, "index.html"),
         settings: path.resolve(rootDir, "settings.html"),
+        quick: path.resolve(rootDir, "quick.html"),
       },
       // Oxc drops `debugger` by default. These calls return undefined, so
       // marking them pure lets DCE strip them from production builds.
@@ -195,18 +267,18 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => ({
         // (src/app/dist-budget.test.ts) locks this.
         codeSplitting: {
           groups: [
-            { name: eagerChunk, priority: 100 },
-            { name: lazyChunk, priority: 0 },
+            { name: eagerChunk, debugName: "eager", priority: 100 },
+            { name: lazyChunk, debugName: "lazy", priority: 0 },
           ],
         },
       },
     },
   },
-  // Real-application benchmark driver (src/bench, scripts/app-lab). `TERAX_BENCH=1` compiles
-  // it in; otherwise this is the literal `false` and every `if (__TERAX_BENCH__)` branch,
+  // Real-application benchmark driver (src/bench, scripts/app-lab). `OARLOCK_BENCH=1` compiles
+  // it in; otherwise this is the literal `false` and every `if (__OARLOCK_BENCH__)` branch,
   // including its dynamic imports, is removed, so no bench code or chunk is emitted.
   define: {
-    __TERAX_BENCH__: JSON.stringify(process.env.TERAX_BENCH === "1"),
+    __OARLOCK_BENCH__: JSON.stringify(process.env.OARLOCK_BENCH === "1"),
   },
   clearScreen: false,
   server: {

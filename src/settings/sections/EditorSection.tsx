@@ -21,7 +21,11 @@ import {
   EDITOR_FONT_SIZES,
   EDITOR_WORD_WRAP_COLUMN_MAX,
   EDITOR_WORD_WRAP_COLUMN_MIN,
+  type DiffViewMode,
+  type EditorDefaultIndent,
   type EditorFormatter,
+  setDiffViewMode,
+  setEditorDefaultIndent,
   setEditorAutoSave,
   setEditorAutoSaveDelay,
   setEditorCustomFormatCommand,
@@ -44,6 +48,8 @@ const AUTO_SAVE_STEP = 100;
 
 export function EditorSection() {
   const editorFontSize = usePreferencesStore((s) => s.editorFontSize);
+  const diffViewMode = usePreferencesStore((s) => s.diffViewMode);
+  const editorDefaultIndent = usePreferencesStore((s) => s.editorDefaultIndent);
   const vimMode = usePreferencesStore((s) => s.vimMode);
   const editorWordWrap = usePreferencesStore((s) => s.editorWordWrap);
   const editorWordWrapColumn = usePreferencesStore(
@@ -90,6 +96,27 @@ export function EditorSection() {
             </SelectContent>
           </Select>
         </SettingRow>
+        <SettingRow
+          title="Diff view"
+          description="Git diffs in one column, or the original and your version side by side."
+        >
+          <Select
+            value={diffViewMode}
+            onValueChange={(v) => void setDiffViewMode(v as DiffViewMode)}
+          >
+            <SelectTrigger size="sm" className="h-8 w-36 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="inline" className="text-[12px]">
+                Inline
+              </SelectItem>
+              <SelectItem value="split" className="text-[12px]">
+                Side by side
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingRow>
       </div>
 
       <div className="flex flex-col gap-2">
@@ -102,6 +129,32 @@ export function EditorSection() {
             checked={vimMode}
             onCheckedChange={(v) => void setVimMode(v)}
           />
+        </SettingRow>
+        <SettingRow
+          title="Default indentation"
+          description="For new files and files without indentation. Files that are indented keep their own style."
+        >
+          <Select
+            value={editorDefaultIndent}
+            onValueChange={(v) =>
+              void setEditorDefaultIndent(v as EditorDefaultIndent)
+            }
+          >
+            <SelectTrigger size="sm" className="h-8 w-36 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="spaces2" className="text-[12px]">
+                2 spaces
+              </SelectItem>
+              <SelectItem value="spaces4" className="text-[12px]">
+                4 spaces
+              </SelectItem>
+              <SelectItem value="tab" className="text-[12px]">
+                Tabs
+              </SelectItem>
+            </SelectContent>
+          </Select>
         </SettingRow>
         <SettingRow
           title="Word wrap"

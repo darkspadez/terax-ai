@@ -9,6 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseSync, Visitor } from "vite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   analyzeDist,
@@ -20,6 +21,10 @@ import {
   traceStartup,
 } from "../../scripts/dist-graph.mjs";
 
+/** Formula and diagram renderers: npm packages only their own chunks hold. */
+const MARKDOWN_RENDERERS =
+  /^(?:katex|mermaid|@mermaid-js\/.+|@streamdown\/.+)$/;
+
 // Complements eager-budget.test.ts. That one walks the *source* import graph;
 // this one reads what the bundler actually emitted, because chunk assignment
 // can drag heavy code into the startup graph even when the source graph is
@@ -30,6 +35,67 @@ import {
 // reachable only through dynamic `import()`.
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
+
+/**
+ * The Safari (system WebKit, which WKWebView uses) each macOS release ships.
+ * A chunk with syntax its WebKit cannot parse fails as a whole; in a startup
+ * chunk that leaves the window blank (crynta/terax-ai#933, macOS 13.0.1).
+ */
+const SAFARI_OF_MACOS: Record<string, number> = {
+  "13.0": 16.1,
+  "13.1": 16.2,
+  "13.2": 16.3,
+  "13.3": 16.4,
+  "14.0": 17.0,
+};
+
+/**
+ * Syntax in `code` that WebKit learned late, with the first Safari that
+ * parses it. Build targets lower class static blocks but never regular
+ * expression features.
+ */
+function lateWebKitSyntax(code: string): Map<string, number> {
+  const found = new Map<string, number>();
+  const { program, errors } = parseSync("chunk.js", code);
+  if (errors.length > 0) found.set("unparsable", Number.POSITIVE_INFINITY);
+  new Visitor({
+    StaticBlock: () => {
+      found.set("class static block", 16.4);
+    },
+    Literal: (node) => {
+      if (!("regex" in node) || !node.regex) return;
+      if (/(?:^|[^\\])\(\?<[=!]/.test(node.regex.pattern)) {
+        found.set("regex lookbehind", 16.4);
+      }
+      if (node.regex.flags.includes("v")) found.set("regex v flag", 17);
+    },
+  }).visit(program);
+  return found;
+}
+
+describe("late WebKit syntax", () => {
+  it("finds what Safari 16.1 to 16.3 cannot parse", () => {
+    expect([
+      ...lateWebKitSyntax(
+        "class A{static{A.x=1}};const r=/(?<=a)b/,s=/(?<!a)b/;",
+      ),
+    ]).toEqual([
+      ["class static block", 16.4],
+      ["regex lookbehind", 16.4],
+    ]);
+    expect([...lateWebKitSyntax("const r=/[a--b]/v;")]).toEqual([
+      ["regex v flag", 17],
+    ]);
+  });
+
+  it("passes older syntax and escaped look-alikes", () => {
+    expect(
+      lateWebKitSyntax(
+        "class A{static x=1;#y=2;m(){return #y in this}};const r=/\\(?<=a/,n=/(?<name>a)(?=b)/u;",
+      ).size,
+    ).toBe(0);
+  });
+});
 
 describe("dist graph analyzer", () => {
   it("reads only static import edges, not dynamic ones", () => {
@@ -67,11 +133,11 @@ describe("dist graph analyzer", () => {
     expect(chunkName("assets/react-Cg0CyNNP.js")).toBe("react");
   });
 
-  it("resolves npm packages through pnpm's nested node_modules", () => {
+  it("resolves npm packages through the isolated install's nested node_modules", () => {
     const map = JSON.stringify({
       sources: [
-        "../../node_modules/.pnpm/zod@4.4.3/node_modules/zod/v4/core.js",
-        "../../node_modules/.pnpm/@ai-sdk+gateway@3/node_modules/@ai-sdk/gateway/dist/index.mjs",
+        "../../node_modules/.bun/zod@4.4.3/node_modules/zod/v4/core.js",
+        "../../node_modules/.bun/@ai-sdk+gateway@3+969a6d035afea0f4/node_modules/@ai-sdk/gateway/dist/index.mjs",
         "../../src/main.tsx",
       ],
     });
@@ -113,7 +179,7 @@ describe("dist graph analyzer", () => {
       "assets/esm-CCCC3333.js": "export const x=1;",
       "assets/esm-CCCC3333.js.map": JSON.stringify({
         sources: [
-          "../../node_modules/.pnpm/x/node_modules/@codemirror/state/a.js",
+          "../../node_modules/.bun/x/node_modules/@codemirror/state/a.js",
         ],
       }),
     };
@@ -143,7 +209,7 @@ describe("built startup graph", () => {
   let outDir = "";
 
   beforeAll(() => {
-    outDir = mkdtempSync(join(tmpdir(), "terax-dist-budget-"));
+    outDir = mkdtempSync(join(tmpdir(), "oarlock-dist-budget-"));
     // Sourcemaps list every module inside each chunk, so the package check does
     // not depend on how a chunk happens to be named. Built into a temp dir:
     // the real dist/ is untouched.
@@ -161,8 +227,8 @@ describe("built startup graph", () => {
       ],
       {
         cwd: root,
-        // TERAX_BENCH is explicitly off: a shipped build must not contain the app-lab driver.
-        env: { ...process.env, NODE_ENV: "production", TERAX_BENCH: "" },
+        // OARLOCK_BENCH is explicitly off: a shipped build must not contain the app-lab driver.
+        env: { ...process.env, NODE_ENV: "production", OARLOCK_BENCH: "" },
         stdio: "pipe",
         timeout: 240_000,
       },
@@ -203,6 +269,9 @@ describe("built startup graph", () => {
       "streamdown",
       "codemirror",
       "iconEngine",
+      "mathPlugin",
+      "MermaidDiagram",
+      "mcp-sdk",
     ]) {
       const file = chunks.find((f) => chunkName(f) === stem);
       expect(file, `${stem} chunk should be emitted`).toBeDefined();
@@ -216,6 +285,157 @@ describe("built startup graph", () => {
         true,
       );
     }
+  });
+
+  it("loads the formula and diagram renderers on demand, not with the preview or chat", () => {
+    const assets = join(outDir, "assets");
+    const readChunk = (rel: string) => {
+      const file = join(outDir, rel);
+      return existsSync(file) ? readFileSync(file, "utf8") : null;
+    };
+    // The chunks holding the preview pane and the chat's reply renderer, and
+    // everything they import statically.
+    const holders = readdirSync(assets)
+      .filter((file) => file.endsWith(".js.map"))
+      .filter((file) =>
+        (
+          JSON.parse(readFileSync(join(assets, file), "utf8")) as {
+            sources: string[];
+          }
+        ).sources.some((source) =>
+          /src\/(?:modules\/markdown\/MarkdownPreviewPane|components\/ai-elements\/message)\.tsx$/.test(
+            source,
+          ),
+        ),
+      )
+      .map((file) => file.replace(/\.map$/, ""));
+    expect(holders.length).toBeGreaterThan(0);
+    const trace = traceStartup(
+      holders
+        .map((file) => `<script type="module" src="/assets/${file}"></script>`)
+        .join(""),
+      readChunk,
+    );
+    expect(trace.missing).toEqual([]);
+    expect(
+      [...trace.files].flatMap(([file, info]) =>
+        [...(info.packages ?? [])]
+          .filter((pkg) => MARKDOWN_RENDERERS.test(pkg))
+          .map((pkg) => `${file}: ${pkg}`),
+      ),
+    ).toEqual([]);
+  });
+
+  it("bundles the MCP client without AJV, which the CSP could not run", () => {
+    const assets = join(outDir, "assets");
+    const bundled = new Set<string>();
+    for (const file of readdirSync(assets).filter((f) =>
+      f.endsWith(".js.map"),
+    )) {
+      const map = readFileSync(join(assets, file), "utf8");
+      for (const pkg of packagesFromMap(map) ?? []) bundled.add(pkg);
+    }
+    expect(bundled.has("@modelcontextprotocol/sdk")).toBe(true);
+    expect([...bundled].filter((pkg) => /^ajv/.test(pkg))).toEqual([]);
+  });
+
+  it("ships KaTeX's fonts as woff2 only", () => {
+    const assets = readdirSync(join(outDir, "assets"));
+    const fonts = assets.filter((file) => file.startsWith("KaTeX_"));
+    expect(fonts.length).toBeGreaterThan(10);
+    expect(fonts.filter((file) => !file.endsWith(".woff2"))).toEqual([]);
+    const css = assets
+      .filter((file) => file.endsWith(".css"))
+      .map((file) => readFileSync(join(outDir, "assets", file), "utf8"))
+      .filter((text) => text.includes("font-family:KaTeX_Main"));
+    expect(css).toHaveLength(1);
+    expect(css[0]).not.toMatch(/\.(?:woff|ttf)\)/);
+  });
+
+  it("bundles one shared Lezer highlighter for parsers and themes", () => {
+    const assets = join(outDir, "assets");
+    const sources = new Set<string>();
+    for (const file of readdirSync(assets).filter((f) =>
+      f.endsWith(".js.map"),
+    )) {
+      const map = JSON.parse(readFileSync(join(assets, file), "utf8")) as {
+        sources: string[];
+      };
+      for (const source of map.sources) {
+        if (source.includes("/node_modules/@lezer/highlight/")) {
+          sources.add(source);
+        }
+      }
+    }
+    expect([...sources]).toHaveLength(1);
+  });
+
+  it("bundles each npm package once, except the copies Mermaid's layouts need", () => {
+    const assets = join(outDir, "assets");
+    // Install directories (`.bun/<name>@<version>`) each package came from.
+    const copies = new Map<string, Set<string>>();
+    for (const file of readdirSync(assets).filter((f) =>
+      f.endsWith(".js.map"),
+    )) {
+      const map = JSON.parse(readFileSync(join(assets, file), "utf8")) as {
+        sources: string[];
+      };
+      for (const source of map.sources) {
+        const m = source.match(
+          /node_modules\/\.bun\/([^/]+)\/node_modules\/((?:@[^/]+\/)?[^/]+)\//,
+        );
+        if (!m) continue;
+        const dirs = copies.get(m[2]) ?? new Set<string>();
+        dirs.add(m[1]);
+        copies.set(m[2], dirs);
+      }
+    }
+    expect(copies.get("marked")?.size).toBe(1);
+    // marked is shared by Streamdown, Mermaid and the LSP client through
+    // package.json overrides. Left on purpose: Mermaid's mindmap layout
+    // (cytoscape-cose-bilkent) runs on cose-base and layout-base 1, its
+    // architecture layout (cytoscape-fcose) on 2, and 2 lays mindmaps out
+    // differently; moving d3-sankey from d3-array 2, d3-shape 1 and d3-path 1
+    // to the 3.x copies saves 0.1 KB and rounds Sankey link paths.
+    expect(
+      [...copies]
+        .filter(([, dirs]) => dirs.size > 1)
+        .map(([pkg]) => pkg)
+        .sort(),
+    ).toEqual(["cose-base", "d3-array", "d3-path", "d3-shape", "layout-base"]);
+  });
+
+  it("loads marked, not Streamdown, with the LSP client", () => {
+    const assets = join(outDir, "assets");
+    const readChunk = (rel: string) => {
+      const file = join(outDir, rel);
+      return existsSync(file) ? readFileSync(file, "utf8") : null;
+    };
+    const holders = readdirSync(assets)
+      .filter((file) => file.endsWith(".js.map"))
+      .filter((file) =>
+        (
+          JSON.parse(readFileSync(join(assets, file), "utf8")) as {
+            sources: string[];
+          }
+        ).sources.some((source) =>
+          source.includes("/node_modules/codemirror-languageserver/"),
+        ),
+      )
+      .map((file) => file.replace(/\.map$/, ""));
+    expect(holders.length).toBeGreaterThan(0);
+    const trace = traceStartup(
+      holders
+        .map((file) => `<script type="module" src="/assets/${file}"></script>`)
+        .join(""),
+      readChunk,
+    );
+    expect(trace.missing).toEqual([]);
+    const packages = new Set(
+      [...trace.files.values()].flatMap((info) => [...(info.packages ?? [])]),
+    );
+    expect(packages.has("marked")).toBe(true);
+    expect(packages.has("streamdown")).toBe(false);
   });
 
   it("refuses to build the app-lab driver without its own identifier, and under the product one", () => {
@@ -235,7 +455,7 @@ describe("built startup graph", () => {
           env: {
             ...process.env,
             NODE_ENV: "production",
-            TERAX_BENCH: "1",
+            OARLOCK_BENCH: "1",
             ...extra,
           },
           stdio: "pipe",
@@ -250,31 +470,50 @@ describe("built startup graph", () => {
       }
       return "";
     };
-    expect(failure({ TERAX_BENCH_IDENTIFIER: "" })).toContain(
-      "TERAX_BENCH_IDENTIFIER",
+    expect(failure({ OARLOCK_BENCH_IDENTIFIER: "" })).toContain(
+      "OARLOCK_BENCH_IDENTIFIER",
     );
-    expect(failure({ TERAX_BENCH_IDENTIFIER: "app.crynta.terax" })).toContain(
+    expect(failure({ OARLOCK_BENCH_IDENTIFIER: "consulting.quantumops.oarlock" })).toContain(
       "not the product identifier",
     );
     // Nothing was emitted by either attempt.
     expect(existsSync(join(outDir, "guarded"))).toBe(false);
   });
 
-  it("contains none of the app-lab benchmark driver (TERAX_BENCH is off)", () => {
+  it("parses in the WebKit of the oldest macOS the bundle declares", () => {
+    const config = JSON.parse(
+      readFileSync(join(root, "src-tauri/tauri.conf.json"), "utf8"),
+    ) as { bundle: { macOS: { minimumSystemVersion: string } } };
+    const minimum = config.bundle.macOS.minimumSystemVersion;
+    const safari = SAFARI_OF_MACOS[minimum];
+    expect(safari, `Safari of macOS ${minimum}`).toBeDefined();
+    const assets = join(outDir, "assets");
+    const offenders = readdirSync(assets)
+      .filter((file) => file.endsWith(".js"))
+      .flatMap((file) =>
+        [...lateWebKitSyntax(readFileSync(join(assets, file), "utf8"))]
+          .filter(([, needs]) => needs > safari)
+          .map(([feature, needs]) => `${file}: ${feature} (Safari ${needs})`),
+      );
+    expect(offenders).toEqual([]);
+    // Parses every chunk (5.5 MB): a second alone, more beside other suites.
+  }, 30_000);
+
+  it("contains none of the app-lab benchmark driver (OARLOCK_BENCH is off)", () => {
     // The driver (src/bench) and its Tauri commands exist only in builds made with
-    // TERAX_BENCH=1: `__TERAX_BENCH__` is the literal `false` otherwise, so its lazy import, the
+    // OARLOCK_BENCH=1: `__OARLOCK_BENCH__` is the literal `false` otherwise, so its lazy import, the
     // chunks behind it and every bench-only string are removed before bundling.
     const markers = [
       "bench_config",
       "bench_window",
       "bench_exit",
-      "__teraxBenchConfig",
+      "__oarlockBenchConfig",
       // The smoothness probe's seam (src/bench/smoothHooks.ts): product code reports to it
-      // only behind __TERAX_BENCH__, and the lookup itself is gated too.
-      "__teraxSmooth",
-      "terax:bench:",
-      "TERAX_BENCH",
-      "__TERAX_BENCH__",
+      // only behind __OARLOCK_BENCH__, and the lookup itself is gated too.
+      "__oarlockSmooth",
+      "oarlock:bench:",
+      "OARLOCK_BENCH",
+      "__OARLOCK_BENCH__",
     ];
     const files = (dir: string): string[] =>
       readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>

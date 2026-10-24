@@ -71,19 +71,83 @@ function art(g: Glyph): string[] {
   );
 }
 
+/**
+ * Every range Ghostty's sprite font draws (`src/font/sprite/Face.zig`: the
+ * `draw<MIN>_<MAX>` functions of `draw/*.zig`), cursor and decoration sprites
+ * aside.
+ */
+const GHOSTTY_SPRITE_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0x2500, 0x257f],
+  [0x2580, 0x259f],
+  [0x25e2, 0x25e5],
+  [0x25f8, 0x25fa],
+  [0x25ff, 0x25ff],
+  [0x2800, 0x28ff],
+  [0xe0b0, 0xe0bf],
+  [0xe0d2, 0xe0d2],
+  [0xe0d4, 0xe0d4],
+  [0xf5d0, 0xf60d],
+  [0x1cc1b, 0x1cc1e],
+  [0x1cc21, 0x1cc2f],
+  [0x1cc30, 0x1cc3f],
+  [0x1cd00, 0x1cde5],
+  [0x1ce00, 0x1ce01],
+  [0x1ce0b, 0x1ce0c],
+  [0x1ce16, 0x1ce19],
+  [0x1ce51, 0x1ce8f],
+  [0x1ce90, 0x1ceaf],
+  [0x1fb00, 0x1fb3b],
+  [0x1fb3c, 0x1fb67],
+  [0x1fb68, 0x1fb6f],
+  [0x1fb70, 0x1fb75],
+  [0x1fb76, 0x1fb7b],
+  [0x1fb7c, 0x1fb97],
+  [0x1fb98, 0x1fb99],
+  [0x1fb9a, 0x1fb9f],
+  [0x1fba0, 0x1fbae],
+  [0x1fbaf, 0x1fbaf],
+  [0x1fbbd, 0x1fbbf],
+  [0x1fbce, 0x1fbcf],
+  [0x1fbd0, 0x1fbdf],
+  [0x1fbe0, 0x1fbef],
+];
+
+function inGhosttySprites(cp: number): boolean {
+  return GHOSTTY_SPRITE_RANGES.some(([start, end]) => cp >= start && cp <= end);
+}
+
 describe("isBuiltinGlyph", () => {
   it("covers the Ghostty sprite ranges and nothing else nearby", () => {
     for (const cp of [
       0x2500, 0x257f, 0x2580, 0x259f, 0x2800, 0x28ff, 0xe0b0, 0xe0b7, 0xe0b8,
       0xe0bf, 0x25e2, 0x1fb00, 0x1fb3b, 0x1fb3c, 0x1fb70, 0x1fbef, 0x1cd00,
+      0xf5d0, 0xf60d, 0x1cc1b, 0x1cc3f, 0x1ce00, 0x1ce51, 0x1ceaf,
     ]) {
       expect(isBuiltinGlyph(cp), cp.toString(16)).toBe(true);
     }
     for (const cp of [
       0x41, 0x20, 0x24ff, 0x25a0, 0x25e1, 0x25e6, 0x27ff, 0x2900, 0xe0af,
-      0xe0c0, 0x1fbb0, 0x1fbf0, 0x1cdf0,
+      0xe0c0, 0x1fbb0, 0x1fbf0, 0x1cdf0, 0xf5cf, 0xf60e, 0x1cc1a, 0x1cc1f,
+      0x1cc20, 0x1cc40, 0x1cde6, 0x1ce02, 0x1ce0a, 0x1ce0d, 0x1ce15, 0x1ce1a,
+      0x1ce50, 0x1ceb0,
     ]) {
       expect(isBuiltinGlyph(cp), cp.toString(16)).toBe(false);
+    }
+  });
+
+  it("routes exactly the code points Ghostty's sprite font draws", () => {
+    for (const [first, last] of [
+      [0x2400, 0x2aff],
+      [0xe000, 0xe0ff],
+      [0xf500, 0xf6ff],
+      [0x1cc00, 0x1cfff],
+      [0x1fb00, 0x1fbff],
+    ]) {
+      for (let cp = first; cp <= last; cp += 1) {
+        expect(isBuiltinGlyph(cp), `U+${cp.toString(16)}`).toBe(
+          inGhosttySprites(cp),
+        );
+      }
     }
   });
 
@@ -836,14 +900,7 @@ describe("symbols for legacy computing", () => {
         thickness: t,
       });
       let drawn = 0;
-      for (const [start, end] of [
-        [0x2500, 0x259f],
-        [0x25e2, 0x25ff],
-        [0x2800, 0x28ff],
-        [0xe0b0, 0xe0d4],
-        [0x1fb00, 0x1fbef],
-        [0x1cd00, 0x1cde5],
-      ]) {
+      for (const [start, end] of GHOSTTY_SPRITE_RANGES) {
         for (let cp = start; cp <= end; cp += 1) {
           const mask = renderer.render(cp);
           if (!mask) continue;
@@ -858,7 +915,12 @@ describe("symbols for legacy computing", () => {
           }
         }
       }
-      expect(drawn).toBeGreaterThan(800);
+      expect(drawn).toBe(
+        GHOSTTY_SPRITE_RANGES.reduce(
+          (sum, [start, end]) => sum + end - start + 1,
+          0,
+        ),
+      );
     }
   });
 
@@ -873,4 +935,370 @@ describe("symbols for legacy computing", () => {
     expect(renderer.render(0x256d)).toEqual(first);
     expect(renderer.render(0x256d)).toBe(renderer.render(0x2573));
   });
+});
+
+/** Source-over composition of several masks, as SpriteMask layers them. */
+function composite(parts: readonly Glyph[], index: number): number {
+  const clear = parts.reduce(
+    (rest, part) => rest * (1 - part.data[index] / 255),
+    1,
+  );
+  return Math.round(255 * (1 - clear));
+}
+
+describe("branch drawing", () => {
+  it.each(CELLS)(
+    "straight lines and arcs are the box-drawing strokes at %ix%i +%i",
+    (w, h, t) => {
+      for (const [branch, box] of [
+        [0xf5d0, "─"],
+        [0xf5d1, "│"],
+        [0xf5d6, "╭"],
+        [0xf5d7, "╮"],
+        [0xf5d8, "╰"],
+        [0xf5d9, "╯"],
+      ] as const) {
+        expect(glyph(branch, w, h, t).data, box).toEqual(
+          glyph(box, w, h, t).data,
+        );
+      }
+    },
+  );
+
+  it.each(CELLS)(
+    "forks and merges are their lines and arcs layered at %ix%i +%i",
+    (w, h, t) => {
+      const pieces: ReadonlyArray<readonly [number, string]> = [
+        [0xf5da, "│╰"],
+        [0xf5db, "│╭"],
+        [0xf5dc, "╰╭"],
+        [0xf5dd, "│╯"],
+        [0xf5de, "│╮"],
+        [0xf5df, "╯╮"],
+        [0xf5e0, "╮─"],
+        [0xf5e1, "╭─"],
+        [0xf5e2, "╭╮"],
+        [0xf5e3, "╯─"],
+        [0xf5e4, "╰─"],
+        [0xf5e5, "╰╯"],
+        [0xf5e6, "│╯╰"],
+        [0xf5e7, "│╮╭"],
+        [0xf5e8, "─╮╯"],
+        [0xf5e9, "─╰╭"],
+        [0xf5ea, "│╯╭"],
+        [0xf5eb, "│╰╮"],
+        [0xf5ec, "─╯╭"],
+        [0xf5ed, "─╰╮"],
+      ];
+      for (const [cp, chars] of pieces) {
+        const drawn = glyph(cp, w, h, t);
+        const parts = Array.from(chars, (char) => glyph(char, w, h, t));
+        drawn.data.forEach((value, index) => {
+          expect(
+            Math.abs(value - composite(parts, index)),
+            `U+${cp.toString(16)} pixel ${index}`,
+          ).toBeLessThanOrEqual(1);
+        });
+      }
+    },
+  );
+
+  it("fades a light line out towards one edge, one level step per pixel", () => {
+    // Ghostty's reference levels at 9x17 with 1px lines.
+    const right = glyph(0xf5d2, 9, 17, 1);
+    expect(right.row(8)).toEqual([255, 227, 198, 170, 142, 113, 85, 57, 28]);
+    expect(right.ink()).toBe(right.row(8).reduce((sum, value) => sum + value));
+    const left = glyph(0xf5d3, 9, 17, 1);
+    expect(left.row(8)).toEqual([0, 28, 57, 85, 113, 142, 170, 198, 227]);
+    const top = glyph(0xf5d5, 9, 17, 1);
+    expect(top.column(4)).toEqual([
+      0, 15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180, 195, 210, 225,
+      240,
+    ]);
+    const bottom = glyph(0xf5d4, 9, 17, 1);
+    expect(bottom.column(4)).toEqual(top.column(4).map((value) => 255 - value));
+  });
+
+  it.each(CELLS)(
+    "nodes sit on the line crossing and join the lines they name at %ix%i +%i",
+    (w, h, t) => {
+      const horizontal = glyph("─", w, h, t);
+      const vertical = glyph("│", w, h, t);
+      const left = (w - t) >> 1;
+      const top = (h - t) >> 1;
+      const centre = [left + (t >> 1), top + (t >> 1)] as const;
+      const nodes: ReadonlyArray<readonly [number, string]> = [
+        [0xf5ee, ""],
+        [0xf5f0, "r"],
+        [0xf5f2, "l"],
+        [0xf5f4, "lr"],
+        [0xf5f6, "d"],
+        [0xf5f8, "u"],
+        [0xf5fa, "ud"],
+        [0xf5fc, "rd"],
+        [0xf5fe, "ld"],
+        [0xf600, "ur"],
+        [0xf602, "ul"],
+        [0xf604, "udr"],
+        [0xf606, "udl"],
+        [0xf608, "dlr"],
+        [0xf60a, "ulr"],
+        [0xf60c, "udlr"],
+      ];
+      for (const [cp, edges] of nodes) {
+        const filled = glyph(cp, w, h, t);
+        const hollow = glyph(cp + 1, w, h, t);
+        const name = `U+${cp.toString(16)}`;
+        expect(filled.at(...centre), name).toBe(255);
+        expect(hollow.at(...centre), name).toBe(0);
+        expect(hollow.ink(), name).toBeLessThan(filled.ink());
+        // A named edge carries the light line exactly; the others stay clear
+        // above and below the circle. The circle already reaches the sides,
+        // where a line only squares off the band.
+        const plain = [glyph(0xf5ee, w, h, t), glyph(0xf5ef, w, h, t)];
+        [filled, hollow].forEach((drawn, index) => {
+          expect(drawn.row(0), name).toEqual(
+            edges.includes("u") ? vertical.row(0) : new Array(w).fill(0),
+          );
+          expect(drawn.row(h - 1), name).toEqual(
+            edges.includes("d") ? vertical.row(0) : new Array(w).fill(0),
+          );
+          for (const [edge, x] of [
+            ["l", 0],
+            ["r", w - 1],
+          ] as const) {
+            const expected = plain[index]
+              .column(x)
+              .map((value, y) =>
+                edges.includes(edge) && horizontal.at(x, y) === 255
+                  ? 255
+                  : value,
+              );
+            expect(drawn.column(x), `${name} ${edge}`).toEqual(expected);
+          }
+        });
+        // Symmetric about the vertical stroke when it is centred.
+        if ((w - t) % 2 === 0 && edges === "ud") {
+          for (let y = 0; y < h; y += 1) {
+            for (let x = 0; x < w; x += 1) {
+              expect(filled.at(x, y)).toBe(filled.at(w - 1 - x, y));
+            }
+          }
+        }
+      }
+    },
+  );
+});
+
+describe("symbols for legacy computing supplement", () => {
+  it("matches Ghostty's reference pixels for separated blocks", () => {
+    expect(art(glyph(0x1cc2f, 9, 17, 1))).toEqual([
+      ".........",
+      ".##...##.",
+      ".##...##.",
+      ".##...##.",
+      ".##...##.",
+      ".##...##.",
+      ".##...##.",
+      ".........",
+      ".........",
+      ".........",
+      ".##...##.",
+      ".##...##.",
+      ".##...##.",
+      ".##...##.",
+      ".##...##.",
+      ".##...##.",
+      ".........",
+    ]);
+    expect(art(glyph(0x1cc26, 11, 21, 2))).toEqual([
+      "...........",
+      ".......###.",
+      ".......###.",
+      ".......###.",
+      ".......###.",
+      ".......###.",
+      ".......###.",
+      ".......###.",
+      ".......###.",
+      "...........",
+      "...........",
+      "...........",
+      ".###.......",
+      ".###.......",
+      ".###.......",
+      ".###.......",
+      ".###.......",
+      ".###.......",
+      ".###.......",
+      ".###.......",
+      "...........",
+    ]);
+    expect(art(glyph(0x1ce8f, 11, 21, 2))).toEqual([
+      "...........",
+      ".###...###.",
+      ".###...###.",
+      ".###...###.",
+      ".###...###.",
+      ".###...###.",
+      "...........",
+      "...........",
+      ".###...###.",
+      ".###...###.",
+      ".###...###.",
+      ".###...###.",
+      ".###...###.",
+      "...........",
+      "...........",
+      ".###...###.",
+      ".###...###.",
+      ".###...###.",
+      ".###...###.",
+      ".###...###.",
+      "...........",
+    ]);
+    expect(art(glyph(0x1ce6a, 9, 17, 1))).toEqual([
+      ".........",
+      "......##.",
+      "......##.",
+      "......##.",
+      ".........",
+      ".........",
+      ".........",
+      "......##.",
+      "......##.",
+      "......##.",
+      ".........",
+      ".........",
+      ".........",
+      ".##......",
+      ".##......",
+      ".##......",
+      ".........",
+    ]);
+  });
+
+  it("matches Ghostty's reference pixels for box-drawing corners", () => {
+    expect(art(glyph(0x1cc1b, 9, 17, 1))).toEqual([
+      "........#",
+      "........#",
+      "........#",
+      "........#",
+      "........#",
+      "........#",
+      "........#",
+      "........#",
+      "#########",
+      ".........",
+      ".........",
+      ".........",
+      ".........",
+      ".........",
+      ".........",
+      ".........",
+      ".........",
+    ]);
+    expect(art(glyph(0x1ce19, 11, 21, 2)).slice(17)).toEqual([
+      "....##.....",
+      "....##.....",
+      "######.....",
+      "######.....",
+    ]);
+    expect(art(glyph(0x1ce16, 9, 17, 1)).slice(0, 2)).toEqual([
+      "....#####",
+      "....#....",
+    ]);
+    expect(art(glyph(0x1cc1e, 11, 21, 2)).slice(9)).toEqual([
+      "...........",
+      "##.........",
+      "##.........",
+      "##.........",
+      "##.........",
+      "##.........",
+      "##.........",
+      "##.........",
+      "##.........",
+      "##.........",
+      "###########",
+      "###########",
+    ]);
+  });
+
+  it.each(CELLS)("sixteenth blocks tile the cell at %ix%i", (w, h, t) => {
+    const union = new Uint8Array(w * h);
+    let ink = 0;
+    for (let cp = 0x1ce90; cp <= 0x1ce9f; cp += 1) {
+      const g = glyph(cp, w, h, t);
+      ink += g.ink();
+      g.data.forEach((value, index) => {
+        union[index] = Math.max(union[index], value);
+      });
+    }
+    expect(union.every((value) => value === 255)).toBe(true);
+    // Rows and columns of quarters overlap by at most the odd pixel line.
+    expect(ink / 255).toBeLessThanOrEqual((w + 3) * (h + 3));
+    // A quarter bar is its four sixteenths.
+    const bar = glyph(0x1ceac, w, h, t);
+    const parts = [glyph(0x1ce93, w, h, t), glyph(0x1ce97, w, h, t)];
+    bar.data.forEach((value, index) => {
+      expect(value).toBe(Math.max(parts[0].data[index], parts[1].data[index]));
+    });
+    expect(art(glyph(0x1cea4, 9, 17, 1)).slice(7, 9)).toEqual([
+      ".........",
+      "##.......",
+    ]);
+  });
+
+  it.each(CELLS)(
+    "quarter circles mirror each other and twelfth pieces meet across cells at %ix%i +%i",
+    (w, h, t) => {
+      const upperLeft = glyph(0x1cc35, w, h, t);
+      const upperRight = glyph(0x1cc36, w, h, t);
+      const lowerLeft = glyph(0x1cc39, w, h, t);
+      for (let y = 0; y < h; y += 1) {
+        for (let x = 0; x < w; x += 1) {
+          expect(upperRight.at(x, y)).toBe(upperLeft.at(w - 1 - x, y));
+          expect(lowerLeft.at(x, y)).toBe(upperLeft.at(x, h - 1 - y));
+        }
+      }
+      // The light stroke leaves the cell square to its edge: full coverage
+      // across the band, no seam against the next piece.
+      expect(upperLeft.at(w - 1, t >> 1)).toBeGreaterThanOrEqual(240);
+      expect(upperLeft.at(t >> 1, h - 1)).toBeGreaterThanOrEqual(240);
+      const left = glyph(0x1cc31, w, h, t);
+      const right = glyph(0x1cc32, w, h, t);
+      expect(left.column(w - 1)).toEqual(right.column(0));
+      expect(left.at(w - 1, t >> 1)).toBeGreaterThanOrEqual(240);
+      expect(
+        left
+          .column(0)
+          .slice(h >> 1)
+          .some(Boolean),
+      ).toBe(false);
+    },
+  );
+
+  it.each(CELLS)(
+    "half circles and ellipses are two outlined halves at %ix%i +%i",
+    (w, h, t) => {
+      const sides = glyph(0x1ce00, w, h, t);
+      const parts = [glyph(0x1fbe3, w, h, t), glyph(0x1fbe1, w, h, t)];
+      sides.data.forEach((value, index) => {
+        expect(Math.abs(value - composite(parts, index))).toBeLessThanOrEqual(
+          1,
+        );
+      });
+      const ellipse = glyph(0x1ce0b, w, h, t);
+      const mirror = glyph(0x1ce0c, w, h, t);
+      for (let y = 0; y < h; y += 1) {
+        for (let x = 0; x < w; x += 1) {
+          expect(mirror.at(x, y)).toBe(ellipse.at(w - 1 - x, y));
+        }
+      }
+      // The two quarter arcs join solidly at the middle of the left edge.
+      expect(ellipse.at(0, h >> 1)).toBeGreaterThanOrEqual(240);
+      expect(ellipse.at(w - 1, 0)).toBeGreaterThan(200);
+      expect(ellipse.at(w - 1, h >> 1)).toBe(0);
+    },
+  );
 });

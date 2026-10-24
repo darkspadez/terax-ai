@@ -1,4 +1,4 @@
-//! Admission control for the `terax-pty` scheme: everything that can be
+//! Admission control for the `oarlock-pty` scheme: everything that can be
 //! decided without waking the hub thread.
 //!
 //! The scheme is reachable from every frame of a webview, including preview
@@ -59,7 +59,7 @@ fn ct_eq(a: u64, b: u64) -> bool {
 /// other origin (a preview iframe, a page the user browsed to) is refused, and
 /// a response only ever names one of these in `Access-Control-Allow-Origin`.
 #[derive(Debug, PartialEq, Eq)]
-pub(super) struct AllowedOrigins {
+pub(crate) struct AllowedOrigins {
     origins: Vec<Arc<str>>,
 }
 
@@ -163,7 +163,7 @@ pub(super) fn admit(
         "/poll" => Endpoint::Poll,
         "/ack" => Endpoint::Ack,
         _ if preflight => return Admission::Preflight { origin },
-        _ => return refuse(StatusCode::NOT_FOUND, "unknown terax-pty endpoint"),
+        _ => return refuse(StatusCode::NOT_FOUND, "unknown oarlock-pty endpoint"),
     };
     if preflight {
         return Admission::Preflight { origin };

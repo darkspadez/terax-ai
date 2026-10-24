@@ -149,7 +149,7 @@ function countIpc(): void {
       if (typeof body === "string") bump("ipc.bytes", body.length);
       else if (body instanceof ArrayBuffer || ArrayBuffer.isView(body))
         bump("ipc.bytes", body.byteLength);
-    } else if (url.includes("terax-pty")) {
+    } else if (url.includes("oarlock-pty")) {
       bump(url.endsWith("/poll") ? "pty.poll" : "pty.ack");
     }
     return realFetch(input, init);

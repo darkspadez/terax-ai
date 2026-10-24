@@ -1,4 +1,5 @@
 export { ThemeProvider, useTheme } from "./ThemeProvider";
+export { variantMode } from "./applyTheme";
 export { LivePageResizeBridge } from "./LivePageResizeBridge";
 export { WindowVibrancyBridge } from "./WindowVibrancyBridge";
 export { WindowActivityBridge } from "./WindowActivityBridge";

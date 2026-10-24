@@ -1,17 +1,17 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { TeraxGhostty } from "@terax/ghostty-core/adapted";
+import { OarlockGhostty } from "@oarlock/ghostty-core/adapted";
 import {
   GhosttyOptimizeMode,
   GhosttyRenderStateDirty,
   OFFICIAL_GHOSTTY_COMMIT,
   OFFICIAL_GHOSTTY_WASM_SHA256,
   OfficialGhostty,
-} from "@terax/ghostty-core/official";
+} from "@oarlock/ghostty-core/official";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 let ghostty: OfficialGhostty;
-let adaptedGhostty: TeraxGhostty;
+let adaptedGhostty: OarlockGhostty;
 let wasmBytes: ArrayBuffer;
 
 beforeAll(async () => {
@@ -27,7 +27,7 @@ beforeAll(async () => {
     import.meta.url,
   );
   const adaptedFile = await readFile(adaptedPath);
-  adaptedGhostty = await TeraxGhostty.loadBytes(
+  adaptedGhostty = await OarlockGhostty.loadBytes(
     Uint8Array.from(adaptedFile).buffer,
   );
 });
@@ -273,7 +273,7 @@ function rawCellStyleId(row: Uint32Array, column: number): number {
 
 function expectEquivalentViewport(
   official: ReturnType<OfficialGhostty["createTerminal"]>,
-  adapted: ReturnType<TeraxGhostty["createTerminal"]>,
+  adapted: ReturnType<OarlockGhostty["createTerminal"]>,
 ): void {
   official.updateRenderState();
   const officialRows: number[][] = [];

@@ -16,13 +16,20 @@ import { TerminalResizeSync } from "@/modules/terminal/lib/terminalResizeSync";
 import type { GhosttyTerminalModelApi } from "../GhosttyTerminalModel";
 import type { GestureGrowth } from "../gpu/CanvasBackingStore";
 import { DevicePixelRatioMonitor } from "../gpu/DevicePixelRatioMonitor";
+import { documentGlyphFontGate } from "../gpu/GlyphFontGate";
 import {
   type CssSize,
   gestureBackingBound,
   measureGestureBackingEnvironment,
   windowInnerSize,
 } from "../gpu/GestureBacking";
-import { fitTerminalViewport } from "../gpu/TerminalFit";
+import { ImageAnimationClock } from "../gpu/imageAnimation";
+import {
+  type LinkCellRange,
+  linkCellRange,
+  linkRangesEqual,
+} from "../gpu/linkUnderline";
+import { fitTerminalViewport, TERMINAL_SCROLLBAR_WIDTH } from "../gpu/TerminalFit";
 import {
   TerminalFitQueue,
   type TerminalFitQueueDiagnostics,
@@ -52,7 +59,7 @@ import type {
 const CURSOR_BLINK_MS = 600;
 const TEXT_BLINK_MS = 600;
 const MAX_SURFACE_CELLS = 262_144;
-/** Safe on every WebGL2 implementation Terax runs on (MAX_TEXTURE_SIZE is at least 8192 there). */
+/** Safe on every WebGL2 implementation Oarlock runs on (MAX_TEXTURE_SIZE is at least 8192 there). */
 const WEBGL_MAX_BACKING_DIMENSION = 8192;
 
 export type WebGlTerminalSurfaceOptions = {
@@ -92,6 +99,7 @@ export class WebGlTerminalSurface
   private readonly scrollbarContent = document.createElement("div");
   private readonly resizeObserver: ResizeObserver;
   private readonly unsubscribeDamage: () => void;
+  private readonly unsubscribeGlyphFonts: () => void;
   private readonly unsubscribeResizeInteraction: () => void;
   private readonly unsubscribeInteraction: () => void;
   private readonly selection: TerminalSelectionController;
@@ -130,9 +138,15 @@ export class WebGlTerminalSurface
   private contentRevision: number;
   private hoveredCell = -1;
   private hoveredLink: string | null = null;
+  /** Cells of the hovered link, underlined as an overlay; valid for `hoveredLinkOrigin`. */
+  private hoveredLinkCells: LinkCellRange | null = null;
+  private hoveredLinkOrigin = 0;
   private mouseDownLink: string | null = null;
   private applyingFit = false;
   private readonly unsubscribePresentation: () => void;
+  private readonly imageAnimation = new ImageAnimationClock(() =>
+    this.runtime.schedule(this),
+  );
   private disposed = false;
 
   constructor(private readonly options: WebGlTerminalSurfaceOptions) {
@@ -171,8 +185,8 @@ export class WebGlTerminalSurface
     this.root.className = "absolute inset-0 overflow-hidden";
     this.root.style.userSelect = "none";
     this.updateRootBackground();
-    this.root.setAttribute("data-terax-ghostty-surface", "webgl");
-    this.root.setAttribute("data-terax-terminal-surface", "");
+    this.root.setAttribute("data-oarlock-ghostty-surface", "webgl");
+    this.root.setAttribute("data-oarlock-terminal-surface", "");
     this.input.setAttribute("aria-label", "Terminal input");
     this.input.setAttribute("autocapitalize", "off");
     this.input.setAttribute("autocomplete", "off");
@@ -181,8 +195,7 @@ export class WebGlTerminalSurface
       "position:absolute;left:0;top:0;width:1px;height:1px;opacity:0;resize:none;pointer-events:none;";
     this.scrollbar.setAttribute("aria-label", "Terminal scrollback");
     this.scrollbar.setAttribute("role", "scrollbar");
-    this.scrollbar.style.cssText =
-      "position:absolute;inset:0 0 0 auto;z-index:10;width:11px;overflow-x:hidden;overflow-y:scroll;overscroll-behavior:contain;visibility:hidden;";
+    this.scrollbar.style.cssText = `position:absolute;inset:0 0 0 auto;z-index:10;width:${TERMINAL_SCROLLBAR_WIDTH}px;overflow-x:hidden;overflow-y:scroll;overscroll-behavior:contain;visibility:hidden;`;
     this.scrollbarContent.style.cssText = "width:1px;height:1px;";
     this.scrollbar.append(this.scrollbarContent);
     this.root.append(this.input, this.scrollbar);
@@ -220,6 +233,12 @@ export class WebGlTerminalSurface
       this.search.invalidate();
       if (!this.applyingFit) this.runtime.schedule(this);
       this.armCursorBlink();
+    });
+    // Icons skipped while their font loaded are drawn by a full redraw.
+    this.unsubscribeGlyphFonts = documentGlyphFontGate().subscribe(() => {
+      if (!this.renderer?.retryDeferredGlyphs()) return;
+      if (!this.visible || this.documentSuspended || !this.host) return;
+      this.runtime.schedule(this);
     });
     this.unsubscribeResizeInteraction = subscribeTerminalResizeInteraction(
       (active) => {
@@ -266,11 +285,13 @@ export class WebGlTerminalSurface
 
   detach(): void {
     if (!this.host) return;
+    this.clearHoveredLink(false);
     this.resizeObserver.disconnect();
     this.fitQueue.clear();
     this.pixelRatioMonitor.stop();
     this.clearCursorTimer();
     this.clearTextBlinkTimer();
+    this.imageAnimation.reset();
     this.runtime.release(this);
     this.renderer = null;
     this.root.remove();
@@ -325,6 +346,8 @@ export class WebGlTerminalSurface
     } else {
       this.clearCursorTimer();
       this.clearTextBlinkTimer();
+      this.imageAnimation.reset();
+      this.clearHoveredLink(false);
       this.textBlinkVisible = true;
       this.search.suspend();
       this.selection.suspend();
@@ -347,7 +370,11 @@ export class WebGlTerminalSurface
     this.updateRootBackground();
     if (!this.renderer || !this.host || this.documentSuspended) return;
     try {
-      this.acquireRenderer().resetModel();
+      const previous = this.renderer;
+      const renderer = this.acquireRenderer();
+      // Another translucency takes another renderer, which has no size yet.
+      if (renderer === previous) renderer.resetModel();
+      else this.resizeToHost();
       this.runtime.schedule(this);
     } catch (error) {
       this.handleRendererError(toError(error));
@@ -393,6 +420,10 @@ export class WebGlTerminalSurface
     return this.selection.text();
   }
 
+  clearSelection(): void {
+    this.selection.clear();
+  }
+
   searchController(): GhosttySearchController {
     return this.search;
   }
@@ -431,9 +462,15 @@ export class WebGlTerminalSurface
     const revision = this.options.model.revision();
     if (revision !== this.contentRevision) {
       this.contentRevision = revision;
-      if (this.hoveredCell >= 0) this.clearHoveredLink();
+      if (this.hoveredCell >= 0) this.clearHoveredLink(false);
       this.mouseDownLink = null;
     }
+    // The view scrolled under the pointer: the link's cells are elsewhere now.
+    if (
+      this.hoveredLinkCells &&
+      this.options.model.viewportOriginLine() !== this.hoveredLinkOrigin
+    )
+      this.clearHoveredLink(false);
     this.selection.reconcile();
     this.search.refreshOverlay();
     this.updateScrollbar();
@@ -446,6 +483,12 @@ export class WebGlTerminalSurface
       cursor.y < this.options.model.rows;
     this.cursorBlinking = cursor.blinking;
     this.armCursorBlink();
+    // Animations advance before the frame reads the model, so it shows the frame due now.
+    this.imageAnimation.beforeFrame(
+      this.options.model,
+      performance.now(),
+      true,
+    );
     const rendered = renderer.render({
       model: this.options.model,
       damage: this.options.model.consumeDamage(),
@@ -453,8 +496,10 @@ export class WebGlTerminalSurface
       textBlinkVisible: this.textBlinkVisible,
       selection: this.selection.normalizedBounds(),
       searchMatchAt: (row, column) => this.search.matchAt(row, column),
+      link: this.hoveredLinkCells,
     });
     this.hasBlinkingCells = renderer.hasBlinkingCells;
+    this.imageAnimation.afterFrame(renderer.imagesShown);
     this.syncTextBlink();
     if (!rendered) {
       this.options.onFrame?.();
@@ -472,6 +517,7 @@ export class WebGlTerminalSurface
     this.discardRenderer();
     this.clearCursorTimer();
     this.clearTextBlinkTimer();
+    this.imageAnimation.reset();
     if (this.documentSuspended) return;
     if (
       this.recoveringRenderer ||
@@ -522,6 +568,7 @@ export class WebGlTerminalSurface
     this.detach();
     this.disposed = true;
     this.unsubscribeDamage();
+    this.unsubscribeGlyphFonts();
     this.unsubscribeResizeInteraction();
     this.search.dispose();
     this.selection.dispose();
@@ -576,6 +623,7 @@ export class WebGlTerminalSurface
     if (!visible) {
       this.clearCursorTimer();
       this.clearTextBlinkTimer();
+      this.imageAnimation.suspend();
       this.textBlinkVisible = true;
       this.search.suspend();
       this.selection.suspend();
@@ -668,14 +716,35 @@ export class WebGlTerminalSurface
     const cell = row * this.options.model.cols + column;
     if (cell === this.hoveredCell) return;
     this.hoveredCell = cell;
-    this.hoveredLink = this.options.model.hyperlinkAtViewportCell(row, column);
+    const model = this.options.model;
+    if (model.linkAtViewportCell) {
+      const link = model.linkAtViewportCell(row, column);
+      this.hoveredLink = link?.uri ?? null;
+      this.setHoveredLinkCells(
+        link
+          ? linkCellRange(link.spans, model.cols, model.rows, row, column)
+          : null,
+      );
+    } else {
+      this.hoveredLink = model.hyperlinkAtViewportCell(row, column);
+    }
     this.root.style.cursor = this.hoveredLink ? "pointer" : "text";
   }
 
-  private clearHoveredLink(): void {
+  private clearHoveredLink(redraw = true): void {
     this.hoveredCell = -1;
     this.hoveredLink = null;
     this.root.style.cursor = "text";
+    if (this.hoveredLinkCells === null) return;
+    this.hoveredLinkCells = null;
+    if (redraw) this.runtime.schedule(this);
+  }
+
+  private setHoveredLinkCells(cells: LinkCellRange | null): void {
+    if (linkRangesEqual(cells, this.hoveredLinkCells)) return;
+    this.hoveredLinkCells = cells;
+    this.hoveredLinkOrigin = this.options.model.viewportOriginLine();
+    this.runtime.schedule(this);
   }
 
   private queueFit(bounds?: Pick<DOMRectReadOnly, "width" | "height">): void {
@@ -852,8 +921,11 @@ export class WebGlTerminalSurface
     this.textBlinkTimer = null;
   }
 
+  /** Behind the canvas and the slack around it; the page paints it for translucent terminals. */
   private updateRootBackground(): void {
-    this.root.style.backgroundColor = rgbToCss(this.theme.background);
+    this.root.style.backgroundColor = this.theme.translucent
+      ? "transparent"
+      : rgbToCss(this.theme.background);
   }
 
   private assertLive(): void {

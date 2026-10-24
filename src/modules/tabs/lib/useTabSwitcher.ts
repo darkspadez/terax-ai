@@ -2,6 +2,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 export type TabSwitcherState = { order: number[]; index: number };
 
+/**
+ * The tab a tap of the switcher's keys lands on (one step, then the release
+ * commits): the next or previous tab in MRU order, never the current one.
+ */
+export function switcherTapTarget(
+  order: readonly number[],
+  delta: 1 | -1,
+): number | null {
+  if (order.length < 2) return null;
+  return order[(delta + order.length) % order.length] ?? null;
+}
+
 type Options = {
   /** Candidate tab ids in MRU order, current tab first. */
   getOrder: () => number[];
@@ -38,6 +50,22 @@ export function useTabSwitcher({ getOrder, onCommit }: Options) {
 
   const cancel = useCallback(() => setState(null), []);
 
+  /**
+   * Steps and commits at once, as a tap of the keys does, for a caller with no
+   * key release to wait for (the macOS menu bar).
+   */
+  const jump = useCallback(
+    (delta: 1 | -1) => {
+      if (stateRef.current) {
+        step(delta);
+        return;
+      }
+      const id = switcherTapTarget(cb.current.getOrder(), delta);
+      if (id !== null) cb.current.onCommit(id);
+    },
+    [step],
+  );
+
   useEffect(() => {
     const onKeyUp = (e: KeyboardEvent) => {
       if (!stateRef.current) return;
@@ -60,5 +88,5 @@ export function useTabSwitcher({ getOrder, onCommit }: Options) {
     };
   }, [commit, cancel]);
 
-  return { state, step };
+  return { state, step, jump };
 }

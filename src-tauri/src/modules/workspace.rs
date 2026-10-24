@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -16,23 +17,160 @@ struct CanonicalEntry {
     inserted_at: Instant,
 }
 
+type RootListener = Box<dyn Fn(&Path) + Send + Sync>;
+
+/// Whose request a file command serves. The app's own file features and the AI tools each have
+/// a setting that lets them reach every folder, so a command that both use takes the caller's
+/// origin. The page leaves it out for the app; the AI tools always send `ai`, so they never get
+/// the app's access, and the app never gets theirs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Origin {
+    #[default]
+    App,
+    Ai,
+}
+
+/// The two "access all folders" settings, off until the page sends them.
+#[derive(Default)]
+struct AllFolders {
+    app: AtomicBool,
+    ai: AtomicBool,
+}
+
+impl AllFolders {
+    fn of(&self, origin: Origin) -> &AtomicBool {
+        match origin {
+            Origin::App => &self.app,
+            Origin::Ai => &self.ai,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct WorkspaceRegistry {
     roots: Mutex<HashSet<PathBuf>>,
     canonical_cache: Mutex<HashMap<PathBuf, CanonicalEntry>>,
+    root_listener: OnceLock<RootListener>,
+    all_folders: AllFolders,
 }
 
 impl WorkspaceRegistry {
+    /// Lets `origin`'s requests reach every folder, or only the authorized ones again, from the
+    /// next command on. It authorizes no root, so the other origin, git, language servers and
+    /// the asset protocol's grants stay as they were. Returns the previous setting.
+    pub fn set_all_folders(&self, origin: Origin, all: bool) -> bool {
+        self.all_folders.of(origin).swap(all, Ordering::SeqCst)
+    }
+
+    pub fn all_folders(&self, origin: Origin) -> bool {
+        self.all_folders.of(origin).load(Ordering::SeqCst)
+    }
+
+    /// The gates of the file commands as `origin` meets them, decided once for the command.
+    pub fn gates(&self, origin: Origin) -> Gates<'_> {
+        Gates {
+            registry: self,
+            everywhere: self.all_folders(origin),
+        }
+    }
+
+    /// The gates of the authorized folders alone, whatever the settings say: for what neither
+    /// setting covers (language servers, launch arguments).
+    pub fn authorized_gates(&self) -> Gates<'_> {
+        Gates {
+            registry: self,
+            everywhere: false,
+        }
+    }
+
     pub fn authorize<P: AsRef<Path>>(&self, path: P) -> std::io::Result<PathBuf> {
         let canonical = std::fs::canonicalize(path.as_ref())?;
-        let mut set = self.roots.lock().expect("workspace registry poisoned");
-        set.insert(canonical.clone());
+        let added = self
+            .roots
+            .lock()
+            .expect("workspace registry poisoned")
+            .insert(canonical.clone());
+        if added {
+            if let Some(listener) = self.root_listener.get() {
+                listener(&canonical);
+            }
+        }
         Ok(canonical)
+    }
+
+    /// Reports every root to `listener`: the ones authorized so far at once, then each new one
+    /// as `authorize` adds it, before that call returns. A root authorized while this runs may
+    /// be reported twice. Only the first listener is kept.
+    pub fn watch_roots(&self, listener: impl Fn(&Path) + Send + Sync + 'static) {
+        if self.root_listener.set(Box::new(listener)).is_err() {
+            log::warn!("workspace registry already has a root listener");
+            return;
+        }
+        let Some(listener) = self.root_listener.get() else {
+            return;
+        };
+        // Set before the snapshot, so a root added meanwhile is in one or the other.
+        let roots: Vec<PathBuf> = self
+            .roots
+            .lock()
+            .expect("workspace registry poisoned")
+            .iter()
+            .cloned()
+            .collect();
+        for root in &roots {
+            listener(root);
+        }
     }
 
     pub fn is_authorized(&self, target: &Path) -> bool {
         let set = self.roots.lock().expect("workspace registry poisoned");
         set.iter().any(|root| target.starts_with(root))
+    }
+
+    /// Lets the file commands reach what the user opened: a folder, or the folder a file is
+    /// really in (a link is followed; for a missing file, the folder it would be in). A folder an
+    /// authorized one already covers is left alone, so browsing and opening add no roots.
+    pub fn authorize_opened<P: AsRef<Path>>(
+        &self,
+        path: P,
+        opened: Opened,
+    ) -> std::io::Result<PathBuf> {
+        let path = path.as_ref();
+        let folder = match (opened, std::fs::canonicalize(path)) {
+            (_, Ok(real)) if real.is_dir() => real,
+            (Opened::File, Ok(real)) => real.parent().map_or(real.clone(), Path::to_path_buf),
+            (Opened::File, Err(_)) => std::fs::canonicalize(
+                path.parent()
+                    .ok_or_else(|| std::io::Error::other("path has no folder"))?,
+            )?,
+            (Opened::Folder, Ok(_)) => return Err(std::io::Error::other("not a folder")),
+            (Opened::Folder, Err(error)) => return Err(error),
+        };
+        if self.is_authorized(&folder) {
+            return Ok(folder);
+        }
+        self.authorize(folder)
+    }
+
+    /// `Gates::authorized_existing` of the authorized folders alone.
+    pub fn authorized_existing(&self, path: &Path) -> Result<PathBuf, String> {
+        self.authorized_gates().authorized_existing(path)
+    }
+
+    /// `Gates::authorized_entry` of the authorized folders alone.
+    pub fn authorized_entry(&self, path: &Path) -> Result<PathBuf, String> {
+        self.authorized_gates().authorized_entry(path)
+    }
+
+    /// `Gates::authorized_new` of the authorized folders alone.
+    pub fn authorized_new(&self, path: &Path) -> Result<PathBuf, String> {
+        self.authorized_gates().authorized_new(path)
+    }
+
+    /// `Gates::authorized_write_target` of the authorized folders alone.
+    pub fn authorized_write_target(&self, path: &Path) -> Result<PathBuf, String> {
+        self.authorized_gates().authorized_write_target(path)
     }
 
     pub fn canonicalize_cached<P: AsRef<Path>>(&self, path: P) -> std::io::Result<PathBuf> {
@@ -70,29 +208,160 @@ impl WorkspaceRegistry {
     }
 }
 
-// `None` means "use bootstrapped default". `Some` is canonicalized to defeat
-// symlink/`..` traversal and must sit under an authorized root.
+/// The gates every file command passes a path the page sends through, as one caller meets them:
+/// the authorized folders, or every folder while that caller's "access all folders" setting is on.
+/// Either way the path must be absolute and is judged on its real path.
+#[derive(Clone, Copy)]
+pub struct Gates<'a> {
+    registry: &'a WorkspaceRegistry,
+    everywhere: bool,
+}
+
+impl Gates<'_> {
+    /// Whether a real (canonical) path is within reach.
+    pub fn reaches(&self, target: &Path) -> bool {
+        self.everywhere || self.registry.is_authorized(target)
+    }
+
+    /// The real path of an existing `path` (links followed), for a command that reads, lists,
+    /// stats, searches or watches it. Refused outside every folder these gates reach, and a
+    /// missing path out there reads as outside too, so the answer never tells whether it exists.
+    pub fn authorized_existing(&self, path: &Path) -> Result<PathBuf, String> {
+        require_absolute(path)?;
+        match std::fs::canonicalize(path) {
+            Ok(real) if self.reaches(&real) => Ok(real),
+            Ok(_) => Err(outside(path)),
+            Err(error) => Err(self.missing(path, error)),
+        }
+    }
+
+    /// A directory entry itself, not what a link points to: its name in its real folder, which
+    /// must be reached. For renaming, moving, deleting and copying entries.
+    pub fn authorized_entry(&self, path: &Path) -> Result<PathBuf, String> {
+        require_absolute(path)?;
+        let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+            return Err(format!("not a file or folder: {}", path.display()));
+        };
+        if !is_plain_name(name) {
+            return Err(format!("not a file or folder: {}", path.display()));
+        }
+        Ok(self.authorized_existing(parent)?.join(name))
+    }
+
+    /// A path that may not exist yet (a file or folder to create): its nearest existing ancestor,
+    /// as it really is, must be reached and every name below it a plain name, so neither a
+    /// link nor `..` leads out.
+    pub fn authorized_new(&self, path: &Path) -> Result<PathBuf, String> {
+        require_absolute(path)?;
+        let (real, rest) = nearest_real_ancestor(path).ok_or_else(|| outside(path))?;
+        if !self.reaches(&real) {
+            return Err(outside(path));
+        }
+        if !is_plain_relative(rest) {
+            return Err(format!(
+                "not a plain path below its folder: {}",
+                path.display()
+            ));
+        }
+        Ok(real.join(rest))
+    }
+
+    /// The file a write lands in: an existing file (a link followed to its file) or a new one.
+    /// A dangling link is an error, never a new file at a place the user did not name.
+    pub fn authorized_write_target(&self, path: &Path) -> Result<PathBuf, String> {
+        require_absolute(path)?;
+        match std::fs::symlink_metadata(path) {
+            Ok(meta) if meta.file_type().is_symlink() => match std::fs::canonicalize(path) {
+                Ok(_) => self.authorized_existing(path),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    self.authorized_entry(path)?;
+                    Err("symlink target does not exist".into())
+                }
+                Err(error) => Err(self.missing(path, error)),
+            },
+            Ok(_) => self.authorized_existing(path),
+            Err(_) => self.authorized_new(path),
+        }
+    }
+
+    /// The error for a path that could not be resolved: the real one inside a folder these gates
+    /// reach, "outside" anywhere else.
+    fn missing(&self, path: &Path, error: std::io::Error) -> String {
+        match nearest_real_ancestor(path) {
+            Some((real, _)) if self.reaches(&real) => error.to_string(),
+            _ => outside(path),
+        }
+    }
+
+    /// A spawn cwd: `None` means "use the bootstrapped default"; `Some` is canonicalized to
+    /// defeat link and `..` traversal and must be a folder within reach.
+    pub fn spawn_cwd(
+        &self,
+        cwd: Option<&str>,
+        workspace: &WorkspaceEnv,
+    ) -> Result<Option<PathBuf>, String> {
+        let Some(cwd) = cwd.map(str::trim).filter(|s| !s.is_empty()) else {
+            return Ok(None);
+        };
+        let resolved = resolve_path(cwd, workspace);
+        let canonical =
+            std::fs::canonicalize(&resolved).map_err(|e| format!("cwd not accessible: {e}"))?;
+        if !canonical.is_dir() {
+            return Err(format!("cwd is not a directory: {}", canonical.display()));
+        }
+        if !self.reaches(&canonical) {
+            return Err(format!(
+                "cwd is outside the authorized workspace: {}",
+                canonical.display()
+            ));
+        }
+        Ok(Some(canonical))
+    }
+}
+
+fn outside(path: &Path) -> String {
+    format!("{} is outside the authorized folders", path.display())
+}
+
+fn require_absolute(path: &Path) -> Result<(), String> {
+    if path.is_absolute() {
+        Ok(())
+    } else {
+        Err(format!("not an absolute path: {}", path.display()))
+    }
+}
+
+/// The deepest ancestor of `path` (itself included) that resolves, as it really is, and the
+/// part of `path` below it.
+fn nearest_real_ancestor(path: &Path) -> Option<(PathBuf, &Path)> {
+    path.ancestors().find_map(|ancestor| {
+        let real = std::fs::canonicalize(ancestor).ok()?;
+        Some((real, path.strip_prefix(ancestor).ok()?))
+    })
+}
+
+fn is_plain_relative(path: &Path) -> bool {
+    path.components()
+        .all(|component| matches!(component, Component::Normal(_)))
+}
+
+/// One plain file name: not `.`, `..` or a root, and nothing that parses as more than a name
+/// on its own (`a:b` is a drive-relative path on Windows), which would replace the folder it
+/// is joined to.
+pub(crate) fn is_plain_name(name: &std::ffi::OsStr) -> bool {
+    matches!(
+        Path::new(name).components().collect::<Vec<_>>().as_slice(),
+        [Component::Normal(_)]
+    )
+}
+
+/// `Gates::spawn_cwd` of the authorized folders alone.
 pub fn authorize_spawn_cwd(
     registry: &WorkspaceRegistry,
     cwd: Option<&str>,
     workspace: &WorkspaceEnv,
 ) -> Result<Option<PathBuf>, String> {
-    let Some(cwd) = cwd.map(str::trim).filter(|s| !s.is_empty()) else {
-        return Ok(None);
-    };
-    let resolved = resolve_path(cwd, workspace);
-    let canonical =
-        std::fs::canonicalize(&resolved).map_err(|e| format!("cwd not accessible: {e}"))?;
-    if !canonical.is_dir() {
-        return Err(format!("cwd is not a directory: {}", canonical.display()));
-    }
-    if !registry.is_authorized(&canonical) {
-        return Err(format!(
-            "cwd is outside the authorized workspace: {}",
-            canonical.display()
-        ));
-    }
-    Ok(Some(canonical))
+    registry.authorized_gates().spawn_cwd(cwd, workspace)
 }
 
 // User-initiated terminal spawn: canonicalize, require a real dir, and register
@@ -139,22 +408,51 @@ pub fn bootstrap_registry(registry: &WorkspaceRegistry) {
     }
 }
 
+/// What the user opened, for `workspace_authorize`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Opened {
+    /// A folder they browse.
+    Folder,
+    /// A file: the folder it is really in.
+    File,
+}
+
+/// Makes a folder a workspace root, or with `opened` lets the file commands reach what the user
+/// opened (`WorkspaceRegistry::authorize_opened`). The page calls it for what the user chose (a
+/// folder opened or browsed, a file opened from the explorer, a link clicked, items dropped),
+/// never for a path a program or an AI reply named on its own.
 #[tauri::command]
 pub async fn workspace_authorize(
     app: tauri::AppHandle,
     path: String,
     workspace: Option<WorkspaceEnv>,
+    opened: Option<Opened>,
 ) -> Result<String, String> {
     // Canonicalizing touches the disk (possibly a network volume).
     crate::modules::fs::blocking(move || {
         let workspace = WorkspaceEnv::from_option(workspace);
         let resolved = resolve_path(&path, &workspace);
-        let canonical = tauri::Manager::state::<WorkspaceRegistry>(&app)
-            .authorize(&resolved)
-            .map_err(|e| e.to_string())?;
+        let registry = tauri::Manager::state::<WorkspaceRegistry>(&app);
+        let canonical = match opened {
+            Some(opened) => registry.authorize_opened(&resolved, opened),
+            None => registry.authorize(&resolved),
+        }
+        .map_err(|e| e.to_string())?;
         Ok(crate::modules::fs::to_canon(&canonical))
     })
     .await
+}
+
+/// Turns one origin's "access all folders" setting on or off (Settings, both off by default).
+/// Every window sends the stored settings when it starts and each change, so the gates follow
+/// the setting from the next command on.
+#[tauri::command]
+pub fn workspace_set_all_folders(app: tauri::AppHandle, origin: Origin, all: bool) {
+    let registry = tauri::Manager::state::<WorkspaceRegistry>(&app);
+    if registry.set_all_folders(origin, all) != all {
+        log::info!("access to all folders for {origin:?} requests: {all}");
+    }
 }
 
 #[tauri::command]
@@ -204,7 +502,7 @@ fn resolve_launch_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
 }
 
-fn is_usable_launch_dir(path: &Path) -> bool {
+pub(crate) fn is_usable_launch_dir(path: &Path) -> bool {
     if !path.is_dir() || path == Path::new("/") {
         return false;
     }
@@ -264,7 +562,7 @@ const APPIMAGE_VALUE_VARS: &[&str] = &[
 #[cfg(target_os = "linux")]
 const APPIMAGE_MARKER_VARS: &[&str] = &["APPDIR", "APPIMAGE", "ARGV0"];
 
-pub fn appimage_env_overrides() -> Vec<(&'static str, Option<OsString>)> {
+fn appimage_env_overrides() -> Vec<(&'static str, Option<OsString>)> {
     #[cfg(target_os = "linux")]
     {
         let Some(appdir) = std::env::var_os("APPDIR") else {
@@ -317,7 +615,68 @@ fn compute_appimage_env_overrides(
     out
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[cfg(target_os = "linux")]
+const NV_DISABLE_EXPLICIT_SYNC: &str = "__NV_DISABLE_EXPLICIT_SYNC";
+
+#[cfg(target_os = "linux")]
+static NV_EXPLICIT_SYNC_DISABLED: AtomicBool = AtomicBool::new(false);
+
+// WebKitGTK commits DMABUF buffers without an explicit-sync acquire point, so an
+// explicit-sync compositor answers with a wp_linux_drm_syncobj_surface_v1
+// protocol error and GDK aborts before the window maps. Falling back to implicit
+// sync keeps the DMABUF renderer, unlike WEBKIT_DISABLE_DMABUF_RENDERER, which
+// costs terminal latency. Must run before GTK init and before any thread spawns.
+#[cfg(target_os = "linux")]
+pub fn disable_nv_explicit_sync_if_needed() {
+    let has_nvidia_driver = Path::new("/sys/module/nvidia").exists();
+    if should_disable_nv_explicit_sync(|k| std::env::var_os(k), has_nvidia_driver) {
+        std::env::set_var(NV_DISABLE_EXPLICIT_SYNC, "1");
+        NV_EXPLICIT_SYNC_DISABLED.store(true, Ordering::Relaxed);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn should_disable_nv_explicit_sync(
+    read: impl Fn(&str) -> Option<OsString>,
+    has_nvidia_driver: bool,
+) -> bool {
+    if read(NV_DISABLE_EXPLICIT_SYNC).is_some() {
+        return false;
+    }
+    let is_wayland = read("WAYLAND_DISPLAY").is_some()
+        || read("XDG_SESSION_TYPE").is_some_and(|v| v.eq_ignore_ascii_case("wayland"));
+    is_wayland && has_nvidia_driver
+}
+
+/// Env fixups for the shells Oarlock spawns (PTY sessions and one-shot commands).
+pub fn child_env_overrides() -> Vec<(&'static str, Option<OsString>)> {
+    #[cfg(target_os = "linux")]
+    {
+        compute_child_env_overrides(
+            appimage_env_overrides(),
+            NV_EXPLICIT_SYNC_DISABLED.load(Ordering::Relaxed),
+        )
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        appimage_env_overrides()
+    }
+}
+
+// The workaround exists for the Oarlock webview only. A child that inherited it
+// would lose explicit sync for no reason.
+#[cfg(target_os = "linux")]
+fn compute_child_env_overrides(
+    mut appimage: Vec<(&'static str, Option<OsString>)>,
+    nv_explicit_sync_disabled: bool,
+) -> Vec<(&'static str, Option<OsString>)> {
+    if nv_explicit_sync_disabled {
+        appimage.push((NV_DISABLE_EXPLICIT_SYNC, None));
+    }
+    appimage
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum WorkspaceEnv {
     #[default]
@@ -413,7 +772,7 @@ pub fn wsl_path_to_unc(distro: &str, path: &str) -> PathBuf {
     // and is normally trustworthy, but a locally-registered malicious distro
     // can name itself with traversal characters; this filter blocks that.
     if !is_safe_distro_name(distro) {
-        return PathBuf::from(r"\\wsl.localhost\__terax_invalid_distro__");
+        return PathBuf::from(r"\\wsl.localhost\__oarlock_invalid_distro__");
     }
     let normalized = path.replace('\\', "/");
     let trimmed = normalized.trim_start_matches('/');
@@ -701,7 +1060,7 @@ mod tests {
         // never escape the WSL share root.
         let p = wsl_path_to_unc("..\\..\\..\\Windows", "/etc/passwd");
         let s = p.to_string_lossy();
-        assert!(s.contains("__terax_invalid_distro__"), "got: {s}");
+        assert!(s.contains("__oarlock_invalid_distro__"), "got: {s}");
         assert!(!s.contains("\\..\\"), "got: {s}");
     }
 
@@ -709,7 +1068,7 @@ mod tests {
     fn wsl_path_to_unc_accepts_valid_distro() {
         let p = wsl_path_to_unc("Ubuntu", "/etc/hosts");
         let s = p.to_string_lossy();
-        assert!(!s.contains("__terax_invalid_distro__"), "got: {s}");
+        assert!(!s.contains("__oarlock_invalid_distro__"), "got: {s}");
     }
 
     #[test]
@@ -752,6 +1111,29 @@ mod tests {
     }
 
     #[test]
+    fn wsl_drvfs_rejects_multi_character_and_non_alpha_drives() {
+        assert_eq!(wsl_drvfs_to_windows("/mnt/ab/Users/x"), None);
+        assert_eq!(wsl_drvfs_to_windows("/mnt/1/Users/x"), None);
+        assert_eq!(wsl_drvfs_to_windows("/mnt//Users/x"), None);
+    }
+
+    #[test]
+    fn wsl_drvfs_normalizes_backslash_input_and_uppercases_drives() {
+        assert_eq!(
+            wsl_drvfs_to_windows("\\mnt\\c\\Users\\vinicios"),
+            Some(PathBuf::from(r"C:\Users\vinicios"))
+        );
+        assert_eq!(wsl_drvfs_to_windows("/mnt/z/"), Some(PathBuf::from(r"Z:\")));
+    }
+
+    #[test]
+    fn distro_validator_bounds_name_length_and_allows_spaces() {
+        assert!(is_safe_distro_name("Debian GNU"));
+        assert!(is_safe_distro_name(&"a".repeat(255)));
+        assert!(!is_safe_distro_name(&"a".repeat(256)));
+    }
+
+    #[test]
     fn normalize_wsl_value_uses_last_nonempty_line() {
         assert_eq!(
             normalize_wsl_value("banner\n  /bin/zsh \n".into(), "/bin/sh"),
@@ -777,7 +1159,7 @@ mod auth_tests {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        p.push(format!("terax-auth-{label}-{nanos}-{}", std::process::id()));
+        p.push(format!("oarlock-auth-{label}-{nanos}-{}", std::process::id()));
         fs::create_dir_all(&p).expect("create tempdir");
         fs::canonicalize(&p).expect("canonicalize tempdir")
     }
@@ -841,7 +1223,7 @@ mod auth_tests {
     fn authorize_spawn_cwd_rejects_missing_path() {
         let mut missing = env::temp_dir();
         missing.push(format!(
-            "terax-missing-{}-{}",
+            "oarlock-missing-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -871,7 +1253,7 @@ mod auth_tests {
     #[test]
     fn authorize_user_spawn_cwd_rejects_missing_path() {
         let mut missing = env::temp_dir();
-        missing.push(format!("terax-user-missing-{}", std::process::id()));
+        missing.push(format!("oarlock-user-missing-{}", std::process::id()));
         let reg = WorkspaceRegistry::default();
         let s = missing.to_string_lossy().into_owned();
         let err = authorize_user_spawn_cwd(&reg, Some(&s), &WorkspaceEnv::Local)
@@ -894,7 +1276,7 @@ mod auth_tests {
     #[test]
     fn user_spawn_cwd_or_home_falls_back_when_inaccessible() {
         let mut missing = env::temp_dir();
-        missing.push(format!("terax-orhome-missing-{}", std::process::id()));
+        missing.push(format!("oarlock-orhome-missing-{}", std::process::id()));
         let reg = WorkspaceRegistry::default();
         let s = missing.to_string_lossy().into_owned();
         assert_eq!(
@@ -917,6 +1299,24 @@ mod auth_tests {
     }
 
     #[test]
+    fn watch_roots_reports_each_root_once_as_it_is_authorized() {
+        let first_dir = tempfile::tempdir().expect("first root");
+        let second_dir = tempfile::tempdir().expect("second root");
+        let reg = WorkspaceRegistry::default();
+        let first = reg.authorize(first_dir.path()).expect("authorize first");
+        let seen = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        reg.watch_roots(move |root| sink.lock().unwrap().push(root.to_path_buf()));
+        assert_eq!(*seen.lock().unwrap(), vec![first.clone()], "replayed");
+
+        let second = reg.authorize(second_dir.path()).expect("authorize second");
+        reg.authorize(&first).expect("authorize first again");
+        assert_eq!(*seen.lock().unwrap(), vec![first, second]);
+
+        reg.watch_roots(|_| panic!("a second listener is ignored"));
+    }
+
+    #[test]
     fn authorize_spawn_cwd_blocks_symlink_escape() {
         let allowed = tempdir("symroot");
         let outside = tempdir("symtarget");
@@ -931,6 +1331,475 @@ mod auth_tests {
         let err = authorize_spawn_cwd(&reg, Some(&s), &WorkspaceEnv::Local)
             .expect_err("symlink-escape must be rejected");
         assert!(err.contains("outside"), "got: {err}");
+    }
+
+    fn is_outside(result: Result<PathBuf, String>) -> bool {
+        result.is_err_and(|e| e.contains("outside the authorized folders"))
+    }
+
+    #[test]
+    fn files_are_reached_only_inside_authorized_folders() {
+        let root = tempdir("gate-root");
+        let foreign = tempdir("gate-foreign");
+        fs::write(root.join("a.txt"), b"a").unwrap();
+        fs::write(foreign.join("b.txt"), b"b").unwrap();
+        let reg = WorkspaceRegistry::default();
+        reg.authorize(&root).unwrap();
+
+        assert_eq!(
+            reg.authorized_existing(&root.join("a.txt")),
+            Ok(root.join("a.txt"))
+        );
+        assert!(is_outside(reg.authorized_existing(&foreign.join("b.txt"))));
+        assert!(is_outside(reg.authorized_existing(&foreign)));
+        assert!(is_outside(
+            reg.authorized_write_target(&foreign.join("b.txt"))
+        ));
+        assert!(is_outside(reg.authorized_new(&foreign.join("new.txt"))));
+        assert!(is_outside(reg.authorized_entry(&foreign.join("b.txt"))));
+    }
+
+    #[test]
+    fn a_missing_path_outside_reads_as_outside_and_inside_as_missing() {
+        let root = tempdir("gate-missing");
+        let foreign = tempdir("gate-missing-foreign");
+        let reg = WorkspaceRegistry::default();
+        reg.authorize(&root).unwrap();
+        let inside = reg.authorized_existing(&root.join("gone.txt")).unwrap_err();
+        assert!(!inside.contains("outside"), "got: {inside}");
+        assert!(is_outside(
+            reg.authorized_existing(&foreign.join("gone.txt"))
+        ));
+        assert!(is_outside(reg.authorized_existing(
+            &foreign.join("a").join("b").join("gone.txt")
+        )));
+    }
+
+    #[test]
+    fn new_paths_need_an_authorized_folder_and_plain_names() {
+        let root = tempdir("gate-new");
+        let reg = WorkspaceRegistry::default();
+        reg.authorize(&root).unwrap();
+        let nested = root.join("a").join("b").join("c.txt");
+        assert_eq!(reg.authorized_new(&nested), Ok(nested.clone()));
+        assert_eq!(
+            reg.authorized_new(&root.join("c.txt")),
+            Ok(root.join("c.txt"))
+        );
+        let up = |start: &str| root.join(start).join("..").join("..").join("escape");
+        assert!(reg.authorized_new(&up("a")).is_err());
+        assert!(reg.authorized_new(&up("missing")).is_err());
+    }
+
+    #[test]
+    fn dot_dot_never_leads_out() {
+        let parent = tempdir("gate-dots");
+        let root = parent.join("root");
+        let other = parent.join("other");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        fs::write(other.join("secret.txt"), b"s").unwrap();
+        let reg = WorkspaceRegistry::default();
+        reg.authorize(&root).unwrap();
+        let sneaky = root.join("..").join("other").join("secret.txt");
+        assert!(is_outside(reg.authorized_existing(&sneaky)));
+        assert!(is_outside(reg.authorized_write_target(&sneaky)));
+        assert!(is_outside(reg.authorized_entry(&sneaky)));
+        assert!(reg.authorized_entry(&root.join("sub").join("..")).is_err());
+    }
+
+    #[test]
+    fn an_authorized_folder_itself_is_not_an_entry_to_delete_or_rename() {
+        let root = tempdir("gate-root-entry");
+        let reg = WorkspaceRegistry::default();
+        reg.authorize(&root).unwrap();
+        fs::create_dir(root.join("sub")).unwrap();
+        assert_eq!(
+            reg.authorized_entry(&root.join("sub")),
+            Ok(root.join("sub"))
+        );
+        assert!(is_outside(reg.authorized_entry(&root)));
+    }
+
+    #[test]
+    fn relative_paths_are_refused() {
+        let reg = WorkspaceRegistry::default();
+        reg.authorize(env::current_dir().unwrap()).unwrap();
+        for gate in [
+            WorkspaceRegistry::authorized_existing,
+            WorkspaceRegistry::authorized_entry,
+            WorkspaceRegistry::authorized_new,
+            WorkspaceRegistry::authorized_write_target,
+        ] {
+            let err = gate(&reg, Path::new("Cargo.toml")).unwrap_err();
+            assert!(err.contains("not an absolute path"), "got: {err}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn links_are_judged_by_where_they_lead() {
+        use std::os::unix::fs::symlink;
+        let root = tempdir("gate-links");
+        let foreign = tempdir("gate-links-foreign");
+        fs::write(foreign.join("secret.txt"), b"s").unwrap();
+        fs::write(root.join("real.txt"), b"r").unwrap();
+        symlink(foreign.join("secret.txt"), root.join("innocent.txt")).unwrap();
+        symlink(&foreign, root.join("escape")).unwrap();
+        symlink(root.join("real.txt"), root.join("alias.txt")).unwrap();
+        symlink(root.join("gone.txt"), root.join("dangling.txt")).unwrap();
+        let reg = WorkspaceRegistry::default();
+        reg.authorize(&root).unwrap();
+
+        assert!(is_outside(
+            reg.authorized_existing(&root.join("innocent.txt"))
+        ));
+        assert!(is_outside(
+            reg.authorized_write_target(&root.join("innocent.txt"))
+        ));
+        assert!(is_outside(
+            reg.authorized_existing(&root.join("escape/secret.txt"))
+        ));
+        assert!(is_outside(reg.authorized_existing(&root.join("escape"))));
+        assert!(is_outside(reg.authorized_new(&root.join("escape/new.txt"))));
+        assert!(is_outside(reg.authorized_new(&root.join("escape/a/b"))));
+        // The link itself lives in the folder: it may be renamed or deleted.
+        assert_eq!(
+            reg.authorized_entry(&root.join("innocent.txt")),
+            Ok(root.join("innocent.txt"))
+        );
+        assert_eq!(
+            reg.authorized_write_target(&root.join("alias.txt")),
+            Ok(root.join("real.txt"))
+        );
+        assert_eq!(
+            reg.authorized_write_target(&root.join("dangling.txt")),
+            Err("symlink target does not exist".into())
+        );
+    }
+
+    #[test]
+    fn opening_a_file_authorizes_its_folder() {
+        let folder = tempdir("file-folder");
+        fs::write(folder.join("a.txt"), b"a").unwrap();
+        let reg = WorkspaceRegistry::default();
+        assert_eq!(
+            reg.authorize_opened(folder.join("a.txt"), Opened::File)
+                .unwrap(),
+            folder
+        );
+        assert!(reg.is_authorized(&folder.join("a.txt")));
+
+        let other = tempdir("file-folder-missing");
+        let reg = WorkspaceRegistry::default();
+        assert_eq!(
+            reg.authorize_opened(other.join("new.txt"), Opened::File)
+                .unwrap(),
+            other,
+            "a file not there (any more) authorizes the folder it would be in"
+        );
+        assert_eq!(reg.authorize_opened(&other, Opened::File).unwrap(), other);
+        assert!(reg
+            .authorize_opened(folder.join("a.txt"), Opened::Folder)
+            .is_err());
+        assert!(reg
+            .authorize_opened(other.join("gone"), Opened::Folder)
+            .is_err());
+    }
+
+    #[test]
+    fn opening_inside_an_authorized_folder_adds_no_root() {
+        let root = tempdir("opened-inside");
+        fs::create_dir_all(root.join(".config").join("app")).unwrap();
+        fs::write(root.join("a.txt"), b"a").unwrap();
+        let reg = WorkspaceRegistry::default();
+        reg.authorize(&root).unwrap();
+        let added = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let sink = added.clone();
+        reg.watch_roots(move |r| sink.lock().unwrap().push(r.to_path_buf()));
+        added.lock().unwrap().clear();
+
+        reg.authorize_opened(root.join("a.txt"), Opened::File)
+            .unwrap();
+        reg.authorize_opened(root.join(".config").join("app"), Opened::Folder)
+            .unwrap();
+        assert!(added.lock().unwrap().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opening_a_linked_file_authorizes_the_folder_it_is_in() {
+        let real = tempdir("file-folder-real");
+        let links = tempdir("file-folder-links");
+        fs::write(real.join("notes.md"), b"n").unwrap();
+        std::os::unix::fs::symlink(real.join("notes.md"), links.join("notes.md")).unwrap();
+        let reg = WorkspaceRegistry::default();
+        assert_eq!(
+            reg.authorize_opened(links.join("notes.md"), Opened::File)
+                .unwrap(),
+            real
+        );
+        assert!(!reg.is_authorized(&links));
+        assert_eq!(
+            reg.authorized_existing(&links.join("notes.md")),
+            Ok(real.join("notes.md"))
+        );
+    }
+
+    #[test]
+    fn the_page_names_what_was_opened_in_one_word() {
+        assert_eq!(
+            serde_json::from_str::<Opened>(r#""file""#).unwrap(),
+            Opened::File
+        );
+        assert_eq!(
+            serde_json::from_str::<Opened>(r#""folder""#).unwrap(),
+            Opened::Folder
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn wsl_paths_are_judged_by_their_host_path() {
+        let root = tempdir("gate-wsl");
+        fs::write(root.join("a.txt"), b"a").unwrap();
+        let host = crate::modules::fs::to_canon(&root);
+        let drvfs = format!("/mnt/{}{}", host[..1].to_ascii_lowercase(), &host[2..]);
+        let ubuntu = WorkspaceEnv::Wsl {
+            distro: "Ubuntu".into(),
+        };
+        let reg = WorkspaceRegistry::default();
+        assert!(is_outside(reg.authorized_existing(&resolve_path(
+            &format!("{drvfs}/a.txt"),
+            &ubuntu
+        ))));
+        reg.authorize(&root).unwrap();
+        assert_eq!(
+            reg.authorized_existing(&resolve_path(&format!("{drvfs}/a.txt"), &ubuntu)),
+            Ok(root.join("a.txt"))
+        );
+        assert!(is_outside(
+            reg.authorized_existing(&resolve_path("/etc/passwd", &ubuntu))
+        ));
+        assert!(is_outside(
+            reg.authorized_new(&resolve_path("/home/me/new.txt", &ubuntu))
+        ));
+    }
+
+    /// An authorized folder and a folder outside it, each with a file and a subfolder.
+    fn inside_and_outside(label: &str) -> (WorkspaceRegistry, PathBuf, PathBuf) {
+        let root = tempdir(&format!("{label}-root"));
+        let outside = tempdir(&format!("{label}-outside"));
+        for dir in [&root, &outside] {
+            fs::write(dir.join("a.txt"), b"a").unwrap();
+            fs::create_dir(dir.join("sub")).unwrap();
+        }
+        let reg = WorkspaceRegistry::default();
+        reg.authorize(&root).unwrap();
+        (reg, root, outside)
+    }
+
+    /// Whether every gate lets `gates` reach into `dir`.
+    fn every_gate_reaches(gates: Gates<'_>, dir: &Path) -> bool {
+        let spawn = gates.spawn_cwd(
+            Some(&dir.join("sub").to_string_lossy()),
+            &WorkspaceEnv::Local,
+        );
+        let results = [
+            gates.reaches(dir),
+            gates.authorized_existing(&dir.join("a.txt")).is_ok(),
+            gates.authorized_entry(&dir.join("a.txt")).is_ok(),
+            gates.authorized_new(&dir.join("new").join("b.txt")).is_ok(),
+            gates.authorized_write_target(&dir.join("a.txt")).is_ok(),
+            gates.authorized_write_target(&dir.join("b.txt")).is_ok(),
+            spawn.is_ok(),
+        ];
+        assert!(
+            results.iter().all(|r| *r) || results.iter().all(|r| !*r),
+            "the gates disagree on {}: {results:?}",
+            dir.display()
+        );
+        results[0]
+    }
+
+    #[test]
+    fn each_setting_opens_exactly_its_own_callers() {
+        let (reg, root, outside) = inside_and_outside("policy");
+        for (app, ai) in [(false, false), (true, false), (false, true), (true, true)] {
+            reg.set_all_folders(Origin::App, app);
+            reg.set_all_folders(Origin::Ai, ai);
+            let case = format!("app {app}, ai {ai}");
+            assert_eq!(
+                every_gate_reaches(reg.gates(Origin::App), &outside),
+                app,
+                "{case}"
+            );
+            assert_eq!(
+                every_gate_reaches(reg.gates(Origin::Ai), &outside),
+                ai,
+                "{case}"
+            );
+            // Language servers, launch arguments, git, `oarlock open` and terminal folders.
+            assert!(
+                !every_gate_reaches(reg.authorized_gates(), &outside),
+                "{case}"
+            );
+            assert!(is_outside(reg.authorized_existing(&outside.join("a.txt"))));
+            assert!(is_outside(reg.authorized_new(&outside.join("b.txt"))));
+            assert!(authorize_spawn_cwd(
+                &reg,
+                Some(&outside.to_string_lossy()),
+                &WorkspaceEnv::Local
+            )
+            .is_err());
+            assert!(!reg.is_authorized(&outside), "{case}");
+            for gates in [
+                reg.gates(Origin::App),
+                reg.gates(Origin::Ai),
+                reg.authorized_gates(),
+            ] {
+                assert!(every_gate_reaches(gates, &root), "{case}: authorized");
+            }
+        }
+    }
+
+    #[test]
+    fn turning_a_setting_off_restores_the_gates_at_once() {
+        let (reg, _root, outside) = inside_and_outside("off");
+        for origin in [Origin::App, Origin::Ai] {
+            assert!(!reg.set_all_folders(origin, true), "off by default");
+            let on = reg.gates(origin);
+            assert!(every_gate_reaches(on, &outside));
+            assert!(reg.set_all_folders(origin, false));
+            assert!(
+                every_gate_reaches(on, &outside),
+                "a command keeps the gates it started with"
+            );
+            let off = reg.gates(origin);
+            assert!(!every_gate_reaches(off, &outside));
+            assert!(is_outside(off.authorized_existing(&outside.join("a.txt"))));
+            assert!(is_outside(
+                off.authorized_existing(&outside.join("gone.txt"))
+            ));
+        }
+    }
+
+    #[test]
+    fn a_setting_authorizes_no_folder() {
+        let (reg, root, outside) = inside_and_outside("no-root");
+        let added = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let sink = added.clone();
+        reg.watch_roots(move |r| sink.lock().unwrap().push(r.to_path_buf()));
+        assert_eq!(*added.lock().unwrap(), vec![root.clone()]);
+        reg.set_all_folders(Origin::App, true);
+        reg.set_all_folders(Origin::Ai, true);
+        reg.gates(Origin::App)
+            .authorized_existing(&outside.join("a.txt"))
+            .unwrap();
+        assert_eq!(*added.lock().unwrap(), vec![root], "no new asset grant");
+        assert!(!reg.is_authorized(&outside));
+    }
+
+    #[test]
+    fn every_folder_still_means_real_absolute_paths_and_plain_names() {
+        let (reg, _root, outside) = inside_and_outside("plain");
+        reg.set_all_folders(Origin::App, true);
+        let gates = reg.gates(Origin::App);
+        let err = gates.authorized_existing(Path::new("a.txt")).unwrap_err();
+        assert!(err.contains("not an absolute path"), "got: {err}");
+        assert!(gates
+            .authorized_entry(&outside.join("sub").join(".."))
+            .is_err());
+        assert!(gates
+            .authorized_new(&outside.join("new").join("..").join("x"))
+            .is_err());
+        let missing = gates
+            .authorized_existing(&outside.join("gone.txt"))
+            .unwrap_err();
+        assert!(!missing.contains("outside"), "a real error: {missing}");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(outside.join("gone"), outside.join("dangling")).unwrap();
+            assert_eq!(
+                gates.authorized_write_target(&outside.join("dangling")),
+                Err("symlink target does not exist".into())
+            );
+        }
+    }
+
+    #[test]
+    fn a_command_without_an_origin_is_the_apps() {
+        let parse = |json: &str| {
+            serde_json::from_str::<Option<Origin>>(json).map(Option::unwrap_or_default)
+        };
+        assert_eq!(parse("null").unwrap(), Origin::App);
+        assert_eq!(parse(r#""app""#).unwrap(), Origin::App);
+        assert_eq!(parse(r#""ai""#).unwrap(), Origin::Ai);
+        assert!(parse(r#""AI""#).is_err());
+        assert!(parse(r#""all""#).is_err());
+    }
+
+    /// The commands whose callers say whose request they serve. The AI tools call each with
+    /// `origin: "ai"` (`src/modules/ai/lib/native.ts`); the app leaves it out.
+    const ORIGIN_COMMANDS: &[&str] = &[
+        "fs_canonicalize",
+        "fs_create_dir",
+        "fs_glob",
+        "fs_grep",
+        "fs_read_dir",
+        "fs_read_file",
+        "fs_write_file",
+        "shell_bg_spawn",
+        "shell_run_command",
+        "shell_session_open",
+        "shell_session_run",
+    ];
+
+    #[test]
+    fn every_command_the_ai_tools_tag_takes_their_origin() {
+        // A command without the parameter would drop the tag and serve the AI tools under the
+        // app's setting.
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let native = fs::read_to_string(manifest.join("../src/modules/ai/lib/native.ts")).unwrap();
+        let mut tagged: Vec<&str> = native
+            .split("invoke")
+            .skip(1)
+            .filter(|call| call.contains("...AI_ORIGIN"))
+            .filter_map(|call| call.split('"').nth(1))
+            .collect();
+        tagged.sort_unstable();
+        assert_eq!(tagged, ORIGIN_COMMANDS);
+
+        let mut taking = Vec::new();
+        let mut dirs = vec![manifest.join("src")];
+        while let Some(dir) = dirs.pop() {
+            for entry in fs::read_dir(&dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs.push(path);
+                    continue;
+                }
+                if path.extension().is_none_or(|ext| ext != "rs") {
+                    continue;
+                }
+                let source = fs::read_to_string(&path).unwrap();
+                for command in source.split("#[tauri::command]").skip(1) {
+                    let signature = command.split(" {").next().unwrap_or_default();
+                    let name = signature
+                        .split("fn ")
+                        .nth(1)
+                        .and_then(|rest| rest.split(['(', '<']).next())
+                        .unwrap_or_default()
+                        .trim()
+                        .to_owned();
+                    if signature.contains("origin: Option<Origin>") {
+                        taking.push(name);
+                    }
+                }
+            }
+        }
+        taking.sort_unstable();
+        assert_eq!(taking, ORIGIN_COMMANDS);
     }
 
     #[test]
@@ -951,7 +1820,7 @@ mod auth_tests {
     #[test]
     fn resolve_launch_cwd_ignores_nonexistent_cli_dir() {
         let env = tempdir("envfb");
-        let resolved = resolve_launch_cwd(Some("/no/such/terax/dir"), Some(env.clone()));
+        let resolved = resolve_launch_cwd(Some("/no/such/oarlock/dir"), Some(env.clone()));
         assert_eq!(resolved, Some(env));
     }
 }
@@ -978,12 +1847,12 @@ mod appimage_tests {
 
     #[test]
     fn strips_appdir_from_path_lists_and_unsets_when_empty() {
-        let appdir = Path::new("/tmp/.mount_Terax_X");
+        let appdir = Path::new("/tmp/.mount_Oarlock_X");
         let env = reader(&[
-            ("LD_LIBRARY_PATH", "/tmp/.mount_Terax_X/usr/lib:/usr/lib"),
-            ("PATH", "/tmp/.mount_Terax_X/usr/bin:/usr/bin:/bin"),
-            ("GST_PLUGIN_SYSTEM_PATH", "/tmp/.mount_Terax_X/usr/lib/gstreamer-1.0"),
-            ("APPDIR", "/tmp/.mount_Terax_X"),
+            ("LD_LIBRARY_PATH", "/tmp/.mount_Oarlock_X/usr/lib:/usr/lib"),
+            ("PATH", "/tmp/.mount_Oarlock_X/usr/bin:/usr/bin:/bin"),
+            ("GST_PLUGIN_SYSTEM_PATH", "/tmp/.mount_Oarlock_X/usr/lib/gstreamer-1.0"),
+            ("APPDIR", "/tmp/.mount_Oarlock_X"),
         ]);
         let out = compute_appimage_env_overrides(appdir, env);
 
@@ -996,7 +1865,7 @@ mod appimage_tests {
 
     #[test]
     fn leaves_untouched_vars_alone() {
-        let appdir = Path::new("/tmp/.mount_Terax_X");
+        let appdir = Path::new("/tmp/.mount_Oarlock_X");
         let env = reader(&[
             ("LD_LIBRARY_PATH", "/usr/lib:/usr/local/lib"),
             ("LD_PRELOAD", "/home/u/my.so"),
@@ -1010,11 +1879,85 @@ mod appimage_tests {
 
     #[test]
     fn unsets_value_vars_only_when_pointing_into_appdir() {
-        let appdir = Path::new("/tmp/.mount_Terax_X");
-        let into = reader(&[("LD_PRELOAD", "/tmp/.mount_Terax_X/usr/lib/x.so")]);
+        let appdir = Path::new("/tmp/.mount_Oarlock_X");
+        let into = reader(&[("LD_PRELOAD", "/tmp/.mount_Oarlock_X/usr/lib/x.so")]);
         assert_eq!(find(&compute_appimage_env_overrides(appdir, into), "LD_PRELOAD"), Some(&None));
 
         let outside = reader(&[("FONTCONFIG_FILE", "/etc/fonts/fonts.conf")]);
         assert!(find(&compute_appimage_env_overrides(appdir, outside), "FONTCONFIG_FILE").is_none());
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod nv_explicit_sync_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn reader(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<OsString> {
+        let map: HashMap<String, OsString> = pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), OsString::from(v)))
+            .collect();
+        move |k: &str| map.get(k).cloned()
+    }
+
+    #[test]
+    fn disables_on_wayland_with_nvidia() {
+        assert!(should_disable_nv_explicit_sync(
+            reader(&[("WAYLAND_DISPLAY", "wayland-0")]),
+            true
+        ));
+        // Session type alone is enough, and its value is not case sensitive.
+        assert!(should_disable_nv_explicit_sync(
+            reader(&[("XDG_SESSION_TYPE", "Wayland")]),
+            true
+        ));
+    }
+
+    #[test]
+    fn skips_x11_sessions_and_non_nvidia_systems() {
+        assert!(!should_disable_nv_explicit_sync(
+            reader(&[("XDG_SESSION_TYPE", "x11"), ("DISPLAY", ":0")]),
+            true
+        ));
+        assert!(!should_disable_nv_explicit_sync(
+            reader(&[("WAYLAND_DISPLAY", "wayland-0")]),
+            false
+        ));
+    }
+
+    #[test]
+    fn never_overrides_an_explicit_user_value() {
+        let env = reader(&[
+            ("WAYLAND_DISPLAY", "wayland-0"),
+            (NV_DISABLE_EXPLICIT_SYNC, "0"),
+        ]);
+        assert!(!should_disable_nv_explicit_sync(env, true));
+    }
+
+    #[test]
+    fn children_do_not_inherit_the_workaround() {
+        let out = compute_child_env_overrides(Vec::new(), true);
+        let entry = out.iter().find(|(k, _)| *k == NV_DISABLE_EXPLICIT_SYNC);
+        assert_eq!(entry.map(|(_, value)| value), Some(&None));
+    }
+
+    #[test]
+    fn child_env_is_untouched_when_the_workaround_is_off() {
+        assert!(compute_child_env_overrides(Vec::new(), false).is_empty());
+    }
+
+    #[test]
+    fn appimage_overrides_survive_alongside_the_workaround() {
+        let appimage = vec![("PATH", Some(OsString::from("/usr/bin")))];
+        let out = compute_child_env_overrides(appimage, true);
+
+        assert_eq!(
+            out.iter()
+                .find(|(k, _)| *k == "PATH")
+                .map(|(_, value)| value),
+            Some(&Some(OsString::from("/usr/bin")))
+        );
+        assert!(out.iter().any(|(k, _)| *k == NV_DISABLE_EXPLICIT_SYNC));
     }
 }

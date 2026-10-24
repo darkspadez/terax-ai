@@ -1,6 +1,9 @@
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
+import { cn } from "@/lib/utils";
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import { type DiffViewMode, setDiffViewMode } from "@/modules/settings/store";
 import { unifiedMergeView } from "@codemirror/merge";
 import { EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
@@ -13,6 +16,7 @@ import {
   getCachedDiff,
   workingDiffKey,
 } from "./lib/diffCache";
+import { UNIFIED_DIFF_THEME } from "./lib/diffTheme";
 import {
   buildSharedExtensions,
   DEFAULT_INDENT,
@@ -20,6 +24,7 @@ import {
 } from "./lib/extensions";
 import { resolveLanguage, resolveLanguageSync } from "./lib/languageResolver";
 import { useEditorThemeExt } from "./lib/useEditorThemeExt";
+import { SplitDiffView } from "./SplitDiffView";
 
 type WorkingSource = {
   kind: "working";
@@ -50,44 +55,6 @@ const READONLY_EXT = [
   EditorState.readOnly.of(true),
   EditorView.editable.of(false),
 ];
-const DIFF_THEME = EditorView.theme({
-  "&.cm-merge-b .cm-changedText, .cm-changedText": {
-    background: "rgba(110, 200, 120, 0.20) !important",
-    borderRadius: "3px",
-    padding: "0 1px",
-  },
-  ".cm-deletedChunk .cm-deletedText, &.cm-merge-b .cm-deletedText": {
-    background: "rgba(220, 90, 90, 0.22) !important",
-    borderRadius: "3px",
-    padding: "0 1px",
-  },
-  "&.cm-merge-b .cm-changedLine, .cm-changedLine, .cm-inlineChangedLine": {
-    backgroundColor: "rgba(110, 200, 120, 0.05) !important",
-  },
-  ".cm-deletedChunk": {
-    backgroundColor: "rgba(220, 90, 90, 0.05) !important",
-    paddingTop: "1px",
-    paddingBottom: "1px",
-  },
-  "&.cm-merge-b .cm-changedLineGutter, .cm-changedLineGutter": {
-    background: "rgba(110, 200, 120, 0.55) !important",
-  },
-  ".cm-deletedLineGutter, &.cm-merge-a .cm-changedLineGutter": {
-    background: "rgba(220, 90, 90, 0.5) !important",
-  },
-  ".cm-changeGutter": {
-    width: "2px !important",
-    paddingLeft: "0 !important",
-  },
-  ".cm-collapsedLines": {
-    backgroundColor: "transparent",
-    color: "var(--muted-foreground, #9ca3af)",
-    fontSize: "10.5px",
-    padding: "2px 8px",
-    opacity: 0.7,
-  },
-});
-
 function countDiffLines(patch: string): { added: number; removed: number } {
   let added = 0;
   let removed = 0;
@@ -139,6 +106,7 @@ function loadStateFromCache(source: WorkingSource | CommitSource): LoadState {
 export function GitDiffPane({ source, chipLabel, active }: Props) {
   const cmRef = useRef<ReactCodeMirrorRef>(null);
   const themeExt = useEditorThemeExt();
+  const diffViewMode = usePreferencesStore((s) => s.diffViewMode);
   const [state, setState] = useState<LoadState>(() =>
     active ? loadStateFromCache(source) : { kind: "idle" },
   );
@@ -224,7 +192,7 @@ export function GitDiffPane({ source, chipLabel, active }: Props) {
         syntaxHighlightDeletions: true,
         collapseUnchanged: { margin: 3, minSize: 6 },
       }),
-      DIFF_THEME,
+      UNIFIED_DIFF_THEME,
     ],
     [originalContent, langExt],
   );
@@ -236,9 +204,7 @@ export function GitDiffPane({ source, chipLabel, active }: Props) {
     let cancelled = false;
     resolveLanguage(path).then((res) => {
       if (cancelled || !res) return;
-      setState((s) =>
-        s.kind === "loaded" ? { ...s, langExt: res.ext } : s,
-      );
+      setState((s) => (s.kind === "loaded" ? { ...s, langExt: res.ext } : s));
     });
     return () => {
       cancelled = true;
@@ -279,6 +245,7 @@ export function GitDiffPane({ source, chipLabel, active }: Props) {
         </div>
         <div className="flex shrink-0 items-center gap-3 text-[10.5px] tabular-nums text-muted-foreground">
           <span className="truncate max-w-80 font-mono">{repoRoot}</span>
+          {!useFallback && <DiffViewToggle mode={diffViewMode} />}
           {useFallback ? (
             <>
               <span className="text-emerald-600 dark:text-emerald-400">
@@ -308,6 +275,12 @@ export function GitDiffPane({ source, chipLabel, active }: Props) {
               {fallbackPatch || "Diff preview is not available for this file."}
             </pre>
           </ScrollArea>
+        ) : diffViewMode === "split" ? (
+          <SplitDiffView
+            original={originalContent}
+            modified={modifiedContent}
+            langExt={langExt}
+          />
         ) : (
           <CodeMirror
             ref={cmRef}
@@ -316,7 +289,7 @@ export function GitDiffPane({ source, chipLabel, active }: Props) {
             extensions={extensions}
             editable={false}
             height="100%"
-            className="h-full"
+            className="oarlock-code-editor h-full"
             basicSetup={{
               lineNumbers: true,
               foldGutter: true,
@@ -327,6 +300,34 @@ export function GitDiffPane({ source, chipLabel, active }: Props) {
           />
         )}
       </div>
+    </div>
+  );
+}
+
+const DIFF_VIEW_MODES: { mode: DiffViewMode; label: string }[] = [
+  { mode: "inline", label: "Inline" },
+  { mode: "split", label: "Side by side" },
+];
+
+function DiffViewToggle({ mode }: { mode: DiffViewMode }) {
+  return (
+    <div className="flex items-center rounded-md border border-border/60 p-0.5">
+      {DIFF_VIEW_MODES.map((option) => (
+        <button
+          key={option.mode}
+          type="button"
+          aria-pressed={mode === option.mode}
+          onClick={() => void setDiffViewMode(option.mode)}
+          className={cn(
+            "rounded px-1.5 py-0.5 text-[10.5px] transition-colors",
+            mode === option.mode
+              ? "bg-accent text-foreground"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {option.label}
+        </button>
+      ))}
     </div>
   );
 }

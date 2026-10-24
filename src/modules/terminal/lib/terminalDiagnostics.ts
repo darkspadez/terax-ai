@@ -1,7 +1,7 @@
 import { BoundedResourceTrace } from "@/modules/terminal/lib/BoundedResourceTrace";
 import { subscribeWindowPresentation } from "@/modules/terminal/ghostty/windowPresentation";
 import { invoke } from "@tauri-apps/api/core";
-import { supportsWasmSimd } from "@terax/ghostty-core/adapted";
+import { supportsWasmSimd } from "@oarlock/ghostty-core/adapted";
 import { ghosttyCoreRuntimeDiagnostics } from "@/modules/terminal/ghostty/GhosttyCoreRuntime";
 import { webGpuTerminalRuntimeDiagnostics } from "@/modules/terminal/ghostty/gpu/WebGpuTerminalRuntime";
 import { webGlTerminalRuntimeDiagnostics } from "@/modules/terminal/ghostty/webgl/WebGlTerminalRuntime";
@@ -40,9 +40,9 @@ export async function terminalDebugSnapshot() {
 
 export function installTerminalDiagnostics(): void {
   Object.assign(window, {
-    __teraxTerm: terminalDebugStats,
-    __teraxTermSnapshot: terminalDebugSnapshot,
-    __teraxTermTrace: recordTerminalResources,
+    __oarlockTerm: terminalDebugStats,
+    __oarlockTermSnapshot: terminalDebugSnapshot,
+    __oarlockTermTrace: recordTerminalResources,
   });
 }
 

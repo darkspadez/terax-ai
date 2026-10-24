@@ -12,6 +12,7 @@ import {
   ArrowRight01Icon,
   Cancel01Icon,
   Delete02Icon,
+  FolderOpenIcon,
   PencilEdit02Icon,
   PlusSignIcon,
 } from "@hugeicons/core-free-icons";
@@ -29,6 +30,7 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   tabs: Tab[];
   onNewSpace: () => void;
+  onOpenFolder: () => void;
   onDeleteSpace: (id: string) => void;
   onNewTabInSpace: (spaceId: string) => void;
   onJumpTab: (id: number) => void;
@@ -76,6 +78,7 @@ export function SpaceSwitcher({
   onOpenChange,
   tabs,
   onNewSpace,
+  onOpenFolder,
   onDeleteSpace,
   onNewTabInSpace,
   onJumpTab,
@@ -226,6 +229,12 @@ export function SpaceSwitcher({
     }
   };
 
+  // Opened with the pointer, focus goes to the list rather than its first
+  // row, which WebKit would ring as if reached by keyboard. Opened with the
+  // shortcut, the first row takes focus for the keyboard.
+  const openedByPointer = useRef(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+
   const onPointerUp = (e: React.PointerEvent, onActivate?: () => void) => {
     const st = drag.current;
     if (st?.active) commit();
@@ -240,6 +249,9 @@ export function SpaceSwitcher({
       <PopoverTrigger asChild>
         <button
           type="button"
+          onPointerDown={() => {
+            openedByPointer.current = !open;
+          }}
           title={shortcut ? `Spaces · ${shortcut}` : "Spaces"}
           className="flex h-7 shrink-0 items-center gap-2 rounded-md px-2 text-muted-foreground/90 outline-none transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
         >
@@ -254,7 +266,19 @@ export function SpaceSwitcher({
           />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" sideOffset={6} className="w-[20rem] p-1.5">
+      <PopoverContent
+        ref={contentRef}
+        align="start"
+        sideOffset={6}
+        className="w-[20rem] p-1.5"
+        onOpenAutoFocus={(e) => {
+          if (openedByPointer.current) {
+            e.preventDefault();
+            contentRef.current?.focus({ preventScroll: true });
+          }
+          openedByPointer.current = false;
+        }}
+      >
         <div className="flex items-center justify-between px-1.5 pb-1.5 pt-0.5">
           <span className="text-xs font-semibold text-foreground">Spaces</span>
           {shortcut && (
@@ -306,6 +330,17 @@ export function SpaceSwitcher({
           >
             <HugeiconsIcon icon={PlusSignIcon} size={14} strokeWidth={1.75} />
             <span className="flex-1">New space</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onOpenChange(false);
+              onOpenFolder();
+            }}
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+          >
+            <HugeiconsIcon icon={FolderOpenIcon} size={14} strokeWidth={1.75} />
+            <span className="flex-1">Open folder…</span>
           </button>
         </div>
       </PopoverContent>

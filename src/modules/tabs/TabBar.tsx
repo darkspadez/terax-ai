@@ -25,6 +25,7 @@ import { FileIcon } from "@/modules/explorer/FileIcon";
 import {
   leafIds,
   ptyIdForLeaf,
+  type SplitPosition,
   useAgentActivityStore,
 } from "@/modules/terminal";
 import {
@@ -54,7 +55,10 @@ import { useShallow } from "zustand/react/shallow";
 import { selectTabAgentStatus } from "./lib/tabAgentStatus";
 import { labelFor } from "./lib/tabLabel";
 import type { EditorTab, Tab, TerminalTab } from "./lib/useTabs";
+import { textFieldKey } from "@/lib/ime";
 import { NewTabMenu } from "./NewTabMenu";
+import { MovePaneToNewTabMenu, MoveToSplitMenu } from "./TabMoveMenus";
+import { TerminalTabLabel } from "./TerminalTabLabel";
 
 type Props = {
   tabs: Tab[];
@@ -78,6 +82,14 @@ type Props = {
   onRename: (id: number, title: string) => void;
   /** Move a dragged tab to a new position (insertion gap index 0..tabs.length). */
   onReorder: (fromId: number, toGapIndex: number) => void;
+  /** Move a single-pane terminal tab into another tab's split, shell kept. */
+  onMoveToSplit: (
+    sourceId: number,
+    destinationId: number,
+    position: SplitPosition,
+  ) => void;
+  /** Move one pane of a split terminal tab to a new tab, shell kept. */
+  onMovePaneToNewTab: (tabId: number, leafId: number) => void;
   onOverrideLanguage?: (id: number, lang: string | null) => void;
   compact?: boolean;
 };
@@ -99,6 +111,8 @@ export function TabBar({
   onPin,
   onRename,
   onReorder,
+  onMoveToSplit,
+  onMovePaneToNewTab,
   onOverrideLanguage,
   compact,
 }: Props) {
@@ -322,19 +336,18 @@ export function TabBar({
                     endDrag(e.currentTarget);
                   }}
                   onPointerCancel={(e) => endDrag(e.currentTarget)}
-                  onDoubleClick={() => isPreview && onPin(t.id)}
-                  onAuxClick={(e) => {
-                    if (e.button === 1 && tabs.length > 1) {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onClose(t.id);
-                    }
+                  onDoubleClick={() => {
+                    if (isPreview) onPin(t.id);
+                    else if (t.kind === "terminal") setEditingId(t.id);
                   }}
                   // Suppress Radix's switch-on-mousedown so a tab grabbed to
                   // drag (or a plain click) only activates on release.
                   onMouseDown={(e) => {
+                    // Middle-click closes on press: WebKit sends no auxclick.
                     if (e.button === 1) {
                       e.preventDefault();
+                      e.stopPropagation();
+                      if (tabs.length > 1) onClose(t.id);
                       return;
                     }
                     if (
@@ -346,7 +359,7 @@ export function TabBar({
                   }}
                   className={cn(
                     "group relative z-[1] h-7 shrink-0 justify-between gap-1.5 rounded-md bg-transparent text-xs transition-colors data-active:bg-transparent dark:data-active:bg-transparent",
-                    isNew && "terax-tab-in",
+                    isNew && "oarlock-tab-in",
                     isActive
                       ? "text-foreground dark:text-foreground"
                       : "text-muted-foreground hover:text-foreground/80 dark:text-muted-foreground",
@@ -466,9 +479,13 @@ export function TabBar({
                     )}
                     {/* Preview tabs use italic to signal the transient state,
                         matching the visual convention from VSCode. */}
-                    <span className={cn("truncate", isPreview && "italic")}>
-                      {labelFor(t)}
-                    </span>
+                    {t.kind === "terminal" ? (
+                      <TerminalTabLabel tab={t} />
+                    ) : (
+                      <span className={cn("truncate", isPreview && "italic")}>
+                        {labelFor(t)}
+                      </span>
+                    )}
                     {t.kind === "editor" && t.dirty ? (
                       <span
                         aria-label="Unsaved changes"
@@ -527,6 +544,15 @@ export function TabBar({
                           />
                           <span className="flex-1">Rename</span>
                         </ContextMenuItem>
+                        <MoveToSplitMenu
+                          tabs={tabs}
+                          sourceId={t.id}
+                          onMove={onMoveToSplit}
+                        />
+                        <MovePaneToNewTabMenu
+                          tab={t}
+                          onMove={onMovePaneToNewTab}
+                        />
                         {tabs.length > 1 && (
                           <>
                             <ContextMenuSeparator />
@@ -781,8 +807,9 @@ function TabRenameInput({
       )}
       onKeyDown={(e) => {
         e.stopPropagation();
-        if (e.key === "Enter") commit(e.currentTarget.value, true);
-        else if (e.key === "Escape") finish(onCancel);
+        const action = textFieldKey(e.nativeEvent);
+        if (action === "commit") commit(e.currentTarget.value, true);
+        else if (action === "cancel") finish(onCancel);
       }}
       onBlur={(e) => {
         // Switching windows/apps blurs the input; keep the edit open instead

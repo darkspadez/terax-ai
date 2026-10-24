@@ -6,6 +6,8 @@ describe("displayAgent", () => {
     expect(displayAgent("claude")).toBe("Claude Code");
     expect(displayAgent("codex")).toBe("Codex");
     expect(displayAgent("pi")).toBe("Pi");
+    expect(displayAgent("antigravity")).toBe("Antigravity");
+    expect(displayAgent("gjc")).toBe("GJC");
   });
 
   it("looks the label up case-insensitively", () => {

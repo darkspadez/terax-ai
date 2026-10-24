@@ -11,7 +11,8 @@ const OS_LABEL = IS_MAC
       : null;
 
 let shellPromise: Promise<string | null> | null = null;
-function detectShell(): Promise<string | null> {
+/** The shell Oarlock starts when none is configured (`pty_shell_name`). */
+export function detectShell(): Promise<string | null> {
   if (!shellPromise) {
     shellPromise = invoke<string>("pty_shell_name")
       .then((s) => s || null)

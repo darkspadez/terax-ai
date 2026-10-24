@@ -1,10 +1,10 @@
 # Two-process model and IPC command reference
 
-This guide elaborates on `TERAX.md`. If anything here conflicts with `TERAX.md`, `TERAX.md` wins.
+This guide elaborates on `AGENTS.md`. If anything here conflicts with `AGENTS.md`, `AGENTS.md` wins.
 
 ## The split
 
-Terax is two processes: the Rust backend (`src-tauri/`) and the webview frontend (`src/`).
+Oarlock is two processes: the Rust backend (`src-tauri/`) and the webview frontend (`src/`).
 
 - **Rust owns all OS access**: PTY, file system, git, shell spawn, network, secrets, workspace authorization.
 - **The webview never touches the FS, processes, or shells directly**. Every host operation goes through an `invoke()` call to a command registered in `src-tauri/src/lib.rs`.
@@ -14,7 +14,7 @@ This boundary is the root of the security model. Untrusted input (terminal escap
 ## Adding a new IPC command
 
 1. Write the `#[tauri::command]` async function in the appropriate `src-tauri/src/modules/<area>/` module.
-2. Register it in `src-tauri/src/lib.rs` inside the `tauri::generate_handler![...]` block (`src-tauri/src/lib.rs:191`).
+2. Register it in `src-tauri/src/lib.rs` inside the `tauri::generate_handler![...]` block.
 3. If the command uses a Tauri plugin API (window, clipboard, dialog, etc.), add the plugin permission to `src-tauri/capabilities/default.json`.
 4. Add a typed frontend wrapper in the matching `src/modules/<area>/lib/` directory and call it through Tauri's `invoke()` API.
 5. If the command touches the file system, network, or shell, it must go through the existing guards (`security.ts` deny-list, workspace authorization registry, SSRF guard, AI tool approval).
@@ -36,11 +36,15 @@ Long-lived interactive terminal sessions.
 - `pty_resize` - resize the PTY
 - `pty_close` / `pty_close_all` - destroy one or all sessions
 - `pty_has_foreground_process` / `pty_has_foreground_job` - detect whether a command is running
+- `pty_authorize_cwd` - authorize the folder a terminal reported (OSC 7) and say whether the page may take it; on Linux and macOS only where the shell or its foreground job really is
 - `pty_shell_name` / `pty_list_shells` - shell detection and enumeration
+- `pty_diagnostics` - native queue counters for the opt-in terminal diagnostics (`window.__oarlockTermSnapshot()`)
 
-Output streams over the `terax-pty` custom URI scheme (one held `poll` request per window), not through `pty_open`; see `pty-transport-v2.md`.
+Output streams over the `oarlock-pty` custom URI scheme (one held `poll` request per window), not through `pty_open`; see `pty-transport-v2.md`.
 
 ### File system (`src-tauri/src/modules/fs/`)
+
+Every command here that takes a path is refused outside the folders the workspace registry authorizes (see `security-model.md`, "File commands").
 
 #### Tree
 
@@ -53,11 +57,17 @@ Output streams over the `terax-pty` custom URI scheme (one held `poll` request p
 - `fs_write_file` - write file contents
 - `fs_stat` - file metadata
 - `fs_canonicalize` - canonical path
+- `fs_host_path` - host path of a workspace file (WSL share or drive), for asset URLs
+- `fs_open_default` - open a file in its default app; a program only after the user clicks Run in a native dialog the backend shows (Return and Escape answer Cancel)
 
 #### Mutate
 
 - `fs_create_file` / `fs_create_dir`
 - `fs_rename` / `fs_move` / `fs_delete` / `fs_delete_batch` / `fs_copy`
+
+#### Clipboard
+
+- `fs_clipboard_paths` - file paths currently on the OS clipboard, for explorer paste
 
 #### Watch
 
@@ -65,7 +75,7 @@ Output streams over the `terax-pty` custom URI scheme (one held `poll` request p
 
 #### Search
 
-- `fs_search` - fuzzy file finder
+- `fs_search` - fuzzy file finder (on macOS a root the privacy controls refuse to list fails with that `EPERM` instead of finding nothing; so does `fs_grep_interactive`)
 - `fs_list_files` - recursive file listing
 
 #### Grep
@@ -81,12 +91,14 @@ All git commands are gated through the workspace authorization registry.
 - `git_resolve_repo` / `git_panel_snapshot`
 - `git_status`
 - `git_diff` / `git_diff_content`
+- `git_file_base` - a file's committed (HEAD) text, for the editor's change gutter
 - `git_stage` / `git_unstage` / `git_discard`
 - `git_commit`
 - `git_fetch` / `git_pull_ff_only` / `git_push`
 - `git_log` / `git_show_commit` / `git_commit_files` / `git_commit_file_diff`
 - `git_remote_url`
-- `git_list_branches` / `git_checkout_branch`
+- `git_list_branches` / `git_checkout_branch` - local branches and worktrees, switching
+- `git_worktree_add` / `git_worktree_remove` - create a worktree (its folder is authorized) or remove a linked one
 
 ### Shell (`src-tauri/src/modules/shell/`)
 
@@ -98,21 +110,54 @@ Three distinct surfaces:
 
 ### Workspace (`src-tauri/src/modules/workspace.rs`)
 
-- `workspace_authorize` / `workspace_current_dir` - the spawn/git/AI cwd authorization registry
+- `workspace_authorize` / `workspace_current_dir` - the authorization registry behind file commands, spawn cwds, git and the AI tools (`opened`: a folder browsed or a file opened, adding no root an authorized folder covers)
 - `wsl_list_distros` / `wsl_default_distro` / `wsl_home` - WSL bridge
 
-### Network (`src-tauri/src/modules/net.rs`)
+### Network (`src-tauri/src/modules/net.rs`, `net/`)
 
 - `ai_http_stream` / `ai_http_cancel` / `ai_http_ack` - AI HTTP proxy with SSRF guard
 - `lm_ping` - local-model ping
+- `markdown_remote_image` - one https image for the Markdown preview (public hosts only, redirects re-validated, images only, 16 MiB)
+
+### AI sessions (`src-tauri/src/modules/ai_sessions.rs`)
+
+- `ai_session_load` / `ai_session_save` / `ai_session_delete` - per-session conversation files, written atomically with a `.bak` copy
+- `ai_session_finish_migration` / `ai_session_prune_backup` - migration of conversations stored by older versions
+
+### Skills (`src-tauri/src/modules/skills/`) and project trust (`project_trust.rs`)
+
+- `skills_list` - the skills a conversation in a project may use, or (`all`) every skill with the open projects' trust states, for Settings
+- `skills_load` / `skills_read_file` - a usable skill's `SKILL.md` body and file list, or one of its text files, read only inside its real folder
+- `skills_set_enabled` / `skills_create` / `skills_edit` / `skills_delete` - turn a skill on or off, create one from the template, open its `SKILL.md` in the editor of the window in front, delete one of Oarlock's folder (to the trash)
+- `skills_install_git` / `skills_install_zip` / `skills_install_commit` / `skills_install_cancel` - stage skills from a Git repository or a zip the user picks, then install the reviewed ones
+- `project_trust_status` / `project_trust_decide` / `project_trust_list` / `project_trust_revoke` - what a project provides (its `AGENTS.md`, its skills, its `.mcp.json`) and the user's decision on each item, kept with its content hash
+- `project_memory_read` - the window's project `AGENTS.md` for an AI run, only while the user allows its current content (`project_memory.rs`)
+
+### Language servers (`src-tauri/src/modules/lsp/`)
+
+- `lsp_detect` / `lsp_resolve_root` - find a server binary and the workspace root for a file
+- `lsp_spawn` / `lsp_send` / `lsp_kill` - process lifecycle and the framed JSON-RPC pipe
+- `lsp_host_pid` - host process id
+
+### MCP servers (`src-tauri/src/modules/mcp/`)
+
+- `mcp_spawn` / `mcp_send` / `mcp_kill` - a local server's process and its newline-delimited JSON-RPC pipe (app windows only; secret environment values read from the keychain here)
+- `mcp_http_open` / `mcp_http_close` - a remote server's session: the one origin its requests may reach, and its configured headers (secret values read here)
+- `mcp_http_stream` / `mcp_http_cancel` / `mcp_http_ack` - one request of a session through the `net.rs` proxy, streamed like `ai_http_stream`
+- `mcp_logs` / `mcp_logs_clear` / `mcp_log_note` - the bounded log of each server (stderr and lifecycle notes)
+- `mcp_status_report` / `mcp_status_list` - what each window's client reports, for Settings (`oarlock://mcp-status`)
+- `mcp_secret_set` / `mcp_secret_delete` / `mcp_secret_status` - secret values of servers, written from Settings and never read back by a page
+- `mcp_oauth_status` / `mcp_oauth_probe` / `mcp_oauth_sign_in` / `mcp_oauth_cancel` / `mcp_oauth_sign_out` - OAuth sign-in of remote servers, run in the backend (settings window only; the page sees a status, never a token; `oarlock://mcp-auth`)
+- `mcp_import_scan` / `mcp_import_secrets` - servers other apps configure (Claude Desktop, Claude Code, Cursor, VS Code), read from their fixed paths; secret values go from those files to the keychain without passing the page (settings window only)
+- `mcp_project_servers` / `mcp_project_spawn` / `mcp_project_http_open` - the servers of a project's `.mcp.json` while the user allows it: listed for the calling window's project (Settings: every open project), started from the trusted file with its variables expanded in the backend
 
 ### Secrets (`src-tauri/src/modules/secrets.rs`)
 
-- `secrets_get` / `secrets_set` / `secrets_delete` / `secrets_get_all` - OS keychain access, service `terax-ai`
+- `secrets_get` / `secrets_set` / `secrets_delete` / `secrets_get_all` - OS keychain access, service `oarlock-ai` (they refuse the MCP service, `oarlock-mcp`)
 
 ### Agent hooks (`src-tauri/src/modules/agent.rs`)
 
-- `agent_enable_hooks` / `agent_hooks_status` - install/status terminal coding-agent hooks (Claude Code, Codex, Gemini CLI)
+- `agent_enable_hooks` / `agent_hooks_status` - install/status terminal coding-agent hooks (Claude Code, Codex, Gemini CLI, Pi)
 
 ### History (`src-tauri/src/modules/history/`)
 
@@ -120,9 +165,32 @@ Three distinct surfaces:
 
 ### Settings window
 
-- `get_launch_dir` - CLI launch directory, drained on first read
-- get_launch_files - files opened at launch (CLI args or OS Open With), drained on first read
+- `get_launch_dir` - the folder Oarlock was launched with (a folder argument, not a launched file's folder), drained on first read
+- `get_launch_files` - files the OS asked the calling window to open (CLI args, OS Open With, a later launch), each taken once; `oarlock:open-file` announces new ones
 - `open_settings_window` - open the separate settings webview (optional `tab` deep-link)
+
+### App windows (`src-tauri/src/modules/windows.rs`, `quick_terminal.rs`)
+
+- `app_window_open` / `app_window_ready` - open another app window; a page reports that it answers quit requests
+- `app_quit` / `app_quit_ready` - quit once every window has confirmed and saved its state
+- `quick_terminal_toggle` / `quick_terminal_set_hotkey` - the quick terminal window and its global hotkey
+
+### Window presentation (`src-tauri/src/modules/vibrancy.rs`, `window_presentation.rs`)
+
+- `window_backdrop_kind` / `window_set_backdrop` - native window backdrop (vibrancy on macOS, Mica on Windows 11)
+- `window_presentation_state` - the calling window's native occlusion, sleep and live-resize state
+
+### macOS privacy (`src-tauri/src/modules/mac_privacy.rs`, macOS only)
+
+- `mac_privacy_status` - whether Oarlock has Full Disk Access, from files only that grant opens (never prompts)
+- `mac_privacy_open_settings` - Privacy & Security in System Settings at a named pane (`fullDiskAccess`, `filesAndFolders`); the page never passes a URL
+
+### Terminal clipboard, scrollback and fonts
+
+- `clipboard_image_read` / `clipboard_image_write` - clipboard images as PNG for the Kitty clipboard protocol (`clipboard_image.rs`)
+- `terminal_primary_selection_read` / `terminal_primary_selection_write` - the Linux PRIMARY selection (`primary_selection.rs`)
+- `terminal_scrollback_save` / `terminal_scrollback_load` / `terminal_scrollback_retain` - saved scrollback per pane (`terminal_scrollback.rs`)
+- `system_font_faces` - an installed family's faces, for terminal font features (`system_fonts.rs`)
 
 ### CLI control plane
 
@@ -139,7 +207,7 @@ See [CLI control plane](cli-control.md) for the local protocol and packaging mod
 
 ## See also
 
-- [`TERAX.md`](../../TERAX.md) - the architecture source of truth
+- [`AGENTS.md`](../../AGENTS.md) - the architecture source of truth
 - [`docs/README.md`](../README.md) - index of contributor guides
 - [PTY shell integration](pty-shell-integration.md) - how sessions and shell integration work
 - [Security model](security-model.md) - the boundaries every command must respect

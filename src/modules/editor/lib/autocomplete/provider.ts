@@ -54,14 +54,16 @@ export async function requestCompletion(
         anthropic: { effort: "low" },
         cerebras: { reasoningEffort: "low" },
         groq: { reasoningEffort: "low" },
-        openai: { reasoningEffort: "low" },
+        // v7 turns on detailed reasoning summaries whenever an effort is
+        // set; a completion never shows them, so keep them off.
+        openai: { reasoningEffort: "low", reasoningSummary: null },
         xai: { reasoningEffort: "low" },
       }
     : undefined;
 
   const { text } = await generateText({
     model,
-    system: COMPLETION_SYSTEM_PROMPT,
+    instructions: COMPLETION_SYSTEM_PROMPT,
     prompt: buildUserPrompt(req),
     maxOutputTokens: isReasoning
       ? MAX_OUTPUT_TOKENS_REASONING

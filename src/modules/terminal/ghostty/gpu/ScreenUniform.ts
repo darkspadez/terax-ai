@@ -1,3 +1,4 @@
+import type { LinkCellRange } from "./linkUnderline";
 import {
   SCREEN_FLAG_SEARCH_ACTIVE,
   SCREEN_FLAG_SELECTION_ACTIVE,
@@ -38,12 +39,18 @@ export type ScreenUniformState = {
   readonly cursor: CursorRect | null;
   readonly cursorColor: readonly [number, number, number];
   readonly background: readonly [number, number, number];
+  /** Default-background cells and the slack are left transparent (see the shader). */
+  readonly translucent?: boolean;
   readonly selection: SelectionUniform;
   readonly selectionColor: readonly [number, number, number];
   readonly selectionAlpha: number;
   readonly decoration: DecorationMetrics;
   readonly leftOverhangPadding: number;
   readonly contrast: TextContrast;
+  /** Ghostty's minimum contrast ratio for text (1, the default, is off). */
+  readonly minimumContrast?: number;
+  /** Cells of the hovered link to underline; absent or null for none. */
+  readonly link?: LinkCellRange | null;
 };
 
 /** Packs the shader's `Screen` uniform and detects changes without allocating. */
@@ -90,7 +97,12 @@ export class ScreenUniform {
       floats[SCREEN_OFFSET.cursorSize / 4 + 1] = state.cursor.height;
     }
     writeColor(floats, SCREEN_OFFSET.cursorColor / 4, state.cursorColor, 1);
-    writeColor(floats, SCREEN_OFFSET.themeBackground / 4, state.background, 1);
+    writeColor(
+      floats,
+      SCREEN_OFFSET.themeBackground / 4,
+      state.background,
+      state.translucent ? 0 : 1,
+    );
     writeColor(
       floats,
       SCREEN_OFFSET.selectionColor / 4,
@@ -110,9 +122,13 @@ export class ScreenUniform {
     uints[SCREEN_OFFSET.decoration / 4 + 3] = state.leftOverhangPadding;
     floats[SCREEN_OFFSET.contrast / 4] = state.contrast.enhancedContrast;
     floats[SCREEN_OFFSET.contrast / 4 + 1] = state.contrast.alphaCorrection;
+    floats[SCREEN_OFFSET.contrast / 4 + 2] = state.minimumContrast ?? 1;
     for (let index = 0; index < DWRITE_GAMMA_RATIOS.length; index += 1) {
       floats[SCREEN_OFFSET.gamma / 4 + index] = DWRITE_GAMMA_RATIOS[index];
     }
+    // An empty range (start after end) underlines nothing.
+    ints[SCREEN_OFFSET.linkCells / 4] = state.link ? state.link.start : 1;
+    ints[SCREEN_OFFSET.linkCells / 4 + 1] = state.link ? state.link.end : 0;
   }
 
   /** True if the packed state differs from what `markUploaded` last recorded. */

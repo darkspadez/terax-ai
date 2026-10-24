@@ -1,18 +1,28 @@
 import type { UIMessage } from "@ai-sdk/react";
+import { activeChatKey } from "@/lib/appWindow";
 import { invoke } from "@tauri-apps/api/core";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { toast } from "sonner";
+import type { ApprovalMode } from "./approvalMode";
+import { commandTitle, OARLOCK_CMD_RE } from "./commandMessage";
+import { MESSAGE_BLOCKS_RE } from "./messageBlocks";
+import { messageChips } from "./messageChips";
 
 export type SessionMeta = {
   id: string;
   title: string;
   createdAt: number;
   updatedAt: number;
+  /** Read through `normalizeApprovalMode`: absent (older conversations) or
+   *  anything but "auto" asks. */
+  approvalMode?: ApprovalMode;
 };
 
-const STORE_PATH = "terax-ai-sessions.json";
+const STORE_PATH = "oarlock-ai-sessions.json";
 const KEY_SESSIONS = "sessions";
-const KEY_ACTIVE = "activeId";
+/** Each window has its own active chat; the history list is shared. */
+const KEY_ACTIVE = activeChatKey();
+const ACTIVE_PREFIX = "activeId";
 const LEGACY_PREFIX = "messages:";
 /** A pre-migration copy older than this, with nothing left to migrate, goes. */
 const LEFTOVER_BACKUP_MAX_AGE_SECS = 7 * 24 * 60 * 60;
@@ -26,6 +36,8 @@ const decoder = new TextDecoder();
 export type LoadedSessions = {
   sessions: SessionMeta[];
   activeId: string | null;
+  /** The chats other windows have open. */
+  activeElsewhere: Set<string>;
 };
 
 export type FlushResult = {
@@ -49,6 +61,7 @@ const pendingWrites = new Map<string, { op: WriteOp; waiters: Waiter[] }>();
 /** The latest write that failed per session, retried on request and at close. */
 const failedWrites = new Map<string, WriteOp>();
 const notices = new Set<string>();
+const revisions = new Map<string, number>();
 
 function escapeHeader(value: unknown): string {
   return JSON.stringify(value).replace(
@@ -63,15 +76,21 @@ async function saveNative(
   messages: UIMessage[],
   options: { migrate?: boolean; durable?: boolean } = {},
 ): Promise<void> {
-  await invoke("ai_session_save", encoder.encode(JSON.stringify(messages)), {
-    headers: {
-      "x-terax-session": escapeHeader({
-        id,
-        migrate: options.migrate === true,
-        durable: options.durable === true,
-      }),
+  const revision = await invoke<number>(
+    "ai_session_save",
+    encoder.encode(JSON.stringify(messages)),
+    {
+      headers: {
+        "x-oarlock-session": escapeHeader({
+          id,
+          migrate: options.migrate === true,
+          durable: options.durable === true,
+          expectedRevision: revisions.get(id) ?? null,
+        }),
+      },
     },
-  });
+  );
+  revisions.set(id, revision);
 }
 
 /**
@@ -159,22 +178,59 @@ async function execute(id: string, op: WriteOp): Promise<void> {
   if (await store.has(legacyKey)) await store.delete(legacyKey);
 }
 
+async function saveConflictCopy(id: string): Promise<void> {
+  const latest = failedWrites.get(id);
+  if (latest?.kind !== "save") return;
+  const copyId = newSessionId();
+  await saveMessages(copyId, latest.messages, { durable: true });
+  const current = (await store.get<SessionMeta[]>(KEY_SESSIONS)) ?? [];
+  const now = Date.now();
+  await saveSessionsList([
+    {
+      id: copyId,
+      title: `${deriveTitle(latest.messages)} (copy)`,
+      createdAt: now,
+      updatedAt: now,
+      approvalMode: current.find((s) => s.id === id)?.approvalMode,
+    },
+    ...current,
+  ]);
+  await store.save();
+  if (failedWrites.get(id) === latest) {
+    failedWrites.delete(id);
+    notices.delete(id);
+    toast.dismiss(`conversation-save:${id}`);
+  }
+}
+
 function reportFailure(id: string, error: unknown) {
   notices.add(id);
-  toast.error("Could not save conversation", {
-    id: `conversation-save:${id}`,
-    duration: Number.POSITIVE_INFINITY,
-    description: String(error),
-    action: {
-      label: "Retry",
-      onClick: () => {
-        const latest = failedWrites.get(id);
-        if (latest && !pendingWrites.has(id)) {
-          void write(id, latest).catch(() => {});
-        }
+  const conflict = String(error).includes("conflict:");
+  toast.error(
+    conflict
+      ? "Conversation changed in another window"
+      : "Could not save conversation",
+    {
+      id: `conversation-save:${id}`,
+      duration: Number.POSITIVE_INFINITY,
+      description: String(error),
+      action: {
+        label: conflict ? "Save a copy" : "Retry",
+        onClick: () => {
+          if (conflict) {
+            void saveConflictCopy(id).catch((failure) =>
+              reportFailure(id, failure),
+            );
+            return;
+          }
+          const latest = failedWrites.get(id);
+          if (latest && !pendingWrites.has(id)) {
+            void write(id, latest).catch(() => {});
+          }
+        },
       },
     },
-  });
+  );
 }
 
 async function runPending(id: string): Promise<void> {
@@ -218,11 +274,37 @@ function write(id: string, op: WriteOp): Promise<void> {
 
 export async function loadAll(): Promise<LoadedSessions> {
   await migrateMessages();
-  const [sessions, activeId] = await Promise.all([
+  // Key names only: values can be large, so only the ones needed are read.
+  const otherWindows = (await store.keys()).filter(
+    (key) =>
+      key !== KEY_ACTIVE &&
+      (key === ACTIVE_PREFIX || key.startsWith(`${ACTIVE_PREFIX}:`)),
+  );
+  const [sessions, activeId, ...elsewhere] = await Promise.all([
     store.get<SessionMeta[]>(KEY_SESSIONS),
     store.get<string>(KEY_ACTIVE),
+    ...otherWindows.map((key) => store.get<string>(key)),
   ]);
-  return { sessions: sessions ?? [], activeId: activeId ?? null };
+  return {
+    sessions: Array.isArray(sessions) ? sessions : [],
+    activeId: typeof activeId === "string" ? activeId : null,
+    activeElsewhere: new Set(
+      elsewhere.filter((id): id is string => typeof id === "string"),
+    ),
+  };
+}
+
+/**
+ * Calls `onChange` with the history list whenever any window changes it, so
+ * every window shows the same list and writes it back whole without undoing
+ * another window's change.
+ */
+export function onSessionsChanged(
+  onChange: (sessions: SessionMeta[]) => void,
+): Promise<() => void> {
+  return store.onKeyChange<SessionMeta[]>(KEY_SESSIONS, (value) => {
+    if (Array.isArray(value)) onChange(value);
+  });
 }
 
 /**
@@ -235,9 +317,14 @@ export async function loadMessages(id: string): Promise<UIMessage[] | null> {
   try {
     return await serial(id, async () => {
       const buffer = await invoke<ArrayBuffer>("ai_session_load", { id });
-      return buffer.byteLength === 0
+      if (buffer.byteLength < 4)
+        throw new Error("Invalid conversation response");
+      revisions.set(id, new DataView(buffer).getUint32(0, true));
+      return buffer.byteLength === 4
         ? null
-        : (JSON.parse(decoder.decode(buffer)) as UIMessage[]);
+        : (JSON.parse(
+            decoder.decode(new Uint8Array(buffer, 4)),
+          ) as UIMessage[]);
     });
   } catch (error) {
     if (!String(error).includes("corrupt:")) throw error;
@@ -337,20 +424,40 @@ export function newSessionId(): string {
   return `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/**
+ * A conversation's title, from the first user text that names something: the
+ * user's own words (never the blocks before them); for a `/command`, the
+ * words its directive quotes or the command's label; for a message that
+ * only invokes a skill or an MCP prompt, `/skill` or `server: prompt`.
+ */
 export function deriveTitle(messages: UIMessage[]): string {
   for (const m of messages) {
     if (m.role !== "user") continue;
     for (const p of m.parts) {
       if (p.type !== "text") continue;
-      const text = (p as { text: string }).text
-        .replace(/<terminal-context[\s\S]*?<\/terminal-context>\s*/g, "")
-        .replace(/<selection[\s\S]*?<\/selection>\s*/g, "")
-        .replace(/<file[\s\S]*?<\/file>\s*/g, "")
-        .trim();
-      if (!text) continue;
-      const first = text.split("\n")[0].trim();
+      const title = textTitle((p as { text: string }).text);
+      if (!title) continue;
+      const first = title.split("\n")[0].trim();
       return first.length > 40 ? `${first.slice(0, 40)}…` : first;
     }
   }
   return "New chat";
+}
+
+function textTitle(text: string): string | null {
+  const command = OARLOCK_CMD_RE.exec(text);
+  const own = (command ? text.slice(command[0].length) : text)
+    .replace(/<terminal-context[\s\S]*?<\/terminal-context>\s*/g, "")
+    .replace(MESSAGE_BLOCKS_RE, "")
+    .trim();
+  if (command) return commandTitle(command[1], own);
+  if (own) return own;
+  for (const chip of messageChips(text).chips) {
+    // Names a server or a project file chose: one line however written.
+    if (chip.kind === "skill") return `/${chip.name}`.replace(/\s+/g, " ");
+    if (chip.kind === "mcp-prompt") {
+      return `${chip.server}: ${chip.name}`.replace(/\s+/g, " ");
+    }
+  }
+  return null;
 }

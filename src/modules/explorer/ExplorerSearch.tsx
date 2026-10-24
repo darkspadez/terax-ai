@@ -1,4 +1,5 @@
 import { Input } from "@/components/ui/input";
+import { isImeKeyEvent } from "@/lib/ime";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   ContextMenu,
@@ -15,6 +16,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { currentWorkspaceEnv } from "@/modules/workspace";
+import { PrivacyRefusalNotice, usePrivacyRefusal } from "@/modules/mac-privacy";
 import {
   forwardRef,
   useEffect,
@@ -24,7 +26,13 @@ import {
 } from "react";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { FileIcon } from "./FileIcon";
-import { copyToClipboard, revealInFinder } from "./lib/contextActions";
+import {
+  copyToClipboard,
+  REVEAL_LABEL,
+  relativePath,
+  revealInFinder,
+} from "./lib/contextActions";
+import { openInDefaultApp } from "./lib/openDefault";
 import { COMPACT_CONTENT, COMPACT_ITEM } from "./lib/menuItemClass";
 import { cn } from "@/lib/utils";
 
@@ -79,6 +87,8 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [searching, setSearching] = useState(false);
   const [truncated, setTruncated] = useState(false);
+  const [failure, setFailure] = useState<unknown>(null);
+  const refusal = usePrivacyRefusal(rootPath, failure);
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastKeyboardNavAt = useRef(0);
@@ -98,6 +108,7 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
       setSelectedIndex(0);
       setSearching(false);
       setTruncated(false);
+      setFailure(null);
     }
   }, [open]);
 
@@ -108,11 +119,13 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
       setSelectedIndex(0);
       setSearching(false);
       setTruncated(false);
+      setFailure(null);
       return;
     }
     setSearching(true);
     let alive = true;
     const handle = setTimeout(async () => {
+      setFailure(null);
       try {
         const res = await invoke<SearchResult>("fs_search", {
           root: rootPath,
@@ -130,6 +143,7 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
       } catch (e) {
         if (alive) {
           console.error("fs_search failed:", e);
+          setFailure(e);
           setResults([]);
           setTruncated(false);
           setSelectedIndex(0);
@@ -186,6 +200,8 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
+              // Keys that confirm or cancel an input method's candidate are the IME's.
+              if (isImeKeyEvent(e.nativeEvent)) return;
               if (e.key === "Escape") {
                 e.preventDefault();
                 e.stopPropagation();
@@ -233,9 +249,13 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
                 Searching…
               </div>
             ) : results.length === 0 ? (
-              <div className="px-3 py-2 text-[11px] text-muted-foreground">
-                No matches
-              </div>
+              refusal ? (
+                <PrivacyRefusalNotice refusal={refusal} className="px-3 py-3" />
+              ) : (
+                <div className="px-3 py-2 text-[11px] text-muted-foreground">
+                  No matches
+                </div>
+              )
             ) : (
               results.map((hit, index) => {
                 const isSelected = index === selectedIndex;
@@ -285,6 +305,14 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
                           Open
                         </ContextMenuItem>
                       )}
+                      {!hit.is_dir && (
+                        <ContextMenuItem
+                          className={COMPACT_ITEM}
+                          onSelect={() => void openInDefaultApp(hit.path)}
+                        >
+                          Open in Default App
+                        </ContextMenuItem>
+                      )}
                       {hit.is_dir && onRevealInTerminal && (
                         <ContextMenuItem
                           className={COMPACT_ITEM}
@@ -313,7 +341,7 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
                         className={COMPACT_ITEM}
                         onSelect={() => void revealInFinder(hit.path)}
                       >
-                        Reveal in Finder
+                        {REVEAL_LABEL}
                       </ContextMenuItem>
                       <ContextMenuSeparator />
                       <ContextMenuItem
@@ -321,6 +349,14 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
                         onSelect={() => void copyToClipboard(hit.path)}
                       >
                         Copy Path
+                      </ContextMenuItem>
+                      <ContextMenuItem
+                        className={COMPACT_ITEM}
+                        onSelect={() =>
+                          void copyToClipboard(relativePath(rootPath, hit.path))
+                        }
+                      >
+                        Copy Relative Path
                       </ContextMenuItem>
                       <ContextMenuSeparator />
                       <ContextMenuItem

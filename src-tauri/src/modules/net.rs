@@ -11,10 +11,11 @@ use tauri::ipc::{InvokeBody, JavaScriptChannelId, Request, Response};
 use tauri::{State, WebviewWindow};
 
 mod clients;
+pub mod image;
 mod ip;
 mod stream;
 use super::ipc_body;
-use clients::{client_for, Profile};
+pub(crate) use clients::{client_for, Profile};
 use ip::{ip_kind, IpKind};
 pub use stream::AiStreamState;
 
@@ -31,7 +32,7 @@ const HEADER_BLOCKLIST: &[&str] = &[
     "expect",
 ];
 
-fn is_blocked_host_name(host: &str) -> bool {
+pub(crate) fn is_blocked_host_name(host: &str) -> bool {
     let host = host.to_ascii_lowercase();
     matches!(
         host.as_str(),
@@ -96,7 +97,7 @@ fn validate_url(url: &str, allow_private: bool) -> Result<reqwest::Url, String> 
 /// Classify the host AND return safe IPs to pin reqwest's resolver to.
 /// Defeats DNS rebinding (second-lookup-returns-different-IP) by reusing
 /// exactly the addresses that passed `ip_kind`.
-async fn classify_and_collect_safe_ips(
+pub(crate) async fn classify_and_collect_safe_ips(
     host: &str,
     allow_private: bool,
 ) -> Result<Vec<IpAddr>, String> {
@@ -124,7 +125,24 @@ async fn classify_and_collect_safe_ips(
     Ok(safe)
 }
 
-fn sanitize_headers(headers: Option<HashMap<String, String>>) -> Result<HeaderMap, String> {
+/// Whether `host` (a server URL the user configured) is a local or private
+/// one, which its requests may then keep reaching: a public host never may,
+/// so a DNS answer cannot move it onto the user's network. Metadata hosts
+/// are refused.
+pub(crate) async fn host_is_private(host: &str) -> Result<bool, String> {
+    if is_blocked_host_name(host) {
+        return Err(format!("host not allowed: {host}"));
+    }
+    match resolve_and_classify(host).await?.0 {
+        IpKind::BlockedMetadata => Err(format!("host not allowed: {host}")),
+        IpKind::Loopback | IpKind::Private => Ok(true),
+        IpKind::Public => Ok(false),
+    }
+}
+
+pub(crate) fn sanitize_headers(
+    headers: Option<HashMap<String, String>>,
+) -> Result<HeaderMap, String> {
     let mut map = HeaderMap::new();
     let Some(h) = headers else { return Ok(map) };
     for (k, v) in h {
@@ -141,6 +159,22 @@ fn sanitize_headers(headers: Option<HashMap<String, String>>) -> Result<HeaderMa
         map.insert(name, value);
     }
     Ok(map)
+}
+
+/// reqwest's own message ("error sending request for url (...)") hides why a
+/// request failed; its sources name the cause (DNS, refused, TLS certificate).
+pub(crate) fn error_chain(error: &dyn std::error::Error) -> String {
+    let mut message = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        let text = cause.to_string();
+        if !message.contains(&text) {
+            message.push_str(": ");
+            message.push_str(&text);
+        }
+        source = cause.source();
+    }
+    message
 }
 
 #[tauri::command]
@@ -163,7 +197,7 @@ pub async fn lm_ping(base_url: String) -> Result<u16, String> {
         .send()
         .await
         .map(|r| r.status().as_u16())
-        .map_err(|e| e.to_string())
+        .map_err(|e| error_chain(&e))
 }
 
 // AI HTTP proxy — bypasses webview CORS / Mixed-Content / PNA so local-network
@@ -186,7 +220,7 @@ fn build_request(
     Ok(req)
 }
 
-fn header_map_to_strings(headers: &HeaderMap) -> HashMap<String, String> {
+pub(crate) fn header_map_to_strings(headers: &HeaderMap) -> HashMap<String, String> {
     let mut out = HashMap::with_capacity(headers.len());
     for (k, v) in headers {
         if let Ok(s) = v.to_str() {
@@ -203,7 +237,7 @@ struct StreamHeaders {
 }
 
 /// Packet kinds the webview decodes: 0 headers, 1 body, 2 end, 3 error.
-fn stream_packet(kind: u8, bytes: &[u8]) -> Response {
+pub(crate) fn stream_packet(kind: u8, bytes: &[u8]) -> Response {
     let mut packet = Vec::with_capacity(bytes.len() + 1);
     packet.push(kind);
     packet.extend_from_slice(bytes);
@@ -216,7 +250,7 @@ const MAX_REQUEST_BYTES: usize = 64 * 1024 * 1024;
 /// returns, while the request task outlives the command, so exactly one copy
 /// is needed to hand the body over. The platform fallback that delivers JSON
 /// instead of raw bytes is handled by `ipc_body`.
-fn request_body(body: &InvokeBody) -> Result<Option<Bytes>, String> {
+pub(crate) fn request_body(body: &InvokeBody) -> Result<Option<Bytes>, String> {
     let bytes = ipc_body::bytes_of(body, MAX_REQUEST_BYTES, ipc_body::JSON_FALLBACK_MAX_BYTES)?;
     Ok(match bytes {
         _ if bytes.is_empty() => None,
@@ -244,7 +278,7 @@ pub async fn ai_http_stream(
 ) -> Result<(), String> {
     let metadata = request
         .headers()
-        .get("x-terax-ai-request")
+        .get("x-oarlock-ai-request")
         .and_then(|value| value.to_str().ok())
         .filter(|value| value.len() <= 64 * 1024)
         .ok_or("missing or oversized AI request metadata")?;
@@ -267,7 +301,7 @@ pub async fn ai_http_stream(
             let safe_ips = classify_and_collect_safe_ips(&host, allow_private).await?;
             let client = client_for(Profile::Stream, &host, &safe_ips, allow_private)?;
             let request = build_request(&client, &method, parsed, headers, body)?;
-            let response = request.send().await.map_err(|e| e.to_string())?;
+            let response = request.send().await.map_err(|e| error_chain(&e))?;
             let metadata = serde_json::to_vec(&StreamHeaders {
                 status: response.status().as_u16(),
                 headers: header_map_to_strings(response.headers()),
@@ -300,7 +334,7 @@ pub async fn ai_http_stream(
 /// while the window is full the next packet keeps filling from the network, so
 /// a slow consumer sees fewer, larger messages rather than a backlog of tiny
 /// ones.
-async fn pump<S, E>(
+pub(crate) async fn pump<S, E>(
     mut chunks: S,
     control: &stream::StreamControl,
     mut send: impl FnMut(Vec<u8>) -> Result<(), String>,
@@ -397,6 +431,46 @@ pub async fn ai_http_ack(
 mod tests {
     use super::*;
     use std::net::Ipv4Addr;
+
+    #[derive(Debug)]
+    struct Layer(&'static str, Option<Box<Layer>>);
+
+    impl std::fmt::Display for Layer {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(self.0)
+        }
+    }
+
+    impl std::error::Error for Layer {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            self.1.as_deref().map(|e| e as _)
+        }
+    }
+
+    #[test]
+    fn error_chain_names_the_cause() {
+        let error = Layer(
+            "error sending request for url (https://llm.internal/v1/models)",
+            Some(Box::new(Layer(
+                "client error (Connect)",
+                Some(Box::new(Layer(
+                    "invalid peer certificate: UnknownIssuer",
+                    None,
+                ))),
+            ))),
+        );
+        assert_eq!(
+            error_chain(&error),
+            "error sending request for url (https://llm.internal/v1/models): \
+             client error (Connect): invalid peer certificate: UnknownIssuer"
+        );
+        // A layer that repeats its source's text is not shown twice.
+        let repeated = Layer(
+            "dns: no addresses",
+            Some(Box::new(Layer("no addresses", None))),
+        );
+        assert_eq!(error_chain(&repeated), "dns: no addresses");
+    }
 
     #[test]
     fn metadata_ips_classified_as_blocked() {
@@ -594,6 +668,22 @@ mod tests {
             .block_on(resolve_and_classify("[2606:4700::1111]"))
             .unwrap();
         assert_eq!(kind, IpKind::Public);
+    }
+
+    #[test]
+    fn a_configured_host_is_private_only_when_it_resolves_there() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        assert_eq!(rt.block_on(host_is_private("127.0.0.1")), Ok(true));
+        assert_eq!(rt.block_on(host_is_private("[::1]")), Ok(true));
+        assert_eq!(rt.block_on(host_is_private("10.0.0.7")), Ok(true));
+        assert_eq!(rt.block_on(host_is_private("1.1.1.1")), Ok(false));
+        assert!(rt.block_on(host_is_private("169.254.169.254")).is_err());
+        assert!(rt.block_on(host_is_private("[::ffff:169.254.169.254]")).is_err());
+        assert!(rt
+            .block_on(host_is_private("metadata.google.internal"))
+            .is_err());
     }
 
     #[test]

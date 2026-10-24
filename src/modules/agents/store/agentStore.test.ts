@@ -1,4 +1,4 @@
-﻿import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { nextAttentionTarget, useAgentStore } from "./agentStore";
 import type { AgentNotification } from "../lib/types";
 
@@ -91,6 +91,16 @@ describe("agent session store", () => {
     expect(useAgentStore.getState().notifications.every((n) => n.read)).toBe(true);
   });
 
+  it("removeNotification drops only that notification", () => {
+    push({ leafId: 1, tabId: 1 });
+    push({ leafId: 2, tabId: 2 });
+    const [newest, oldest] = useAgentStore.getState().notifications;
+
+    useAgentStore.getState().removeNotification(oldest.id);
+
+    expect(useAgentStore.getState().notifications).toEqual([newest]);
+  });
+
   it("nextAttentionTarget returns the most recently waiting agent", () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);
@@ -107,6 +117,34 @@ describe("agent session store", () => {
     useAgentStore.getState().setStatus(1, "waiting");
 
     expect(nextAttentionTarget()).toEqual({ tabId: 10, leafId: 1 });
+  });
+
+  it("moveLeafToTab retargets only the moved leaf's session and notifications", () => {
+    useAgentStore.getState().start(7, 3, "claude");
+    useAgentStore.getState().start(8, 3, "codex");
+    push({ leafId: 7, tabId: 3 });
+    push({ leafId: 8, tabId: 3 });
+
+    useAgentStore.getState().moveLeafToTab(7, 5);
+
+    const { sessions, notifications } = useAgentStore.getState();
+    expect(sessions[7]).toMatchObject({ leafId: 7, tabId: 5, agent: "claude" });
+    expect(sessions[8].tabId).toBe(3);
+    expect(notifications.map((n) => [n.leafId, n.tabId])).toEqual([
+      [8, 3],
+      [7, 5],
+    ]);
+  });
+
+  it("moveLeafToTab skips the write when nothing references the leaf", () => {
+    useAgentStore.getState().start(8, 3, "codex");
+    const before = useAgentStore.getState();
+
+    useAgentStore.getState().moveLeafToTab(7, 5);
+    useAgentStore.getState().moveLeafToTab(8, 3);
+
+    expect(useAgentStore.getState().sessions).toBe(before.sessions);
+    expect(useAgentStore.getState().notifications).toBe(before.notifications);
   });
 
 });

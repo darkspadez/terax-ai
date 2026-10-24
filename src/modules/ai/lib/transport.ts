@@ -1,34 +1,34 @@
+import { mcpToolsForRun } from "@/modules/mcp";
 import type { UIMessage } from "@ai-sdk/react";
-import type { CustomEndpoint } from "../config";
+import { toUIMessageStream } from "ai";
+import type { AgentSkills } from "@/modules/skills/catalog";
+import { type CustomEndpoint, resolveContextLimit } from "../config";
 import { runAgentStream, type AgentUsageDelta } from "./agent";
+import { maxMemoryBytes } from "./compact";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { formatAiError } from "./errors";
-import { native } from "./native";
+import { pathText } from "./messageBlocks";
+import { native, type ProjectMemory } from "./native";
 import type { ToolContext } from "../tools/tools";
+import type { ApprovalMode } from "./approvalMode";
+import type { ReasoningEffort } from "./reasoningEffort";
 
-const TERAX_MD_MAX_BYTES = 32 * 1024;
-type MemoryCacheEntry = { content: string | null; mtime: number };
-const projectMemoryCache = new Map<string, MemoryCacheEntry>();
-
-async function readTeraxMd(workspaceRoot: string | null): Promise<string | null> {
+/**
+ * The project's AGENTS.md for this run. The backend reads it and returns it only
+ * while the user allows its current content (project trust), so it is asked on
+ * every run: a withdrawn answer or a changed file stops reaching the model at
+ * once. Without it the run goes on with no project memory. The whole file is
+ * sent, whatever its size; above `limit` bytes (more than the model could take)
+ * only its size comes back, and the run says it does not fit.
+ */
+async function readAgentsMd(
+  workspaceRoot: string | null,
+  limit: number,
+): Promise<ProjectMemory | null> {
   if (!workspaceRoot) return null;
-  const path = `${workspaceRoot.replace(/\/$/, "")}/TERAX.md`;
-  const cached = projectMemoryCache.get(workspaceRoot);
-  if (cached && Date.now() - cached.mtime < 30_000) return cached.content;
   try {
-    const r = await native.readFile(path);
-    if (r.kind !== "text") {
-      projectMemoryCache.set(workspaceRoot, { content: null, mtime: Date.now() });
-      return null;
-    }
-    const content =
-      r.content.length > TERAX_MD_MAX_BYTES
-        ? r.content.slice(0, TERAX_MD_MAX_BYTES)
-        : r.content;
-    projectMemoryCache.set(workspaceRoot, { content, mtime: Date.now() });
-    return content;
+    return await native.readProjectMemory(workspaceRoot, limit);
   } catch {
-    projectMemoryCache.set(workspaceRoot, { content: null, mtime: Date.now() });
     return null;
   }
 }
@@ -64,6 +64,12 @@ type Deps = {
   onCompact?: (info: { droppedCount: number }) => void;
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
   getPlanMode?: () => boolean;
+  /** The conversation's approval mode, read on every gated tool call. */
+  getApprovalMode?: () => ApprovalMode;
+  /** The effort remembered for the run's model, if one was chosen. */
+  getReasoningEffort?: () => ReasoningEffort | undefined;
+  /** The skills a run in this workspace may use. */
+  getSkills?: (workspaceRoot: string | null) => Promise<AgentSkills>;
 };
 
 type SendOptions = {
@@ -75,12 +81,24 @@ type SendOptions = {
 export function createContextAwareTransport(deps: Deps) {
   const run = async (options: SendOptions) => {
     const live = deps.getLive();
-    const projectMemory = await readTeraxMd(live.workspaceRoot);
+    const contextLimit = resolveContextLimit(
+      deps.getModelId(),
+      deps.getCustomEndpoints?.() ?? [],
+      deps.getOpenaiCompatibleContextLimit?.(),
+    );
+    const [projectMemory, mcp, skills] = await Promise.all([
+      readAgentsMd(live.workspaceRoot, maxMemoryBytes(contextLimit)),
+      mcpToolsForRun({
+        signal: options.abortSignal,
+        onWaiting: () => deps.onStep?.("Starting MCP servers"),
+      }),
+      deps.getSkills?.(live.workspaceRoot),
+    ]);
     const envBlock = formatEnvBlock(live);
     const messagesForRun = envBlock
       ? injectEnvIntoLastUser(options.messages, envBlock)
       : options.messages;
-    const result = await runAgentStream({
+    const run = await runAgentStream({
       keys: deps.getKeys(),
       modelId: deps.getModelId(),
       customInstructions: deps.getCustomInstructions(),
@@ -103,11 +121,20 @@ export function createContextAwareTransport(deps: Deps) {
       customEndpoints: deps.getCustomEndpoints?.(),
       customEndpointKeys: deps.getCustomEndpointKeys?.(),
       planMode: deps.getPlanMode?.(),
+      approvalState: () => ({
+        mode: deps.getApprovalMode?.() ?? "ask",
+        planMode: deps.getPlanMode?.() ?? false,
+      }),
+      reasoningEffort: deps.getReasoningEffort?.(),
       projectMemory,
+      mcp,
+      skills,
       uiMessages: messagesForRun,
       abortSignal: options.abortSignal,
     });
-    return result.toUIMessageStream({
+    return toUIMessageStream({
+      stream: run.stream,
+      tools: run.tools,
       originalMessages: options.messages,
       onError: formatAiError,
     });
@@ -151,11 +178,16 @@ function injectEnvIntoLastUser(
   return messages;
 }
 
+/** The run's environment for the model. A path is a folder or file name the
+ *  user did not type, so it may hold a newline or `</env>`: each stays on its
+ *  own line (`pathText`). */
 function formatEnvBlock(live: LiveSnapshot): string | null {
   const lines: string[] = [];
-  if (live.workspaceRoot) lines.push(`workspace_root: ${live.workspaceRoot}`);
-  if (live.cwd) lines.push(`active_terminal_cwd: ${live.cwd}`);
-  if (live.activeFile) lines.push(`active_file: ${live.activeFile}`);
+  if (live.workspaceRoot) {
+    lines.push(`workspace_root: ${pathText(live.workspaceRoot)}`);
+  }
+  if (live.cwd) lines.push(`active_terminal_cwd: ${pathText(live.cwd)}`);
+  if (live.activeFile) lines.push(`active_file: ${pathText(live.activeFile)}`);
   if (live.terminalPrivate) lines.push("active_terminal_mode: private");
   if (lines.length === 0) return null;
   return `<env>\n${lines.join("\n")}\n</env>`;

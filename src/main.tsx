@@ -4,15 +4,19 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import ReactDOM from "react-dom/client";
 import App from "./app/App";
-import { initLaunchDir } from "./lib/launchDir";
+import { initLaunchDir, isOpenedNow } from "./lib/launchDir";
+import { installNativeContextMenuGuard } from "./lib/nativeContextMenu";
 import { USE_CUSTOM_WINDOW_CONTROLS } from "./lib/platform";
+import { installWindowFrame } from "./lib/windowFrame";
 import { terminalDiagnosticsEnabled } from "@/modules/terminal/lib/terminalDiagnosticsEnabled";
 
 if (USE_CUSTOM_WINDOW_CONTROLS) {
   document.documentElement.dataset.chrome = "borderless";
 }
+installNativeContextMenuGuard();
+installWindowFrame();
 
-// Render-instrumentation overlay, opt-in: `VITE_REACT_SCAN=true pnpm dev`.
+// Render-instrumentation overlay, opt-in: `VITE_REACT_SCAN=true bun run dev`.
 // Dev-only dynamic import so it never reaches the production bundle.
 if (import.meta.env.DEV && import.meta.env.VITE_REACT_SCAN === "true") {
   const { scan } = await import("react-scan");
@@ -20,8 +24,8 @@ if (import.meta.env.DEV && import.meta.env.VITE_REACT_SCAN === "true") {
 }
 
 // Real-application benchmark (scripts/app-lab): scenario flags must be in force before any
-// terminal module reads them. Removed entirely unless the build sets TERAX_BENCH=1.
-if (__TERAX_BENCH__) {
+// terminal module reads them. Removed entirely unless the build sets OARLOCK_BENCH=1.
+if (__OARLOCK_BENCH__) {
   const { installBenchEarly } = await import("@/bench/early");
   await installBenchEarly();
 }
@@ -39,9 +43,14 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 // Window starts hidden (per tauri.conf.json) so users never see a transparent
 // shadow-only frame before React paints. Use setTimeout — rAF is throttled
 // while the window is hidden and would never fire.
+// A window opened just now (a later launch from Explorer, Finder or a shell
+// included) comes to the front; showing alone leaves it behind on macOS.
+const focusOnShow = isOpenedNow();
 const showWindow = () => {
-  getCurrentWindow()
+  const current = getCurrentWindow();
+  current
     .show()
+    .then(() => (focusOnShow ? current.setFocus() : undefined))
     .catch((e) => console.error("window.show failed:", e));
 };
 setTimeout(showWindow, 50);

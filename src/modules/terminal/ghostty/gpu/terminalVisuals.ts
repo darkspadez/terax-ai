@@ -41,6 +41,18 @@ export type TerminalGpuTheme = {
     readonly alpha: number;
   };
   readonly palette: readonly Rgb[];
+  /** Ghostty's minimum contrast ratio for text; 1 or absent is off. */
+  readonly minimumContrast?: number;
+  /**
+   * A Ghostty/Shadertoy custom shader run over each frame; the WebGL
+   * renderer applies it (`webgl/customShader.ts`).
+   */
+  readonly customShader?: string | null;
+  /**
+   * The window shows through the default background (`theme/terminalTranslucency.ts`):
+   * cells on it are left transparent, the page paints the colour behind them.
+   */
+  readonly translucent?: boolean;
 };
 
 let colorCanvas: HTMLCanvasElement | null = null;
@@ -162,10 +174,19 @@ export function fontCss(
   return `${italic ? "italic " : ""}${weight} ${font.size}px ${font.family}`;
 }
 
-export function readTerminalGpuTheme(): TerminalGpuTheme {
+export function readTerminalGpuTheme(
+  options: {
+    readonly minimumContrast?: number;
+    readonly customShader?: string | null;
+    readonly translucent?: boolean;
+  } = {},
+): TerminalGpuTheme {
   const tokens = readTerminalTokens();
   const selection = cssColorToRgba(tokens.selection);
   return {
+    minimumContrast: options.minimumContrast ?? 1,
+    customShader: options.customShader ?? null,
+    translucent: options.translucent ?? false,
     background: cssColorToRgb(tokens.background),
     foreground: cssColorToRgb(tokens.foreground),
     cursor: cssColorToRgb(tokens.cursor),

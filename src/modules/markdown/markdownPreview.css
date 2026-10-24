@@ -1,0 +1,425 @@
+/* The rendered Markdown preview (RenderedMarkdown.tsx), laid out after
+   GitHub's own stylesheet for rendered Markdown (github-markdown-css) on the
+   app theme's colours: GitHub's greys become mixes of the theme's foreground
+   and background in GitHub's proportions, links take the theme's primary
+   colour as in the editor and the chat, and only the alert hues are GitHub's.
+
+   The rules are unlayered, so they win over Tailwind's preflight and
+   utilities, with GitHub's specificity (`.markdown-body p`). Blocks that
+   style themselves with utilities (.not-prose: a Mermaid diagram's frame)
+   are kept out of the rules that would reach inside them. */
+
+.markdown-body {
+  --md-fg-muted: var(--muted-foreground);
+  --md-bg: var(--background);
+  --md-bg-muted: color-mix(in srgb, var(--foreground) 4%, var(--background));
+  --md-bg-neutral: color-mix(in srgb, var(--foreground) 9%, transparent);
+  --md-border: color-mix(in srgb, var(--foreground) 18%, var(--background));
+  --md-border-muted: color-mix(
+    in srgb,
+    var(--foreground) 12%,
+    var(--background)
+  );
+  --md-link: var(--primary);
+  --md-mono: var(
+    --font-mono,
+    ui-monospace,
+    SFMono-Regular,
+    "SF Mono",
+    Menlo,
+    Consolas,
+    "Liberation Mono",
+    monospace
+  );
+
+  /* A centred reading column, GitHub's width. */
+  box-sizing: border-box;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 24px clamp(16px, 5%, 40px) 48px;
+  color: var(--foreground);
+  font-size: 16px;
+  line-height: 1.5;
+  overflow-wrap: break-word;
+}
+
+/* Blocks */
+
+.markdown-body
+  :is(p, blockquote, ul, ol, dl, table, pre, details):where(
+    :not(.not-prose *)
+  ) {
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+
+.markdown-body .not-prose {
+  margin: 0 0 16px;
+}
+
+/* Streamdown renders the document inside one div. */
+.markdown-body > :first-child,
+.markdown-body > div:first-child > :first-child {
+  margin-top: 0;
+}
+.markdown-body > :last-child,
+.markdown-body > div:last-child > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body :is(h1, h2, h3, h4, h5, h6) {
+  margin-top: 24px;
+  margin-bottom: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.markdown-body h1 {
+  padding-bottom: 0.3em;
+  font-size: 2em;
+  border-bottom: 1px solid var(--md-border-muted);
+}
+.markdown-body h2 {
+  padding-bottom: 0.3em;
+  font-size: 1.5em;
+  border-bottom: 1px solid var(--md-border-muted);
+}
+.markdown-body h3 {
+  font-size: 1.25em;
+}
+.markdown-body h4 {
+  font-size: 1em;
+}
+.markdown-body h5 {
+  font-size: 0.875em;
+}
+.markdown-body h6 {
+  font-size: 0.85em;
+  color: var(--md-fg-muted);
+}
+/* A heading in a summary stays on the disclosure triangle's line. */
+.markdown-body summary :is(h1, h2, h3, h4, h5, h6) {
+  display: inline-block;
+}
+.markdown-body summary :is(h1, h2) {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.markdown-body blockquote {
+  padding: 0 1em;
+  color: var(--md-fg-muted);
+  border-left: 0.25em solid var(--md-border);
+}
+.markdown-body blockquote > :first-child {
+  margin-top: 0;
+}
+.markdown-body blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body hr {
+  box-sizing: content-box;
+  height: 0.25em;
+  padding: 0;
+  margin: 24px 0;
+  overflow: hidden;
+  background-color: var(--md-border);
+  border: 0;
+}
+
+.markdown-body details {
+  display: block;
+}
+.markdown-body summary {
+  display: list-item;
+  cursor: pointer;
+}
+
+/* Lists. Tailwind's preflight takes every marker away. */
+
+.markdown-body :is(ul, ol) {
+  padding-left: 2em;
+}
+.markdown-body ul {
+  list-style-type: disc;
+}
+.markdown-body ul ul {
+  list-style-type: circle;
+}
+.markdown-body ul ul ul {
+  list-style-type: square;
+}
+.markdown-body ol {
+  list-style-type: decimal;
+}
+.markdown-body :is(ol, ul) ol {
+  list-style-type: lower-roman;
+}
+.markdown-body :is(ol, ul) :is(ol, ul) ol {
+  list-style-type: lower-alpha;
+}
+.markdown-body :is(ul, ol) :is(ul, ol) {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+.markdown-body li + li {
+  margin-top: 0.25em;
+}
+.markdown-body li > p {
+  margin-top: 16px;
+}
+
+.markdown-body .task-list-item {
+  list-style-type: none;
+}
+.markdown-body .task-list-item input[type="checkbox"] {
+  margin: 0 0.2em 0.25em -1.4em;
+  vertical-align: middle;
+}
+
+.markdown-body dl {
+  padding: 0;
+}
+.markdown-body dt {
+  padding: 0;
+  margin-top: 16px;
+  font-style: italic;
+  font-weight: 600;
+}
+.markdown-body dd {
+  padding: 0 16px;
+  margin: 0 0 16px;
+}
+
+/* Tables size to their content and scroll sideways when wider than the
+   column. Without an alignment row, header cells keep the browser's
+   centring, as on GitHub. */
+
+.markdown-body table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow: auto;
+  border-spacing: 0;
+  border-collapse: collapse;
+  font-variant: tabular-nums;
+}
+.markdown-body :is(th, td) {
+  padding: 6px 13px;
+  border: 1px solid var(--md-border);
+}
+.markdown-body th {
+  font-weight: 600;
+}
+.markdown-body tr {
+  background-color: var(--md-bg);
+  border-top: 1px solid var(--md-border-muted);
+}
+.markdown-body tr:nth-child(2n) {
+  background-color: var(--md-bg-muted);
+}
+.markdown-body td > :last-child {
+  margin-bottom: 0;
+}
+/* The frontmatter's key/value rows span the column and wrap their values. */
+.markdown-body table.markdown-frontmatter {
+  display: table;
+  width: 100%;
+}
+
+/* Inline */
+
+.markdown-body a {
+  color: var(--md-link);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--md-link) 45%, transparent);
+  text-underline-offset: 0.2rem;
+}
+.markdown-body a:hover {
+  text-decoration-color: currentColor;
+}
+
+.markdown-body :is(b, strong) {
+  font-weight: 600;
+}
+
+/* Images flow with the text (preflight makes them blocks), so badges sit in
+   a row and `<p align="center">` centres a logo. */
+.markdown-body img {
+  display: inline;
+  max-width: 100%;
+  box-sizing: content-box;
+  vertical-align: baseline;
+  border-style: none;
+}
+.markdown-body img[align="right"] {
+  padding-left: 20px;
+}
+.markdown-body img[align="left"] {
+  padding-right: 20px;
+}
+
+.markdown-body :is(code, kbd, samp, tt):where(:not(.not-prose *)) {
+  font-family: var(--md-mono);
+}
+.markdown-body :is(code, samp, tt):where(:not(.not-prose *)) {
+  padding: 0.2em 0.4em;
+  margin: 0;
+  font-size: 85%;
+  white-space: break-spaces;
+  background-color: var(--md-bg-neutral);
+  border-radius: 6px;
+}
+.markdown-body :is(h1, h2, h3, h4, h5, h6) code {
+  padding: 0 0.2em;
+  font-size: inherit;
+}
+
+/* Code blocks (PreviewCode.tsx) and raw <pre>: GitHub's box, with a copy
+   button that shows on hover. */
+
+.markdown-body pre:where(:not(.not-prose *)) {
+  padding: 16px;
+  overflow: auto;
+  font-family: var(--md-mono);
+  font-size: 85%;
+  line-height: 1.45;
+  color: var(--foreground);
+  overflow-wrap: normal;
+  background-color: var(--md-bg-muted);
+  border-radius: 6px;
+}
+.markdown-body pre code {
+  display: inline;
+  padding: 0;
+  margin: 0;
+  overflow: visible;
+  font-size: 100%;
+  line-height: inherit;
+  white-space: pre;
+  word-break: normal;
+  background-color: transparent;
+  border: 0;
+  border-radius: 0;
+}
+.markdown-body .markdown-code-block {
+  position: relative;
+  margin-bottom: 16px;
+}
+.markdown-body .markdown-code-block > pre {
+  margin-bottom: 0;
+}
+.markdown-body .markdown-code-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  padding: 3px;
+  background-color: var(--md-bg-muted);
+  border: 1px solid var(--md-border);
+  border-radius: 6px;
+  opacity: 0;
+}
+.markdown-body .markdown-code-block:hover .markdown-code-copy,
+.markdown-body .markdown-code-copy:focus-within {
+  opacity: 1;
+}
+
+.markdown-body kbd {
+  display: inline-block;
+  padding: 4px;
+  font-size: 11px;
+  line-height: 10px;
+  color: var(--foreground);
+  vertical-align: middle;
+  background-color: var(--md-bg-muted);
+  border: 1px solid var(--md-border-muted);
+  border-radius: 6px;
+  box-shadow: inset 0 -1px 0 var(--md-border-muted);
+}
+
+/* Footnotes */
+
+.markdown-body [data-footnote-ref]::before {
+  content: "[";
+}
+.markdown-body [data-footnote-ref]::after {
+  content: "]";
+}
+.markdown-body .footnotes {
+  font-size: 12px;
+  color: var(--md-fg-muted);
+  border-top: 1px solid var(--md-border);
+}
+.markdown-body .footnotes ol {
+  padding-left: 16px;
+}
+
+/* GitHub alerts (githubAlerts.ts), in GitHub's hues with its octicons. The
+   icons are masks painted in the title's colour, so the sanitizer never has
+   to let SVG through. */
+
+.markdown-body .markdown-alert {
+  --markdown-alert: #0969da;
+  padding: 8px 16px;
+  margin-bottom: 16px;
+  color: inherit;
+  border-left: 0.25em solid var(--markdown-alert);
+}
+.markdown-body .markdown-alert > :first-child {
+  margin-top: 0;
+}
+.markdown-body .markdown-alert > :last-child {
+  margin-bottom: 0;
+}
+.markdown-body .markdown-alert > .markdown-alert-title {
+  display: flex;
+  align-items: center;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--markdown-alert);
+}
+.markdown-body .markdown-alert > .markdown-alert-title::before {
+  content: "";
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  background-color: currentColor;
+  -webkit-mask: var(--markdown-alert-icon) center / contain no-repeat;
+  mask: var(--markdown-alert-icon) center / contain no-repeat;
+}
+.markdown-body .markdown-alert-note {
+  --markdown-alert-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.5 7.75A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z'/%3E%3C/svg%3E");
+}
+.markdown-body .markdown-alert-tip {
+  --markdown-alert: #1a7f37;
+  --markdown-alert-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z'/%3E%3C/svg%3E");
+}
+.markdown-body .markdown-alert-important {
+  --markdown-alert: #8250df;
+  --markdown-alert-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Zm7 2.25v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z'/%3E%3C/svg%3E");
+}
+.markdown-body .markdown-alert-warning {
+  --markdown-alert: #9a6700;
+  --markdown-alert-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z'/%3E%3C/svg%3E");
+}
+.markdown-body .markdown-alert-caution {
+  --markdown-alert: #d1242f;
+  --markdown-alert-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .389.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25a.749.749 0 0 1-.53.22H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.389.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z'/%3E%3C/svg%3E");
+}
+.dark .markdown-body .markdown-alert-note {
+  --markdown-alert: #4493f8;
+}
+.dark .markdown-body .markdown-alert-tip {
+  --markdown-alert: #3fb950;
+}
+.dark .markdown-body .markdown-alert-important {
+  --markdown-alert: #ab7df8;
+}
+.dark .markdown-body .markdown-alert-warning {
+  --markdown-alert: #d29922;
+}
+.dark .markdown-body .markdown-alert-caution {
+  --markdown-alert: #f85149;
+}

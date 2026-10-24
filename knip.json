@@ -8,7 +8,6 @@
     "@tauri-apps/plugin-log",
     "@tauri-apps/plugin-window-state",
     "@fontsource-variable/inter",
-    "@fontsource/jetbrains-mono",
     "@smoke-driver"
   ],
   "ignoreBinaries": [
@@ -26,7 +25,6 @@
   "workspaces": {
     ".": {
       "entry": [
-        "src/settings/main.tsx",
         "src/**/*.test.{ts,tsx}",
         "src/**/*.bench.ts",
         "scripts/**/*.html",

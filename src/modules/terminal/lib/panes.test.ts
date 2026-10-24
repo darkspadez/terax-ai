@@ -1,10 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
+  canSplitPane,
+  clampPaneLimit,
+  findLeafNode,
   firstLeafSlotId,
+  insertLeafAt,
   leafIds,
-  swapLeafInDirection,
+  MAX_PANES_PER_TAB,
+  leafInDirection,
   type PaneNode,
+  splitIds,
+  splitLeaf,
+  splitResizeTarget,
+  swapLeafInDirection,
 } from "@/modules/terminal/lib/panes";
+import { MAX_WEBGL_RENDERER_SLOTS } from "@/modules/terminal/ghostty/webgl/WebGlTerminalRuntime";
 
 function row(...ids: number[]): PaneNode {
   return {
@@ -141,5 +151,225 @@ describe("swapLeafInDirection", () => {
   it("does nothing when the tree contains only one pane", () => {
     const tree: PaneNode = { kind: "leaf", id: 1 };
     expect(swapLeafInDirection(tree, 1, "left")).toBe(tree);
+  });
+});
+
+describe("directional pane focus and resizing", () => {
+  // [1 | [2 / 3]]
+  const tree: PaneNode = {
+    kind: "split",
+    id: 10,
+    dir: "row",
+    children: [
+      { kind: "leaf", id: 1 },
+      {
+        kind: "split",
+        id: 20,
+        dir: "col",
+        children: [
+          { kind: "leaf", id: 2 },
+          { kind: "leaf", id: 3 },
+        ],
+      },
+    ],
+  };
+
+  it("finds the neighbour in a direction", () => {
+    expect(leafInDirection(tree, 1, "right")).toBe(2);
+    expect(leafInDirection(tree, 3, "up")).toBe(2);
+    expect(leafInDirection(tree, 3, "left")).toBe(1);
+    expect(leafInDirection({ kind: "leaf", id: 1 }, 1, "left")).toBeNull();
+  });
+
+  it("finds leaves and splits", () => {
+    expect(findLeafNode(tree, 3)).toEqual({ kind: "leaf", id: 3 });
+    expect(findLeafNode(tree, 9)).toBeNull();
+    expect(splitIds(tree)).toEqual([10, 20]);
+  });
+
+  it("moves the divider on the requested side, else the other one", () => {
+    const right = splitResizeTarget(tree, 1, "right");
+    expect(
+      right && {
+        split: right.split.id,
+        divider: right.divider,
+        sign: right.sign,
+      },
+    ).toEqual({
+      split: 10,
+      divider: 0,
+      sign: 1,
+    });
+    // Pane 2 has no divider to its right: its left divider moves right.
+    const shrink = splitResizeTarget(tree, 2, "right");
+    expect(
+      shrink && {
+        split: shrink.split.id,
+        divider: shrink.divider,
+        sign: shrink.sign,
+      },
+    ).toEqual({
+      split: 10,
+      divider: 0,
+      sign: 1,
+    });
+    // Vertical resize uses the nearest column split.
+    const up = splitResizeTarget(tree, 3, "up");
+    expect(
+      up && { split: up.split.id, divider: up.divider, sign: up.sign },
+    ).toEqual({
+      split: 20,
+      divider: 0,
+      sign: -1,
+    });
+    expect(splitResizeTarget(tree, 1, "up")).toBeNull();
+  });
+});
+
+// crynta/terax-ai#1035, #1149: a 2x2 grid was as far as a tab could go.
+describe("pane limit", () => {
+  it("splits a tab into eight panes and no further", () => {
+    let tree: PaneNode = { kind: "leaf", id: 1 };
+    let next = 2;
+    while (canSplitPane(tree, MAX_PANES_PER_TAB)) {
+      const ids = leafIds(tree);
+      const target = ids[ids.length - 1];
+      tree = splitLeaf(tree, target, next++, next++, next % 2 ? "row" : "col");
+    }
+    expect(leafIds(tree)).toHaveLength(8);
+    expect(MAX_PANES_PER_TAB).toBe(8);
+  });
+
+  // crynta/terax-ai#1150: the limit is a setting, 1 to the maximum.
+  it("splits up to a configured limit, never past the maximum", () => {
+    const three = row(1, 2, 3);
+    expect(leafIds(three)).toHaveLength(3);
+    expect(canSplitPane(three, 4)).toBe(true);
+    expect(canSplitPane(three, 3)).toBe(false);
+    expect(canSplitPane(three, 2)).toBe(false);
+    expect(canSplitPane({ kind: "leaf", id: 1 }, 1)).toBe(false);
+    expect(canSplitPane({ kind: "leaf", id: 1 }, 0)).toBe(false);
+    expect(canSplitPane(three, 99)).toBe(true);
+  });
+
+  it("reads a stored limit as one a tab can use", () => {
+    expect(clampPaneLimit(4)).toBe(4);
+    expect(clampPaneLimit(4.6)).toBe(5);
+    expect(clampPaneLimit(0)).toBe(1);
+    expect(clampPaneLimit(-3)).toBe(1);
+    expect(clampPaneLimit(64)).toBe(MAX_PANES_PER_TAB);
+    expect(clampPaneLimit(undefined)).toBe(MAX_PANES_PER_TAB);
+    expect(clampPaneLimit("4")).toBe(MAX_PANES_PER_TAB);
+    expect(clampPaneLimit(Number.NaN)).toBe(MAX_PANES_PER_TAB);
+  });
+
+  it("leaves the WebGL fallback a renderer for every pane and one more", () => {
+    expect(MAX_WEBGL_RENDERER_SLOTS).toBe(MAX_PANES_PER_TAB + 1);
+  });
+});
+
+describe("insertLeafAt", () => {
+  const moved = { kind: "leaf", id: 9, slotId: 7, cwd: "/moved" } as const;
+
+  it("wraps a lone target leaf in a new split for every position", () => {
+    const target: PaneNode = { kind: "leaf", id: 1 };
+    expect(insertLeafAt(target, 1, moved, "left", 50)).toEqual({
+      kind: "split",
+      id: 50,
+      dir: "row",
+      children: [moved, target],
+    });
+    expect(insertLeafAt(target, 1, moved, "right", 50)).toEqual({
+      kind: "split",
+      id: 50,
+      dir: "row",
+      children: [target, moved],
+    });
+    expect(insertLeafAt(target, 1, moved, "top", 50)).toEqual({
+      kind: "split",
+      id: 50,
+      dir: "col",
+      children: [moved, target],
+    });
+    expect(insertLeafAt(target, 1, moved, "bottom", 50)).toEqual({
+      kind: "split",
+      id: 50,
+      dir: "col",
+      children: [target, moved],
+    });
+  });
+
+  it("preserves the inserted leaf node identity", () => {
+    const next = insertLeafAt({ kind: "leaf", id: 1 }, 1, moved, "right", 50);
+    expect(next.kind).toBe("split");
+    if (next.kind === "split") expect(next.children[1]).toBe(moved);
+  });
+
+  it("flattens into an enclosing split running in the same direction", () => {
+    expect(leafIds(insertLeafAt(row(1, 2, 3), 2, moved, "left", 50))).toEqual([
+      1, 9, 2, 3,
+    ]);
+    const right = insertLeafAt(row(1, 2, 3), 2, moved, "right", 50);
+    expect(right.kind === "split" && right.id).toBe(100);
+    expect(leafIds(right)).toEqual([1, 2, 9, 3]);
+    expect(leafIds(insertLeafAt(col(1, 2), 1, moved, "top", 50))).toEqual([
+      9, 1, 2,
+    ]);
+    expect(leafIds(insertLeafAt(col(1, 2), 2, moved, "bottom", 50))).toEqual([
+      1, 2, 9,
+    ]);
+  });
+
+  it("nests a new split when the enclosing split runs the other way", () => {
+    expect(insertLeafAt(row(1, 2), 2, moved, "bottom", 50)).toEqual({
+      kind: "split",
+      id: 100,
+      dir: "row",
+      children: [
+        { kind: "leaf", id: 1 },
+        {
+          kind: "split",
+          id: 50,
+          dir: "col",
+          children: [{ kind: "leaf", id: 2 }, moved],
+        },
+      ],
+    });
+  });
+
+  it("targets a leaf deep inside a nested tree", () => {
+    const tree: PaneNode = {
+      kind: "split",
+      id: 10,
+      dir: "row",
+      children: [
+        { kind: "leaf", id: 1 },
+        {
+          kind: "split",
+          id: 11,
+          dir: "col",
+          children: [
+            { kind: "leaf", id: 2 },
+            { kind: "leaf", id: 3 },
+          ],
+        },
+      ],
+    };
+    const next = insertLeafAt(tree, 3, moved, "top", 50);
+    expect(leafIds(next)).toEqual([1, 2, 9, 3]);
+    expect(next.kind === "split" && next.children[1]).toMatchObject({
+      id: 11,
+      dir: "col",
+    });
+  });
+
+  it("returns the tree unchanged when the target is missing", () => {
+    const tree = row(1, 2);
+    expect(insertLeafAt(tree, 42, moved, "left", 50)).toBe(tree);
+  });
+
+  it("returns the tree unchanged when the leaf is already present", () => {
+    const tree = row(1, 9);
+    expect(insertLeafAt(tree, 1, moved, "left", 50)).toBe(tree);
   });
 });

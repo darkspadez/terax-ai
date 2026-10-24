@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   checkReadable,
   checkReadableCanonical,
+  isNotFoundError,
   checkShellCommand,
   checkWritable,
   checkWritableCanonical,
@@ -290,12 +291,64 @@ describe("checkWritable — layered refusals", () => {
       ok: true,
     });
   });
+
+  it("refuses login, shell-startup and autostart files under the home root", () => {
+    for (const p of [
+      "/Users/me/Library/LaunchAgents/com.x.plist",
+      "/Users/me/Library/LaunchAgents",
+      "/Users/me/.zshrc",
+      "/Users/me/.zlogin",
+      "/home/me/.bashrc",
+      "/home/me/.bash_login",
+      "/home/me/.profile",
+      "/root/.bash_profile",
+      "/var/home/me/.zshenv",
+      "/home/me/.config/fish/config.fish",
+      "/home/me/.config/fish/conf.d/x.fish",
+      "/home/me/.config/autostart/x.desktop",
+      "/home/me/.config/systemd/user/x.service",
+      "/home/me/.config/environment.d/10-x.conf",
+      "/home/me/.xprofile",
+      "/Users/me/.gitconfig",
+      "C:\\Users\\me\\.gitconfig",
+      "C:\\Users\\me\\Documents\\PowerShell\\Microsoft.PowerShell_profile.ps1",
+      "C:\\Users\\me\\OneDrive - Contoso\\Documents\\WindowsPowerShell\\profile.ps1",
+      "C:\\Users\\me\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\x.lnk",
+      "/Applications/Foo.app/Contents/MacOS/foo",
+      // Case, trailing-dot and stream variants compare equal.
+      "/Users/me/.ZSHRC",
+      "C:\\Users\\me\\.bashrc.",
+      "C:\\Users\\me\\.bashrc:stream",
+    ]) {
+      expect(checkWritable(p), p).toMatchObject({ ok: false });
+    }
+    expect(checkWritable("/Users/me/.zshrc")).toEqual({
+      ok: false,
+      reason:
+        'Refused: "~/.zshrc" can run code later as the user (login, shell start, git), so it is not writable.',
+    });
+  });
+
+  it("allows the same names outside the home root", () => {
+    for (const p of [
+      "/home/me/code/dotfiles/.zshrc",
+      "/Users/me/code/dotfiles/.gitconfig",
+      "/Users/me/project/Library/LaunchAgents/x.plist",
+      "/home/me/project/.config/fish/config.fish",
+      "/home/me/.zshrc.d/aliases.zsh",
+      "/home/me/.config/fishy/x",
+      "/home/me/Documents/notes.md",
+    ]) {
+      expect(checkWritable(p), p).toMatchObject({ ok: true });
+    }
+  });
 });
 
 describe("checkReadableCanonical — parent-directory fallback", () => {
   it("canonicalizes the parent when the target does not exist yet", async () => {
     const canonicalize = async (p: string) => {
-      if (p === "/home/me/link/newfile.txt") throw new Error("enoent");
+      if (p === "/home/me/link/newfile.txt")
+        throw "No such file or directory (os error 2)";
       return p === "/home/me/link" ? "/home/me/.ssh" : p;
     };
     const r = await checkWritableCanonical(
@@ -307,13 +360,76 @@ describe("checkReadableCanonical — parent-directory fallback", () => {
 
   it("passes through when neither target nor parent resolves", async () => {
     const failing = async () => {
-      throw new Error("enoent");
+      throw "No such file or directory (os error 2)";
     };
     const r = await checkWritableCanonical(
       "/home/me/project/newfile.txt",
       failing,
     );
     expect(r.ok).toBe(true);
+  });
+});
+
+describe("canonical checks fail closed", () => {
+  const failingWith = (error: unknown) => async () => {
+    throw error;
+  };
+
+  it("tells a missing path from other failures", () => {
+    expect(isNotFoundError("No such file or directory (os error 2)")).toBe(
+      true,
+    );
+    expect(
+      isNotFoundError(
+        "The system cannot find the path specified. (os error 3)",
+      ),
+    ).toBe(true);
+    expect(
+      isNotFoundError(new Error("Datei nicht gefunden (os error 2)")),
+    ).toBe(true);
+    expect(isNotFoundError("Permission denied (os error 13)")).toBe(false);
+    expect(isNotFoundError("/etc/x is outside the authorized folders")).toBe(
+      false,
+    );
+    expect(
+      isNotFoundError("Too many levels of symbolic links (os error 40)"),
+    ).toBe(false);
+  });
+
+  it("refuses a read whose path cannot be resolved for another reason", async () => {
+    for (const error of [
+      "Permission denied (os error 13)",
+      "/srv/x is outside the authorized folders",
+      new Error("Too many levels of symbolic links (os error 40)"),
+    ]) {
+      const r = await checkReadableCanonical(
+        "/home/me/project/link",
+        failingWith(error),
+      );
+      expect(r.ok).toBe(false);
+    }
+    const missing = await checkReadableCanonical(
+      "/home/me/project/new.txt",
+      failingWith("No such file or directory (os error 2)"),
+    );
+    expect(missing.ok).toBe(true);
+  });
+
+  it("refuses a write whose target or parent cannot be resolved for another reason", async () => {
+    const target = await checkWritableCanonical(
+      "/home/me/project/link",
+      failingWith("Permission denied (os error 13)"),
+    );
+    expect(target.ok).toBe(false);
+    const parent = await checkWritableCanonical(
+      "/home/me/project/sub/new.txt",
+      async (p) => {
+        if (p.endsWith("new.txt"))
+          throw "No such file or directory (os error 2)";
+        throw "/home/me/project/sub is outside the authorized folders";
+      },
+    );
+    expect(parent.ok).toBe(false);
   });
 });
 

@@ -277,6 +277,11 @@ function fromCustom(server: LspCustomServer): LspPreset {
   };
 }
 
+/** Files that mark a project root for this server; a git repository by default. */
+export function rootMarkersOf(preset: LspPreset): string[] {
+  return preset.rootMarkers.length > 0 ? preset.rootMarkers : [".git"];
+}
+
 export function allServers(custom: LspCustomServer[]): LspPreset[] {
   return [...LSP_PRESETS, ...custom.map(fromCustom)];
 }

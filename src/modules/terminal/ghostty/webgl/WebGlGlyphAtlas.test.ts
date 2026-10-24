@@ -1,5 +1,6 @@
-import { CellFlags } from "@terax/ghostty-core/protocol";
+import { CellFlags } from "@oarlock/ghostty-core/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { GlyphFontGate } from "../gpu/GlyphFontGate";
 import { hasIntrinsicColor, WebGlGlyphAtlas } from "./WebGlGlyphAtlas";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -60,6 +61,39 @@ describe("WebGlGlyphAtlas uploads", () => {
   });
 });
 
+describe("WebGlGlyphAtlas icon fonts", () => {
+  it("skips an icon whose font is loading without caching it, then draws it unstyled", async () => {
+    const fillText = vi.fn();
+    const gl = createWebGlHarness(vi.fn(), vi.fn(), fillText);
+    let loaded = false;
+    let settle = () => {};
+    const gate = new GlyphFontGate({
+      check: () => loaded,
+      load: () =>
+        new Promise<void>((resolve) => {
+          settle = resolve;
+        }),
+    });
+    const atlas = new WebGlGlyphAtlas(gl, METRICS, 1, gate);
+
+    expect(atlas.glyph(0xf013, null, 0).width).toBe(0);
+    expect(atlas.glyph(0xf0001, null, 0).width).toBe(0);
+    expect(atlas.glyphCount).toBe(0);
+    expect(fillText).not.toHaveBeenCalled();
+    expect(atlas.takeDeferred()).toBe(true);
+    expect(atlas.takeDeferred()).toBe(false);
+
+    loaded = true;
+    settle();
+    await Promise.resolve();
+    const icon = atlas.glyph(0xf013, null, CellFlags.BOLD);
+    expect(icon.width).toBeGreaterThan(0);
+    expect(atlas.glyph(0xf013, null, CellFlags.ITALIC)).toBe(icon);
+    expect(atlas.takeDeferred()).toBe(false);
+    atlas.dispose();
+  });
+});
+
 describe("WebGlGlyphAtlas procedural glyphs", () => {
   it("draws box characters at the cell size with no bearing and ignores styles", () => {
     const fillText = vi.fn();
@@ -108,10 +142,80 @@ describe("WebGlGlyphAtlas procedural glyphs", () => {
   });
 });
 
+describe("WebGlGlyphAtlas constraints", () => {
+  it("fits a symbol to the cells it may use and keys each layout", () => {
+    const fillText = vi.fn();
+    const setTransform = vi.fn();
+    const gl = createWebGlHarness(vi.fn(), vi.fn(), fillText, setTransform);
+    const atlas = new WebGlGlyphAtlas(gl, METRICS, 1);
+    const inferred = atlas.glyph(0x2192, null, 0);
+    const one = atlas.glyph(0x2192, null, 0, 1);
+    const two = atlas.glyph(0x2192, null, 0, 2);
+    expect(atlas.glyph(0x2192, null, 0, 2)).toBe(two);
+    expect(atlas.glyph(0x2192, null, 0)).toBe(inferred);
+    expect(atlas.glyphCount).toBe(3);
+    expect(fillText).toHaveBeenCalledTimes(3);
+    // Squeezed into one 8 pixel cell, or left at 16 pixels across two.
+    expect(one.width).toBe(8 + 4);
+    expect(inferred.width).toBe(one.width);
+    expect(two.width).toBe(16 + 4);
+    // Half size: the 16 x 12 ink becomes 8 x 6, centred where the font put
+    // it (top at 5), drawn 2 pixels into a bitmap that starts at row 3.
+    expect(setTransform).toHaveBeenCalledWith(0.5, 0, 0, 0.5, 2, 7);
+    expect(setTransform).toHaveBeenLastCalledWith(1, 0, 0, 1, 0, 0);
+    atlas.dispose();
+  });
+
+  it("draws branch drawing procedurally whatever the style or cells", () => {
+    const fillText = vi.fn();
+    const gl = createWebGlHarness(vi.fn(), vi.fn(), fillText);
+    const atlas = new WebGlGlyphAtlas(gl, METRICS, 1);
+    const node = atlas.glyph(0xf5ee, null, 0);
+    expect(atlas.glyph(0xf5ee, null, CellFlags.BOLD, 2)).toBe(node);
+    expect(node.width).toBe(METRICS.deviceCellWidth);
+    expect(node.originOffsetX).toBe(0);
+    expect(fillText).not.toHaveBeenCalled();
+    atlas.dispose();
+  });
+});
+
+describe("WebGlGlyphAtlas ligature runs", () => {
+  it("keys each cell of a run by run, index and style, apart from plain glyphs", () => {
+    const fillText = vi.fn();
+    const gl = createWebGlHarness(vi.fn(), vi.fn(), fillText);
+    const atlas = new WebGlGlyphAtlas(gl, METRICS, 1);
+    const first = atlas.ligatureGlyph("->", 0, 0);
+    const second = atlas.ligatureGlyph("->", 1, 0);
+    const bold = atlas.ligatureGlyph("->", 0, CellFlags.BOLD);
+    const other = atlas.ligatureGlyph("-=", 0, 0);
+    const dash = atlas.glyph(0x2d, null, 0);
+    expect(new Set([first, second, bold, other, dash]).size).toBe(5);
+    expect(atlas.glyphCount).toBe(5);
+    // Cached, and the whole run is what is drawn for each cell.
+    expect(atlas.ligatureGlyph("->", 1, 0)).toBe(second);
+    expect(atlas.ligatureGlyph("->", 0, CellFlags.BOLD)).toBe(bold);
+    expect(fillText.mock.calls.map(([text]) => text)).toEqual([
+      "->",
+      "->",
+      "->",
+      "-=",
+      "-",
+    ]);
+    // Colour, underline and the like never make another glyph.
+    expect(atlas.ligatureGlyph("->", 0, CellFlags.FAINT)).toBe(first);
+    // A middle cell is exactly one cell wide, with no bearing.
+    const middle = atlas.ligatureGlyph("===", 1, 0);
+    expect(middle.originOffsetX).toBe(0);
+    expect(middle.width).toBe(METRICS.deviceCellWidth);
+    atlas.dispose();
+  });
+});
+
 function createWebGlHarness(
   texSubImage2D: ReturnType<typeof vi.fn>,
   pixelStorei: ReturnType<typeof vi.fn>,
   fillText: ReturnType<typeof vi.fn> = vi.fn(),
+  setTransform: ReturnType<typeof vi.fn> = vi.fn(),
 ): WebGL2RenderingContext {
   const pixels = new Uint8ClampedArray(12 * 16 * 4);
   for (let offset = 0; offset < pixels.length; offset += 4) {
@@ -126,11 +230,14 @@ function createWebGlHarness(
       height: 0,
       getContext: vi.fn(() => ({
         clearRect: vi.fn(),
+        setTransform,
         fillText,
         getImageData: vi.fn(() => ({ data: pixels })),
-        measureText: vi.fn(() => ({
+        // Arrows are drawn two cells wide, as a fallback font might.
+        measureText: vi.fn((text: string) => ({
+          width: text.length * 8,
           actualBoundingBoxLeft: 0,
-          actualBoundingBoxRight: 8,
+          actualBoundingBoxRight: text === "→" ? 16 : 8,
           actualBoundingBoxAscent: 10,
           actualBoundingBoxDescent: 2,
         })),

@@ -1,13 +1,13 @@
 # App lab: resource benchmark of the real application
 
-`scripts/app-lab` measures the **real** Terax app (full React shell, real PTYs, real
+`scripts/app-lab` measures the **real** Oarlock app (full React shell, real PTYs, real
 tabs and splits, real window, the release profile users run) instead of the synthetic
 renderer in `scripts/renderer-profile`. It exists because the renderer lab did not reproduce
 what the user sees every day: memory that jumps on every tab switch and does not come back.
 Reports are written to the output directory you pass; they are never committed.
 
 Nothing of it ships. The Rust side is behind the cargo feature `bench`, the frontend behind
-`TERAX_BENCH=1` (a Vite `define` that is the literal `false` otherwise, so the driver, its
+`OARLOCK_BENCH=1` (a Vite `define` that is the literal `false` otherwise, so the driver, its
 lazy chunk and every bench-only string are removed before bundling). `src/app/dist-budget.test.ts`
 builds the normal frontend and fails if any `bench` chunk or marker string is emitted.
 
@@ -15,14 +15,14 @@ builds the normal frontend and fails if any `bench` chunk or marker string is em
 
 ```sh
 # one scenario against this checkout (builds the bench app first; release, private target dir)
-python3 scripts/app-lab/run.py --scenario tabs --target-dir /tmp/app-lab-target --report tabs.json
+bun scripts/app-lab/run.ts --scenario tabs --target-dir /tmp/app-lab-target --report tabs.json
 
 # measure a pristine revision instead of the working tree (HEAD or any rev, plus the overlay)
 scripts/app-lab/export-tree.sh /tmp/app-lab-src HEAD
-python3 scripts/app-lab/run.py --scenario tabs --source /tmp/app-lab-src --target-dir /tmp/app-lab-target
+bun scripts/app-lab/run.ts --scenario tabs --source /tmp/app-lab-src --target-dir /tmp/app-lab-target
 
-python3 scripts/app-lab/run.py --compare base.json [base2.json ...] --candidate cand.json
-python3 scripts/app-lab/app_report.py report1.json report2.json    # one comparable line per report
+bun scripts/app-lab/run.ts --compare base.json [base2.json ...] --candidate cand.json
+bun scripts/app-lab/app_report.ts report1.json report2.json    # one comparable line per report
 ```
 
 Build time on an M4 (10 cores): cold release build including every dependency 2 min 14 s;
@@ -59,16 +59,16 @@ region from `vmmap -v`), `--valve EVERY_S:CHUNKS:MB` (allocation-pressure GC pro
 
 ### Experiment toggles
 
-`--toggle NAME=VALUE` sets `localStorage["terax:bench:NAME"]` before the app starts; product code
+`--toggle NAME=VALUE` sets `localStorage["oarlock:bench:NAME"]` before the app starts; product code
 may read it through `benchFlag` / `benchFlagOn` (`src/bench/flags.ts`, a constant `null` when
-`__TERAX_BENCH__` is false). The hooks used for the tab-switch investigation touch files that
+`__OARLOCK_BENCH__` is false). The hooks used for the tab-switch investigation touch files that
 change often (`WebGpuTerminalSurface.ts`, `CanvasBackingStore.ts`, `useGhosttyTerminalSession.ts`,
 `TerminalStack.tsx`), so they are kept as a patch against `ee836e1`:
 
 ```sh
 scripts/app-lab/export-tree.sh /tmp/app-lab-exp HEAD
 (cd /tmp/app-lab-exp && patch -p1 < scripts/app-lab/experiments/tab-switch-toggles.patch)
-python3 scripts/app-lab/run.py --scenario tabs --variant saps --source /tmp/app-lab-exp \
+bun scripts/app-lab/run.ts --scenario tabs --variant saps --source /tmp/app-lab-exp \
     --target-dir /tmp/app-lab-target-exp --toggle fixed-backing=2560x1700
 ```
 
@@ -79,9 +79,9 @@ backing size, so none is ever resized).
 
 ## Isolation
 
-The bundle is `Terax App Lab.app` with the identifier `app.crynta.terax.app-lab`, launched with
+The bundle is `Oarlock App Lab.app` with the identifier `consulting.quantumops.oarlock.app-lab`, launched with
 its own `HOME` (so the control-server descriptor, shell-integration files and history never touch
-the real user's) and `TERAX_BENCH_ISOLATED=1`. The bench binary refuses to start under the product
+the real user's) and `OARLOCK_BENCH_ISOLATED=1`. The bench binary refuses to start under the product
 identifier or without that variable (`modules/bench.rs::guard`, unit tested), and the profile
 directories for the lab identifier are removed before and after every run. The user's running app
 is never touched. The shells are real login shells with an empty `HOME`; the agent is
@@ -91,7 +91,7 @@ bordered tool block every 7 s, 300 lines of history).
 
 ## What is measured
 
-The scenario driver (`src/bench`, mounted by `App.tsx` only when `__TERAX_BENCH__`) uses the app's
+The scenario driver (`src/bench`, mounted by `App.tsx` only when `__OARLOCK_BENCH__`) uses the app's
 own tab actions (`setActiveId`, `newTab`, `newAgentGroupTab`, `splitActivePane`) and
 `whenSessionReady` / `writeToSession`. Each phase posts an event to the orchestrator's local HTTP
 server (the `scripts/pty-smoke` pattern); the page waits until the orchestrator has sampled.

@@ -8,6 +8,10 @@ export {
   useGlobalShortcuts,
   type ShortcutHandlers,
 } from "./lib/useGlobalShortcuts";
-export { useShortcutLabel } from "./lib/useShortcutLabel";
-export { shortcutLabel } from "./lib/shortcutLabel";
-export { shouldDisablePaneSwapShortcut } from "./lib/shortcutScope";
+export { useMenuShortcuts } from "./lib/useMenuShortcuts";
+export { useShortcutLabel, useShortcutText } from "./lib/useShortcutLabel";
+export { shortcutLabel, shortcutText } from "./lib/shortcutLabel";
+export {
+  shouldDeferShortcutToTerminal,
+  shouldDisablePaneSwapShortcut,
+} from "./lib/shortcutScope";

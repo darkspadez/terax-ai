@@ -4,22 +4,34 @@
  */
 
 import type { TerminalDamage } from "@/modules/terminal/backend/contracts";
-import { CellFlags } from "@terax/ghostty-core/protocol";
+import { CellFlags } from "@oarlock/ghostty-core/protocol";
 import type { Rgb, TerminalCellReader } from "../core/packedCells";
 import type { GhosttyTerminalModelApi } from "../GhosttyTerminalModel";
+import { isBuiltinGlyph } from "../gpu/BuiltinGlyphs";
 import {
   CanvasBackingStore,
   type GestureGrowth,
 } from "../gpu/CanvasBackingStore";
+import { constraintCells } from "../gpu/glyphConstraint";
+import {
+  findRowLigatureRuns,
+  ligatureRunIndex,
+  ligatureRunLength,
+} from "../gpu/ligatureRuns";
+import { type LinkCellRange, linkRangesEqual } from "../gpu/linkUnderline";
+import { contrastedColor } from "../gpu/minimumContrast";
 import type {
   TerminalFontMetrics,
   TerminalGpuTheme,
 } from "../gpu/terminalVisuals";
+import { detectPlatform } from "../gpu/textContrast";
 import {
   selectionBoundsContain,
   type TerminalSelectionBounds,
 } from "../selection/TerminalSelectionController";
+import type { CustomShaderRunner } from "./customShader";
 import { WebGlGlyphAtlas, type WebGlGlyphEntry } from "./WebGlGlyphAtlas";
+import type { WebGlImageLayer } from "./WebGlImageLayer";
 
 const GLYPH_FLOATS = 15;
 const GLYPH_POSITION_OFFSET = 13;
@@ -31,6 +43,16 @@ const MIN_CELL_CAPACITY = 1_024;
 const CONTEXT_RESTORE_TIMEOUT_MS = 3_000;
 const SEARCH_MATCH_BACKGROUND = 0x515c6a;
 const SEARCH_ACTIVE_MATCH_BACKGROUND = 0xd18616;
+/** Rectangle style of strikethrough and overline: solid, but a decoration, not a background. */
+const SOLID_DECORATION = 6;
+/** Kitty image layers (see `gpu/imageLayer.ts`, not imported: it loads with the images). */
+const IMAGES_UNDER_BACKGROUNDS = 0;
+const IMAGES_BELOW_TEXT = 1;
+const IMAGES_ABOVE_TEXT = 2;
+
+type ImageLayerModule = typeof import("./WebGlImageLayer");
+let imageLayerModule: Promise<ImageLayerModule> | null = null;
+let loadedImageLayerModule: ImageLayerModule | null = null;
 
 const PROJECTION_MATRIX = new Float32Array([
   2, 0, 0, 0, 0, -2, 0, 0, 0, 0, 1, 0, -1, 1, 0, 1,
@@ -49,6 +71,8 @@ export type WebGlRendererFrame = {
   readonly textBlinkVisible: boolean;
   readonly selection: TerminalSelectionBounds | null;
   readonly searchMatchAt: (row: number, column: number) => 0 | 1 | 2;
+  /** Cells of the hovered link, underlined as an overlay. */
+  readonly link?: LinkCellRange | null;
 };
 
 export type WebGlCellRendererStats = {
@@ -67,11 +91,17 @@ export type WebGlCellRendererStats = {
   readonly uploadedGlyphBytes: number;
   readonly uploadedRectangleBytes: number;
   readonly contextRecoveries: number;
+  /** Kitty image textures (included in `gpuBufferBytes`). */
+  readonly imageBytes: number;
 };
 
 type Program = {
   readonly value: WebGLProgram;
   readonly projection: WebGLUniformLocation;
+};
+
+type ColorProgram = Program & {
+  readonly decorationsOnly: WebGLUniformLocation;
 };
 
 type GlyphProgram = Program & {
@@ -87,13 +117,15 @@ type RectangleVertices = {
 };
 
 type RendererResources = {
-  readonly colorProgram: Program;
+  readonly colorProgram: ColorProgram;
   readonly glyphProgram: GlyphProgram;
   readonly backgroundVao: WebGLVertexArrayObject;
   readonly cursorVao: WebGLVertexArrayObject;
+  readonly linkVao: WebGLVertexArrayObject;
   readonly glyphVao: WebGLVertexArrayObject;
   readonly backgroundBuffer: WebGLBuffer;
   readonly cursorBuffer: WebGLBuffer;
+  readonly linkBuffer: WebGLBuffer;
   readonly glyphBuffer: WebGLBuffer;
   readonly buffers: readonly WebGLBuffer[];
   readonly vaos: readonly WebGLVertexArrayObject[];
@@ -115,6 +147,9 @@ export class WebGlCellRenderer {
   private flags = new Uint8Array(0);
   private decorations = new Uint8Array(0);
   private blinkingRows = new Uint8Array(0);
+  /** One row's ligature keys and runs (`findRowLigatureRuns`). */
+  private ligatureKeys = new Float64Array(0);
+  private ligatureRuns = new Uint16Array(0);
   private readonly backgroundVertices: RectangleVertices = {
     attributes: new Float32Array(INITIAL_RECTANGLE_CAPACITY * RECTANGLE_FLOATS),
     count: 0,
@@ -133,6 +168,12 @@ export class WebGlCellRenderer {
   };
   private readonly uploadedCursor = new Float32Array(RECTANGLE_FLOATS);
   private uploadedCursorCount = -1;
+  private readonly linkVertices: RectangleVertices = {
+    attributes: new Float32Array(0),
+    count: 0,
+  };
+  /** The link range `linkVertices` were built for. */
+  private renderedLink: LinkCellRange | null = null;
   private forcePresent = true;
   private lastTextBlinkVisible = true;
   private glyphInstanceCount = 0;
@@ -142,6 +183,8 @@ export class WebGlCellRenderer {
   private cols = 0;
   private rows = 0;
   private forceFullRedraw = true;
+  /** A drawn frame skipped glyphs whose font was still loading. */
+  private awaitingGlyphFonts = false;
   private contextLost = false;
   private viewportDirty = true;
   private contextRestoreTimer: number | null = null;
@@ -152,22 +195,43 @@ export class WebGlCellRenderer {
   private backingStoreResizeCount = 0;
   private blinkingRowCount = 0;
   private disposed = false;
-  private onContextRestored: (() => void) | null = null;
+  /** Schedules the owning surface (a restored context, images that finished loading). */
+  private requestFrame: (() => void) | null = null;
   private onContextFailure: ((error: Error) => void) | null = null;
+  /** Kitty images; the layer's code loads, and it is created, when a pane first shows one. */
+  private images: WebGlImageLayer | null = null;
+  /** The model the image textures belong to; a pooled renderer may serve another next. */
+  private imagesOwner: GhosttyTerminalModelApi | null = null;
+  /** The owner's Kitty z below which images go under the cell backgrounds. */
+  private imageBackgroundLimit: number | undefined;
+  private imagesLoading = false;
+  /** Placements must be read again without damage: the image layer just loaded. */
+  private imagesStale = false;
+  private imagesShownValue = false;
+  /** The theme's custom shader source; its code loads when one is first set. */
+  private shaderSource: string | null = null;
+  private shaderModule: typeof import("./customShader") | null = null;
+  private shaderLoading = false;
+  /** A source that failed to compile is not tried again until it changes. */
+  private shaderFailedSource: string | null = null;
+  private shader: CustomShaderRunner | null = null;
 
-  constructor() {
+  /**
+   * The drawing buffer has an alpha channel, for translucent terminals: cells on the default
+   * background stay transparent. Fixed for the context's life; the pool matches it to the theme.
+   */
+  constructor(readonly translucent = false) {
     this.canvas.className = "block";
     this.canvas.setAttribute("aria-hidden", "true");
-    const context = this.canvas.getContext("webgl2", {
-      alpha: false,
-      antialias: false,
-      depth: false,
-      desynchronized: true,
-      failIfMajorPerformanceCaveat: false,
-      powerPreference: "low-power",
-      preserveDrawingBuffer: false,
-      stencil: false,
-    });
+    const context = this.canvas.getContext(
+      "webgl2",
+      webGlContextAttributes(
+        detectPlatform(
+          typeof navigator === "undefined" ? "" : navigator.userAgent,
+        ),
+        translucent,
+      ),
+    );
     if (!context) throw new Error("WebGL2 is unavailable in this webview");
     this.gl = context;
     this.resources = this.createResources();
@@ -180,16 +244,22 @@ export class WebGlCellRenderer {
 
   configure(
     profile: WebGlRendererProfile,
-    onContextRestored: () => void,
+    requestFrame: () => void,
     onContextFailure: (error: Error) => void,
   ): void {
     this.assertLive();
-    this.onContextRestored = onContextRestored;
+    this.requestFrame = requestFrame;
     this.onContextFailure = onContextFailure;
     const fontChanged =
       !this.profile ||
       rendererProfileKey(this.profile) !== rendererProfileKey(profile);
     this.profile = profile;
+    const shaderSource = profile.theme.customShader || null;
+    if (shaderSource !== this.shaderSource) {
+      this.disposeShader();
+      this.shaderSource = shaderSource;
+      this.forcePresent = true;
+    }
     if (fontChanged && !this.contextLost) {
       this.atlas?.dispose();
       this.atlas = new WebGlGlyphAtlas(this.gl, profile.metrics, profile.scale);
@@ -207,8 +277,12 @@ export class WebGlCellRenderer {
 
   detach(): void {
     this.canvas.remove();
-    this.onContextRestored = null;
+    this.requestFrame = null;
     this.onContextFailure = null;
+    // Back in the pool: the textures are freed now, a new owner uploads its own.
+    this.images?.clear();
+    this.imagesOwner = null;
+    this.imagesShownValue = false;
   }
 
   resize(
@@ -270,19 +344,33 @@ export class WebGlCellRenderer {
     const damage = this.forceFullRedraw
       ? { kind: "full" as const }
       : frame.damage;
-    if (damage.kind !== "none") this.updateModel(frame, damage);
+    if (damage.kind !== "none") {
+      this.updateModel(frame, damage);
+      if (this.atlas.takeDeferred()) this.awaitingGlyphFonts = true;
+    }
+    if (damage.kind !== "none" || this.imagesStale) this.updateImages(frame);
+    const link = frame.link ?? null;
+    const linkChanged = !linkRangesEqual(link, this.renderedLink);
+    if (linkChanged || (link && damage.kind !== "none"))
+      this.buildLinkUnderline(link);
     const cursorChanged = this.updateCursor(frame);
     const blinkChanged =
       this.hasBlinkingCells &&
       this.lastTextBlinkVisible !== frame.textBlinkVisible;
+    // A custom shader animates while the window has focus (Ghostty's
+    // default), so it draws every frame then.
+    const shader = this.prepareShader(frame);
     if (
       damage.kind === "none" &&
       !cursorChanged &&
       !blinkChanged &&
-      !this.forcePresent
+      !linkChanged &&
+      !this.forcePresent &&
+      !shader?.focused
     )
       return false;
     this.draw(frame.textBlinkVisible);
+    if (shader?.focused) this.requestFrame?.();
     this.forcePresent = false;
     this.lastTextBlinkVisible = frame.textBlinkVisible;
     this.forceFullRedraw = false;
@@ -292,6 +380,17 @@ export class WebGlCellRenderer {
 
   requestPresentation(): void {
     this.forcePresent = true;
+  }
+
+  /**
+   * After a glyph font load settles: redraws everything if a frame skipped
+   * glyphs for it. True when the owner should schedule a frame.
+   */
+  retryDeferredGlyphs(): boolean {
+    if (!this.awaitingGlyphFonts) return false;
+    this.awaitingGlyphFonts = false;
+    this.forceFullRedraw = true;
+    return true;
   }
 
   resetModel(): void {
@@ -332,9 +431,12 @@ export class WebGlCellRenderer {
         this.rectangleDirtyRows.byteLength +
         this.rectangleScratch.attributes.byteLength +
         this.cursorVertices.attributes.byteLength +
+        this.linkVertices.attributes.byteLength +
         this.uploadedCursor.byteLength,
       gpuBufferBytes:
-        this.glyphGpuCapacity * GLYPH_FLOATS * 4 + this.backgroundGpuBytes,
+        this.glyphGpuCapacity * GLYPH_FLOATS * 4 +
+        this.backgroundGpuBytes +
+        (this.images?.textureBytes ?? 0),
       canvasColorBytes: this.disposed
         ? 0
         : this.canvas.width * this.canvas.height * 4,
@@ -343,11 +445,17 @@ export class WebGlCellRenderer {
       uploadedGlyphBytes: this.uploadedGlyphBytes,
       uploadedRectangleBytes: this.uploadedRectangleBytes,
       contextRecoveries: this.contextRecoveryCount,
+      imageBytes: this.images?.textureBytes ?? 0,
     };
   }
 
   get hasBlinkingCells(): boolean {
     return this.blinkingRowCount > 0;
+  }
+
+  /** The last frame that read placements found Kitty images on screen. */
+  get imagesShown(): boolean {
+    return this.imagesShownValue;
   }
 
   dispose(): void {
@@ -362,6 +470,10 @@ export class WebGlCellRenderer {
     this.canvas.remove();
     this.atlas?.dispose();
     this.atlas = null;
+    this.disposeShader();
+    this.images?.dispose(this.contextLost);
+    this.images = null;
+    this.imagesOwner = null;
     this.deleteResources();
     this.gl.getExtension("WEBGL_lose_context")?.loseContext();
     this.canvas.width = 1;
@@ -379,15 +491,21 @@ export class WebGlCellRenderer {
     this.rectangleScratch.attributes = new Float32Array(0);
     this.backgroundGpuBytes = 0;
     this.cursorVertices.attributes = new Float32Array(0);
+    this.linkVertices.attributes = new Float32Array(0);
     this.glyphGpuCapacity = 0;
     this.cellCapacity = 0;
-    this.onContextRestored = null;
+    this.requestFrame = null;
     this.onContextFailure = null;
   }
 
   private readonly handleContextLost = (event: Event): void => {
     event.preventDefault();
     this.contextLost = true;
+    // Its program and texture died with the context; compiled again after.
+    this.shader = null;
+    this.images?.dispose(true);
+    this.images = null;
+    this.imagesOwner = null;
     this.clearContextRestoreTimer();
     this.contextRestoreTimer = window.setTimeout(() => {
       this.contextRestoreTimer = null;
@@ -406,6 +524,8 @@ export class WebGlCellRenderer {
     this.backgroundGpuBytes = 0;
     this.resources = this.createResources();
     this.uploadedCursorCount = -1;
+    this.renderedLink = null;
+    this.linkVertices.count = 0;
     if (this.profile) {
       this.atlas = new WebGlGlyphAtlas(
         this.gl,
@@ -416,8 +536,63 @@ export class WebGlCellRenderer {
     this.contextRecoveryCount += 1;
     this.viewportDirty = true;
     this.forceFullRedraw = true;
-    this.onContextRestored?.();
+    this.requestFrame?.();
   };
+
+  /**
+   * Reads the frame's Kitty placements (after `updateModel`, so the render state they come from
+   * is current) and uploads what they need before anything else touches the model.
+   */
+  private updateImages(frame: WebGlRendererFrame): void {
+    this.imagesStale = false;
+    const model = frame.model;
+    const profile = this.profile;
+    if (!model.imagePlacements || !profile) return;
+    if (model !== this.imagesOwner) {
+      // Image ids belong to one model: another model's textures must never be drawn.
+      this.images?.clear();
+      this.imagesOwner = model;
+      this.imageBackgroundLimit = model.imageBackgroundZLimit?.();
+    }
+    const placements = model.imagePlacements();
+    this.imagesShownValue = placements.length > 0;
+    if (!this.images && placements.length > 0) {
+      this.images = this.createImageLayer();
+    }
+    this.images?.update(
+      placements,
+      this.imageBackgroundLimit,
+      profile.metrics.deviceCellWidth,
+      profile.metrics.deviceCellHeight,
+    );
+  }
+
+  private createImageLayer(): WebGlImageLayer | null {
+    if (loadedImageLayerModule)
+      return new loadedImageLayerModule.WebGlImageLayer(this.gl, {
+        createProgram,
+        requiredBuffer,
+        requiredUniform,
+        requiredVertexArray,
+      });
+    if (this.imagesLoading) return null;
+    this.imagesLoading = true;
+    imageLayerModule ??= import("./WebGlImageLayer").then((module) => {
+      loadedImageLayerModule = module;
+      return module;
+    });
+    imageLayerModule.then(
+      () => {
+        if (this.disposed) return;
+        this.imagesStale = true;
+        this.forcePresent = true;
+        this.requestFrame?.();
+      },
+      // Without its code the pane draws no images; it does not retry every frame.
+      () => {},
+    );
+    return null;
+  }
 
   private updateModel(frame: WebGlRendererFrame, damage: TerminalDamage): void {
     const cells = frame.model.renderCells();
@@ -466,11 +641,22 @@ export class WebGlCellRenderer {
     const canvasWidth = this.canvas.width;
     const canvasHeight = this.canvas.height;
     const viewportOrigin = frame.model.viewportOriginLine();
+    const minimumContrast = this.profile.theme.minimumContrast ?? 1;
+    const ligatures = frame.model.ligatures?.() === true;
+    // Runs break at the visible cursor; the core reports its rows as damaged
+    // when it moves.
+    const cursor = ligatures ? frame.model.cursor() : null;
+    const breakRow = cursor?.visible ? cursor.y : -1;
+    const breakColumn = cursor?.visible ? cursor.x : -1;
 
     for (let row = first; row <= last; row += 1) {
       let rowHasBlinkingCell = false;
       let rowRectanglesChanged = false;
       let previousBackground = this.packRgb(this.profile.theme.background);
+      const runs = ligatures
+        ? this.findRowLigatures(cells, row, row === breakRow ? breakColumn : -1)
+        : null;
+      let runText = "";
       for (let column = 0; column < this.cols; column += 1) {
         const cellIndex = row * this.cols + column;
         const glyphIndex = cellIndex * GLYPH_FLOATS;
@@ -482,7 +668,9 @@ export class WebGlCellRenderer {
             this.decorations[cellIndex] !== 0 ||
             (this.flags[cellIndex] & CellFlags.STRIKETHROUGH) !== 0;
           this.backgrounds[cellIndex] = previousBackground;
-          this.foregrounds[cellIndex] = 0;
+          // The trailing half of a wide character underlines in its lead's colour.
+          this.foregrounds[cellIndex] =
+            column > 0 ? this.foregrounds[cellIndex - 1] : 0;
           this.underlineColors[cellIndex] = 0;
           this.flags[cellIndex] = 0;
           this.decorations[cellIndex] = 0;
@@ -542,11 +730,41 @@ export class WebGlCellRenderer {
             cells.graphemeLength(cellIndex) > 0
               ? frame.model.grapheme(row, column)
               : null;
-          const glyph = this.atlas.glyph(codepoint, grapheme, flags);
+          const run = runs === null ? 0 : runs[column];
+          let glyph: WebGlGlyphEntry;
+          if (run !== 0) {
+            const index = ligatureRunIndex(run);
+            if (index === 0) {
+              runText = runTextAt(cells, cellIndex, ligatureRunLength(run));
+            }
+            glyph = this.atlas.ligatureGlyph(runText, index, flags);
+          } else {
+            // Ghostty's cell rule, as the core applies it for WebGPU: a symbol
+            // may use two cells when the next one is free.
+            glyph = this.atlas.glyph(
+              codepoint,
+              grapheme,
+              flags,
+              constraintCells(
+                codepoint,
+                width,
+                column > 0 ? cells.codepoint(cellIndex - 1) : 0,
+                column + 1 < this.cols ? cells.codepoint(cellIndex + 1) : null,
+              ),
+            );
+          }
+          // Ghostty's minimum contrast applies to text, not to colour glyphs or
+          // procedural shapes (and never to decorations).
+          const textColor =
+            minimumContrast > 1 &&
+            !glyph.intrinsicColor &&
+            !(grapheme === null && isBuiltinGlyph(codepoint))
+              ? contrastedColor(minimumContrast, foreground, background)
+              : foreground;
           this.writeGlyph(
             glyphIndex,
             glyph,
-            foreground,
+            textColor,
             ((flags & CellFlags.FAINT) !== 0 ? 0.5 : 1) *
               ((flags & CellFlags.BLINK) !== 0 ? -1 : 1),
             previousBackground !== background,
@@ -565,6 +783,28 @@ export class WebGlCellRenderer {
       }
     }
     return rectanglesChanged;
+  }
+
+  /** The ligature runs of `row` broken at `breakAt`, or null when it has none. */
+  private findRowLigatures(
+    cells: TerminalCellReader,
+    row: number,
+    breakAt: number,
+  ): Uint16Array | null {
+    if (this.ligatureKeys.length < this.cols) {
+      this.ligatureKeys = new Float64Array(this.cols);
+      this.ligatureRuns = new Uint16Array(this.cols);
+    }
+    return findRowLigatureRuns(
+      cells,
+      row,
+      this.cols,
+      this.ligatureKeys,
+      this.ligatureRuns,
+      breakAt,
+    ) > 0
+      ? this.ligatureRuns
+      : null;
   }
 
   private writeGlyph(
@@ -740,6 +980,7 @@ export class WebGlCellRenderer {
           Math.max(1 / this.profile.metrics.deviceCellHeight, 0.05),
           this.foregrounds[index],
           1,
+          SOLID_DECORATION,
         );
       }
       if ((decoration & 8) !== 0) {
@@ -752,10 +993,39 @@ export class WebGlCellRenderer {
           Math.max(1 / this.profile.metrics.deviceCellHeight, 0.05),
           this.foregrounds[index],
           1,
+          SOLID_DECORATION,
         );
       }
     }
     return count;
+  }
+
+  /** One single-underline rectangle per linked cell without an underline of its own. */
+  private buildLinkUnderline(link: LinkCellRange | null): void {
+    this.renderedLink = link;
+    const vertices = this.linkVertices;
+    vertices.count = 0;
+    const profile = this.profile;
+    if (link && profile) {
+      const height = Math.max(1 / profile.metrics.deviceCellHeight, 0.05);
+      const end = Math.min(link.end, this.cols * this.rows - 1);
+      for (let index = Math.max(0, link.start); index <= end; index += 1) {
+        if ((this.decorations[index] & 7) !== 0) continue;
+        const row = Math.floor(index / this.cols);
+        this.writeRectangle(
+          vertices,
+          vertices.count++,
+          index - row * this.cols,
+          row + 0.88,
+          1,
+          height,
+          this.foregrounds[index],
+          1,
+          1,
+        );
+      }
+    }
+    this.uploadRectangles(vertices, this.resources?.linkBuffer ?? null);
   }
 
   private updateCursor(frame: WebGlRendererFrame): boolean {
@@ -864,30 +1134,57 @@ export class WebGlCellRenderer {
     if (!resources || !profile || !atlas) return;
     const gl = this.gl;
     const background = profile.theme.background;
+    const shader = this.shader;
+    shader?.begin(this.canvas.width, this.canvas.height);
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.STENCIL_TEST);
-    gl.clearColor(
-      background[0] / 255,
-      background[1] / 255,
-      background[2] / 255,
-      1,
-    );
+    // Only explicit backgrounds are rectangles: the clear colour is the default background, or
+    // nothing while the window shows through it. A custom shader gets an opaque frame.
+    if (this.translucent && !shader) gl.clearColor(0, 0, 0, 0);
+    else
+      gl.clearColor(
+        background[0] / 255,
+        background[1] / 255,
+        background[2] / 255,
+        1,
+      );
     gl.clear(gl.COLOR_BUFFER_BIT);
 
+    // Ghostty's layering: images under the cell backgrounds (only explicit backgrounds are
+    // rectangles here, so default cells show them), then between backgrounds and text, where
+    // decorations and the cursor are drawn again over them, then above the text.
+    const images = this.images;
+    const gridWidth = this.cols * profile.metrics.deviceCellWidth;
+    const gridHeight = this.rows * profile.metrics.deviceCellHeight;
+    images?.draw(IMAGES_UNDER_BACKGROUNDS, gridWidth, gridHeight);
     gl.disable(gl.BLEND);
     this.drawRectangles(
       resources.colorProgram,
       resources.backgroundVao,
       this.backgroundVertices.count,
     );
-    this.drawRectangles(
-      resources.colorProgram,
-      resources.cursorVao,
-      this.cursorVertices.count,
-    );
+    this.drawOverlays(resources);
+    if (images?.has(IMAGES_BELOW_TEXT)) {
+      images.draw(IMAGES_BELOW_TEXT, gridWidth, gridHeight);
+      gl.disable(gl.BLEND);
+      this.drawRectangles(
+        resources.colorProgram,
+        resources.backgroundVao,
+        this.backgroundVertices.count,
+        true,
+      );
+      this.drawOverlays(resources);
+    }
 
     gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    // Destination alpha accumulates as "over" does, so text on a transparent background
+    // composites premultiplied.
+    gl.blendFuncSeparate(
+      gl.SRC_ALPHA,
+      gl.ONE_MINUS_SRC_ALPHA,
+      gl.ONE,
+      gl.ONE_MINUS_SRC_ALPHA,
+    );
     // biome-ignore lint/correctness/useHookAtTopLevel: WebGL method, not a React hook.
     gl.useProgram(resources.glyphProgram.value);
     gl.bindVertexArray(resources.glyphVao);
@@ -915,12 +1212,91 @@ export class WebGlCellRenderer {
       0,
       this.glyphInstanceCount,
     );
+    images?.draw(IMAGES_ABOVE_TEXT, gridWidth, gridHeight);
+    shader?.finish(profile.theme);
+    if (shader && this.translucent) {
+      // Whatever alpha the shader wrote, its pane stays opaque.
+      gl.colorMask(false, false, false, true);
+      gl.clearColor(0, 0, 0, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.colorMask(true, true, true, true);
+    }
+  }
+
+  /**
+   * The custom shader for this frame, compiled on first use (its module loads
+   * first, then a frame is requested), with its clock, focus and cursor
+   * brought up to date; null without one or when it does not compile.
+   */
+  private prepareShader(frame: WebGlRendererFrame) {
+    const source = this.shaderSource;
+    if (!source || this.contextLost || !this.profile) return null;
+    if (!this.shader) {
+      if (this.shaderFailedSource === source) return null;
+      const module = this.shaderModule;
+      if (!module) {
+        if (!this.shaderLoading) {
+          this.shaderLoading = true;
+          void import("./customShader").then(
+            (loaded) => {
+              this.shaderModule = loaded;
+              this.shaderLoading = false;
+              if (!this.disposed) this.requestFrame?.();
+            },
+            () => {
+              this.shaderLoading = false;
+              this.shaderFailedSource = source;
+            },
+          );
+        }
+        return null;
+      }
+      const runner = module.CustomShaderRunner.create(this.gl, source);
+      if (typeof runner === "string") {
+        console.warn(`[oarlock] custom shader: ${runner}`);
+        this.shaderFailedSource = source;
+        return null;
+      }
+      this.shader = runner;
+    }
+    const shader = this.shader;
+    const metrics = this.profile.metrics;
+    shader.update(
+      frame.model.cursor(),
+      frame.cursorVisible,
+      metrics.deviceCellWidth,
+      metrics.deviceCellHeight,
+      this.canvas.height,
+      this.profile.theme.cursor,
+    );
+    return shader;
+  }
+
+  private disposeShader(): void {
+    if (this.shader && !this.contextLost) this.shader.dispose();
+    this.shader = null;
+    this.shaderFailedSource = null;
+  }
+
+  /** The hovered link's underline, then the cursor over it. */
+  private drawOverlays(resources: RendererResources): void {
+    this.drawRectangles(
+      resources.colorProgram,
+      resources.linkVao,
+      this.linkVertices.count,
+    );
+    this.drawRectangles(
+      resources.colorProgram,
+      resources.cursorVao,
+      this.cursorVertices.count,
+    );
   }
 
   private drawRectangles(
-    program: Program,
+    program: ColorProgram,
     vao: WebGLVertexArrayObject,
     count: number,
+    decorationsOnly = false,
   ): void {
     if (count === 0) return;
     const gl = this.gl;
@@ -928,6 +1304,7 @@ export class WebGlCellRenderer {
     gl.useProgram(program.value);
     gl.bindVertexArray(vao);
     gl.uniformMatrix4fv(program.projection, false, PROJECTION_MATRIX);
+    gl.uniform1i(program.decorationsOnly, decorationsOnly ? 1 : 0);
     gl.drawElementsInstanced(gl.TRIANGLE_STRIP, 4, gl.UNSIGNED_BYTE, 0, count);
   }
 
@@ -1063,6 +1440,7 @@ export class WebGlCellRenderer {
 
     const backgroundBuffer = requiredBuffer(gl);
     const cursorBuffer = requiredBuffer(gl);
+    const linkBuffer = requiredBuffer(gl);
     const glyphBuffer = requiredBuffer(gl);
     const unitQuadBuffer = requiredBuffer(gl);
     gl.bindBuffer(gl.ARRAY_BUFFER, unitQuadBuffer);
@@ -1090,6 +1468,12 @@ export class WebGlCellRenderer {
       unitQuadBuffer,
       elementBuffer,
     );
+    const linkVao = createRectangleVao(
+      gl,
+      linkBuffer,
+      unitQuadBuffer,
+      elementBuffer,
+    );
     const glyphVao = createGlyphVao(
       gl,
       glyphBuffer,
@@ -1101,6 +1485,11 @@ export class WebGlCellRenderer {
       colorProgram: {
         value: colorProgramValue,
         projection: colorProjection,
+        decorationsOnly: requiredUniform(
+          gl,
+          colorProgramValue,
+          "u_decorations_only",
+        ),
       },
       glyphProgram: {
         value: glyphProgramValue,
@@ -1112,18 +1501,21 @@ export class WebGlCellRenderer {
       },
       backgroundVao,
       cursorVao,
+      linkVao,
       glyphVao,
       backgroundBuffer,
       cursorBuffer,
+      linkBuffer,
       glyphBuffer,
       buffers: [
         backgroundBuffer,
         cursorBuffer,
+        linkBuffer,
         glyphBuffer,
         unitQuadBuffer,
         elementBuffer,
       ],
-      vaos: [backgroundVao, cursorVao, glyphVao],
+      vaos: [backgroundVao, cursorVao, linkVao, glyphVao],
       programs: [colorProgramValue, glyphProgramValue],
     };
   }
@@ -1152,6 +1544,43 @@ export class WebGlCellRenderer {
   private assertLive(): void {
     if (this.disposed) throw new Error("WebGL renderer is disposed");
   }
+}
+
+function runTextAt(
+  cells: TerminalCellReader,
+  first: number,
+  length: number,
+): string {
+  let text = "";
+  for (let index = first; index < first + length; index += 1) {
+    text += String.fromCharCode(cells.codepoint(index));
+  }
+  return text;
+}
+
+/**
+ * WebKitGTK without hardware acceleration (Ubuntu turns its DMA-BUF renderer
+ * off for the proprietary NVIDIA driver) paints a WebGL canvas by reading the
+ * drawing buffer back after swapping it out, so every frame shows the one
+ * before it, the last keystroke included. A preserved drawing buffer is
+ * copied instead of swapped and still holds the frame just drawn, at the cost
+ * of one copy per drawn frame, so only Linux pays it.
+ */
+export function webGlContextAttributes(
+  platform: ReturnType<typeof detectPlatform>,
+  translucent = false,
+): WebGLContextAttributes {
+  return {
+    alpha: translucent,
+    premultipliedAlpha: true,
+    antialias: false,
+    depth: false,
+    desynchronized: true,
+    failIfMajorPerformanceCaveat: false,
+    powerPreference: "low-power",
+    preserveDrawingBuffer: platform === "linux",
+    stencil: false,
+  };
 }
 
 export function rendererProfileKey(profile: WebGlRendererProfile): string {
@@ -1403,12 +1832,14 @@ void main() {
 
 const COLOR_FRAGMENT_SHADER = `#version 300 es
 precision mediump float;
+uniform bool u_decorations_only;
 in vec4 v_color;
 in vec2 v_unitquad;
 flat in float v_decoration;
 out vec4 outColor;
 void main() {
   int style = int(v_decoration + 0.5);
+  if (u_decorations_only && style == 0) discard;
   if (style == 2 && v_unitquad.y > 0.28 && v_unitquad.y < 0.72) discard;
   if (style == 3) {
     float wave = 0.5 + sin(v_unitquad.x * 12.5663706) * 0.27;

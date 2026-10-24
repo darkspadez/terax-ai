@@ -1,6 +1,8 @@
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 
+use crate::modules::git::types::COMMIT_TIMEOUT_SECS;
+
 #[derive(Debug)]
 pub enum GitError {
     NotInstalled,
@@ -11,6 +13,7 @@ pub enum GitError {
     NotADirectory(String),
     PathOutsideWorkspace(PathBuf),
     InvalidPath(String),
+    InvalidBranchName(String),
     FileTooLarge {
         path: PathBuf,
         size: u64,
@@ -21,6 +24,7 @@ pub enum GitError {
     AuthRequired(String),
     HostKeyUnverified,
     TimedOut(&'static str),
+    CommitTimedOut,
     EmptyCommitMessage,
     CommandFailed {
         context: &'static str,
@@ -48,7 +52,7 @@ impl Display for GitError {
             ),
             GitError::TooOld { found, required } => write!(
                 f,
-                "git {found} is too old; Terax needs git {required} or newer.",
+                "git {found} is too old; Oarlock needs git {required} or newer.",
             ),
             GitError::NotADirectory(p) => write!(f, "not a directory: {p}"),
             GitError::PathOutsideWorkspace(p) => write!(
@@ -57,6 +61,7 @@ impl Display for GitError {
                 p.display()
             ),
             GitError::InvalidPath(p) => write!(f, "invalid path: {p}"),
+            GitError::InvalidBranchName(name) => write!(f, "invalid branch name: {name}"),
             GitError::FileTooLarge { path, size, max } => write!(
                 f,
                 "file too large to diff ({size} bytes, max {max}): {}",
@@ -78,6 +83,12 @@ impl Display for GitError {
                 "host key verification failed. Run the command once in the terminal to trust the host."
             ),
             GitError::TimedOut(op) => write!(f, "{op} timed out"),
+            GitError::CommitTimedOut => write!(
+                f,
+                "git commit timed out after {} minutes: a commit hook or commit signing took too long. \
+                 If git then reports that index.lock exists, make sure no git process is running and remove that file.",
+                COMMIT_TIMEOUT_SECS / 60
+            ),
             GitError::EmptyCommitMessage => write!(f, "commit message cannot be empty"),
             GitError::CommandFailed { context, detail } => {
                 if detail.is_empty() {
@@ -161,6 +172,14 @@ mod tests {
             GitError::TimedOut("git fetch").to_string(),
             "git fetch timed out"
         );
+    }
+
+    #[test]
+    fn commit_timed_out_mentions_hooks_and_index_lock() {
+        let msg = GitError::CommitTimedOut.to_string();
+        assert!(msg.contains("after 3 minutes"));
+        assert!(msg.contains("commit hook"));
+        assert!(msg.contains("index.lock"));
     }
 
     #[test]

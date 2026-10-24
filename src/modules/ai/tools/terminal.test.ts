@@ -12,9 +12,10 @@ vi.mock("../lib/security", () => securityMock);
 
 import { buildTerminalTools } from "./terminal";
 
-const toolOptions: ToolExecutionOptions = {
+const toolOptions: ToolExecutionOptions<Record<string, unknown>> = {
   toolCallId: "tool-call",
   messages: [],
+  context: {},
 };
 
 type Ctx = {

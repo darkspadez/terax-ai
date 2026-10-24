@@ -7,16 +7,20 @@ import {
 } from "@/modules/ai/lib/native";
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import {
-  modelSupportsTemperature,
-  providerNeedsKey,
-  resolveModel,
-} from "@/modules/ai/config";
+  liveModelConfig,
+  useSelectedModelProblem,
+} from "@/modules/ai/store/modelConfig";
+import { modelSupportsTemperature, resolveModel } from "@/modules/ai/config";
 import {
   invalidateDiff,
   invalidateRepoDiffs,
   workingDiffKey,
 } from "@/modules/editor/lib/diffCache";
-import { usePreferencesStore } from "@/modules/settings/preferences";
+import {
+  notifyFilesDiscarded,
+  notifyHeadMoved,
+} from "@/modules/editor/lib/gitSignals";
+import { showPrivacyRefusal } from "@/modules/mac-privacy";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SourceControlSummary } from "./useSourceControl";
 
@@ -372,22 +376,7 @@ export function useSourceControlPanel(
 ): SourceControlPanelState {
   const selectedModelId = useChatStore((state) => state.selectedModelId);
   const agentStatus = useChatStore((state) => state.agentMeta.status);
-  const hasApiKeyForSelected = useChatStore((state) => {
-    const model = resolveModel(state.selectedModelId);
-    return !providerNeedsKey(model.provider) || !!state.apiKeys[model.provider];
-  });
-  const lmstudioModelId = usePreferencesStore((state) => state.lmstudioModelId);
-  const mlxModelId = usePreferencesStore((state) => state.mlxModelId);
-  const ollamaModelId = usePreferencesStore((state) => state.ollamaModelId);
-  const openaiCompatibleBaseURL = usePreferencesStore(
-    (state) => state.openaiCompatibleBaseURL,
-  );
-  const openaiCompatibleModelId = usePreferencesStore(
-    (state) => state.openaiCompatibleModelId,
-  );
-  const openrouterModelId = usePreferencesStore(
-    (state) => state.openrouterModelId,
-  );
+  const selectedModelProblem = useSelectedModelProblem();
   const [panelState, setPanelState] = useState<PanelState>("closed");
   const [repo, setRepo] = useState<GitRepoInfo | null>(null);
   const [status, setStatus] = useState<GitStatusSnapshot | null>(null);
@@ -473,43 +462,10 @@ export function useSourceControlPanel(
   );
   const aiBusy = agentStatus !== "idle" && agentStatus !== "error";
   const anyActionBusy = localActionBusy !== null || summary.busyAction !== null;
-  const aiUnavailableReason = useMemo(() => {
-    if (stagedEntries.length === 0) {
-      return "Stage changes to generate a commit message";
-    }
-    if (!hasApiKeyForSelected) {
-      return "Connect an AI provider to generate commit messages";
-    }
-    if (selectedModel.id === "lmstudio-local" && !lmstudioModelId.trim()) {
-      return "Connect an AI provider to generate commit messages";
-    }
-    if (selectedModel.id === "mlx-local" && !mlxModelId.trim()) {
-      return "Connect an AI provider to generate commit messages";
-    }
-    if (selectedModel.id === "ollama-local" && !ollamaModelId.trim()) {
-      return "Connect an AI provider to generate commit messages";
-    }
-    if (
-      selectedModel.id === "openai-compatible-custom" &&
-      (!openaiCompatibleBaseURL.trim() || !openaiCompatibleModelId.trim())
-    ) {
-      return "Connect an AI provider to generate commit messages";
-    }
-    if (selectedModel.id === "openrouter-custom" && !openrouterModelId.trim()) {
-      return "Connect an AI provider to generate commit messages";
-    }
-    return null;
-  }, [
-    hasApiKeyForSelected,
-    lmstudioModelId,
-    mlxModelId,
-    ollamaModelId,
-    openaiCompatibleBaseURL,
-    openaiCompatibleModelId,
-    openrouterModelId,
-    selectedModel,
-    stagedEntries.length,
-  ]);
+  const aiUnavailableReason =
+    stagedEntries.length === 0
+      ? "Stage changes to generate a commit message"
+      : selectedModelProblem;
   const canGenerateCommitMessage =
     stagedEntries.length > 0 && !anyActionBusy && !aiBusy && !!repo;
   const generateCommitMessageHint = aiUnavailableReason
@@ -687,6 +643,10 @@ export function useSourceControlPanel(
         scheduleReconcile();
       } catch (error) {
         setActionError(normalizeError(error));
+        showPrivacyRefusal("Could not update the repository", {
+          path: repo.repoRoot,
+          error,
+        });
         cancelReconcile();
         await summary.refresh({ remote: "never" }).catch(() => {});
       } finally {
@@ -758,7 +718,10 @@ export function useSourceControlPanel(
         ? `discard:${list[0].path}`
         : "discard:all",
       (s) => optimisticDiscard(s, paths),
-      () => native.gitDiscard(repo.repoRoot, entries),
+      async () => {
+        await native.gitDiscard(repo.repoRoot, entries);
+        notifyFilesDiscarded(repo.repoRoot, [...paths]);
+      },
       [...paths],
     );
   }, [pendingDiscard, repo, runMutation]);
@@ -876,26 +839,14 @@ export function useSourceControlPanel(
           native.gitDiff(repo.repoRoot, null, true),
         ]);
       const { text: diffText, truncated } = truncateDiff(diff.diffText);
-      const chatState = useChatStore.getState();
-      const prefs = usePreferencesStore.getState();
       const model = await buildConfiguredLanguageModel(
         selectedModelId,
-        chatState.apiKeys,
-        {
-          lmstudioBaseURL: prefs.lmstudioBaseURL,
-          lmstudioModelId,
-          mlxBaseURL: prefs.mlxBaseURL,
-          mlxModelId,
-          ollamaBaseURL: prefs.ollamaBaseURL,
-          ollamaModelId,
-          openaiCompatibleBaseURL,
-          openaiCompatibleModelId,
-          openrouterModelId,
-        },
+        useChatStore.getState().apiKeys,
+        liveModelConfig(),
       );
       const result = await generateText({
         model,
-        system: COMMIT_MESSAGE_SYSTEM_PROMPT,
+        instructions: COMMIT_MESSAGE_SYSTEM_PROMPT,
         prompt: buildCommitMessagePrompt(stagedEntries, diffText, truncated),
         maxOutputTokens: COMMIT_MESSAGE_MAX_OUTPUT_TOKENS,
         ...(selectedModelSupportsTemperature ? { temperature: 0.2 } : {}),
@@ -904,7 +855,7 @@ export function useSourceControlPanel(
       if (!isValidCommitMessage(message)) {
         const repair = await generateText({
           model,
-          system: COMMIT_MESSAGE_SYSTEM_PROMPT,
+          instructions: COMMIT_MESSAGE_SYSTEM_PROMPT,
           prompt: buildRepairCommitMessagePrompt(message, stagedEntries),
           maxOutputTokens: COMMIT_MESSAGE_MAX_OUTPUT_TOKENS,
           ...(selectedModelSupportsTemperature ? { temperature: 0 } : {}),
@@ -926,12 +877,6 @@ export function useSourceControlPanel(
   }, [
     aiUnavailableReason,
     aiBusy,
-    lmstudioModelId,
-    mlxModelId,
-    ollamaModelId,
-    openaiCompatibleBaseURL,
-    openaiCompatibleModelId,
-    openrouterModelId,
     repo,
     selectedModelId,
     selectedModelSupportsTemperature,
@@ -945,6 +890,7 @@ export function useSourceControlPanel(
     setActionError(null);
     try {
       const result = await native.gitCommit(repo.repoRoot, commitMessage);
+      notifyHeadMoved();
       setCommitMessage("");
       setActionMessage(
         `Committed ${result.commitSha.slice(0, 7)} ${result.summary}`,
@@ -953,6 +899,7 @@ export function useSourceControlPanel(
       await summary.refresh({ remote: "never" });
     } catch (error) {
       setActionError(normalizeError(error));
+      showPrivacyRefusal("Could not commit", { path: repo.repoRoot, error });
     } finally {
       setLocalActionBusy(null);
     }

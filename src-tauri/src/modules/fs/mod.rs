@@ -3,7 +3,9 @@ pub mod copy;
 pub mod file;
 pub mod grep;
 pub mod index;
+pub mod launch;
 pub mod mutate;
+mod run_prompt;
 pub mod search;
 pub mod supersede;
 pub mod tree;
@@ -11,7 +13,9 @@ pub mod watch;
 
 use std::path::Path;
 
-use crate::modules::workspace::WorkspaceEnv;
+use tauri::Manager;
+
+use crate::modules::workspace::{resolve_path, Origin, WorkspaceEnv, WorkspaceRegistry};
 
 /// Runs blocking filesystem work off the async workers and the main thread.
 /// Tauri runs a non-async command inline in the IPC handler (the main thread on
@@ -25,6 +29,34 @@ where
     tauri::async_runtime::spawn_blocking(work)
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// Refuses a folder (or file) to list or search outside every folder `origin` may reach. The
+/// work then goes through the spelling the page used, which the paths it reports follow.
+pub(crate) fn authorized_root(
+    app: &tauri::AppHandle,
+    path: &str,
+    workspace: Option<&WorkspaceEnv>,
+    origin: Origin,
+) -> Result<(), String> {
+    let workspace = workspace.cloned().unwrap_or_default();
+    app.state::<WorkspaceRegistry>()
+        .gates(origin)
+        .authorized_existing(&resolve_path(path, &workspace))
+        .map(drop)
+}
+
+/// A search walk skips a folder it cannot list, so a root that macOS privacy
+/// controls refuse would read as "nothing found". The interactive searches report
+/// that refusal instead, for the page to explain; elsewhere nothing changes.
+#[cfg(target_os = "macos")]
+pub(crate) fn privacy_refused_root(root: &str) -> Result<(), String> {
+    crate::modules::mac_privacy::refused(std::fs::read_dir(root))
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn privacy_refused_root(_root: &str) -> Result<(), String> {
+    Ok(())
 }
 
 /// How a path under a search root is shown to the frontend. WSL roots keep the

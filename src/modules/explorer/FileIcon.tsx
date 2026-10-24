@@ -40,7 +40,7 @@ function IconSlot({
       alt=""
       width={width}
       height={height}
-      className={cn(className, arrivedLate && "terax-icon-in")}
+      className={cn(className, arrivedLate && "oarlock-icon-in")}
       onError={onError}
     />
   );

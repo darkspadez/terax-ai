@@ -2,6 +2,7 @@ import type { CloseManyPending } from "@/app/hooks/tabCloseGuards";
 import {
   type AppCloseBlocker,
   canOptOutOfAppClosePrompt,
+  type PendingAppClose,
 } from "@/app/hooks/useAppCloseGuard";
 import {
   AlertDialog,
@@ -27,6 +28,9 @@ type Props = {
   pendingTerminalCloseTab: number | null;
   onCancelTerminalClose: () => void;
   onConfirmTerminalClose: () => void;
+  pendingTerminalRestart: number | null;
+  onCancelTerminalRestart: () => void;
+  onConfirmTerminalRestart: () => void;
   pendingDeleteTabs: number[] | null;
   onCancelDeleteClose: () => void;
   onConfirmDeleteClose: () => void;
@@ -34,23 +38,25 @@ type Props = {
   closeManyConfirming: boolean;
   onCancelCloseMany: () => void;
   onConfirmCloseMany: () => void;
-  pendingAppClose: AppCloseBlocker | null;
+  pendingAppClose: PendingAppClose | null;
   onCancelAppClose: () => void;
   onConfirmAppClose: () => void;
 };
 
-function appCloseMessage(blocker: AppCloseBlocker): string {
+/** The warning; `quits` when Oarlock quits rather than one window closing. */
+export function appCloseMessage(blocker: AppCloseBlocker, quits = true): string {
+  const doing = quits ? "Quitting" : "Closing this window";
   const dirty =
     blocker.dirtyEditors === 1
       ? "1 file has unsaved changes"
       : `${blocker.dirtyEditors} files have unsaved changes`;
   if (blocker.dirtyEditors > 0 && blocker.busyTerminal) {
-    return `A process is still running and ${dirty}. Quitting will terminate it and discard the changes.`;
+    return `A process is still running and ${dirty}. ${doing} will terminate it and discard the changes.`;
   }
   if (blocker.dirtyEditors > 0) {
-    return `${dirty.charAt(0).toUpperCase()}${dirty.slice(1)}. Quitting will discard them.`;
+    return `${dirty.charAt(0).toUpperCase()}${dirty.slice(1)}. ${doing} will discard them.`;
   }
-  return "A process is still running in a terminal. Quitting will terminate it.";
+  return `A process is still running in a terminal. ${doing} will terminate it.`;
 }
 
 function OptOutRow({
@@ -116,7 +122,10 @@ function closeManyMessage(pending: CloseManyPending, tabs: Tab[]): string {
     : `${process} running in ${busyCount === 1 ? "another tab" : "other tabs"}. Closing will terminate ${busyCount === 1 ? "it" : "them"}. Close anyway?`;
 }
 
-/** Confirmation dialogs for closing dirty editors and terminals with live processes. */
+/**
+ * Confirmation dialogs for closing dirty editors and terminals with live
+ * processes, and for restarting a terminal that runs one.
+ */
 export function CloseDialogs({
   tabs,
   pendingCloseTab,
@@ -125,6 +134,9 @@ export function CloseDialogs({
   pendingTerminalCloseTab,
   onCancelTerminalClose,
   onConfirmTerminalClose,
+  pendingTerminalRestart,
+  onCancelTerminalRestart,
+  onConfirmTerminalRestart,
   pendingDeleteTabs,
   onCancelDeleteClose,
   onConfirmDeleteClose,
@@ -137,6 +149,7 @@ export function CloseDialogs({
   onConfirmAppClose,
 }: Props) {
   const [optOutTerminalClose, setOptOutTerminalClose] = useState(false);
+  const [optOutTerminalRestart, setOptOutTerminalRestart] = useState(false);
   const [optOutAppClose, setOptOutAppClose] = useState(false);
   const appCloseCanOptOut =
     pendingAppClose !== null && canOptOutOfAppClosePrompt(pendingAppClose);
@@ -150,6 +163,17 @@ export function CloseDialogs({
   const cancelTerminalClose = () => {
     setOptOutTerminalClose(false);
     onCancelTerminalClose();
+  };
+
+  const confirmTerminalRestart = () => {
+    if (optOutTerminalRestart) void persistOptOut();
+    setOptOutTerminalRestart(false);
+    onConfirmTerminalRestart();
+  };
+
+  const cancelTerminalRestart = () => {
+    setOptOutTerminalRestart(false);
+    onCancelTerminalRestart();
   };
 
   // The pref write has to land before the window closes, or quitting drops it.
@@ -214,6 +238,32 @@ export function CloseDialogs({
             </AlertDialogCancel>
             <AlertDialogAction onClick={confirmTerminalClose}>
               Close Anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={pendingTerminalRestart !== null}
+        onOpenChange={(open) => !open && cancelTerminalRestart()}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Restart Terminal?</AlertDialogTitle>
+            <AlertDialogDescription>
+              A process is running. Restarting the terminal will terminate it.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <OptOutRow
+            checked={optOutTerminalRestart}
+            onCheckedChange={setOptOutTerminalRestart}
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={cancelTerminalRestart}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={confirmTerminalRestart}>
+              Restart Anyway
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -288,9 +338,15 @@ export function CloseDialogs({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Quit Terax?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {pendingAppClose?.quits === false
+                ? "Close Window?"
+                : "Quit Oarlock?"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              {pendingAppClose ? appCloseMessage(pendingAppClose) : ""}
+              {pendingAppClose
+                ? appCloseMessage(pendingAppClose, pendingAppClose.quits)
+                : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {appCloseCanOptOut ? (
@@ -304,7 +360,9 @@ export function CloseDialogs({
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction onClick={() => void confirmAppClose()}>
-              Quit Anyway
+              {pendingAppClose?.quits === false
+                ? "Close Anyway"
+                : "Quit Anyway"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

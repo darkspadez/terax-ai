@@ -1,6 +1,6 @@
 import type { TerminalBackendKind } from "./contracts";
 
-const STORAGE_KEY = "terax.experimental.terminal-backend";
+const STORAGE_KEY = "oarlock.experimental.terminal-backend";
 const DEFAULT_BACKEND: TerminalBackendKind = "ghostty-webgpu";
 const GHOSTTY_BACKENDS = new Set<TerminalBackendKind>([
   "ghostty-webgl",

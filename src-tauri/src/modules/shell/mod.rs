@@ -12,10 +12,10 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::Manager;
 
-use crate::modules::proc::capture::{self, Limits};
+use crate::modules::proc::capture::{self, Limits, OnTimeout};
 #[cfg(windows)]
 use crate::modules::workspace::validate_wsl_distro_name;
-use crate::modules::workspace::{authorize_spawn_cwd, WorkspaceEnv, WorkspaceRegistry};
+use crate::modules::workspace::{Origin, WorkspaceEnv, WorkspaceRegistry};
 
 use background::{BackgroundLogResponse, BackgroundProc, BackgroundProcInfo};
 use session::{SessionRunOutput, ShellSession};
@@ -33,8 +33,9 @@ pub struct CommandOutput {
     pub truncated: bool,
 }
 
-/// Runs a one-shot command via the user's login shell. Output is capped and
-/// the process is force-killed on timeout. We deliberately do NOT pipe into
+/// Runs a one-shot command (`build_oneshot_command`). Output is capped and on
+/// timeout the command stops with everything it started (on Unix its process
+/// group gets SIGTERM, then SIGKILL). We deliberately do NOT pipe into
 /// the user's interactive PTY — that would fight their input. AI tool calls
 /// are presented in chat as their own structured result.
 #[tauri::command]
@@ -44,6 +45,7 @@ pub async fn shell_run_command(
     cwd: Option<String>,
     timeout_secs: Option<u64>,
     workspace: Option<WorkspaceEnv>,
+    origin: Option<Origin>,
 ) -> Result<CommandOutput, String> {
     let trimmed = command.trim().to_string();
     if trimmed.is_empty() {
@@ -55,11 +57,9 @@ pub async fn shell_run_command(
     // Authorization canonicalizes the cwd and the run blocks until exit, so
     // both belong on the blocking pool, never on an async worker.
     tauri::async_runtime::spawn_blocking(move || {
-        authorize_spawn_cwd(
-            &app.state::<WorkspaceRegistry>(),
-            cwd.as_deref(),
-            &workspace,
-        )?;
+        app.state::<WorkspaceRegistry>()
+            .gates(origin.unwrap_or_default())
+            .spawn_cwd(cwd.as_deref(), &workspace)?;
         let cwd_path = cwd
             .as_deref()
             .map(str::trim)
@@ -103,7 +103,7 @@ fn run_blocking(
         .stderr(Stdio::piped());
     crate::modules::proc::hide_console(&mut cmd);
 
-    let captured = capture::run(
+    let captured = capture::run_with(
         &mut cmd,
         dur,
         Limits {
@@ -111,6 +111,7 @@ fn run_blocking(
             stderr: MAX_OUTPUT_BYTES,
             stop_on_stdout_cap: false,
         },
+        OnTimeout::TerminateGroup,
     )
     .map_err(|e| {
         log::warn!("shell_run_command failed: {e}");
@@ -137,6 +138,18 @@ pub struct ShellState {
     next_bg_id: AtomicU32,
 }
 
+impl ShellState {
+    /// Stops every background process with what it started; on app exit,
+    /// since nothing would read their output or stop them afterwards.
+    pub fn kill_all(&self) {
+        let drained: Vec<Arc<BackgroundProc>> =
+            self.bg.write().unwrap().drain().map(|(_, p)| p).collect();
+        for proc in drained {
+            proc.kill();
+        }
+    }
+}
+
 impl Default for ShellState {
     fn default() -> Self {
         Self {
@@ -153,16 +166,16 @@ pub async fn shell_session_open(
     app: tauri::AppHandle,
     cwd: Option<String>,
     workspace: Option<WorkspaceEnv>,
+    origin: Option<Origin>,
 ) -> Result<u32, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     // wsl_home spawns wsl.exe on Windows and authorization hits the disk.
     let registry_app = app.clone();
     let (initial, workspace) = tauri::async_runtime::spawn_blocking(move || {
-        authorize_spawn_cwd(
-            &registry_app.state::<WorkspaceRegistry>(),
-            cwd.as_deref(),
-            &workspace,
-        )?;
+        registry_app
+            .state::<WorkspaceRegistry>()
+            .gates(origin.unwrap_or_default())
+            .spawn_cwd(cwd.as_deref(), &workspace)?;
         let initial = match cwd.as_deref().filter(|s| !s.is_empty()) {
             Some(c) => c.to_string(),
             None => {
@@ -198,6 +211,7 @@ pub async fn shell_session_run(
     cwd: Option<String>,
     timeout_secs: Option<u64>,
     workspace: Option<WorkspaceEnv>,
+    origin: Option<Origin>,
 ) -> Result<SessionRunOutput, String> {
     let session = app
         .state::<ShellState>()
@@ -212,11 +226,9 @@ pub async fn shell_session_run(
         let effective_workspace = workspace
             .clone()
             .unwrap_or_else(|| session.workspace.clone());
-        authorize_spawn_cwd(
-            &app.state::<WorkspaceRegistry>(),
-            cwd.as_deref(),
-            &effective_workspace,
-        )?;
+        app.state::<WorkspaceRegistry>()
+            .gates(origin.unwrap_or_default())
+            .spawn_cwd(cwd.as_deref(), &effective_workspace)?;
         session.run(command, cwd, workspace, dur)
     })
     .await
@@ -235,14 +247,13 @@ pub async fn shell_bg_spawn(
     command: String,
     cwd: Option<String>,
     workspace: Option<WorkspaceEnv>,
+    origin: Option<Origin>,
 ) -> Result<u32, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     tauri::async_runtime::spawn_blocking(move || {
-        authorize_spawn_cwd(
-            &app.state::<WorkspaceRegistry>(),
-            cwd.as_deref(),
-            &workspace,
-        )?;
+        app.state::<WorkspaceRegistry>()
+            .gates(origin.unwrap_or_default())
+            .spawn_cwd(cwd.as_deref(), &workspace)?;
         let proc = background::spawn(command, cwd, workspace)?;
         let state = app.state::<ShellState>();
         let id = state.next_bg_id.fetch_add(1, Ordering::Relaxed);
@@ -308,7 +319,7 @@ pub(crate) fn build_oneshot_command(
     {
         let mut cmd = Command::new("/bin/sh");
         cmd.arg("-c").arg(command);
-        for (key, value) in crate::modules::workspace::appimage_env_overrides() {
+        for (key, value) in crate::modules::workspace::child_env_overrides() {
             match value {
                 Some(v) => {
                     cmd.env(key, v);
@@ -373,6 +384,26 @@ mod tests {
         let out = run("sleep 10", 1);
         assert!(out.timed_out);
         assert_eq!(out.exit_code, None);
+    }
+
+    #[test]
+    fn a_timed_out_command_takes_what_it_started_with_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("survived");
+        let script = format!(
+            "(trap '' TERM; sleep 1; touch '{}') & wait",
+            marker.display()
+        );
+        let out = run_blocking_inner(
+            script,
+            None,
+            WorkspaceEnv::Local,
+            Duration::from_millis(200),
+        )
+        .expect("run");
+        assert!(out.timed_out);
+        std::thread::sleep(Duration::from_millis(1500));
+        assert!(!marker.exists(), "a grandchild outlived the timeout");
     }
 
     #[test]

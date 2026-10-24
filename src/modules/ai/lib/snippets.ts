@@ -1,4 +1,5 @@
 import { LazyStore } from "@tauri-apps/plugin-store";
+import { snippetBlock } from "./messageBlocks";
 
 export type Snippet = {
   id: string;
@@ -9,7 +10,7 @@ export type Snippet = {
   content: string;
 };
 
-const STORE_PATH = "terax-ai-snippets.json";
+const STORE_PATH = "oarlock-ai-snippets.json";
 const KEY_LIST = "snippets";
 
 const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
@@ -66,8 +67,8 @@ export function expandSnippetTokens(
     matched.set(snip.id, snip);
     return lead;
   });
-  const blocks = Array.from(matched.values()).map(
-    (s) => `<snippet name="${s.handle}">\n${s.content}\n</snippet>`,
+  const blocks = Array.from(matched.values()).map((s) =>
+    snippetBlock(s.handle, s.content),
   );
   return { body: body.replace(/[ \t]+\n/g, "\n").trim(), blocks };
 }

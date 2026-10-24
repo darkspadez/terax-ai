@@ -13,24 +13,19 @@
 //! delivered event id, so changes that landed while it was being replaced are
 //! replayed instead of lost.
 
-use std::ffi::{c_char, c_void, CStr, CString};
+use std::ffi::{c_char, c_void, CStr};
 use std::path::Path;
+use std::ptr::NonNull;
 
-use fsevent_sys as fs;
-use fsevent_sys::core_foundation as cf;
+use dispatch2::{DispatchQueue, DispatchRetained};
+use objc2_core_foundation::{CFArray, CFRetained, CFString};
+use objc2_core_services::{self as fs, FSEventsGetCurrentEventId};
 
 use super::plan::{self, WatchSet};
 use super::{Backend, Sink};
 
 /// FSEvents coalesces to this interval; the debounce downstream stays 150 ms.
 const LATENCY_SECONDS: f64 = 0.1;
-
-extern "C" {
-    fn dispatch_queue_create(label: *const c_char, attr: *const c_void) -> *mut c_void;
-    fn dispatch_release(object: *mut c_void);
-    fn FSEventStreamSetDispatchQueue(stream: fs::FSEventStreamRef, queue: *mut c_void);
-    fn FSEventsGetCurrentEventId() -> fs::FSEventStreamEventId;
-}
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 struct StreamSpec {
@@ -44,32 +39,39 @@ struct CallbackContext {
 
 /// Freed by FSEvents when the stream is deallocated, which also covers any
 /// callback that was already queued when the stream was stopped.
-extern "C" fn release_context(info: *const c_void) {
+unsafe extern "C-unwind" fn release_context(info: *const c_void) {
     drop(unsafe { Box::from_raw(info as *mut CallbackContext) });
 }
 
-extern "C" fn callback(
-    _stream: fs::FSEventStreamRef,
+unsafe extern "C-unwind" fn callback(
+    _stream: fs::ConstFSEventStreamRef,
     info: *mut c_void,
     count: usize,
-    paths: *mut c_void,
-    event_flags: *const fs::FSEventStreamEventFlags,
-    _ids: *const fs::FSEventStreamEventId,
+    paths: NonNull<c_void>,
+    event_flags: NonNull<fs::FSEventStreamEventFlags>,
+    _ids: NonNull<fs::FSEventStreamEventId>,
 ) {
-    let context = unsafe { &*(info as *const CallbackContext) };
-    let paths = paths as *const *const c_char;
-    // Without kFSEventStreamCreateFlagUseCFTypes the paths are plain C strings.
-    let events = (0..count).map(|i| unsafe {
-        (
-            CStr::from_ptr(*paths.add(i)).to_bytes(),
-            *event_flags.add(i),
-        )
-    });
-    let dirs = context.sink.dirs();
-    let batch = plan::reduce_directory_events(events, &dirs, &mut |path| {
-        context.sink.note_path(path);
-    });
-    context.sink.send(batch);
+    // A panic must not unwind into CoreServices frames.
+    let delivered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let context = unsafe { &*(info as *const CallbackContext) };
+        let paths = paths.as_ptr() as *const *const c_char;
+        let event_flags = event_flags.as_ptr();
+        // Without kFSEventStreamCreateFlagUseCFTypes the paths are plain C strings.
+        let events = (0..count).map(|i| unsafe {
+            (
+                CStr::from_ptr(*paths.add(i)).to_bytes(),
+                *event_flags.add(i),
+            )
+        });
+        let dirs = context.sink.dirs();
+        let batch = plan::reduce_directory_events(events, &dirs, &mut |path| {
+            context.sink.note_path(path);
+        });
+        context.sink.send(batch);
+    }));
+    if delivered.is_err() {
+        log::error!("fsevents: event callback panicked; batch dropped");
+    }
 }
 
 struct Stream {
@@ -85,7 +87,7 @@ impl Stream {
     /// "since now" reports a sentinel until its first event, which is why
     /// every stream is given an explicit starting id.
     fn latest_event_id(&self) -> fs::FSEventStreamEventId {
-        unsafe { fs::FSEventStreamGetLatestEventId(self.raw) }
+        unsafe { fs::FSEventStreamGetLatestEventId(self.raw.cast_const()) }
     }
 
     /// Delivers events with an id greater than `since`: live ones, and any
@@ -93,56 +95,46 @@ impl Stream {
     /// history-done marker that the reducer ignores).
     fn start(
         spec: &StreamSpec,
-        queue: *mut c_void,
+        queue: &DispatchQueue,
         context: CallbackContext,
         since: fs::FSEventStreamEventId,
-    ) -> Option<Self> {
+    ) -> Result<Self, &'static str> {
+        let paths = cf_string_array(&spec.roots).ok_or("no FSEvents roots")?;
         let context = Box::into_raw(Box::new(context));
-        let free_context = || release_context(context as *const c_void);
+        let mut stream_context = fs::FSEventStreamContext {
+            version: 0,
+            info: context as *mut c_void,
+            retain: None,
+            release: Some(release_context),
+            copyDescription: None,
+        };
         unsafe {
-            let paths = cf_string_array(&spec.roots);
-            if paths.is_null() {
-                free_context();
-                return None;
-            }
-            let stream_context = fs::FSEventStreamContext {
-                version: 0,
-                info: context as *mut c_void,
-                retain: None,
-                release: Some(release_context),
-                copy_description: None,
-            };
             let raw = fs::FSEventStreamCreate(
-                cf::kCFAllocatorDefault,
-                callback,
-                &stream_context,
-                paths,
+                None,
+                Some(callback),
+                &mut stream_context,
+                paths.as_opaque(),
                 since,
                 LATENCY_SECONDS,
                 // Directory-level events only: no FileEvents, no NoDefer.
                 fs::kFSEventStreamCreateFlagNone,
             );
-            cf::CFRelease(paths);
             if raw.is_null() {
-                free_context();
-                return None;
+                release_context(context as *const c_void);
+                return Err("FSEventStreamCreate failed");
             }
-            if !spec.exclusions.is_empty() {
-                let excluded = cf_string_array(&spec.exclusions);
-                if !excluded.is_null() {
-                    if fs::FSEventStreamSetExclusionPaths(raw, excluded) == 0 {
-                        log::debug!("fsevents: exclusion paths rejected");
-                    }
-                    cf::CFRelease(excluded);
+            if let Some(excluded) = cf_string_array(&spec.exclusions) {
+                if !fs::FSEventStreamSetExclusionPaths(raw, excluded.as_opaque()) {
+                    log::debug!("fsevents: exclusion paths rejected");
                 }
             }
-            FSEventStreamSetDispatchQueue(raw, queue);
-            if fs::FSEventStreamStart(raw) == 0 {
+            fs::FSEventStreamSetDispatchQueue(raw, Some(queue));
+            if !fs::FSEventStreamStart(raw) {
                 fs::FSEventStreamInvalidate(raw);
                 fs::FSEventStreamRelease(raw);
-                return None;
+                return Err("FSEventStreamStart failed: the macOS FSEvents service is unavailable or access is denied");
             }
-            Some(Self { raw })
+            Ok(Self { raw })
         }
     }
 }
@@ -157,58 +149,34 @@ impl Drop for Stream {
     }
 }
 
-/// A CFArray of CFStrings, or null if nothing could be converted.
-unsafe fn cf_string_array(items: &[String]) -> cf::CFMutableArrayRef {
-    let array = cf::CFArrayCreateMutable(cf::kCFAllocatorDefault, 0, &cf::kCFTypeArrayCallBacks);
-    if array.is_null() {
-        return array;
+/// A CFArray of CFStrings, or None for no items.
+fn cf_string_array(items: &[String]) -> Option<CFRetained<CFArray<CFString>>> {
+    if items.is_empty() {
+        return None;
     }
-    for item in items {
-        let Ok(c_string) = CString::new(item.as_str()) else {
-            continue;
-        };
-        let string = cf::CFStringCreateWithCString(
-            cf::kCFAllocatorDefault,
-            c_string.as_ptr(),
-            cf::kCFStringEncodingUTF8,
-        );
-        if !string.is_null() {
-            cf::CFArrayAppendValue(array, string);
-            cf::CFRelease(string);
-        }
-    }
-    if cf::CFArrayGetCount(array) == 0 {
-        cf::CFRelease(array);
-        return std::ptr::null_mut();
-    }
-    array
+    let strings: Vec<_> = items.iter().map(|item| CFString::from_str(item)).collect();
+    Some(CFArray::from_retained_objects(&strings))
 }
 
 pub struct FsEvents {
-    queue: *mut c_void,
+    queue: DispatchRetained<DispatchQueue>,
     sink: Sink,
     spec: Option<StreamSpec>,
     stream: Option<Stream>,
+    last_error: Option<&'static str>,
     /// Last event id the previous stream delivered, kept until a replacement
     /// starts so a failed start does not widen the gap.
     resume_from: Option<fs::FSEventStreamEventId>,
 }
 
-// `queue` is an immutable libdispatch handle owned by this backend.
-unsafe impl Send for FsEvents {}
-
 impl FsEvents {
     pub fn new(sink: Sink) -> Result<Self, String> {
-        let label = CString::new("app.crynta.terax.fsevents").expect("static label");
-        let queue = unsafe { dispatch_queue_create(label.as_ptr(), std::ptr::null()) };
-        if queue.is_null() {
-            return Err("could not create the file-event queue".into());
-        }
         Ok(Self {
-            queue,
+            queue: DispatchQueue::new("consulting.quantumops.oarlock.fsevents", None),
             sink,
             spec: None,
             stream: None,
+            last_error: None,
             resume_from: None,
         })
     }
@@ -216,8 +184,8 @@ impl FsEvents {
 
 impl Drop for FsEvents {
     fn drop(&mut self) {
+        // Stop the stream before the queue it delivers on is released.
         self.stream = None;
-        unsafe { dispatch_release(self.queue) };
     }
 }
 
@@ -225,48 +193,70 @@ fn is_dir(path: &str) -> bool {
     Path::new(path).is_dir()
 }
 
-impl Backend for FsEvents {
-    fn sync(&mut self, set: &WatchSet) {
+impl FsEvents {
+    fn sync_with(
+        &mut self,
+        set: &WatchSet,
+        current_id: impl FnOnce() -> fs::FSEventStreamEventId,
+        start: impl FnOnce(
+            &StreamSpec,
+            &DispatchQueue,
+            CallbackContext,
+            fs::FSEventStreamEventId,
+        ) -> Result<Stream, &'static str>,
+    ) {
         let roots = set.covering_roots();
         let wanted = (!roots.is_empty()).then(|| StreamSpec {
             exclusions: plan::exclusion_paths(&roots, set, &is_dir),
             roots,
         });
-        if wanted == self.spec {
+        if wanted == self.spec && self.last_error.is_none() {
             return;
         }
-        // Drop the old stream before creating the next so no two streams ever
-        // deliver the same change. Its last delivered id is read first: the
-        // replacement starts after it, so what changed while the swap was in
-        // progress (including events still inside the latency window) is
-        // replayed rather than lost.
+        // Resume before stopping: changes still in the coalescing window must be replayed.
         if let Some(old) = self.stream.take() {
             self.resume_from = Some(old.latest_event_id());
         }
-        if wanted.is_none() {
-            self.resume_from = None;
-        }
-        self.stream = wanted.as_ref().and_then(|spec| {
-            let since =
-                plan::resume_after(self.resume_from, unsafe { FSEventsGetCurrentEventId() });
-            let stream = Stream::start(
+        self.last_error = None;
+        if let Some(spec) = &wanted {
+            let since = plan::resume_after(self.resume_from, current_id());
+            // Keep the first attempt's cursor even if no stream has started yet.
+            self.resume_from = Some(since);
+            match start(
                 spec,
-                self.queue,
+                &self.queue,
                 CallbackContext {
                     sink: self.sink.clone(),
                 },
                 since,
-            );
-            if stream.is_none() {
-                log::warn!("fsevents: could not start a stream for {:?}", spec.roots);
+            ) {
+                Ok(stream) => {
+                    self.stream = Some(stream);
+                    self.resume_from = None;
+                }
+                Err(error) => {
+                    self.last_error = Some(error);
+                    log::warn!("fsevents: {error}; roots: {:?}", spec.roots);
+                }
             }
-            stream
-        });
-        if self.stream.is_some() {
+        } else {
             self.resume_from = None;
         }
-        // A failed start leaves the spec unset so the next change retries.
         self.spec = wanted.filter(|_| self.stream.is_some());
+    }
+}
+
+impl Backend for FsEvents {
+    fn sync(&mut self, set: &WatchSet) {
+        self.sync_with(
+            set,
+            || unsafe { FSEventsGetCurrentEventId() },
+            Stream::start,
+        );
+    }
+
+    fn needs_retry(&self) -> bool {
+        self.last_error.is_some()
     }
 }
 
@@ -305,9 +295,16 @@ mod tests {
 
         fn watch_unsettled(&mut self, dir: &Path) {
             let canonical = std::fs::canonicalize(dir).unwrap();
-            self.set.add_dir(to_canon(&canonical), canonical);
+            // FSEvents on a local volume always notifies, so nothing here is polled.
+            let key = to_canon(&canonical);
+            self.set.add_dir(key.clone(), key, canonical, false);
             *self.sink.dirs.write().unwrap() = Arc::new(self.set.snapshot());
             self.backend.sync(&self.set);
+            assert!(
+                self.backend.last_error.is_none(),
+                "macOS watcher startup: {:?}",
+                self.backend.last_error
+            );
         }
 
         fn watch(&mut self, dir: &Path) {
@@ -332,6 +329,50 @@ mod tests {
 
     fn canon(path: &Path) -> String {
         to_canon(std::fs::canonicalize(path).unwrap())
+    }
+
+    #[test]
+    fn failed_initial_start_retries_from_the_original_cursor() {
+        let root = tempfile::tempdir().unwrap();
+        let mut fx = Fixture::new();
+        let canonical = std::fs::canonicalize(root.path()).unwrap();
+        let key = to_canon(&canonical);
+        fx.set.add_dir(key.clone(), key, canonical, false);
+        let mut cursors = Vec::new();
+        for now in [100, 200, 300] {
+            fx.backend.sync_with(
+                &fx.set,
+                || now,
+                |_, _, _, since| {
+                    cursors.push(since);
+                    Err("injected start failure")
+                },
+            );
+            assert!(fx.backend.needs_retry());
+            assert!(fx.backend.spec.is_none());
+        }
+        assert_eq!(cursors, [100, 100, 100]);
+    }
+
+    #[test]
+    fn unwatching_after_a_failed_start_clears_retry_and_replay_state() {
+        let root = tempfile::tempdir().unwrap();
+        let mut fx = Fixture::new();
+        let canonical = std::fs::canonicalize(root.path()).unwrap();
+        let key = to_canon(&canonical);
+        fx.set.add_dir(key.clone(), key.clone(), canonical, false);
+        fx.backend
+            .sync_with(&fx.set, || 100, |_, _, _, _| Err("injected failure"));
+        assert!(fx.backend.needs_retry());
+        fx.set.remove_dir(&key, &key);
+        fx.backend.sync_with(
+            &fx.set,
+            || panic!("no event id needed"),
+            |_, _, _, _| panic!("no stream needed"),
+        );
+        assert!(!fx.backend.needs_retry());
+        assert!(fx.backend.resume_from.is_none());
+        assert!(fx.backend.spec.is_none());
     }
 
     #[test]
@@ -418,7 +459,7 @@ mod tests {
             first,
             "nested directories are covered by the existing stream"
         );
-        fx.set.remove_dir(&canon(root.path()));
+        fx.set.remove_dir(&canon(root.path()), &canon(root.path()));
         fx.backend.sync(&fx.set);
         assert_eq!(
             fx.backend.spec.as_ref().map(|s| s.roots.clone()),
@@ -464,7 +505,9 @@ mod tests {
         let before = unsafe { FSEventsGetCurrentEventId() };
         fx.watch(root.path());
         let latest = fx.backend.stream.as_ref().unwrap().latest_event_id();
-        assert_ne!(latest, fs::kFSEventStreamEventIdSinceNow, "no sentinel");
+        // kFSEventStreamEventIdSinceNow, which the stream reports until its
+        // first event unless it is given an explicit starting id.
+        assert_ne!(latest, u64::MAX, "no sentinel");
         assert!(latest >= before && latest <= unsafe { FSEventsGetCurrentEventId() });
         std::fs::write(root.path().join("a.txt"), "x").unwrap();
         fx.drain(Duration::from_millis(600));
@@ -486,7 +529,10 @@ mod tests {
         assert!(fx.backend.stream.is_some());
         assert_eq!(fx.backend.resume_from, None, "consumed by a running stream");
         // ...and unwatching everything forgets it: there is no gap to cover.
-        fx.set.remove_dir(&canon(&root.path().join("a")));
+        fx.set.remove_dir(
+            &canon(&root.path().join("a")),
+            &canon(&root.path().join("a")),
+        );
         fx.backend.resume_from = Some(latest);
         fx.backend.sync(&fx.set);
         assert!(fx.backend.stream.is_none());
@@ -499,7 +545,7 @@ mod tests {
         let mut fx = Fixture::new();
         fx.watch(root.path());
         assert!(fx.backend.stream.is_some());
-        fx.set.remove_dir(&canon(root.path()));
+        fx.set.remove_dir(&canon(root.path()), &canon(root.path()));
         fx.backend.sync(&fx.set);
         assert!(fx.backend.stream.is_none());
         std::fs::write(root.path().join("late.txt"), "x").unwrap();

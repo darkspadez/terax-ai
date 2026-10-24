@@ -1,5 +1,5 @@
-import { TeraxGhostty } from "@terax/ghostty-core/adapted";
-import type { GhosttyTerminalConfig } from "@terax/ghostty-core/protocol";
+import { OarlockGhostty } from "@oarlock/ghostty-core/adapted";
+import type { GhosttyTerminalConfig } from "@oarlock/ghostty-core/protocol";
 import { AdaptedGhosttyTerminalModel } from "./AdaptedGhosttyTerminalModel";
 import {
   allocateScrollbackBytes,
@@ -9,6 +9,7 @@ import {
   type ScrollbackDemand,
 } from "./core/scrollbackBudget";
 import type {
+  GhosttyClipboardPolicy,
   GhosttyTerminalModelApi,
   GhosttyTerminalModelOptions,
 } from "./GhosttyTerminalModel";
@@ -49,24 +50,31 @@ export type GhosttyCoreRuntimeOptions = {
   readonly scrollbackBudgetBytes?: number;
 };
 
-type GhosttyLoader = () => Promise<TeraxGhostty>;
+type GhosttyLoader = () => Promise<OarlockGhostty>;
 
-const deviceAttributeProbes = new WeakMap<TeraxGhostty, boolean>();
+const deviceAttributeProbes = new WeakMap<OarlockGhostty, boolean>();
 
 export class GhosttyCoreRuntime {
   private readonly loader: GhosttyLoader;
   private readonly models = new Map<number, AdaptedGhosttyTerminalModel>();
   private readonly pendingModels = new Set<number>();
-  private loadPromise: Promise<TeraxGhostty> | null = null;
-  private ghostty: TeraxGhostty | null = null;
+  private loadPromise: Promise<OarlockGhostty> | null = null;
+  private ghostty: OarlockGhostty | null = null;
   private status: GhosttyRuntimeDiagnostics["status"] = "cold";
   private lastError: string | null = null;
   private idleReleaseTimer: ReturnType<typeof setTimeout> | null = null;
   private scrollbackBudgetBytes: number;
+  private ligatures = true;
+  private alternateScroll = true;
+  /** Refused until the app applies the user's choice. */
+  private clipboardPolicy: GhosttyClipboardPolicy = {
+    readsToHost: false,
+    writesAllowed: false,
+  };
   private disposed = false;
 
   constructor(
-    loader: GhosttyLoader = () => TeraxGhostty.load(),
+    loader: GhosttyLoader = () => OarlockGhostty.load(),
     options: GhosttyCoreRuntimeOptions = {},
   ) {
     this.loader = loader;
@@ -101,6 +109,7 @@ export class GhosttyCoreRuntime {
         cols: options.cols,
         rows: options.rows,
         config: options.config,
+        kittyKeyboardFlags: options.kittyKeyboardFlags,
         onReply: options.onReply,
         onEvent: options.onEvent,
         scrollbackByteLimit: this.grantForNewModel(options),
@@ -111,6 +120,9 @@ export class GhosttyCoreRuntime {
           this.scheduleIdleRelease();
         },
       });
+      model.setLigatures(this.ligatures);
+      model.setAlternateScroll(this.alternateScroll);
+      model.setClipboardPolicy(this.clipboardPolicy);
       this.models.set(options.leafId, model);
       this.rebalanceScrollback();
       return model;
@@ -143,6 +155,35 @@ export class GhosttyCoreRuntime {
     }
     this.scrollbackBudgetBytes = Math.floor(bytes);
     this.rebalanceScrollback();
+  }
+
+  /**
+   * Whether every model, live and future, draws ligature runs
+   * (`GhosttyTerminalModelApi.setLigatures`).
+   */
+  setLigatures(enabled: boolean): void {
+    this.ligatures = enabled;
+    for (const model of this.models.values()) model.setLigatures(enabled);
+  }
+
+  /**
+   * Alternate scroll (mode 1007) as every model's default, live and future
+   * (`GhosttyTerminalModelApi.setAlternateScroll`).
+   */
+  setAlternateScroll(enabled: boolean): void {
+    this.alternateScroll = enabled;
+    for (const model of this.models.values()) {
+      model.setAlternateScroll(enabled);
+    }
+  }
+
+  /**
+   * Kitty clipboard access for every model, live and future
+   * (`GhosttyTerminalModelApi.setClipboardPolicy`).
+   */
+  setClipboardPolicy(policy: GhosttyClipboardPolicy): void {
+    this.clipboardPolicy = policy;
+    for (const model of this.models.values()) model.setClipboardPolicy(policy);
   }
 
   dispose(): void {
@@ -181,7 +222,7 @@ export class GhosttyCoreRuntime {
     };
   }
 
-  private load(): Promise<TeraxGhostty> {
+  private load(): Promise<OarlockGhostty> {
     if (this.disposed)
       return Promise.reject(new Error("Ghostty runtime is disposed"));
     if (this.ghostty) return Promise.resolve(this.ghostty);
@@ -280,7 +321,7 @@ export class GhosttyCoreRuntime {
  * property of the compiled module, so it is probed once on a throwaway
  * instance that is dropped immediately, and only when diagnostics ask.
  */
-function nativeDeviceAttributes(ghostty: TeraxGhostty): boolean {
+function nativeDeviceAttributes(ghostty: OarlockGhostty): boolean {
   const cached = deviceAttributeProbes.get(ghostty);
   if (cached !== undefined) return cached;
   const terminal = ghostty.createTerminal(2, 1);

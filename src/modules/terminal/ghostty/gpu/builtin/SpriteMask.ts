@@ -369,6 +369,17 @@ function insetRing(ring: Ring, distance: number): number[] | null {
   return result;
 }
 
+/** A closed polygon inscribed in a circle, fine enough to look round. */
+export function circleRing(x: number, y: number, radius: number): number[] {
+  const count = Math.max(48, Math.ceil(radius) * 8);
+  const ring: number[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const angle = (index / count) * Math.PI * 2;
+    ring.push(x + radius * Math.cos(angle), y + radius * Math.sin(angle));
+  }
+  return ring;
+}
+
 /** Appends the flattened cubic Bezier (without its start point) to `out`. */
 export function flattenCubic(
   out: number[],

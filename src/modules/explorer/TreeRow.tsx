@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { isPrimaryModifierPressed } from "@/lib/platform";
+import { PrivacyRefusalLine, usePrivacyRefusal } from "@/modules/mac-privacy";
 import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { memo } from "react";
@@ -12,7 +13,6 @@ export type SelectModifiers = { shift: boolean; mod: boolean };
 
 export type RowActions = {
   toggle: (path: string) => void;
-  beginRename: (path: string) => void;
   commitRename: (newName: string) => void | Promise<void>;
   cancelRename: () => void;
 };
@@ -28,9 +28,7 @@ export type EntryRowProps = {
   isSelected: boolean;
   isRenaming: boolean;
   isDropTarget?: boolean;
-  /** True when more than one row is selected: rename doesn't generalize to
-   * a batch, so double-click-to-rename is disabled while it's active. */
-  multiSelectActive?: boolean;
+  /** `pin` keeps the tab; without it a file opens in the preview tab. */
   onOpenFile: (path: string, pin?: boolean) => void;
   onSelectPath: (path: string, modifiers: SelectModifiers) => void;
   gitStatusCode?: GitStatusCode | null;
@@ -49,7 +47,6 @@ function EntryRowImpl(props: EntryRowProps) {
     isSelected,
     isRenaming,
     isDropTarget = false,
-    multiSelectActive = false,
     onOpenFile,
     onSelectPath,
     gitStatusCode,
@@ -102,9 +99,11 @@ function EntryRowImpl(props: EntryRowProps) {
       type="button"
       data-fs-path={path}
       onClick={handleClick}
-      onDoubleClick={() =>
-        !isDir && !multiSelectActive && actions.beginRename(path)
-      }
+      onDoubleClick={() => {
+        // A click previews a file, a double-click keeps it open. Rename is
+        // in the context menu and on F2.
+        if (!isDir && !renameInProgress) onOpenFile(path, true);
+      }}
       className={cn(
         "group flex h-6 w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-1.5 text-left text-[13px] transition-colors hover:bg-accent/70",
         isSelected
@@ -190,11 +189,24 @@ export function StatusRow({
   depth,
   message,
   tone,
+  path = null,
 }: {
   depth: number;
   message: string;
   tone: "muted" | "error";
+  /** The folder whose listing failed, so a macOS privacy refusal can say what is missing. */
+  path?: string | null;
 }) {
+  const refusal = usePrivacyRefusal(path, tone === "error" ? message : null);
+  if (refusal) {
+    return (
+      <PrivacyRefusalLine
+        refusal={refusal}
+        className="h-6 px-2 text-[11px] leading-6 text-muted-foreground"
+        style={{ paddingLeft: 6 + depth * 12 + 18 }}
+      />
+    );
+  }
   return (
     <div
       className={cn(

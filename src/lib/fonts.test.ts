@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveFontFamily } from "./fonts";
 
-const FALLBACK = '"JetBrains Mono", SFMono-Regular, Menlo, monospace';
+const FALLBACK =
+  '"JetBrains Mono", "Oarlock Symbols", SFMono-Regular, Menlo, monospace';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -56,7 +57,8 @@ describe("terminal font availability", () => {
     expect(ensureMonoFontsLoaded()).toBe(first);
     await first;
     expect(load).toHaveBeenCalledWith('400 14px "JetBrains Mono"');
-    expect(load).toHaveBeenCalledWith('700 14px "JetBrains Mono"');
+    // Upright and italic Latin segments; each variable file has every weight.
+    expect(load).toHaveBeenCalledWith('italic 400 14px "JetBrains Mono"');
     expect(load).toHaveBeenCalledTimes(2);
   });
 });
@@ -89,5 +91,17 @@ describe("resolveFontFamily", () => {
   it("falls back to the mono chain for empty input", () => {
     expect(resolveFontFamily("")).toBe(FALLBACK);
     expect(resolveFontFamily("   ")).toBe(FALLBACK);
+  });
+
+  // Engines never fall back to an unnamed font for Private Use Area icons, so
+  // the bundled symbols must be in every stack, after the fonts the user (or
+  // detection) chose so an installed Nerd Font still draws its own icons.
+  it("names the bundled symbol font after the chosen fonts in every stack", () => {
+    for (const input of ["", "Fira Code", "Foo, Bar", "Hack Nerd Font"]) {
+      const families = resolveFontFamily(input).split(", ");
+      const symbols = families.indexOf('"Oarlock Symbols"');
+      expect(symbols, input).toBe(families.indexOf('"JetBrains Mono"') + 1);
+      expect(families.indexOf("SFMono-Regular"), input).toBe(symbols + 1);
+    }
   });
 });

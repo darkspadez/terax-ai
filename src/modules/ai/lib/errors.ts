@@ -7,7 +7,20 @@ const MAX_ERROR_LENGTH = 800;
 const FALLBACK_ERROR =
   "The AI provider rejected the request. Check the selected model and provider settings, then try again.";
 
+// What a webview's fetch rejects with when no readable response arrived
+// (Chromium/WebView2, WebKit, Gecko). An error reply without CORS headers, as
+// OpenAI sends for a bad key, is indistinguishable from a dropped connection.
+const WEBVIEW_NETWORK_FAILURES: ReadonlySet<string> = new Set([
+  "failed to fetch",
+  "load failed",
+  "networkerror when attempting to fetch resource.",
+]);
+
 export function formatAiError(error: unknown): string {
+  const networkFailure = webviewNetworkFailure(error);
+  if (networkFailure) {
+    return `No readable reply from the AI provider (${networkFailure}). The network may be blocked, or the provider refused the request without letting the app read why, as it does for an invalid API key or an exhausted quota. Check your connection and the key in Settings → Models, then try again.`;
+  }
   const details = extractErrorDetails(error);
   if (!details) return FALLBACK_ERROR;
   const message = sanitizeErrorMessage(details.message);
@@ -38,6 +51,22 @@ function extractErrorDetails(
   }
   const message = stringValue(record.message);
   return message ? { code, message } : null;
+}
+
+function webviewNetworkFailure(error: unknown): string | null {
+  for (
+    let current = error, depth = 0;
+    current instanceof Error && depth < 5;
+    current = (current as { cause?: unknown }).cause, depth++
+  ) {
+    if (
+      current instanceof TypeError &&
+      WEBVIEW_NETWORK_FAILURES.has(current.message.trim().toLowerCase())
+    ) {
+      return current.message.trim();
+    }
+  }
+  return null;
 }
 
 function parseJson(value: string): unknown | null {

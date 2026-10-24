@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import {
   ArrowDown01Icon,
   ArrowUp01Icon,
+  Cancel01Icon,
   CheckmarkCircle02Icon,
   Loading03Icon,
   Notification01Icon,
@@ -18,6 +19,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useMemo, useState } from "react";
 import { AgentIcon } from "../lib/agentIcon";
 import { displayAgent } from "../lib/format";
+import { AGENT_LAUNCHERS } from "../lib/launcher";
 import type { AgentNotification, AgentStatus } from "../lib/types";
 import { useAgentStore } from "../store/agentStore";
 
@@ -79,7 +81,9 @@ const NOTIF_LABEL: Record<AgentNotification["kind"], string> = {
   error: "failed",
 };
 
-const HOOK_AGENTS = ["claude", "codex", "gemini", "pi"] as const;
+const HOOK_AGENTS = AGENT_LAUNCHERS.filter((a) => a.supportsHooks).map(
+  (a) => a.id,
+);
 
 function HookAgentRow({
   id,
@@ -134,41 +138,54 @@ function HookAgentRow({
 function NotificationRow({
   n,
   onClick,
+  onDismiss,
 }: {
   n: AgentNotification;
   onClick: () => void;
+  onDismiss: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent"
-    >
-      <span className="flex w-4 shrink-0 items-center justify-center">
-        {n.kind === "finished" ? (
-          <HugeiconsIcon
-            icon={CheckmarkCircle02Icon}
-            size={15}
-            strokeWidth={1.75}
-            className="text-muted-foreground"
-          />
-        ) : (
-          <span
-            className={cn(
-              "size-1.5 rounded-full",
-              n.kind === "error" ? "bg-destructive" : "bg-primary",
-            )}
-          />
-        )}
-      </span>
-      <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-        {displayAgent(n.agent)}{" "}
-        <span className="text-muted-foreground">{NOTIF_LABEL[n.kind]}</span>
-      </span>
-      <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-        {relativeTime(n.at)}
-      </span>
-    </button>
+    <div className="group/notif relative">
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent"
+      >
+        <span className="flex w-4 shrink-0 items-center justify-center">
+          {n.kind === "finished" ? (
+            <HugeiconsIcon
+              icon={CheckmarkCircle02Icon}
+              size={15}
+              strokeWidth={1.75}
+              className="text-muted-foreground"
+            />
+          ) : (
+            <span
+              className={cn(
+                "size-1.5 rounded-full",
+                n.kind === "error" ? "bg-destructive" : "bg-primary",
+              )}
+            />
+          )}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+          {displayAgent(n.agent)}{" "}
+          <span className="text-muted-foreground">{NOTIF_LABEL[n.kind]}</span>
+        </span>
+        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground group-focus-within/notif:invisible group-hover/notif:invisible">
+          {relativeTime(n.at)}
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Dismiss notification"
+        title="Dismiss"
+        className="absolute top-1/2 right-1.5 flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity group-focus-within/notif:opacity-100 group-hover/notif:opacity-100 hover:bg-background hover:text-foreground focus-visible:opacity-100"
+      >
+        <HugeiconsIcon icon={Cancel01Icon} size={11} strokeWidth={2} />
+      </button>
+    </div>
   );
 }
 
@@ -182,6 +199,7 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
   const notifications = useAgentStore((s) => s.notifications);
   const markAllRead = useAgentStore((s) => s.markAllRead);
   const clearNotifications = useAgentStore((s) => s.clearNotifications);
+  const removeNotification = useAgentStore((s) => s.removeNotification);
 
   const active = useMemo(() => Object.values(sessions), [sessions]);
   const activeCount = active.length + (localAgent ? 1 : 0);
@@ -293,7 +311,7 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
           <div className="border-t border-border/60 px-3 py-5 text-center text-xs leading-relaxed text-muted-foreground">
             No agent activity yet.
             <br />
-            Run the Terax agent or a coding agent to track it here.
+            Run the Oarlock agent or a coding agent to track it here.
           </div>
         ) : (
           <div className="max-h-80 overflow-y-auto border-t border-border/60 p-1">
@@ -320,6 +338,7 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
                 key={n.id}
                 n={n}
                 onClick={() => activateNotification(n)}
+                onDismiss={() => removeNotification(n.id)}
               />
             ))}
           </div>

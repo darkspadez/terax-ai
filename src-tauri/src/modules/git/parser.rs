@@ -1,4 +1,4 @@
-use crate::modules::git::types::GitChangedFile;
+use crate::modules::git::types::{GitChangedFile, GitLogRef, GitRefKind};
 
 #[derive(Default)]
 pub struct PorcelainV2 {
@@ -145,9 +145,86 @@ fn status_label(index_status: char, worktree_status: char) -> String {
     }
 }
 
+/// The refs of one commit from `%D` under `--decorate=full` (`HEAD -> refs/heads/main,
+/// tag: refs/tags/v1, refs/remotes/origin/main`): HEAD and its branch first, then branches,
+/// tags and remote branches in git's order. `origin/HEAD`, the stash, notes and other
+/// namespaces are left out.
+pub fn parse_decorations(raw: &str) -> Vec<GitLogRef> {
+    let mut refs: Vec<GitLogRef> = Vec::new();
+    let mut push = |kind, name: &str, head| {
+        if !name.is_empty() {
+            refs.push(GitLogRef {
+                kind,
+                name: name.to_owned(),
+                head,
+            });
+        }
+    };
+    for item in raw.split(", ").map(str::trim) {
+        if item == "HEAD" {
+            push(GitRefKind::Head, "HEAD", true);
+        } else if let Some(target) = item.strip_prefix("HEAD -> ") {
+            if let Some(name) = target.strip_prefix("refs/heads/") {
+                push(GitRefKind::Branch, name, true);
+            }
+        } else if let Some(name) = item.strip_prefix("tag: refs/tags/") {
+            push(GitRefKind::Tag, name, false);
+        } else if let Some(name) = item.strip_prefix("refs/heads/") {
+            push(GitRefKind::Branch, name, false);
+        } else if let Some(name) = item.strip_prefix("refs/remotes/") {
+            if !name.ends_with("/HEAD") {
+                push(GitRefKind::Remote, name, false);
+            }
+        }
+    }
+    refs.sort_by_key(|r| (!r.head, r.kind));
+    refs
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn r(kind: GitRefKind, name: &str, head: bool) -> GitLogRef {
+        GitLogRef {
+            kind,
+            name: name.into(),
+            head,
+        }
+    }
+
+    #[test]
+    fn decorations_are_classified_by_namespace_not_by_name() {
+        assert_eq!(
+            parse_decorations(
+                "refs/remotes/origin/main, tag: refs/tags/v1.0, HEAD -> refs/heads/main, \
+                 refs/heads/origin/x, refs/remotes/origin/HEAD, refs/stash"
+            ),
+            vec![
+                r(GitRefKind::Branch, "main", true),
+                r(GitRefKind::Branch, "origin/x", false),
+                r(GitRefKind::Tag, "v1.0", false),
+                r(GitRefKind::Remote, "origin/main", false),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_detached_head_is_its_own_ref() {
+        assert_eq!(
+            parse_decorations("HEAD, tag: refs/tags/release/2.0"),
+            vec![
+                r(GitRefKind::Head, "HEAD", true),
+                r(GitRefKind::Tag, "release/2.0", false),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_undecorated_commit_has_no_refs() {
+        assert!(parse_decorations("").is_empty());
+        assert!(parse_decorations("refs/notes/commits").is_empty());
+    }
 
     // Build one ordinary-change record (`1 ` entry) with the exact field layout
     // git emits: `XY sub mH mI mW hH hI path`.

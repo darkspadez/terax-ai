@@ -31,7 +31,7 @@ const FRACTIONAL_DISPLAY_CONTRAST: TextContrast = {
 export type TextContrastEnvironment = {
   readonly platform: "windows" | "linux" | "mac" | "other";
   readonly scale: number;
-  /** `localStorage["terax:terminal-text-contrast"]`: "off", "on" or a number. */
+  /** `localStorage["oarlock:terminal-text-contrast"]`: "off", "on" or a number. */
   readonly override?: string | null;
 };
 

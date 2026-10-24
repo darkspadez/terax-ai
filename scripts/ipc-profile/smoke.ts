@@ -10,10 +10,10 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 const original = fetch;
 const nativeFetch = createProxyFetch({ allowPrivateNetwork: true });
-declare const __TERAX_IPC_BASE_URL__: string;
-declare const __TERAX_IPC_TREE__: string;
-const base = __TERAX_IPC_BASE_URL__;
-const tree = __TERAX_IPC_TREE__;
+declare const __OARLOCK_IPC_BASE_URL__: string;
+declare const __OARLOCK_IPC_TREE__: string;
+const base = __OARLOCK_IPC_BASE_URL__;
+const tree = __OARLOCK_IPC_TREE__;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 type Json = Record<string, unknown>;

@@ -1,6 +1,7 @@
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { TerminalSearchController } from "@/modules/terminal/search/TerminalSearchController";
 import { useTheme } from "@/modules/theme";
+import { useTerminalTranslucent } from "@/modules/theme/terminalTranslucency";
 import {
   forwardRef,
   lazy,
@@ -13,11 +14,14 @@ import {
 } from "react";
 import type { TerminalBackendKind } from "./backend/contracts";
 import { resolvedTerminalBackend } from "./backend/selection";
-import {
-  useGhosttyTerminalSession,
-  ghosttyBlockGeometry,
-} from "./ghostty/useGhosttyTerminalSession";
+import { getGhosttyCoreRuntime } from "./ghostty/GhosttyCoreRuntime";
 import { ghosttyBlocks } from "./ghostty/ghosttyBlockSessions";
+import { ligaturesApply } from "./ghostty/gpu/ligatureRuns";
+import { kittyClipboardPolicy } from "./ghostty/terminalIntegration";
+import {
+  ghosttyBlockGeometry,
+  useGhosttyTerminalSession,
+} from "./ghostty/useGhosttyTerminalSession";
 
 export type TerminalPaneHandle = {
   write: (data: string) => void;
@@ -72,6 +76,34 @@ const GhosttyTerminalPane = memo(
     const containerRef = useRef<HTMLDivElement>(null);
     const down = useRef<{ x: number; y: number } | null>(null);
     const { resolvedMode, activeTheme } = useTheme();
+    const minimumContrast = usePreferencesStore(
+      (state) => state.terminalMinimumContrast,
+    );
+    const customShader = usePreferencesStore(
+      (state) => state.terminalCustomShader,
+    );
+    const translucent = useTerminalTranslucent();
+    const ligatures = usePreferencesStore((state) =>
+      ligaturesApply(state.terminalLigatures, state.terminalLetterSpacing),
+    );
+    // Before the session's effects, so its model is created with the choice.
+    useEffect(() => {
+      getGhosttyCoreRuntime().setLigatures(ligatures);
+    }, [ligatures]);
+    const alternateScroll = usePreferencesStore(
+      (state) => state.terminalBehavior.alternateScroll,
+    );
+    useEffect(() => {
+      getGhosttyCoreRuntime().setAlternateScroll(alternateScroll);
+    }, [alternateScroll]);
+    const clipboardRead = usePreferencesStore(
+      (state) => state.terminalBehavior.clipboardRead,
+    );
+    useEffect(() => {
+      getGhosttyCoreRuntime().setClipboardPolicy(
+        kittyClipboardPolicy(clipboardRead),
+      );
+    }, [clipboardRead]);
     const session = useGhosttyTerminalSession({
       leafId,
       backend,
@@ -88,9 +120,19 @@ const GhosttyTerminalPane = memo(
     useEffect(() => {
       void resolvedMode;
       void activeTheme;
+      void minimumContrast;
+      void customShader;
+      void translucent;
       const id = requestAnimationFrame(() => session.applyTheme());
       return () => cancelAnimationFrame(id);
-    }, [resolvedMode, activeTheme, session]);
+    }, [
+      resolvedMode,
+      activeTheme,
+      minimumContrast,
+      customShader,
+      translucent,
+      session,
+    ]);
 
     useImperativeHandle(
       ref,
@@ -210,7 +252,9 @@ export const TerminalPane = memo(
   forwardRef<TerminalPaneHandle, TerminalPaneProps>(
     function TerminalPane(props, ref) {
       const [backend] = useState(() =>
-        usePreferencesStore.getState().terminalRenderer === "webgl"
+        // Custom shaders run on the WebGL renderer.
+        usePreferencesStore.getState().terminalRenderer === "webgl" ||
+        usePreferencesStore.getState().terminalCustomShader
           ? ("ghostty-webgl" as const)
           : resolvedTerminalBackend(),
       );

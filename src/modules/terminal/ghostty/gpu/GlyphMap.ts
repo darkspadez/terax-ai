@@ -1,4 +1,4 @@
-import { ATLAS_FULL } from "./GlyphAtlas";
+import { ATLAS_FULL, GLYPH_DEFERRED } from "./GlyphAtlas";
 
 /** Never rasterized in this atlas epoch; queued for rasterization. */
 export const GLYPH_PENDING = 0xffff_ffff;
@@ -12,6 +12,8 @@ const GLYPH_ID_MASK = 0x00ff_ffff;
 export const BACKLOG_THRESHOLD = 256;
 const QUEUED_NORMAL = 1;
 const QUEUED_URGENT = 2;
+/** Parked until its font loads (`retryDeferred`); not counted as pending. */
+const QUEUED_DEFERRED = 4;
 
 export type GlyphSource = {
   readonly id: number;
@@ -46,13 +48,15 @@ export type GlyphProcessResult = {
 export class TerminalGlyphMap {
   private values = new Uint32Array(MIN_ENTRIES).fill(GLYPH_PENDING);
   private texts: Array<string | undefined> = [];
-  private styles = new Uint8Array(MIN_ENTRIES);
+  /** `GLYPH_STYLE_*` bits; wider than the eight in use so none is cut off. */
+  private styles = new Uint16Array(MIN_ENTRIES);
   private queued = new Uint8Array(MIN_ENTRIES);
   private visibleMark = new Uint8Array(0);
   private normal: number[] = [];
   private normalHead = 0;
   private urgent: number[] = [];
   private urgentHead = 0;
+  private deferred: number[] = [];
   private evictedCount = 0;
   private zigEpochValue = -1;
   private atlasEpochValue = -1;
@@ -105,6 +109,7 @@ export class TerminalGlyphMap {
     this.normalHead = 0;
     this.urgent = [];
     this.urgentHead = 0;
+    this.deferred = [];
     this.evictedCount = 0;
     this.markDirty(0, this.values.length - 1);
   }
@@ -121,7 +126,7 @@ export class TerminalGlyphMap {
     const values = new Uint32Array(next).fill(GLYPH_PENDING);
     values.set(this.values);
     this.values = values;
-    const styles = new Uint8Array(next);
+    const styles = new Uint16Array(next);
     styles.set(this.styles);
     this.styles = styles;
     const queued = new Uint8Array(next);
@@ -281,6 +286,15 @@ export class TerminalGlyphMap {
       }
       const index = atlas.resolve(text, this.styles[id]);
       if (index === ATLAS_FULL) return { resolved, full: true };
+      if (index === GLYPH_DEFERRED) {
+        // Its font is loading: park it instead of spinning frames on it.
+        if ((this.queued[id] & QUEUED_DEFERRED) === 0) {
+          this.queued[id] |= QUEUED_DEFERRED;
+          this.deferred.push(id);
+        }
+        this.shift(fromUrgent, id);
+        continue;
+      }
       this.values[id] = index;
       this.markDirty(id, id);
       this.shift(fromUrgent, id);
@@ -288,6 +302,30 @@ export class TerminalGlyphMap {
     }
     this.compact();
     return { resolved, full: false };
+  }
+
+  /**
+   * Queues the glyphs parked while their fonts loaded, ahead of other work.
+   * Returns how many were queued; the owner schedules a frame when any were.
+   */
+  retryDeferred(): number {
+    const ids = this.deferred;
+    this.deferred = [];
+    let queued = 0;
+    for (const id of ids) {
+      if ((this.queued[id] & QUEUED_DEFERRED) === 0) continue;
+      this.queued[id] &= ~QUEUED_DEFERRED;
+      if (
+        this.values[id] !== GLYPH_PENDING ||
+        (this.queued[id] & QUEUED_URGENT) !== 0
+      ) {
+        continue;
+      }
+      this.queued[id] |= QUEUED_URGENT;
+      this.urgent.push(id);
+      queued += 1;
+    }
+    return queued;
   }
 
   /** Inclusive id range changed since the last call, or null. */

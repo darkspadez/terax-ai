@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { labelFor } from "./tabLabel";
+import { labelFor, paneLabels } from "./tabLabel";
 import type { TerminalTab } from "./useTabs";
 
 function terminalTab(over: Partial<TerminalTab> = {}): TerminalTab {
@@ -16,8 +16,8 @@ function terminalTab(over: Partial<TerminalTab> = {}): TerminalTab {
 
 describe("labelFor (terminal tabs)", () => {
   it("derives the label from the last cwd segment", () => {
-    expect(labelFor(terminalTab({ cwd: "/Users/me/projects/terax-ai" }))).toBe(
-      "terax-ai",
+    expect(labelFor(terminalTab({ cwd: "/Users/me/projects/oarlock" }))).toBe(
+      "oarlock",
     );
   });
 
@@ -27,7 +27,7 @@ describe("labelFor (terminal tabs)", () => {
 
   it("prefers a custom title over the cwd-derived name", () => {
     expect(
-      labelFor(terminalTab({ cwd: "/Users/me/projects/terax-ai", customTitle: "Server" })),
+      labelFor(terminalTab({ cwd: "/Users/me/projects/oarlock", customTitle: "Server" })),
     ).toBe("Server");
   });
 
@@ -39,5 +39,35 @@ describe("labelFor (terminal tabs)", () => {
 
   it("handles Windows-style cwd separators", () => {
     expect(labelFor(terminalTab({ cwd: "C:\\Users\\me\\proj" }))).toBe("proj");
+  });
+});
+
+describe("paneLabels", () => {
+  const split = terminalTab({
+    cwd: "/code/web",
+    paneTree: {
+      kind: "split",
+      id: 5,
+      dir: "row",
+      children: [
+        { kind: "leaf", id: 2, cwd: "/code/web" },
+        { kind: "leaf", id: 3, cwd: "C:\\code\\api" },
+        { kind: "leaf", id: 4 },
+      ],
+    },
+    activeLeafId: 3,
+  });
+
+  it("names every pane in tree order and marks the active one", () => {
+    expect(paneLabels(split)).toEqual([
+      { leafId: 2, name: "web", active: false },
+      { leafId: 3, name: "api", active: true },
+      { leafId: 4, name: "shell", active: false },
+    ]);
+  });
+
+  it("prefers the title the pane's program set", () => {
+    const names = paneLabels(split, (leafId) => (leafId === 2 ? "vim" : null));
+    expect(names.map((pane) => pane.name)).toEqual(["vim", "api", "shell"]);
   });
 });

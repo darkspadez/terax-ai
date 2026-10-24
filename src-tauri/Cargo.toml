@@ -1,21 +1,26 @@
 [package]
-name = "terax"
-version = "0.9.0"
-description = "Terax — an open-source AI-native terminal emulator"
-authors = ["crynta"]
-license = "Apache-2.0"
-edition = "2021"
-default-run = "terax"
+name = "oarlock"
+version = "0.1.0"
+description = "Oarlock, an open-source AI-native terminal emulator"
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+default-run = "oarlock"
 
 [workspace]
-members = ["crates/terax-cli", "crates/terax-control-protocol"]
-default-members = [".", "crates/terax-cli", "crates/terax-control-protocol"]
+members = ["crates/oarlock-cli", "crates/oarlock-control-protocol"]
+default-members = [".", "crates/oarlock-cli", "crates/oarlock-control-protocol"]
 resolver = "2"
 
 [workspace.package]
-version = "0.9.0"
+version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
+authors = ["Quantum Ops Consulting, LLC"]
+repository = "https://github.com/qopsc/oarlock"
+homepage = "https://github.com/qopsc/oarlock"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -28,7 +33,7 @@ bench = []
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "terax_lib"
+name = "oarlock_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -40,16 +45,19 @@ serde_json = "1"
 tauri = { version = "2", features = ["macos-private-api", "protocol-asset"] }
 tauri-plugin-opener = "2"
 tauri-plugin-clipboard-manager = "2"
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 getrandom = "0.4"
 memchr = "2"
-terax-control-protocol = { path = "crates/terax-control-protocol" }
+oarlock-control-protocol = { path = "crates/oarlock-control-protocol" }
 portable-pty = "0.9"
 dirs = "7"
 log = "0.4"
 ignore = "0.4"
 grep-regex = "0.1"
+# Shared native/frontend skill secret-path rules; regex is already in the tree.
+regex = "1"
 grep-searcher = "0.1"
 globset = "0.4"
 nucleo-matcher = "0.3"
@@ -70,15 +78,33 @@ reqwest = { version = "0.13", default-features = false, features = [
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 bytes = "1"
 futures-util = "0.3"
-tokio = { version = "1", default-features = false, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", default-features = false, features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
 tempfile = "3"
 which = "8.0.4"
+fontdb = "0.24"
+image = { version = "0.25", default-features = false, features = ["png"] }
+# Skills: content hashes for project trust, and zip installs (both already in the tree).
+sha2 = "0.10"
+zip = { version = "4.6", default-features = false, features = ["deflate-flate2"] }
 
 [dev-dependencies]
 proptest = "1"
 tokio = { version = "1", features = ["macros", "rt", "test-util", "time"] }
 tempfile = "3"
-wasmparser = { version = "=0.259.0", default-features = false, features = ["std", "validate", "features", "simd"] }
+wasmparser = { version = "=0.262.0", default-features = false, features = ["std", "validate", "features", "simd"] }
+
+# keychain_compat (secrets.rs): items written by keyring 3, which earlier
+# releases used, must stay readable through the keyring-core stores.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+keyring3 = { package = "keyring", version = "3.6", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dev-dependencies]
+keyring3 = { package = "keyring", version = "3.6", default-features = false, features = ["windows-native"] }
+
+# secrets.rs tests the split of long values over keyring-core's in-memory
+# store, which macOS and Windows get through their keychain dependency.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+keyring-core = "1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -89,21 +115,21 @@ libc = "0.2"
 notify = "8.2.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-keyring = { version = "3.6", default-features = false, features = [
-	"apple-native",
-] }
+keyring-core = "1"
+apple-native-keyring-store = { version = "1", features = ["keychain"] }
 objc2 = { version = "0.6", features = ["exception"] }
 block2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSColor", "NSPasteboard", "NSPasteboardItem", "NSWindow", "NSWorkspace"] }
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSURL", "NSString", "NSUserDefaults", "NSValue"] }
-fsevent-sys = "4.1"
-window-vibrancy = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "NSAlert", "NSApplication", "NSButton", "NSColor", "NSControl", "NSEvent", "NSPasteboard", "NSPasteboardItem", "NSResponder", "NSView", "NSWindow", "NSWorkspace"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSDate", "NSError", "NSFileManager", "NSRunLoop", "NSURL", "NSString", "NSUserDefaults", "NSValue"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFArray", "CFString"] }
+objc2-core-services = { version = "0.3", default-features = false, features = ["std", "FSEvents", "dispatch2"] }
+dispatch2 = { version = "0.3", default-features = false, features = ["std"] }
+window-vibrancy = "0.8"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-keyring = { version = "3.6", default-features = false, features = [
-	"windows-native",
-] }
-window-vibrancy = "0.6"
+keyring-core = "1"
+windows-native-keyring-store = "1"
+window-vibrancy = "0.8"
 # The OS-level proxy setting (registry) is read by reqwest only with this
 # feature, and the previous reqwest honoured it unconditionally on Windows.
 reqwest = { version = "0.13", default-features = false, features = ["system-proxy"] }
@@ -120,15 +146,22 @@ windows-sys = { version = "0.61", features = [
 	"Win32_System_ProcessStatus",
 	"Win32_System_Threading",
 	"Win32_System_Diagnostics_ToolHelp",
+	"Win32_UI_Controls",
 	"Win32_UI_Shell",
+	"Win32_UI_WindowsAndMessaging",
 ] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Already in the tree via tauri; used directly for the file clipboard.
 gtk = "0.18"
+# Already in the tree via tauri-plugin-clipboard-manager; used directly for the
+# PRIMARY selection, which the plugin does not expose.
+arboard = { version = "3.7.0", default-features = false, features = ["wayland-data-control"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-autostart = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-window-state = "2"
 
@@ -139,8 +172,42 @@ incremental = true
 codegen-units = 1
 lto = "fat"
 opt-level = "s"
-panic = "abort"
+# A panic off the main thread ends only its thread or task (and is logged, see
+# modules/panics.rs); threads whose state cannot survive one abort (pty/hub.rs).
+panic = "unwind"
 strip = true
+
+# Speed where Oarlock spends CPU per byte or per keystroke; everything else stays
+# size-optimized. Generic code (serde derives, grep-searcher's search loop) is
+# compiled in the crate that instantiates it, so only these crates' own code is
+# affected.
+#
+# Scans every PTY output byte for terminal queries and agent markers, and finds
+# lines and literals for content search.
+[profile.release.package.memchr]
+opt-level = 3
+# String scanning behind every IPC payload and the streaming validation of
+# AI conversation files, which run to megabytes.
+[profile.release.package.serde_json]
+opt-level = 3
+# The regex and literal engines content search runs over every searched byte.
+[profile.release.package.regex-automata]
+opt-level = 3
+[profile.release.package.aho-corasick]
+opt-level = 3
+# Matches every walked path against ignore rules and fs_glob patterns.
+[profile.release.package.globset]
+opt-level = 3
+# Scores every cached path on each keystroke of the file finder.
+[profile.release.package.nucleo-matcher]
+opt-level = 3
+# Tauri serves the embedded frontend brotli-compressed and decompresses each
+# asset per request: startup, every window and every lazy chunk. The decoder is
+# generic over its allocator, so its loop is compiled in tauri-utils' asset lookup.
+[profile.release.package.tauri-utils]
+opt-level = 3
+[profile.release.package.brotli-decompressor]
+opt-level = 3
 
 # rust-lang/rust#110536: stripping proc-macro dylibs breaks the dlopen rustc does
 # at compile time on macOS, reported as a bogus E0463. Never shipped, so nothing to strip.

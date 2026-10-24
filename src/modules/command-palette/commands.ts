@@ -1,22 +1,27 @@
 import type { SearchTarget } from "@/modules/header";
-import { MAX_PANES_PER_TAB, type Tab } from "@/modules/tabs";
-import { leafIds } from "@/modules/terminal";
+import type { Tab } from "@/modules/tabs";
+import { canSplitPane, leafIds } from "@/modules/terminal";
 import {
+  AppWindowIcon,
   Cancel01Icon,
   DashboardSquare01Icon,
   FileEditIcon,
   FileSearchIcon,
+  FolderOpenIcon,
   Globe02Icon,
   IncognitoIcon,
   KeyboardIcon,
   LayoutTwoColumnIcon,
   LayoutTwoRowIcon,
+  Logout01Icon,
   PaintBoardIcon,
+  Refresh01Icon,
   Search01Icon,
   Settings01Icon,
   SidebarLeftIcon,
   SourceCodeIcon,
   SparklesIcon,
+  SquareArrowUpRightIcon,
   TerminalIcon,
   ViewIcon,
 } from "@hugeicons/core-free-icons";
@@ -40,6 +45,9 @@ export type CommandPaletteActionContext = {
   explorerRoot: string | null;
   home: string | null;
   openNewTab: () => void;
+  openNewWindow: () => void;
+  openFolder: () => void;
+  quit: () => void;
   openNewBlock: () => void;
   openNewPrivate: () => void;
   openNewEditor: () => void;
@@ -49,15 +57,20 @@ export type CommandPaletteActionContext = {
   closeActiveTabOrPane: () => void;
   splitPaneRight: () => void;
   splitPaneDown: () => void;
+  movePaneToNewTab: () => void;
+  restartTerminal: () => void;
   focusSearch: () => void;
   focusExplorerSearch: () => void;
   toggleSidebar: () => void;
   toggleHiddenFiles: () => void;
   toggleAi: () => void;
+  newAiConversation: () => void;
   askAiSelection: () => void;
   openSettings: () => void;
   openKeyboardShortcuts: () => void;
   spaces: { id: string; name: string }[];
+  /** Panes a terminal tab may hold (Settings). */
+  paneLimit: number;
   activeSpaceId: string | null;
   openSpacesOverview: () => void;
   newSpace: () => void;
@@ -78,8 +91,13 @@ export function createCommandItems(
   const noWorkspaceRoot = !ctx.explorerRoot && !ctx.home;
   const splitDisabled = !activeTerminalTab
     ? "No terminal tab"
-    : activePaneCount >= MAX_PANES_PER_TAB
+    : !canSplitPane(activeTerminalTab.paneTree, ctx.paneLimit)
       ? "Pane limit"
+      : undefined;
+  const moveToNewTabDisabled = !activeTerminalTab
+    ? "No terminal tab"
+    : activePaneCount < 2
+      ? "Single pane"
       : undefined;
   const closeDisabled =
     onlyOneTab && activePaneCount < 2 ? "Last tab" : undefined;
@@ -93,6 +111,31 @@ export function createCommandItems(
       icon: Settings01Icon,
       shortcutId: "settings.open",
       run: ctx.openSettings,
+    },
+    {
+      id: "window.new",
+      title: "New window",
+      group: "General",
+      keywords: ["window", "workspace", "second window"],
+      icon: AppWindowIcon,
+      shortcutId: "window.new",
+      run: ctx.openNewWindow,
+    },
+    {
+      id: "folder.open",
+      title: "Open folder...",
+      group: "General",
+      keywords: ["directory", "project", "workspace", "drive", "volume"],
+      icon: FolderOpenIcon,
+      run: ctx.openFolder,
+    },
+    {
+      id: "app.quit",
+      title: "Quit Oarlock",
+      group: "General",
+      keywords: ["exit", "close all windows"],
+      icon: Logout01Icon,
+      run: ctx.quit,
     },
     {
       id: "theme.pick",
@@ -212,6 +255,25 @@ export function createCommandItems(
       run: ctx.splitPaneDown,
     },
     {
+      id: "pane.moveToNewTab",
+      title: "Move pane to new tab",
+      group: "Panes",
+      keywords: ["terminal", "pane", "move", "break", "detach", "tab"],
+      icon: SquareArrowUpRightIcon,
+      disabledReason: moveToNewTabDisabled,
+      run: ctx.movePaneToNewTab,
+    },
+    {
+      id: "terminal.restart",
+      title: "Restart terminal",
+      group: "Panes",
+      keywords: ["restart", "respawn", "relaunch", "reset", "kill", "shell"],
+      icon: Refresh01Icon,
+      shortcutId: "terminal.restart",
+      disabledReason: activeTerminalTab ? undefined : "No terminal tab",
+      run: ctx.restartTerminal,
+    },
+    {
       id: "git.graph",
       title: "Open git graph",
       group: "Git",
@@ -292,6 +354,15 @@ export function createCommandItems(
       icon: SparklesIcon,
       shortcutId: "ai.toggle",
       run: ctx.toggleAi,
+    },
+    {
+      id: "ai.newConversation",
+      title: "New AI conversation",
+      group: "AI",
+      keywords: ["chat", "session", "thread", "assistant", "agent"],
+      icon: SparklesIcon,
+      shortcutId: "ai.newConversation",
+      run: ctx.newAiConversation,
     },
     {
       id: "ai.askSelection",

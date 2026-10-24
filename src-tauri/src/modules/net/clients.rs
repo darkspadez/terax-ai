@@ -1,4 +1,4 @@
-//! Cached `reqwest` clients for the AI proxy.
+//! Cached `reqwest` clients for the AI proxy and preview image fetches.
 //!
 //! Every request used to build a fresh client: a new connection pool, a new TLS
 //! handshake, no HTTP/2 reuse. Clients are now shared per
@@ -25,6 +25,11 @@ pub enum Profile {
     Stream,
     /// Local-model reachability probe: short timeout, no redirects.
     Ping,
+    /// One bounded download; the caller follows and validates redirects.
+    Fetch,
+    /// MCP over HTTP: long-lived event streams, no redirects (the client
+    /// follows only those within the server's origin, each one checked again).
+    Mcp,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -211,6 +216,16 @@ fn build_client(key: &ClientKey) -> Result<reqwest::Client, String> {
         Profile::Ping => builder
             .timeout(Duration::from_secs(5))
             .redirect(reqwest::redirect::Policy::none()),
+        Profile::Fetch => builder
+            .timeout(Duration::from_secs(20))
+            .pool_idle_timeout(IDLE_TTL)
+            .redirect(reqwest::redirect::Policy::none()),
+        Profile::Mcp => builder
+            .redirect(reqwest::redirect::Policy::none())
+            .pool_idle_timeout(IDLE_TTL)
+            .pool_max_idle_per_host(2)
+            .http2_initial_stream_window_size(256 * 1024)
+            .http2_initial_connection_window_size(2 * 1024 * 1024),
     };
     builder.build().map_err(|e| e.to_string())
 }

@@ -1,11 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ATLAS_FULL,
+  GLYPH_DEFERRED,
   GLYPH_ENTRY_FLAG_COLOR,
   GLYPH_ENTRY_FLAG_EXACT,
   GLYPH_ENTRY_WORDS,
   GlyphAtlas,
 } from "./GlyphAtlas";
+import { GlyphFontGate } from "./GlyphFontGate";
+import {
+  GLYPH_STYLE_LIGATURE,
+  GLYPH_STYLE_LIGATURE_INDEX_SHIFT,
+  GLYPH_STYLE_TWO_CELLS,
+} from "./GlyphRasterizer";
 import { deriveFontMetrics } from "./terminalVisuals";
 
 const METRICS = deriveFontMetrics(
@@ -90,6 +97,7 @@ function createHarness(maxTextureDimension2D = 8_192) {
     textBaseline: "",
     fillStyle: "",
     clearRect: vi.fn(),
+    setTransform: vi.fn(),
     fillText: vi.fn((text: string) => {
       current = text;
     }),
@@ -235,6 +243,64 @@ describe("GlyphAtlas", () => {
     atlas.commit();
     const words = h.writeBuffer.mock.calls[1][2] as Uint32Array;
     expect(words[bold * GLYPH_ENTRY_WORDS + 3]).toBe(0);
+    atlas.dispose();
+  });
+
+  it("keeps a two-cell layout of a symbol apart, but not of a procedural glyph", () => {
+    const h = createHarness();
+    const atlas = new GlyphAtlas(h.device, METRICS);
+    const one = atlas.resolve("\uf013", 0);
+    const two = atlas.resolve("\uf013", GLYPH_STYLE_TWO_CELLS);
+    expect(two).not.toBe(one);
+    // Icons ignore bold and italic in either layout.
+    expect(atlas.resolve("\uf013", GLYPH_STYLE_TWO_CELLS | 3)).toBe(two);
+    expect(atlas.resolve("\uf013", 3)).toBe(one);
+    // Branch drawing is procedural: one cell whatever the style says.
+    const node = atlas.resolve("\uf5ee", 0);
+    expect(atlas.resolve("\uf5ee", GLYPH_STYLE_TWO_CELLS | 3)).toBe(node);
+    const flag = atlas.resolve("🇺🇸", 0);
+    expect(atlas.resolve("🇺🇸", GLYPH_STYLE_TWO_CELLS)).not.toBe(flag);
+    expect(atlas.glyphCount).toBe(5);
+    atlas.commit();
+    const words = h.writeBuffer.mock.calls[0][2] as Uint32Array;
+    const size = (index: number) => words[index * GLYPH_ENTRY_WORDS + 1];
+    // One cell shrinks the icon to the one-cell icon height; two keep it.
+    expect(size(one) >>> 16).toBeLessThan(size(two) >>> 16);
+    atlas.dispose();
+  });
+
+  it("keeps each cell of a ligature run apart, per style, from the plain glyphs", () => {
+    const h = createHarness();
+    const atlas = new GlyphAtlas(h.device, METRICS);
+    const slice = (index: number, style = 0) =>
+      atlas.resolve(
+        "->",
+        style |
+          GLYPH_STYLE_LIGATURE |
+          (index << GLYPH_STYLE_LIGATURE_INDEX_SHIFT),
+      );
+    const first = slice(0);
+    const second = slice(1);
+    const bold = slice(0, 1);
+    const dash = atlas.resolve("-", 0);
+    expect(new Set([first, second, bold, dash]).size).toBe(4);
+    expect(atlas.glyphCount).toBe(4);
+    // Cached: no second drawing for the same cell of the same run.
+    const draws = h.context.fillText.mock.calls.length;
+    expect(slice(1)).toBe(second);
+    expect(slice(0, 1)).toBe(bold);
+    expect(h.context.fillText.mock.calls.length).toBe(draws);
+    // The whole run is drawn for every cell of it.
+    expect(
+      h.context.fillText.mock.calls.filter(([text]) => text === "->"),
+    ).toHaveLength(3);
+    // Another run with the same first character is another glyph.
+    expect(slice(0)).not.toBe(
+      atlas.resolve(
+        "-=",
+        GLYPH_STYLE_LIGATURE | (0 << GLYPH_STYLE_LIGATURE_INDEX_SHIFT),
+      ),
+    );
     atlas.dispose();
   });
 
@@ -397,5 +463,32 @@ describe("GlyphAtlas", () => {
       "allocation failed",
     );
     expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  it("caches nothing for an icon whose font is loading and shares one entry across styles", async () => {
+    const h = createHarness();
+    let loaded = false;
+    let settle = () => {};
+    const gate = new GlyphFontGate({
+      check: () => loaded,
+      load: () =>
+        new Promise<void>((resolve) => {
+          settle = resolve;
+        }),
+    });
+    const atlas = new GlyphAtlas(h.device, METRICS, gate);
+
+    expect(atlas.resolve("\uf013", 0)).toBe(GLYPH_DEFERRED);
+    expect(atlas.glyphCount).toBe(0);
+    expect(h.writeTexture).not.toHaveBeenCalled();
+
+    loaded = true;
+    settle();
+    await Promise.resolve();
+    const icon = atlas.resolve("\uf013", 0);
+    expect(icon).toBeGreaterThanOrEqual(0);
+    expect(atlas.resolve("\uf013", 3)).toBe(icon);
+    expect(atlas.glyphCount).toBe(1);
+    atlas.dispose();
   });
 });

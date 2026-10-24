@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
+import { showFileError } from "@/modules/mac-privacy";
 import type { WorkspaceEnv } from "@/modules/workspace";
+import { authorizeFolder } from "@/modules/workspace/authorize";
+import { parentDir as hostParentDir } from "./watch";
 
 export function parentDir(path: string, fallback: string): string {
   const i = path.lastIndexOf("/");
@@ -40,11 +43,24 @@ type PasteOptions = {
   refresh: (destDir: string) => Promise<boolean>;
 };
 
-export function reportCopyFailures(result: CopyResult): void {
+/**
+ * Files the user drops or pastes are copied from where they are: their folders
+ * are authorized first. They are host paths, whatever the workspace.
+ */
+export async function authorizeSources(sources: string[]): Promise<void> {
+  const folders = new Set(sources.map(hostParentDir));
+  await Promise.all(
+    [...folders].map((folder) => authorizeFolder(folder, { kind: "local" })),
+  );
+}
+
+export function reportCopyFailures(result: CopyResult, destDir: string): void {
   if (result.failed.length === 0) return;
   const first = result.failed[0];
   const count = result.failed.length;
-  toast.error(`Could not copy ${count} ${count === 1 ? "item" : "items"}`, {
+  showFileError(`Could not copy ${count} ${count === 1 ? "item" : "items"}`, {
+    path: [first.source, destDir],
+    error: first.message,
     description: `${first.source}: ${first.message}`,
   });
 }
@@ -62,6 +78,7 @@ export async function pasteClipboardFiles(
       return [];
     }
     copyStarted = true;
+    await authorizeSources(sources);
     const result = await invoke<CopyResult>("fs_copy", {
       sources,
       destDir,
@@ -69,12 +86,15 @@ export async function pasteClipboardFiles(
       workspace,
       renameOnConflict: true,
     });
-    reportCopyFailures(result);
+    reportCopyFailures(result, destDir);
     if (!isCurrent()) return [];
     const refreshed = await refresh(destDir);
     return refreshed && isCurrent() ? result.created : [];
   } catch (err) {
-    toast.error(`Paste failed: ${String(err)}`);
+    showFileError(`Paste failed: ${String(err)}`, {
+      path: destDir,
+      error: err,
+    });
     if (copyStarted && isCurrent()) await refresh(destDir);
     return [];
   }

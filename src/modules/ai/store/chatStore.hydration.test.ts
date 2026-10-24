@@ -1,8 +1,16 @@
+import type { UIMessage } from "@ai-sdk/react";
 import { expect, it, vi } from "vitest";
-import { useChatStore } from "@/modules/ai/store/chatStore";
+import type { SessionMeta } from "@/modules/ai/lib/sessions";
+import { seedMessages, useChatStore } from "@/modules/ai/store/chatStore";
 
 const sessions = vi.hoisted(() => ({
-  loadAll: vi.fn(async () => ({ sessions: [], activeId: null })),
+  loadAll: vi.fn(async () => ({
+    sessions: [] as SessionMeta[],
+    activeId: null,
+    activeElsewhere: new Set<string>(),
+  })),
+  loadMessages: vi.fn(async () => null as UIMessage[] | null),
+  onSessionsChanged: vi.fn(async () => () => {}),
   newSessionId: vi.fn(() => "s-new"),
   saveSessionsList: vi.fn(async () => {}),
   saveActiveId: vi.fn(async () => {}),
@@ -11,7 +19,6 @@ vi.mock("@/modules/ai/lib/sessions", () => ({
   ...sessions,
   deleteSessionData: vi.fn(),
   deriveTitle: vi.fn(),
-  loadMessages: vi.fn(),
   saveMessages: vi.fn(),
 }));
 
@@ -27,4 +34,67 @@ it("creates one initial conversation when startup hydration overlaps", async () 
     sessionsHydrated: true,
     activeSessionId: "s-new",
   });
+});
+
+const meta = (id: string, title: string): SessionMeta => ({
+  id,
+  title,
+  createdAt: 1,
+  updatedAt: 2,
+});
+
+it("reopens the newest untitled conversation instead of stacking another", async () => {
+  useChatStore.setState({ sessions: [], sessionsHydrated: false });
+  sessions.newSessionId.mockClear();
+  sessions.saveSessionsList.mockClear();
+  sessions.loadAll.mockResolvedValueOnce({
+    sessions: [meta("old-1", "New chat"), meta("old-2", "Real work")],
+    activeId: null,
+    activeElsewhere: new Set<string>(),
+  });
+
+  await useChatStore.getState().hydrateSessions();
+
+  expect(sessions.newSessionId).not.toHaveBeenCalled();
+  expect(sessions.saveSessionsList).not.toHaveBeenCalled();
+  expect(useChatStore.getState().activeSessionId).toBe("old-1");
+  expect(useChatStore.getState().sessions.map((s) => s.id)).toEqual([
+    "old-1",
+    "old-2",
+  ]);
+});
+
+it("prepends a fresh conversation when the newest one has a title", async () => {
+  useChatStore.setState({ sessions: [], sessionsHydrated: false });
+  sessions.loadAll.mockResolvedValueOnce({
+    sessions: [meta("old-1", "Real work")],
+    activeId: null,
+    activeElsewhere: new Set<string>(),
+  });
+
+  await useChatStore.getState().hydrateSessions();
+
+  expect(useChatStore.getState().activeSessionId).toBe("s-new");
+  expect(useChatStore.getState().sessions.map((s) => s.title)).toEqual([
+    "New chat",
+    "Real work",
+  ]);
+});
+
+it("loads reused history before it can save, acquiring its native revision", async () => {
+  useChatStore.setState({ sessions: [], sessionsHydrated: false });
+  seedMessages.clear();
+  const messages: UIMessage[] = [
+    { id: "m", role: "user", parts: [{ type: "text", text: "retained" }] },
+  ];
+  sessions.loadAll.mockResolvedValueOnce({
+    sessions: [meta("reused", "New chat")],
+    activeId: null,
+    activeElsewhere: new Set(),
+  });
+  sessions.loadMessages.mockResolvedValueOnce(messages);
+  await useChatStore.getState().hydrateSessions();
+  expect(sessions.loadMessages).toHaveBeenCalledWith("reused");
+  expect(seedMessages.get("reused")).toEqual(messages);
+  expect(useChatStore.getState().activeSessionId).toBe("reused");
 });

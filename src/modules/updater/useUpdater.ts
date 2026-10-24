@@ -4,10 +4,19 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useCallback, useEffect, useState } from "react";
 import { IS_LINUX } from "@/lib/platform";
 
-const LAST_CHECK_KEY = "terax:updater:last-check";
+/**
+ * Updates are not set up for this build: Oarlock has no releases or signing key
+ * yet. Turning them on takes `plugins.updater` in `tauri.conf.json` (endpoint
+ * and signing key), `bundle.createUpdaterArtifacts`, the release workflow's
+ * signing secrets and `updater:default` back in the desktop capability; the
+ * release feed below already reads Oarlock's releases.
+ */
+export const UPDATES_ENABLED = false;
+
+const LAST_CHECK_KEY = "oarlock:updater:last-check";
 const CHECK_INTERVAL_MS = 30 * 60 * 1000;
-const GITHUB_LATEST_RELEASE =
-  "https://api.github.com/repos/crynta/terax-ai/releases/latest";
+export const GITHUB_LATEST_RELEASE =
+  "https://api.github.com/repos/qopsc/oarlock/releases/latest";
 
 export interface ManualUpdateInfo {
   version: string;
@@ -85,6 +94,7 @@ export function useUpdater({ autoCheck = true }: HookOptions = {}) {
   const [status, setStatus] = useState<UpdaterStatus>({ kind: "idle" });
 
   const runCheck = useCallback(async ({ manual }: Options = {}) => {
+    if (!UPDATES_ENABLED) return;
     if (!manual) {
       const last = Number(localStorage.getItem(LAST_CHECK_KEY) ?? 0);
       if (Date.now() - last < CHECK_INTERVAL_MS) return;

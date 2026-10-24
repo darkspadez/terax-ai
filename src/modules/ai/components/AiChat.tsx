@@ -30,12 +30,18 @@ import { cn } from "@/lib/utils";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowRight01Icon,
+  BookOpenTextIcon,
   CodeIcon,
   File01Icon,
   HashtagIcon,
+  McpServerIcon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
-import { SLASH_COMMANDS, TERAX_CMD_RE } from "../lib/slashCommands";
+import { type MessageImage, messageImages } from "../lib/imageAttachment";
+import { type ContextChip, messageChips } from "../lib/messageChips";
+import { mergeInterleavedReasoning } from "../lib/reasoningDisplay";
+import { OARLOCK_CMD_RE } from "../lib/commandMessage";
+import { SLASH_COMMANDS } from "../lib/slashCommands";
 import { Spinner } from "@/components/ui/spinner";
 import { useChatStore } from "../store/chatStore";
 import { sendMessage } from "../store/chatRuntime";
@@ -47,7 +53,9 @@ import type {
   UIMessagePart,
 } from "ai";
 import { memo, useCallback, useMemo } from "react";
+import { isMcpToolName } from "@/modules/mcp";
 import { AiToolApproval } from "./AiToolApproval";
+import { McpToolApproval, McpToolCall } from "./McpTool";
 import { estimateMessageHeight } from "./messageHeightEstimate";
 
 function CommandSnippet({ name }: { name: string }) {
@@ -79,48 +87,26 @@ function CommandSnippet({ name }: { name: string }) {
 
 type AnyToolPart = ToolUIPart | DynamicToolUIPart;
 
-type ContextChip =
-  | { kind: "selection"; source: "terminal" | "editor"; lines: number }
-  | { kind: "file"; name: string; lines: number }
-  | { kind: "snippet"; name: string };
-
-const SELECTION_RE =
-  /<selection\s+source="(terminal|editor)">\n?([\s\S]*?)\n?<\/selection>/g;
-const FILE_RE =
-  /<file\s+name="([^"]+)"[^>]*>\n?([\s\S]*?)\n?<\/file>/g;
-const SNIPPET_RE = /<snippet\s+name="([^"]+)">\n?[\s\S]*?\n?<\/snippet>/g;
-
-function countLines(s: string): number {
-  if (!s) return 0;
-  const trimmed = s.replace(/\n+$/, "");
-  if (!trimmed) return 0;
-  return trimmed.split("\n").length;
-}
-
-function stripUserContextBlocks(text: string): {
-  text: string;
-  chips: ContextChip[];
-} {
-  const chips: ContextChip[] = [];
-  let out = text;
-  out = out.replace(SELECTION_RE, (_m, source: string, body: string) => {
-    chips.push({
-      kind: "selection",
-      source: source === "editor" ? "editor" : "terminal",
-      lines: countLines(body),
-    });
-    return "";
-  });
-  out = out.replace(FILE_RE, (_m, name: string, body: string) => {
-    chips.push({ kind: "file", name, lines: countLines(body) });
-    return "";
-  });
-  out = out.replace(SNIPPET_RE, (_m, name: string) => {
-    chips.push({ kind: "snippet", name });
-    return "";
-  });
-  return { text: out.trim(), chips };
-}
+const MessageImages = memo(function MessageImages({
+  images,
+}: {
+  images: MessageImage[];
+}) {
+  return (
+    <div className="mb-1 flex flex-wrap gap-1.5">
+      {images.map((image) => (
+        <img
+          key={image.key}
+          src={image.url}
+          alt={image.name}
+          title={image.name}
+          decoding="async"
+          className="h-24 max-w-48 rounded-md border border-border/50 object-cover"
+        />
+      ))}
+    </div>
+  );
+});
 
 const ContextChips = memo(function ContextChips({
   chips,
@@ -132,10 +118,20 @@ const ContextChips = memo(function ContextChips({
       {chips.map((c, i) => (
         <span
           key={i}
-          className="inline-flex items-center gap-1 rounded-md border border-border/50 bg-card/60 px-1.5 py-0.5 text-[10.5px] text-muted-foreground"
+          title={
+            c.kind === "mcp-resource" || c.kind === "mcp-prompt"
+              ? `From the MCP server ${c.server} (outside content, not Oarlock's)`
+              : undefined
+          }
+          className="inline-flex max-w-full items-center gap-1 rounded-md border border-border/50 bg-card/60 px-1.5 py-0.5 text-[10.5px] text-muted-foreground"
         >
           {chipIcon(c)}
-          <span className="font-medium text-foreground">{chipLabel(c)}</span>
+          {c.kind === "mcp-resource" || c.kind === "mcp-prompt" ? (
+            <span className="shrink-0 opacity-80">{c.server}</span>
+          ) : null}
+          <span className="truncate font-medium text-foreground">
+            {chipLabel(c)}
+          </span>
           {"lines" in c && c.lines > 0 ? (
             <span className="opacity-70">· {c.lines}L</span>
           ) : null}
@@ -158,6 +154,14 @@ function chipIcon(c: ContextChip) {
   if (c.kind === "file") {
     return <HugeiconsIcon icon={File01Icon} size={10} strokeWidth={1.75} />;
   }
+  if (c.kind === "skill") {
+    return (
+      <HugeiconsIcon icon={BookOpenTextIcon} size={10} strokeWidth={1.75} />
+    );
+  }
+  if (c.kind === "mcp-resource" || c.kind === "mcp-prompt") {
+    return <HugeiconsIcon icon={McpServerIcon} size={10} strokeWidth={1.75} />;
+  }
   return <HugeiconsIcon icon={HashtagIcon} size={10} strokeWidth={1.75} />;
 }
 
@@ -166,6 +170,9 @@ function chipLabel(c: ContextChip): string {
     return c.source === "editor" ? "Editor selection" : "Terminal selection";
   }
   if (c.kind === "file") return c.name;
+  if (c.kind === "skill") return `/${c.name}`;
+  if (c.kind === "mcp-resource") return c.name;
+  if (c.kind === "mcp-prompt") return `prompt ${c.name}`;
   return `#${c.name}`;
 }
 type AnyPart = UIMessagePart<Record<string, never>, Record<string, never>>;
@@ -216,7 +223,7 @@ export function AiChatView({
       <Conversation>
         <ConversationContent>
           <ConversationEmptyState
-            title="Ask Terax anything"
+            title="Ask Oarlock anything"
             description="Explain command output, fix errors, generate snippets, or run a task."
           />
         </ConversationContent>
@@ -231,7 +238,7 @@ export function AiChatView({
           <RenderedMessage
             key={m.id}
             message={m}
-            onApproval={onApproval}
+            onApproval={i === messages.length - 1 ? onApproval : null}
             streaming={m.id === streamingMessageId}
             deferOffscreen={i < messages.length - LIVE_TAIL_MESSAGES}
           />
@@ -340,32 +347,35 @@ const RenderedMessage = memo(function RenderedMessage({
   deferOffscreen,
 }: {
   message: UIMessage;
-  onApproval: (id: string, approved: boolean) => void;
+  /** Only the newest message's approvals can still be answered. */
+  onApproval: ((id: string, approved: boolean) => void) | null;
   streaming: boolean;
   deferOffscreen: boolean;
 }) {
   const deferProps = deferOffscreen
     ? {
-        className: "terax-chat-item",
+        className: "oarlock-chat-item",
         style: {
           containIntrinsicSize: `auto ${estimateMessageHeight(message)}px`,
         },
       }
     : undefined;
+  // Hooks must run unconditionally (Rules of Hooks) even though user messages
+  // render without groups; grouping is cheap so this stays out of the way.
+  const parts = useMemo(
+    () => mergeInterleavedReasoning(message.parts as AnyPart[]),
+    [message.parts],
+  );
+  const groups = useMemo(() => buildPartGroups(parts), [parts]);
   // Index of the trailing text part — only that one is "live" mid-stream.
   // Earlier text parts (separated by tool calls) are already finalized.
   let lastTextIdx = -1;
-  for (let i = message.parts.length - 1; i >= 0; i -= 1) {
-    if (message.parts[i]?.type === "text") {
+  for (let i = parts.length - 1; i >= 0; i -= 1) {
+    if (parts[i]?.type === "text") {
       lastTextIdx = i;
       break;
     }
   }
-  // Hooks must run unconditionally (Rules of Hooks) even though user messages
-  // render without groups; grouping is cheap so this stays out of the way.
-  const groups = useMemo(() => buildPartGroups(message.parts as AnyPart[]), [
-    message.parts,
-  ]);
 
   if (message.role === "user") {
     const rawText = message.parts
@@ -373,15 +383,17 @@ const RenderedMessage = memo(function RenderedMessage({
       .map((p) => p.text)
       .join("\n");
 
-    const cmdMatch = rawText.match(TERAX_CMD_RE);
+    const cmdMatch = rawText.match(OARLOCK_CMD_RE);
     const commandName = cmdMatch?.[1] ?? null;
     const withoutCmd = cmdMatch ? rawText.slice(cmdMatch[0].length) : rawText;
-    const stripped = stripUserContextBlocks(withoutCmd);
+    const stripped = messageChips(withoutCmd);
+    const images = messageImages(message.parts);
 
     return (
       <Message from="user" {...deferProps}>
         <MessageContent>
           {commandName ? <CommandSnippet name={commandName} /> : null}
+          {images.length > 0 ? <MessageImages images={images} /> : null}
           {stripped.chips.length > 0 ? (
             <ContextChips chips={stripped.chips} />
           ) : null}
@@ -456,7 +468,7 @@ function partKey(p: AnyPart, idx: number): string {
   return `i-${idx}`;
 }
 
-function buildPartGroups(parts: AnyPart[]): Group[] {
+function buildPartGroups(parts: readonly AnyPart[]): Group[] {
   const out: Group[] = [];
   let run: { parts: AnyPart[]; startIdx: number } | null = null;
   const flushRun = () => {
@@ -549,7 +561,7 @@ const ReadGroup = memo(function ReadGroup({ parts }: { parts: AnyPart[] }) {
           </span>
         ) : null}
       </CollapsibleTrigger>
-      <CollapsibleContent className="terax-collapsible-content border-t border-border/30">
+      <CollapsibleContent className="oarlock-collapsible-content border-t border-border/30">
         <ul className="flex flex-col gap-0.5 px-2 py-1.5">
           {paths.map((path) => (
             <li
@@ -636,7 +648,7 @@ const RenderedPart = memo(function RenderedPart({
   streaming,
 }: {
   part: AnyPart;
-  onApproval: (id: string, approved: boolean) => void;
+  onApproval: ((id: string, approved: boolean) => void) | null;
   streaming: boolean;
 }) {
   if (part.type === "text") {
@@ -678,14 +690,26 @@ const RenderedTool = memo(function RenderedTool({
   onApproval,
 }: {
   part: AnyToolPart;
-  onApproval: (id: string, approved: boolean) => void;
+  onApproval: ((id: string, approved: boolean) => void) | null;
 }) {
   const toolName =
     part.type === "dynamic-tool"
       ? part.toolName
       : part.type.replace(/^tool-/, "");
 
-  if (part.state === "approval-requested") {
+  if (isMcpToolName(toolName)) {
+    return part.state === "approval-requested" && onApproval ? (
+      <McpToolApproval
+        part={part}
+        toolName={toolName}
+        onRespond={(approved) => onApproval(part.approval.id, approved)}
+      />
+    ) : (
+      <McpToolCall part={part} toolName={toolName} />
+    );
+  }
+
+  if (part.state === "approval-requested" && onApproval) {
     return (
       <AiToolApproval
         part={part as Extract<ToolUIPart, { state: "approval-requested" }>}
@@ -698,7 +722,8 @@ const RenderedTool = memo(function RenderedTool({
   return (
     <Tool
       toolName={toolName}
-      state={part.state}
+      // A later message superseded it: the next request settles it as denied.
+      state={part.state === "approval-requested" ? "output-denied" : part.state}
       input={part.input}
       output={"output" in part ? part.output : undefined}
       errorText={"errorText" in part ? part.errorText : undefined}

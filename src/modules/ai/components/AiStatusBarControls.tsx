@@ -7,9 +7,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Kbd } from "@/components/ui/kbd";
 import { Spinner } from "@/components/ui/spinner";
-import { fmtShortcut, MOD_KEY } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
+import { useShortcutText } from "@/modules/shortcuts";
 import {
   Add01Icon,
   AiBookIcon,
@@ -60,6 +60,7 @@ import { ACCEPTED_FILES, useComposer } from "../lib/composer";
 import { toggleFavoriteModel } from "../lib/modelPrefs";
 import { useChatStore } from "../store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { ReasoningEffortPicker } from "./ReasoningEffortPicker";
 
 const PROVIDER_ICON = {
   openai: ChatGptIcon,
@@ -78,6 +79,7 @@ const PROVIDER_ICON = {
 } as const satisfies Record<ProviderId, typeof ChatGptIcon>;
 
 export function AiOpenButton({ onOpen }: { onOpen: () => void }) {
+  const toggleAi = useShortcutText("ai.toggle");
   return (
     <button
       type="button"
@@ -90,7 +92,7 @@ export function AiOpenButton({ onOpen }: { onOpen: () => void }) {
       title="Open AI agent"
     >
       <span>Open AI agent</span>
-      <Kbd className="h-4 min-w-4 px-1">{fmtShortcut(MOD_KEY, "I")}</Kbd>
+      <Kbd className="h-4 min-w-4 px-1">{toggleAi}</Kbd>
     </button>
   );
 }
@@ -101,6 +103,8 @@ export function AiStatusBarControls() {
   const toggleMini = useChatStore((s) => s.toggleMini);
   const miniOpen = useChatStore((s) => s.mini.open);
   const closePanel = useChatStore((s) => s.closePanel);
+  const toggleAi = useShortcutText("ai.toggle");
+  const miniShortcut = useShortcutText("ai.toggleMini");
 
   return (
     <div className="flex items-center gap-0.5">
@@ -145,7 +149,7 @@ export function AiStatusBarControls() {
           )}
         >
           {c.voice.recording ? (
-            <span className="size-2 terax-blink rounded-full bg-destructive" />
+            <span className="size-2 oarlock-blink rounded-full bg-destructive" />
           ) : c.voice.transcribing ? (
             <Spinner className="size-3" />
           ) : (
@@ -155,6 +159,7 @@ export function AiStatusBarControls() {
       )}
 
       <ModelDropdown />
+      <SelectedModelReasoning />
 
       <span className="mx-1 h-8 w-px bg-border" aria-hidden />
       <Button
@@ -166,11 +171,11 @@ export function AiStatusBarControls() {
         className="text-[11px] text-foreground/85 px-1"
       >
         <Kbd className="h-4 gap-px px-2 font-mono text-[11px]">
-          {fmtShortcut(MOD_KEY, "I")}
+          {toggleAi}
         </Kbd>
       </Button>
       <IconBtn
-        title={`${miniOpen ? "Close" : "Open"} AI chat window (${fmtShortcut("⇧", MOD_KEY, "I")})`}
+        title={`${miniOpen ? "Close" : "Open"} AI chat window (${miniShortcut})`}
         onClick={toggleMini}
       >
         <HugeiconsIcon icon={Message01Icon} size={13} strokeWidth={1.75} />
@@ -203,6 +208,15 @@ export function AiStatusBarControls() {
       )}
     </div>
   );
+}
+
+function SelectedModelReasoning() {
+  const selected = useChatStore((s) => s.selectedModelId);
+  const customEndpoints = usePreferencesStore((s) => s.customEndpoints);
+  const model = isCompatModelId(selected)
+    ? getCompatModelInfo(selected, customEndpoints)
+    : getModel(selected as ModelId);
+  return <ReasoningEffortPicker model={model} />;
 }
 
 type Tab = "all" | "favorites" | "recent";
